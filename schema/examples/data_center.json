@@ -1,0 +1,63 @@
+{
+  "_comment": "Data Center (GPU workload scheduling) domain parametrization example for Syn-APS",
+  "states": [
+    {
+      "code": "WL-LLM-TRAIN-70B",
+      "label": "LLM Training Job — 70B parameter model",
+      "domain_attributes": {
+        "workload_type": "GPU-training",
+        "model_params_B": 70,
+        "framework": "PyTorch",
+        "precision": "bf16",
+        "min_gpus": 64
+      }
+    },
+    {
+      "code": "WL-INFERENCE-BATCH",
+      "label": "Batch Inference — classification pipeline",
+      "domain_attributes": {
+        "workload_type": "GPU-inference",
+        "model_params_B": 7,
+        "framework": "SGLang",
+        "precision": "int8",
+        "min_gpus": 4
+      }
+    }
+  ],
+  "setup_matrix_example": {
+    "from_state": "WL-LLM-TRAIN-70B",
+    "to_state": "WL-INFERENCE-BATCH",
+    "setup_minutes": 15,
+    "material_loss": 0,
+    "energy_kwh": 2.5,
+    "domain_attributes": {
+      "model_eviction_required": true,
+      "vram_flush": true,
+      "driver_reload": false,
+      "container_swap": true
+    }
+  },
+  "work_center_example": {
+    "code": "DC2-RACK-14-GPU",
+    "capability_group": "gpu_compute",
+    "speed_factor": 1.0,
+    "domain_attributes": {
+      "gpu_model": "H100-SXM5",
+      "gpu_count": 8,
+      "vram_gb_per_gpu": 80,
+      "interconnect": "NVLink-4",
+      "power_budget_kw": 12.5,
+      "cooling_zone": "liquid"
+    }
+  },
+  "auxiliary_resource_example": {
+    "code": "NVLINK-SWITCH-TRAY-A",
+    "resource_type": "network_fabric",
+    "pool_size": 4,
+    "domain_attributes": {
+      "bandwidth_gbps": 900,
+      "topology": "fat_tree",
+      "switch_model": "QM9700"
+    }
+  }
+}

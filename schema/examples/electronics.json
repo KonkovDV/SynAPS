@@ -1,0 +1,62 @@
+{
+  "_comment": "Electronics (SMT) domain parametrization example for Syn-APS",
+  "states": [
+    {
+      "code": "PCB-4L-FR4-BGA256",
+      "label": "4-layer FR4 PCB with BGA-256 component",
+      "domain_attributes": {
+        "pcb_layers": 4,
+        "substrate": "FR4",
+        "lead_free": true,
+        "component_package": "BGA-256",
+        "pitch_mm": 0.5
+      }
+    },
+    {
+      "code": "PCB-6L-FR4-QFN48",
+      "label": "6-layer FR4 PCB with QFN-48 component",
+      "domain_attributes": {
+        "pcb_layers": 6,
+        "substrate": "FR4",
+        "lead_free": true,
+        "component_package": "QFN-48",
+        "pitch_mm": 0.4
+      }
+    }
+  ],
+  "setup_matrix_example": {
+    "from_state": "PCB-4L-FR4-BGA256",
+    "to_state": "PCB-6L-FR4-QFN48",
+    "setup_minutes": 35,
+    "material_loss": 0.02,
+    "energy_kwh": 5,
+    "domain_attributes": {
+      "stencil_change": true,
+      "nozzle_change": true,
+      "reflow_profile": "lead_free_245C",
+      "feeder_setup_count": 12,
+      "vision_recalibration": true
+    }
+  },
+  "work_center_example": {
+    "code": "SMT-LINE-01",
+    "capability_group": "smt_placement",
+    "speed_factor": 1.2,
+    "domain_attributes": {
+      "heads": 16,
+      "max_cph": 80000,
+      "placement_accuracy_um": 25,
+      "supported_packages": ["0201", "0402", "0603", "BGA", "QFN", "SOP"]
+    }
+  },
+  "auxiliary_resource_example": {
+    "code": "STENCIL-BGA256-05",
+    "resource_type": "tooling",
+    "pool_size": 2,
+    "domain_attributes": {
+      "thickness_mm": 0.12,
+      "aperture_type": "laser_cut",
+      "cleaning_cycles_remaining": 150
+    }
+  }
+}

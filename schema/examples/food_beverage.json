@@ -1,0 +1,62 @@
+{
+  "_comment": "Food & Beverage domain parametrization example for Syn-APS",
+  "states": [
+    {
+      "code": "BEV-DAIRY-MILK-3.5",
+      "label": "Whole Milk 3.5% fat, pasteurized",
+      "domain_attributes": {
+        "product_category": "dairy",
+        "fat_percent": 3.5,
+        "pasteurization": "HTST-72C-15s",
+        "shelf_life_days": 14,
+        "allergen_group": "milk"
+      }
+    },
+    {
+      "code": "BEV-JUICE-ORANGE-NFC",
+      "label": "NFC Orange Juice",
+      "domain_attributes": {
+        "product_category": "juice",
+        "fruit_content_percent": 100,
+        "pasteurization": "HTST-90C-5s",
+        "shelf_life_days": 28,
+        "allergen_group": null
+      }
+    }
+  ],
+  "setup_matrix_example": {
+    "from_state": "BEV-DAIRY-MILK-3.5",
+    "to_state": "BEV-JUICE-ORANGE-NFC",
+    "setup_minutes": 120,
+    "material_loss": 15,
+    "energy_kwh": 80,
+    "domain_attributes": {
+      "cip_protocol": "CIP-alkaline-acid-rinse",
+      "allergen_changeover": true,
+      "haccp_checkpoint": "CCP-02",
+      "rinse_water_litres": 500,
+      "microbiological_swab": true
+    }
+  },
+  "work_center_example": {
+    "code": "FILL-TETRA-01",
+    "capability_group": "filling",
+    "speed_factor": 1.0,
+    "domain_attributes": {
+      "filler_type": "aseptic_tetra_pak",
+      "max_volume_ml": 1000,
+      "fill_rate_units_per_hour": 7500,
+      "cleanroom_class": "ISO-5"
+    }
+  },
+  "auxiliary_resource_example": {
+    "code": "PACKAGING-MATERIAL-1L",
+    "resource_type": "consumable",
+    "pool_size": 50000,
+    "domain_attributes": {
+      "material": "tetra_brik_aseptic",
+      "volume_ml": 1000,
+      "supplier_lot": "LOT-2026-Q1-A"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+name: Benchmark
+on:
+  schedule:
+    - cron: "0 3 * * 1"  # every Monday 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - name: Run benchmark suite
+        run: |
+          mkdir -p benchmark/results
+          python -m benchmark.run_benchmark benchmark/instances/ \
+            --solvers GREED CPSAT-10 CPSAT-30 --compare --runs 3 \
+            > benchmark/results/weekly-benchmark.json
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark/results/
+          if-no-files-found: ignore

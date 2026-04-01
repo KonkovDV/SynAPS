@@ -1,0 +1,59 @@
+{
+  "_comment": "Metallurgy domain parametrization example for Syn-APS",
+  "states": [
+    {
+      "code": "AISI-304-ROD-12mm",
+      "label": "AISI 304 Stainless Steel Rod ∅12mm",
+      "domain_attributes": {
+        "alloy_grade": "AISI-304",
+        "form_factor": "rod",
+        "cross_section_mm": 12,
+        "temperature_celsius": 20
+      }
+    },
+    {
+      "code": "AISI-316L-ROD-12mm",
+      "label": "AISI 316L Stainless Steel Rod ∅12mm",
+      "domain_attributes": {
+        "alloy_grade": "AISI-316L",
+        "form_factor": "rod",
+        "cross_section_mm": 12,
+        "temperature_celsius": 20
+      }
+    }
+  ],
+  "setup_matrix_example": {
+    "from_state": "AISI-304-ROD-12mm",
+    "to_state": "AISI-316L-ROD-12mm",
+    "setup_minutes": 90,
+    "material_loss": 2.5,
+    "energy_kwh": 180,
+    "domain_attributes": {
+      "requires_furnace_purge": true,
+      "purge_gas": "argon",
+      "cooldown_minutes": 45,
+      "slag_removal_required": true
+    }
+  },
+  "work_center_example": {
+    "code": "ARC-FURNACE-01",
+    "capability_group": "melting",
+    "speed_factor": 1.0,
+    "domain_attributes": {
+      "furnace_type": "electric_arc",
+      "max_temperature_celsius": 1800,
+      "capacity_tonnes": 50,
+      "lining_type": "MgO-C"
+    }
+  },
+  "auxiliary_resource_example": {
+    "code": "LADLE-SET-A",
+    "resource_type": "reusable_tooling",
+    "pool_size": 3,
+    "domain_attributes": {
+      "capacity_tonnes": 50,
+      "refractory_life_heats": 120,
+      "current_heat_count": 47
+    }
+  }
+}

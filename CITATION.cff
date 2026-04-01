@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+title: "Syn-APS: Universal Advanced Planning & Scheduling Platform"
+message: "If you use Syn-APS in your research, please cite it as below."
+type: software
+authors:
+  - name: "Syn-APS Contributors"
+license: MIT
+repository-code: "https://github.com/syn-aps/syn-aps"
+keywords:
+  - advanced-planning-scheduling
+  - operations-research
+  - job-shop-scheduling
+  - multi-objective-optimization
+  - digital-twin
+  - discrete-event-simulation
+  - production-planning
+abstract: >-
+  Syn-APS is an open-source, industry-agnostic Advanced Planning & Scheduling
+  platform built on the MO-FJSP-SDST-ML-ARC canonical form. It provides a
+  deterministic-first solver portfolio, universal data schema, AI advisory layer,
+  and domain parametrization framework for any manufacturing, logistics,
+  or resource-scheduling vertical.

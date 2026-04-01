@@ -1,0 +1,65 @@
+{
+  "_comment": "Pharmaceutical domain parametrization example for Syn-APS",
+  "states": [
+    {
+      "code": "API-AMOXICILLIN-GRANULATE",
+      "label": "Amoxicillin Granulate (pre-tableting)",
+      "domain_attributes": {
+        "api_compound": "Amoxicillin",
+        "dosage_form": "granulate",
+        "gxp_class": "EU-GMP-Annex1",
+        "allergen_group": "penicillin",
+        "potency_mg": 500
+      }
+    },
+    {
+      "code": "API-IBUPROFEN-GRANULATE",
+      "label": "Ibuprofen Granulate (pre-tableting)",
+      "domain_attributes": {
+        "api_compound": "Ibuprofen",
+        "dosage_form": "granulate",
+        "gxp_class": "EU-GMP",
+        "allergen_group": null,
+        "potency_mg": 400
+      }
+    }
+  ],
+  "setup_matrix_example": {
+    "from_state": "API-AMOXICILLIN-GRANULATE",
+    "to_state": "API-IBUPROFEN-GRANULATE",
+    "setup_minutes": 240,
+    "material_loss": 0.8,
+    "energy_kwh": 45,
+    "domain_attributes": {
+      "cip_protocol": "CIP-SIP-3cycle",
+      "validation_required": true,
+      "hold_time_max_hours": 4,
+      "allergen_changeover": true,
+      "swab_test_required": true,
+      "environmental_monitoring": "ISO-7"
+    }
+  },
+  "work_center_example": {
+    "code": "TAB-PRESS-FETTE-01",
+    "capability_group": "tableting",
+    "speed_factor": 1.0,
+    "domain_attributes": {
+      "press_type": "rotary",
+      "max_force_kn": 100,
+      "stations": 61,
+      "cleanroom_class": "ISO-7",
+      "containment_level": "OEB-3"
+    }
+  },
+  "auxiliary_resource_example": {
+    "code": "PUNCH-SET-ROUND-12mm",
+    "resource_type": "tooling",
+    "pool_size": 5,
+    "domain_attributes": {
+      "punch_diameter_mm": 12,
+      "coating": "chromium",
+      "max_compressions": 5000000,
+      "current_compressions": 1200000
+    }
+  }
+}
