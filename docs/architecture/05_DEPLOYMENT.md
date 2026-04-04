@@ -4,7 +4,7 @@
 
 <details><summary>🇷🇺 Краткое описание</summary>
 
-Модель развёртывания Syn-APS: четыре среды (dev — prod), полный BOM платформы (PostgreSQL 18, NATS JetStream 2.11, SGLang, PyTorch 2.6, OR-Tools CP-SAT v9.10+), изолированный (air-gapped) режим с оффлайн-артефактным пайплайном, трёхзонная модель безопасности (DMZ → App → Data), шесть канонических ролей RBAC, три класса SLO и стек наблюдаемости (Prometheus + Grafana + OpenTelemetry + ClickHouse). Все компоненты совместимы с OCI-контейнеризацией и Helm-чартами.
+Модель развёртывания SynAPS: четыре среды (dev — prod), полный BOM платформы (PostgreSQL 17+, NATS JetStream 2.12+, SGLang, PyTorch 2.6, OR-Tools CP-SAT v9.10+), изолированный (air-gapped) режим с оффлайн-артефактным пайплайном, трёхзонная модель безопасности (DMZ → App → Data), шесть канонических ролей RBAC, три класса SLO и стек наблюдаемости (Prometheus + Grafana + OpenTelemetry + ClickHouse). Все компоненты совместимы с OCI-контейнеризацией и Helm-чартами.
 </details>
 
 ---
@@ -18,24 +18,37 @@
 | **preprod** | UAT & performance benchmarks | Kubernetes (3-node) | Shadow production | All solvers + ML models |
 | **prod** | Live operations | Kubernetes (HA) | Production | All solvers + promoted ML |
 
+## 1.1 Zero-Touch Edge Posture
+
+Industrial deployment pushes SynAPS toward a zero-touch operating model:
+
+1. immutable, API-managed node images instead of mutable SSH-managed servers;
+2. eBPF-first networking and kube-proxy replacement where latency matters;
+3. durable workflow recovery for long-running optimization jobs;
+4. declarative rollback and redeploy rather than node-by-node manual repair.
+
+Version discipline matters.
+
+As of `2026-04-02`, Kubernetes `1.35.x` is the latest stable minor release and `1.36` is still the upcoming release track. Treat `1.36` as target planning input, not as a currently shipped baseline.
+
 ---
 
 ## 2. Platform Bill of Materials (BOM)
 
 | Component | Version | Role | Licence |
 |-----------|---------|------|---------|
-| PostgreSQL | 18+ | RDBMS, event store, HNSW vector search | PostgreSQL License |
-| NATS JetStream | 2.11+ | Event streaming, exactly-once delivery | Apache-2.0 |
+| PostgreSQL | 17+ | RDBMS, event store, HNSW vector search (18 target) | PostgreSQL License |
+| NATS JetStream | 2.12+ | Event streaming, exactly-once delivery | Apache-2.0 |
 | OR-Tools CP-SAT | 9.10+ | Constraint programming solver | Apache-2.0 |
 | HiGHS | 1.8+ | LP/MIP solver (LBBD master) | MIT |
-| Python | 3.12+ | Solver engine, ML pipelines | PSF License |
+| Python | 3.13+ | Solver engine, ML pipelines | PSF License |
 | PyTorch | 2.6+ | ML training (Inductor compiler) | BSD-3 |
 | PyTorch Geometric | 2.6+ | GNN – HGAT weight predictor | MIT |
 | TorchRL | 0.6+ | Reinforcement learning (Digital Twin) | MIT |
 | SGLang | 0.4+ | LLM inference runtime | Apache-2.0 |
 | ExecuTorch | 0.5+ | Edge AI on ARM PLCs/gateways | BSD-3 |
 | FastAPI | 0.115+ | REST / WebSocket API | MIT |
-| Redis | 7.4+ | Cache, session, rate limiting | BSD-3 |
+| Valkey | 9.0+ | Cache, session, distributed locks | BSD-3 |
 | Prometheus | 2.55+ | Metrics collection | Apache-2.0 |
 | Grafana | 11+ | Dashboards & alerting | AGPL-3.0 |
 | OpenTelemetry | 1.30+ | Distributed tracing | Apache-2.0 |
@@ -76,9 +89,9 @@
         ┌───────────────┼────────────────┐
         │               │                │
   ┌─────▼─────┐  ┌──────▼──────┐  ┌─────▼──────┐
-  │ PostgreSQL │  │    NATS     │  │   Redis    │
-  │    18      │  │ JetStream   │  │   7.4+     │
-  │  (primary  │  │   2.11      │  │  (cache)   │
+  │ PostgreSQL │  │    NATS     │  │   Valkey   │
+  │    17+     │  │ JetStream   │  │   9.0+     │
+  │  (primary  │  │   2.12+     │  │  (cache)   │
   │  + replica)│  └─────────────┘  └────────────┘
   └────────────┘
 ```
@@ -87,7 +100,7 @@
 
 ## 4. Air-Gapped Deployment
 
-For environments with no internet access (defense, critical infrastructure, secure manufacturing), Syn-APS supports fully offline deployment.
+For environments with no internet access (defense, critical infrastructure, secure operations), SynAPS supports fully offline deployment.
 
 ### 4.1 Artifact Pipeline
 
@@ -177,7 +190,7 @@ graph LR
 │                          │ mTLS / Unix socket        │
 │  Zone 2: Data            │                           │
 │  ┌───────────────────────▼────────────────────────┐  │
-│  │  PostgreSQL 18 · NATS JetStream · Redis        │  │
+│  │  PostgreSQL 17+ · NATS JetStream · Valkey      │  │
 │  │  ClickHouse (telemetry archive)                │  │
 │  └────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────┘
@@ -234,7 +247,7 @@ Audit events are immutable and retained for 7 years (configurable per regulatory
 | LBBD solve (≤5000 ops) | ≤ 120 s | Iterative master-sub |
 | Incremental repair (single disruption) | ≤ 2 s | Localized neighbourhood |
 | GNN inference (weight prediction) | ≤ 50 ms | Batched, GPU optional |
-| API response (read) | ≤ 50 ms | Redis cache + DB index |
+| API response (read) | ≤ 50 ms | Valkey cache + DB index |
 | API response (write) | ≤ 200 ms | Async outbox commit |
 
 ### 7.2 Throughput
@@ -264,7 +277,7 @@ Audit events are immutable and retained for 7 years (configurable per regulatory
 |---------|-----------|-------------------|----------|
 | PostgreSQL primary down | pg_isready + replication lag | Promote replica; read-only until promotion | Automatic (Patroni / CloudNativePG) |
 | NATS JetStream unavailable | Health probe timeout | Outbox retry queue; events buffered in PostgreSQL | Auto-reconnect + replay |
-| Redis down | Connection timeout | Bypass cache; direct DB reads (higher latency) | Auto-reconnect |
+| Valkey down | Connection timeout | Bypass cache; direct DB reads (higher latency) | Auto-reconnect |
 | Solver timeout | Time-box exceeded | Return best-known solution + quality flag | Manual re-run with relaxed params |
 | ML model service down | gRPC health check | Fall back to static weights (ATCS formula default) | Auto-restart + rollback to previous model |
 | Disk full | OS alert threshold 85% | Stop accepting new schedule runs; read-only mode | Partition maintenance, archive old data |
@@ -320,7 +333,7 @@ Trace: schedule-run-01HW...
 
 | Dashboard | Audience | Refresh |
 |-----------|----------|---------|
-| Production Overview | Plant manager | 10s |
+| Operations Overview | Operations manager | 10s |
 | Solver Performance | Data scientist | 1m |
 | Disruption Tracker | Shift supervisor | 5s |
 | ML Model Registry | ML admin | 5m |
@@ -332,7 +345,7 @@ Trace: schedule-run-01HW...
 ## 11. Helm Chart Structure
 
 ```
-helm/syn-aps/
+helm/synaps/
 ├── Chart.yaml
 ├── values.yaml
 ├── values-dev.yaml

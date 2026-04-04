@@ -1,10 +1,10 @@
 # V3 — Federated Learning & Edge AI
 
-> **Vector scope**: Enable collaborative model improvement across multiple sites without sharing raw production data, with on-device inference at the edge (PLCs, gateways, ARM devices).
+> **Vector scope**: Enable collaborative model improvement across multiple sites without sharing raw operational data, with on-device inference at the edge (PLCs, gateways, ARM devices).
 
 <details><summary>🇷🇺 Краткое описание</summary>
 
-Федеративное обучение между несколькими заводами/площадками: локальные модели → агрегированная глобальная модель через Flower FL без передачи сырых данных. Edge AI: инференс GNN-предиктора и политик RL на ARM-устройствах (PLC-шлюзы) через ExecuTorch. Дифференциальная приватность (DP-SGD), гомоморфное шифрование градиентов, zero-trust attestation.
+Федеративное обучение между несколькими площадками и операционными контурами: локальные модели → агрегированная глобальная модель через Flower FL без передачи сырых данных. Edge AI: инференс GNN-предиктора и политик RL на ARM-устройствах (PLC-шлюзы) через ExecuTorch. Дифференциальная приватность (DP-SGD), гомоморфное шифрование градиентов, zero-trust attestation.
 </details>
 
 ---
@@ -13,19 +13,19 @@
 
 ```mermaid
 graph TB
-    subgraph "Plant A (Heavy Manufacturing)"
+    subgraph "Site A (Heavy Operations)"
         CLIENT_A[FL Client<br/>Flower]
         MODEL_A[Local GNN Model]
         DATA_A[Local Schedule Data]
         EDGE_A[Edge Gateway<br/>ExecuTorch]
     end
-    subgraph "Plant B (Precision Manufacturing)"
+    subgraph "Site B (Precision Operations)"
         CLIENT_B[FL Client<br/>Flower]
         MODEL_B[Local GNN Model]
         DATA_B[Local Schedule Data]
         EDGE_B[Edge Gateway<br/>ExecuTorch]
     end
-    subgraph "Plant C (Assembly Line)"
+    subgraph "Site C (Assembly Network)"
         CLIENT_C[FL Client<br/>Flower]
         MODEL_C[Local GNN Model]
         DATA_C[Local Schedule Data]
@@ -125,7 +125,7 @@ Every T seconds (configurable, default 30s):
   1. Read telemetry from NATS JetStream (local subscriber)
   2. Build feature vector (utilization, queue, disruption flags)
   3. Run ExecuTorch inference → updated ATCS weights
-  4. Publish weights to NATS topic: ml.edge.weights.{plant_id}
+    4. Publish weights to NATS topic: ml.edge.weights.{site_id}
   5. Solver uses fresh weights on next dispatch cycle
 ```
 
@@ -135,15 +135,15 @@ Every T seconds (configurable, default 30s):
 
 | Topology | Use Case | Aggregation |
 |----------|----------|------------|
-| Star (hub-and-spoke) | Corporate HQ aggregates from N plants | Central Flower server |
-| Hierarchical | Region → Global (e.g., EU plants → Europe hub → global) | 2-level FedAvg |
-| Peer-to-peer (roadmap) | Air-gapped plants, no central server | Gossip-based aggregation |
+| Star (hub-and-spoke) | Corporate HQ aggregates from N sites | Central Flower server |
+| Hierarchical | Region → Global (e.g., EU sites → Europe hub → global) | 2-level FedAvg |
+| Peer-to-peer (roadmap) | Air-gapped sites, no central server | Gossip-based aggregation |
 
 ---
 
 ## 7. Data Heterogeneity Handling
 
-Manufacturing sites differ in scale, product mix, and disruption patterns. This creates non-IID data distributions.
+Operational sites differ in scale, workload mix, and disruption patterns. This creates non-IID data distributions.
 
 | Challenge | Mitigation |
 |-----------|-----------|
@@ -161,7 +161,7 @@ Manufacturing sites differ in scale, product mix, and disruption patterns. This 
 | `fl.round.started` | FL server | Monitoring dashboard |
 | `fl.round.completed` | FL server | Model registry |
 | `fl.client.update.sent` | FL client | Local audit log |
-| `ml.edge.weights.{plant_id}` | Edge gateway | Solver orchestrator |
+| `ml.edge.weights.{site_id}` | Edge gateway | Solver orchestrator |
 | `ml.promotions.federated` | Model registry | All clients |
 
 ---

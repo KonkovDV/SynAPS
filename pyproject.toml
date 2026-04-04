@@ -1,15 +1,17 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.26"]
 build-backend = "hatchling.build"
 
 [project]
-name = "syn-aps"
+name = "synaps"
 version = "0.1.0"
-description = "Universal Advanced Planning & Scheduling solver for MO-FJSP-SDST-ML-ARC"
+description = "Universal scheduling and resource-orchestration engine for MO-FJSP-SDST-ML-ARC"
 readme = "README.md"
 license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
-authors = [{ name = "Syn-APS Contributors" }]
+authors = [{ name = "SynAPS Contributors" }]
+maintainers = [{ name = "SynAPS Contributors" }]
 keywords = [
     "scheduling",
     "optimization",
@@ -23,9 +25,14 @@ keywords = [
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
-    "Intended Audience :: Manufacturing",
+    "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+    "Topic :: Scientific/Engineering",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Office/Business :: Scheduling",
 ]
@@ -49,16 +56,25 @@ rl = [
     "torchrl>=0.6",
 ]
 dev = [
+    "build>=1.2",
+    "hypothesis>=6.100",
     "pytest>=8.3",
+    "pytest-benchmark>=5.0",
     "pytest-cov>=6.0",
     "ruff>=0.8",
     "mypy>=1.13",
+    "twine>=6.1",
 ]
-all = ["syn-aps[ml,llm,rl,dev]"]
+all = ["synaps[ml,llm,rl,dev]"]
 
 [project.urls]
-Repository = "https://github.com/syn-aps/syn-aps"
-Documentation = "https://github.com/syn-aps/syn-aps/tree/main/docs"
+Homepage = "https://github.com/synaps/synaps"
+Repository = "https://github.com/synaps/synaps"
+Documentation = "https://github.com/synaps/synaps/tree/main/docs"
+Issues = "https://github.com/synaps/synaps/issues"
+Changelog = "https://github.com/synaps/synaps/releases"
+Support = "https://github.com/synaps/synaps/blob/main/SUPPORT.md"
+Security = "https://github.com/synaps/synaps/security/policy"
 
 [tool.ruff]
 target-version = "py312"
@@ -79,4 +95,5 @@ addopts = "-ra --strict-markers"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks integration tests requiring external services",
+    "hypothesis: property-based tests using Hypothesis",
 ]

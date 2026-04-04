@@ -1,227 +1,114 @@
-<p align="center">
-  <strong>Syn-APS</strong><br/>
-  <em>Universal Advanced Planning &amp; Scheduling Platform</em>
-</p>
+﻿# SynAPS
 
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
-  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.11+-brightgreen.svg" alt="Python 3.11+"></a>
-  <a href="https://github.com/syn-aps/syn-aps/actions"><img src="https://img.shields.io/badge/CI-passing-brightgreen.svg" alt="CI"></a>
-</p>
+Deterministic-first scheduling and resource-orchestration engine for planning problems modeled in the MO-FJSP-SDST-ML-ARC family.
 
----
+Language: **EN** | [RU](README_RU.md)
 
-**Syn-APS** is an open-source, industry-agnostic platform for multi-objective job-shop scheduling with sequence-dependent setup times, AI advisory, and a domain parametrization framework that adapts to any manufacturing, logistics, energy, or scientific scheduling vertical.
+## Status
 
-<details>
-<summary>🇷🇺 Краткое описание</summary>
+SynAPS is a public research and engineering repository.
 
-**Syn-APS** — открытая платформа оперативного планирования производства (APS). Ядро решает задачу многокритериального планирования (MO-FJSP-SDST) с детерминированным базовым уровнем, портфелем солверов, AI-advisory слоем и параметризацией под любую отрасль: металлургия, фармацевтика, электроника, пищевая промышленность, логистика, энергетика, наука.
+The repository currently contains a Python scheduling core, canonical schema surfaces, a benchmark harness, and validation tooling. It does **not** yet claim full production deployment, cyber-physical plant integration, or the entire "Aleph" target architecture as implemented software.
 
-</details>
+### Implemented today
 
-## Canonical Problem Form
+- Exact CP-SAT scheduling paths with sequence-dependent setup handling and auxiliary resources.
+- Greedy dispatch with queue-local log-space ATCS scoring and bounded incremental repair heuristics with accurate tardiness accounting.
+- First-class epsilon-constrained CP-SAT profiles for setup-vs-makespan (`CPSAT-EPS-SETUP-110`) and tardiness-vs-makespan (`CPSAT-EPS-TARD-110`) trade-off studies.
+- Logic-Based Benders Decomposition (LBBD) solver with HiGHS master, CP-SAT subproblems, bottleneck capacity cuts, load-balance cuts (Hooker 2007, §7.3), and post-assembly cross-cluster precedence/setup enforcement.
+- Property-based test suite (Hypothesis) validating structural invariants across random problem instances.
+- Cross-solver consistency tests ensuring all solvers satisfy the same feasibility, precedence, and objective-sign contracts.
+- Benchmark regression tests with pinned quality bounds as CI guardrails.
+- Horizon-bound validation in the feasibility checker.
+- Pydantic-based canonical data model for the current solver surfaces.
+- Reproducible benchmark harness with three instance tiers (tiny, medium, medium-stress) under [benchmark/README.md](benchmark/README.md).
+- Repository validation via `pytest`, targeted `ruff` checks, and package build metadata.
 
-Syn-APS models scheduling as **MO-FJSP-SDST-ML-ARC**:
+### Target blueprint
 
-| Symbol | Meaning |
-|--------|---------|
-| **MO** | Multi-Objective optimization |
-| **FJSP** | Flexible Job-Shop Scheduling Problem |
-| **SDST** | Sequence-Dependent Setup Times |
-| **ML** | Machine Learning advisory layer |
-| **ARC** | Auxiliary Resources & Constraints |
+The longer-form architecture material describes the intended next layers of the system, including:
 
-**Objective function:**
+- event-sourced orchestration and anti-corruption boundaries;
+- hardware-aware hot paths such as Rust or PyO3 bridges;
+- larger-instance decomposition strategies such as LBBD;
+- advisory ML or LLM layers with explicit verification guardrails.
 
-$$J = w_1 T + w_2 S + w_3 M + w_4 B + w_5 R + w_6 E$$
+Those items are roadmap and research direction unless they are explicitly backed by current code and benchmarks in this repository.
 
-| Term | Description |
-|------|-------------|
-| $T$ | Total weighted tardiness |
-| $S$ | Total setup time |
-| $M$ | Material waste / auxiliary resource cost |
-| $B$ | Load imbalance across work centers |
-| $R$ | Schedule stability (delta from previous plan) |
-| $E$ | Energy cost |
+## Claim Boundaries
 
-**Robust extension:**
+Read this repository as an engineering surface first.
 
-$$J_{\text{robust}} = \mathbb{E}[J(\xi)] + \lambda\, \text{CVaR}_\alpha(J(\xi)) + \mu\, \Delta_{\text{stability}}$$
-
-## Architecture
-
-```mermaid
-graph TB
-    subgraph External["External Systems"]
-        ERP["ERP / MES"]
-        IOT["IoT / SCADA / OPC-UA"]
-        BI["BI / Analytics"]
-    end
-
-    subgraph SynAPS["Syn-APS Platform"]
-        UI["Operator UI<br/>(React + TypeScript)"]
-        BFF["API / BFF<br/>(FastAPI or Axum)"]
-        CORE["Planning Core"]
-        OPT["Solver Portfolio<br/>(OR-Tools · HiGHS · pymoo)"]
-        RT["Realtime Engine<br/>(JetStream + Temporal)"]
-        INT["Integration Layer<br/>(Anti-corruption adapters)"]
-        ML["ML Advisory<br/>(GNN + ONNX)"]
-    end
-
-    subgraph Data["Data Platform"]
-        PG["PostgreSQL 17<br/>(canonical OLTP)"]
-        TS["TimescaleDB<br/>(telemetry)"]
-        CH["ClickHouse<br/>(OLAP analytics)"]
-        CACHE["Valkey<br/>(cache + locks)"]
-        OBJ["Object Store<br/>(MinIO)"]
-    end
-
-    ERP -->|orders, routing| INT
-    IOT -->|telemetry, states| RT
-    INT --> CORE
-    CORE --> OPT
-    CORE --> RT
-    ML -.->|advisory weights| OPT
-    BFF --> CORE
-    UI --> BFF
-    CORE --> PG
-    RT --> TS
-    CORE --> CH
-    BI --> CH
-
-    style External fill:#f5f5f5,stroke:#9e9e9e
-    style SynAPS fill:#e3f2fd,stroke:#1565c0
-    style Data fill:#e8f5e9,stroke:#2e7d32
-```
-
-## Solver Portfolio
-
-| Regime | Solver | When |
-|--------|--------|------|
-| Full rebuild | GREED/ATCS + LNS | Daily or shift-level replan |
-| Local repair | Frozen prefix + LNS + CP-SAT | Machine failure, rush order |
-| Bottleneck | CP-SAT (exact) | Critical resource window |
-| Energy | HiGHS LP/MIP | Tariff-aware shift allocation |
-| Pareto | pymoo NSGA-III | Multi-stakeholder trade-off |
-| Hyperparameter | Optuna | Solver configuration tuning |
-
-## Domain Parametrization
-
-Syn-APS is **not** a single-industry tool. The universal schema uses `domain_attributes JSONB` columns to adapt to any vertical:
-
-| Industry | Key Parameters | Example |
-|----------|---------------|---------|
-| Metallurgy | alloy grade, ingot temperature, rolling pass | [metallurgy.json](schema/examples/metallurgy.json) |
-| Pharmaceuticals | batch size, clean room class, expiry tracking | [pharma.json](schema/examples/pharma.json) |
-| Semiconductor | wafer lot, reticle set, clean room zone | [semiconductor.json](schema/examples/semiconductor.json) |
-| Food & Beverage | allergen class, pasteurization temp, shelf life | [food.json](schema/examples/food.json) |
-| Data Centers | VM type, rack zone, power/cooling envelope | [datacenter.json](schema/examples/datacenter.json) |
-| Energy & Utilities | unit commitment, ramp rate, emission cap | [energy.json](schema/examples/energy.json) |
-| Logistics & Warehousing | vehicle type, dock slot, route window | [logistics.json](schema/examples/logistics.json) |
-| Aerospace & Defense | flight test slot, MRO bay, certification hold | [aerospace.json](schema/examples/aerospace.json) |
-
-See [docs/domains/](docs/domains/) for full parametrization guides.
+- The root repository does not claim that hardware pinning, zero-copy IPC, event sourcing, GNN cuts, or LLM explanation layers are implemented here today.
+- Public publication of this repository does not imply production readiness, regulated deployment readiness, or plant-integration certification.
+- Investor or diligence materials are supporting context, not the sole technical source of truth.
 
 ## Quick Start
 
 ```bash
-# Clone
-git clone https://github.com/syn-aps/syn-aps.git
-cd syn-aps
+git clone https://github.com/synaps/synaps.git
+cd synaps
+python -m pip install -e ".[dev]"
 
-# Install solver (Python 3.11+)
-pip install -e ".[dev]"
+# Routed portfolio solve with JSON output
+python -m synaps solve benchmark/instances/tiny_3x3.json
 
-# Run a benchmark instance
-python -m syn_aps.cli solve benchmark/instances/demo_10x5.json
+# Export the TypeScript ↔ Python runtime contract schemas
+python -m synaps write-contract-schemas --output-dir schema/contracts
 
-# Run tests
-pytest
+# Start the minimal TypeScript control-plane BFF
+cd control-plane
+npm install
+npm run dev
+
+pytest tests/ -v
+ruff check synaps tests benchmark --select F,E9
+
+python -m benchmark.run_benchmark benchmark/instances/tiny_3x3.json \
+  --solvers GREED CPSAT-30 --compare
 ```
 
-## Repository Structure
+To build a distributable package locally:
 
-```
-syn-aps/
-├── docs/
-│   ├── architecture/       # System architecture & design decisions
-│   ├── domains/             # Industry parametrization guides
-│   ├── evolution/           # Future vectors (Digital Twin, LLM, FL, Quantum)
-│   └── research/            # Literature review, roadmap, benchmarks
-├── schema/
-│   ├── ddl/                 # PostgreSQL DDL (universal tables)
-│   └── examples/            # Domain-specific JSON examples
-├── solver/
-│   └── syn_aps/             # Python solver package
-│       ├── model/           # Data model (dataclasses)
-│       ├── solvers/         # GREED, CP-SAT, LNS, NSGA-III
-│       ├── repair/          # Incremental repair engine
-│       └── validators/      # Feasibility & constraint checkers
-├── benchmark/
-│   ├── instances/           # Problem instances (JSON)
-│   └── runner.py            # Benchmark CLI
-├── .github/                 # CI workflows & templates
-├── LICENSE                  # MIT
-├── CONTRIBUTING.md
-├── CITATION.cff
-└── README.md                # ← You are here
+```bash
+python -m build
+twine check dist/*
 ```
 
-## Roadmap
+## Repository Map
 
-| Phase | Milestone | Scope |
-|-------|-----------|-------|
-| 0 | Data contract freeze | Canonical schema, domain mapping, KPI tree |
-| 1 | Deterministic pilot | Import pipeline, GREED scheduler, basic operator board |
-| 2 | Repair & realtime | Incremental repair, override flow, event streaming |
-| 3 | Analytics & XAI | ClickHouse projections, explanation service |
-| 4 | ML advisory | GNN weight predictor, shadow evaluation, MLOps |
-| 5 | Selective extraction | Service boundaries driven by real evidence |
-| 6 | Digital Twin & LLM | DES simulation, NL copilot (on-prem) |
-| 7 | Federated Learning | Multi-plant learning, edge AI |
-| 8 | Quantum Readiness | QUBO formulation, hybrid solver |
+- [docs/README.md](docs/README.md): architecture, domain, evolution, and research navigation.
+- [docs/PUBLIC_GITHUB_POST_PUSH_CHECKLIST.md](docs/PUBLIC_GITHUB_POST_PUSH_CHECKLIST.md): manual GitHub setup after the first public push.
+- [benchmark/README.md](benchmark/README.md): reproducible solver benchmarking.
+- `python -m synaps solve <instance.json>`: high-level routed solver execution with JSON output.
+- [`schema/contracts/`](schema/contracts/README.md): stable JSON request/response contract for future TypeScript control-plane integration.
+- [`control-plane/`](control-plane/README.md): minimal TypeScript BFF proving the network-facing control-plane boundary.
+- [CONTRIBUTING.md](CONTRIBUTING.md): contribution workflow and validation expectations.
+- [SUPPORT.md](SUPPORT.md): supported public support channels.
+- [SECURITY.md](SECURITY.md): vulnerability reporting path.
 
-## Key Design Principles
+## Architecture and Research Notes
 
-1. **Model-first** — canonical mathematical form before any code
-2. **Deterministic baseline** — every AI recommendation has a deterministic fallback
-3. **Evolutionary architecture** — modular monolith first, extract services by evidence
-4. **Event-native** — all state changes are auditable domain events
-5. **Explainability** — every scheduling decision can be inspected and challenged
-6. **Industrial safety** — degraded modes are explicit, not hidden behind scores
+The repository includes a broader architecture thesis and domain exploration material for readers who want the long-horizon system design:
 
-## Technology Stack (Reference)
+- [docs/architecture/01_OVERVIEW.md](docs/architecture/01_OVERVIEW.md)
+- [docs/architecture/02_CANONICAL_FORM.md](docs/architecture/02_CANONICAL_FORM.md)
+- [docs/architecture/03_SOLVER_PORTFOLIO.md](docs/architecture/03_SOLVER_PORTFOLIO.md)
+- [research/SYNAPS_MASTER_BLUEPRINT.md](research/SYNAPS_MASTER_BLUEPRINT.md)
+- [research/SYNAPS_OSS_STACK_2026.md](research/SYNAPS_OSS_STACK_2026.md)
 
-| Layer | Primary | Alternative |
-|-------|---------|-------------|
-| Solver kernel | OR-Tools CP-SAT | HiGHS, pymoo, Optuna |
-| ML framework | PyTorch + PyG | ONNX Runtime (inference) |
-| Backend | FastAPI (Python) | Axum (Rust, hot path) |
-| Frontend | React 19 + TypeScript | — |
-| OLTP | PostgreSQL 17 | — |
-| OLAP | ClickHouse | TimescaleDB (telemetry) |
-| Events | NATS JetStream | — |
-| Workflows | Temporal | — |
-| Cache | Valkey | — |
-| IAM | Keycloak + OPA | — |
-| Platform | RKE2 / K3s | — |
-| CI/CD | GitHub Actions + ArgoCD | — |
-| Observability | Prometheus + Grafana + Loki + Tempo | — |
+These documents are useful for understanding direction, but the current implementation boundary is defined by the code, tests, benchmark harness, and packaging surfaces in this repository.
 
-## Contributing
+## Roadmap Themes
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). We especially welcome:
+- Strengthen decomposition and scaling paths beyond the current LBBD baseline (dual-based cut generation, GNN-guided cuts).
+- Introduce explicit orchestration boundaries instead of keeping all scheduling state in a single solver-centric layer.
+- Extend the epsilon-constrained portfolio with material-loss and multi-objective Pareto front enumeration.
+- Add safer publication and supply-chain surfaces for releases, dependency updates, and security scanning.
+- Keep research-grade claims bounded by measurable evidence.
 
-- New **domain parametrizations** for underserved industries
-- **Benchmark instances** from real or realistic problem sets
-- **Solver improvements** — heuristics, neighborhoods, exact methods
-- **Translations** of documentation
+## Investor and Diligence Material
 
-## License
+An optional diligence packet can live under `docs/investor/`.
 
-[MIT](LICENSE) — Syn-APS Contributors.
-
-## Citation
-
-If you use Syn-APS in academic work, please cite via [CITATION.cff](CITATION.cff).
+That surface is intentionally secondary. The open-source code, tests, benchmark harness, and packaging do not depend on that subtree. Start with the engineering entrypoints above if your primary goal is to understand what the repository implements today.

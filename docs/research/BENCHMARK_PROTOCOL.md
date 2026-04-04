@@ -1,17 +1,17 @@
-# Benchmark Protocol — Syn-APS
+# Benchmark Protocol — SynAPS
 
-> **Purpose**: Standardized methodology for evaluating solver quality, runtime performance, and scalability of the Syn-APS scheduling engine across multiple domains.
+> **Purpose**: Standardized methodology for evaluating solver quality, runtime performance, and scalability of the SynAPS scheduling engine across multiple domains.
 
 <details><summary>🇷🇺 Краткое описание</summary>
 
-Протокол бенчмаркинга Syn-APS: формат входных данных, стандартные наборы задач (Brandimarte Mk01–Mk10, Kacem, Fattahi), определения KPI, методология сравнения с базовыми решениями, статистическая валидность (30 запусков, медиана, IQR), и формат отчёта.
+Протокол бенчмаркинга SynAPS: формат входных данных, стандартные наборы задач (Brandimarte Mk01–Mk10, Kacem, Fattahi), определения KPI, методология сравнения с базовыми решениями, статистическая валидность (30 запусков, медиана, IQR), и формат отчёта.
 </details>
 
 ---
 
 ## 1. Instance Format
 
-All benchmark instances use the Syn-APS JSON schema (see [`schema/README.md`](../../schema/README.md)).
+All benchmark instances use the SynAPS JSON schema (see [`schema/README.md`](../../schema/README.md)).
 
 ### Minimal Instance Fields
 
@@ -49,7 +49,7 @@ All benchmark instances use the Syn-APS JSON schema (see [`schema/README.md`](..
 
 ### 2.1 Classical FJSP Benchmarks
 
-These benchmarks are converted to Syn-APS JSON format. Converters live in `benchmark/converters/`.
+These benchmarks are converted to SynAPS JSON format. Converters live in `benchmark/converters/`.
 
 | Dataset | Source | Instances | Jobs × Machines | Characteristics |
 |---------|--------|-----------|-----------------|-----------------|
@@ -58,7 +58,7 @@ These benchmarks are converted to Syn-APS JSON format. Converters live in `bench
 | **Fattahi** | Fattahi et al. (2007) | SFJS01–SFJS10, MFJS01–MFJS10 | 2×2 → 20×10 | FJSP with partial flexibility |
 | **HU** | Hurink et al. (1994) | edata/rdata/vdata | Various | JSP with FJSP extensions |
 
-### 2.2 Syn-APS Synthetic Instances
+### 2.2 SynAPS Synthetic Instances
 
 Generated via parametric instance generator (`benchmark/generate_instances.py`, planned).
 
@@ -127,7 +127,7 @@ Generated via parametric instance generator (`benchmark/generate_instances.py`, 
 |----------|-------------|
 | **SPT** | Shortest Processing Time — classic priority rule |
 | **EDD** | Earliest Due Date — classic priority rule |
-| **ATCS** | Apparent Tardiness Cost with Setups (Syn-APS GREED) |
+| **ATCS** | Apparent Tardiness Cost with Setups (SynAPS GREED) |
 | **BKS** | Best Known Solution from literature (when available) |
 | **Random** | Uniform random feasible assignment (lower bound sanity) |
 

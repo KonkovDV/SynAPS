@@ -1,5 +1,5 @@
 -- schema/ddl/002_setup_matrix.sql
--- Syn-APS: Sequence-Dependent Setup Time (SDST) graph (PostgreSQL 18+)
+-- SynAPS: Sequence-Dependent Setup Time (SDST) graph (PostgreSQL 18+)
 
 BEGIN;
 

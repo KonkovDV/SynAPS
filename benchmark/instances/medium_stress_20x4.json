@@ -1,0 +1,511 @@
+{
+  "states": [
+    {
+      "id": "f6bd0107-9dfc-467e-b80b-e5b255906bed",
+      "code": "RAW",
+      "label": "Raw material"
+    },
+    {
+      "id": "814c4465-9aae-48b6-8839-2389e9f416ef",
+      "code": "MACHINED",
+      "label": "Machined part"
+    },
+    {
+      "id": "9c0cf67e-68f2-49da-bf31-f71dd22decec",
+      "code": "FINISHED",
+      "label": "Finished part"
+    }
+  ],
+  "orders": [
+    {
+      "id": "5d4c5bb7-8899-4a35-943a-10aacb9bae89",
+      "external_ref": "ORD-001",
+      "due_date": "2026-04-01T12:00:00+00:00",
+      "priority": 500
+    },
+    {
+      "id": "cbc0767f-f716-4ccf-a3c1-f4ba255741c1",
+      "external_ref": "ORD-002",
+      "due_date": "2026-04-01T13:00:00+00:00",
+      "priority": 550
+    },
+    {
+      "id": "f6488aed-1a31-48b1-84d5-8244583c24ec",
+      "external_ref": "ORD-003",
+      "due_date": "2026-04-01T14:00:00+00:00",
+      "priority": 600
+    },
+    {
+      "id": "93f34a32-e4bf-444a-8178-441e2c37c8ef",
+      "external_ref": "ORD-004",
+      "due_date": "2026-04-01T15:00:00+00:00",
+      "priority": 650
+    },
+    {
+      "id": "f053ea5e-582d-4836-9c65-f04d9b1c2c3e",
+      "external_ref": "ORD-005",
+      "due_date": "2026-04-01T16:00:00+00:00",
+      "priority": 700
+    },
+    {
+      "id": "5e2856e9-0f7c-4c1e-943c-db258797da51",
+      "external_ref": "ORD-006",
+      "due_date": "2026-04-01T17:00:00+00:00",
+      "priority": 750
+    },
+    {
+      "id": "b28c21d8-1f61-45e8-89f9-ec16c84a7d04",
+      "external_ref": "ORD-RUSH-1",
+      "due_date": "2026-04-01T11:00:00+00:00",
+      "priority": 900
+    },
+    {
+      "id": "03d57e55-9687-4cf7-a1ff-0452850749f6",
+      "external_ref": "ORD-RUSH-2",
+      "due_date": "2026-04-01T11:00:00+00:00",
+      "priority": 900
+    }
+  ],
+  "operations": [
+    {
+      "id": "17af4bfc-efdb-42c7-9705-da59757a15e4",
+      "order_id": "5d4c5bb7-8899-4a35-943a-10aacb9bae89",
+      "seq_in_order": 0,
+      "state_id": "f6bd0107-9dfc-467e-b80b-e5b255906bed",
+      "base_duration_min": 15,
+      "eligible_wc_ids": [
+        "b50f9a7c-3378-4edc-8255-866c680785cf",
+        "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+        "db33e217-5058-4afa-8333-8cf5bcb97353"
+      ],
+      "predecessor_op_id": null
+    },
+    {
+      "id": "cdfcb2fb-0181-4dfb-847f-10747365fef7",
+      "order_id": "5d4c5bb7-8899-4a35-943a-10aacb9bae89",
+      "seq_in_order": 1,
+      "state_id": "814c4465-9aae-48b6-8839-2389e9f416ef",
+      "base_duration_min": 25,
+      "eligible_wc_ids": [
+        "b50f9a7c-3378-4edc-8255-866c680785cf",
+        "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+        "db33e217-5058-4afa-8333-8cf5bcb97353"
+      ],
+      "predecessor_op_id": "17af4bfc-efdb-42c7-9705-da59757a15e4"
+    },
+    {
+      "id": "671fcf46-5125-4d34-9878-deb92b12bea8",
+      "order_id": "5d4c5bb7-8899-4a35-943a-10aacb9bae89",
+      "seq_in_order": 2,
+      "state_id": "9c0cf67e-68f2-49da-bf31-f71dd22decec",
+      "base_duration_min": 35,
+      "eligible_wc_ids": [
+        "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+        "db33e217-5058-4afa-8333-8cf5bcb97353",
+        "80bf0443-5b5a-4a19-ae28-b8668e8723d0"
+      ],
+      "predecessor_op_id": "cdfcb2fb-0181-4dfb-847f-10747365fef7"
+    },
+    {
+      "id": "a34d6838-9378-4ba4-b6d0-0e6b82de6473",
+      "order_id": "cbc0767f-f716-4ccf-a3c1-f4ba255741c1",
+      "seq_in_order": 0,
+      "state_id": "f6bd0107-9dfc-467e-b80b-e5b255906bed",
+      "base_duration_min": 17,
+      "eligible_wc_ids": [
+        "b50f9a7c-3378-4edc-8255-866c680785cf",
+        "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+        "db33e217-5058-4afa-8333-8cf5bcb97353"
+      ],
+      "predecessor_op_id": null
+    },
+    {
+      "id": "6addf778-6374-42a9-94a6-3cb359895975",
+      "order_id": "cbc0767f-f716-4ccf-a3c1-f4ba255741c1",
+      "seq_in_order": 1,
+      "state_id": "814c4465-9aae-48b6-8839-2389e9f416ef",
+      "base_duration_min": 27,
+      "eligible_wc_ids": [
+        "b50f9a7c-3378-4edc-8255-866c680785cf",
+        "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+        "db33e217-5058-4afa-8333-8cf5bcb97353"
+      ],
+      "predecessor_op_id": "a34d6838-9378-4ba4-b6d0-0e6b82de6473"
+    },
+    {
+      "id": "7aa5f25e-89ab-499e-acf6-9bf925f43723",
+      "order_id": "cbc0767f-f716-4ccf-a3c1-f4ba255741c1",
+      "seq_in_order": 2,
+      "state_id": "9c0cf67e-68f2-49da-bf31-f71dd22decec",
+      "base_duration_min": 37,
+      "eligible_wc_ids": [
+        "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+        "db33e217-5058-4afa-8333-8cf5bcb97353",
+        "80bf0443-5b5a-4a19-ae28-b8668e8723d0"
+      ],
+      "predecessor_op_id": "6addf778-6374-42a9-94a6-3cb359895975"
+    },
+    {
+      "id": "d4d6972c-44e2-4053-b070-a0ef547959d8",
+      "order_id": "f6488aed-1a31-48b1-84d5-8244583c24ec",
+      "seq_in_order": 0,
+      "state_id": "f6bd0107-9dfc-467e-b80b-e5b255906bed",
+      "base_duration_min": 19,
+      "eligible_wc_ids": [
+        "b50f9a7c-3378-4edc-8255-866c680785cf",
+        "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+        "db33e217-5058-4afa-8333-8cf5bcb97353"
+      ],
+      "predecessor_op_id": null
+    },
+    {
+      "id": "687aedb8-9069-4bbe-9e21-74b09d606f3b",
+      "order_id": "f6488aed-1a31-48b1-84d5-8244583c24ec",
+      "seq_in_order": 1,
+      "state_id": "814c4465-9aae-48b6-8839-2389e9f416ef",
+      "base_duration_min": 29,
+      "eligible_wc_ids": [
+        "b50f9a7c-3378-4edc-8255-866c680785cf",
+        "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+        "db33e217-5058-4afa-8333-8cf5bcb97353"
+      ],
+      "predecessor_op_id": "d4d6972c-44e2-4053-b070-a0ef547959d8"
+    },
+    {
+      "id": "3e3fab33-9f11-4bc3-9f37-09e6f21526d2",
+      "order_id": "f6488aed-1a31-48b1-84d5-8244583c24ec",
+      "seq_in_order": 2,
+      "state_id": "9c0cf67e-68f2-49da-bf31-f71dd22decec",
+      "base_duration_min": 39,
+      "eligible_wc_ids": [
+        "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+        "db33e217-5058-4afa-8333-8cf5bcb97353",
+        "80bf0443-5b5a-4a19-ae28-b8668e8723d0"
+      ],
+      "predecessor_op_id": "687aedb8-9069-4bbe-9e21-74b09d606f3b"
+    },
+    {
+      "id": "c2938dc9-067d-431f-84ab-a0ea54c5a66d",
+      "order_id": "93f34a32-e4bf-444a-8178-441e2c37c8ef",
+      "seq_in_order": 0,
+      "state_id": "f6bd0107-9dfc-467e-b80b-e5b255906bed",
+      "base_duration_min": 21,
+      "eligible_wc_ids": [
+        "b50f9a7c-3378-4edc-8255-866c680785cf",
+        "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+        "db33e217-5058-4afa-8333-8cf5bcb97353"
+      ],
+      "predecessor_op_id": null
+    },
+    {
+      "id": "87cd7365-eba2-4561-be91-f7714d113dfc",
+      "order_id": "93f34a32-e4bf-444a-8178-441e2c37c8ef",
+      "seq_in_order": 1,
+      "state_id": "814c4465-9aae-48b6-8839-2389e9f416ef",
+      "base_duration_min": 31,
+      "eligible_wc_ids": [
+        "b50f9a7c-3378-4edc-8255-866c680785cf",
+        "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+        "db33e217-5058-4afa-8333-8cf5bcb97353"
+      ],
+      "predecessor_op_id": "c2938dc9-067d-431f-84ab-a0ea54c5a66d"
+    },
+    {
+      "id": "13f403c9-dbef-414f-86d1-25890aaebf93",
+      "order_id": "93f34a32-e4bf-444a-8178-441e2c37c8ef",
+      "seq_in_order": 2,
+      "state_id": "9c0cf67e-68f2-49da-bf31-f71dd22decec",
+      "base_duration_min": 41,
+      "eligible_wc_ids": [
+        "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+        "db33e217-5058-4afa-8333-8cf5bcb97353",
+        "80bf0443-5b5a-4a19-ae28-b8668e8723d0"
+      ],
+      "predecessor_op_id": "87cd7365-eba2-4561-be91-f7714d113dfc"
+    },
+    {
+      "id": "b1727b07-57ab-4763-91e4-0693fc88f69c",
+      "order_id": "f053ea5e-582d-4836-9c65-f04d9b1c2c3e",
+      "seq_in_order": 0,
+      "state_id": "f6bd0107-9dfc-467e-b80b-e5b255906bed",
+      "base_duration_min": 23,
+      "eligible_wc_ids": [
+        "b50f9a7c-3378-4edc-8255-866c680785cf",
+        "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+        "db33e217-5058-4afa-8333-8cf5bcb97353"
+      ],
+      "predecessor_op_id": null
+    },
+    {
+      "id": "7f2b13c0-dad7-4a2f-b11d-e82eebbeabc6",
+      "order_id": "f053ea5e-582d-4836-9c65-f04d9b1c2c3e",
+      "seq_in_order": 1,
+      "state_id": "814c4465-9aae-48b6-8839-2389e9f416ef",
+      "base_duration_min": 33,
+      "eligible_wc_ids": [
+        "b50f9a7c-3378-4edc-8255-866c680785cf",
+        "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+        "db33e217-5058-4afa-8333-8cf5bcb97353"
+      ],
+      "predecessor_op_id": "b1727b07-57ab-4763-91e4-0693fc88f69c"
+    },
+    {
+      "id": "794be11a-a358-463b-92cd-e111649937d9",
+      "order_id": "f053ea5e-582d-4836-9c65-f04d9b1c2c3e",
+      "seq_in_order": 2,
+      "state_id": "9c0cf67e-68f2-49da-bf31-f71dd22decec",
+      "base_duration_min": 43,
+      "eligible_wc_ids": [
+        "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+        "db33e217-5058-4afa-8333-8cf5bcb97353",
+        "80bf0443-5b5a-4a19-ae28-b8668e8723d0"
+      ],
+      "predecessor_op_id": "7f2b13c0-dad7-4a2f-b11d-e82eebbeabc6"
+    },
+    {
+      "id": "44c7e68c-8c35-41d2-aec2-0dce1a0b8834",
+      "order_id": "5e2856e9-0f7c-4c1e-943c-db258797da51",
+      "seq_in_order": 0,
+      "state_id": "f6bd0107-9dfc-467e-b80b-e5b255906bed",
+      "base_duration_min": 25,
+      "eligible_wc_ids": [
+        "b50f9a7c-3378-4edc-8255-866c680785cf",
+        "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+        "db33e217-5058-4afa-8333-8cf5bcb97353"
+      ],
+      "predecessor_op_id": null
+    },
+    {
+      "id": "20009135-2fb4-42ae-ae73-629d70f892d9",
+      "order_id": "5e2856e9-0f7c-4c1e-943c-db258797da51",
+      "seq_in_order": 1,
+      "state_id": "814c4465-9aae-48b6-8839-2389e9f416ef",
+      "base_duration_min": 35,
+      "eligible_wc_ids": [
+        "b50f9a7c-3378-4edc-8255-866c680785cf",
+        "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+        "db33e217-5058-4afa-8333-8cf5bcb97353"
+      ],
+      "predecessor_op_id": "44c7e68c-8c35-41d2-aec2-0dce1a0b8834"
+    },
+    {
+      "id": "62e0dd5d-1bac-424f-a8d5-3b1e1e415d1c",
+      "order_id": "5e2856e9-0f7c-4c1e-943c-db258797da51",
+      "seq_in_order": 2,
+      "state_id": "9c0cf67e-68f2-49da-bf31-f71dd22decec",
+      "base_duration_min": 45,
+      "eligible_wc_ids": [
+        "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+        "db33e217-5058-4afa-8333-8cf5bcb97353",
+        "80bf0443-5b5a-4a19-ae28-b8668e8723d0"
+      ],
+      "predecessor_op_id": "20009135-2fb4-42ae-ae73-629d70f892d9"
+    },
+    {
+      "id": "8267b00c-edc3-4e08-b63f-1435ac09f660",
+      "order_id": "b28c21d8-1f61-45e8-89f9-ec16c84a7d04",
+      "seq_in_order": 0,
+      "state_id": "f6bd0107-9dfc-467e-b80b-e5b255906bed",
+      "base_duration_min": 20,
+      "eligible_wc_ids": [
+        "b50f9a7c-3378-4edc-8255-866c680785cf",
+        "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+        "db33e217-5058-4afa-8333-8cf5bcb97353",
+        "80bf0443-5b5a-4a19-ae28-b8668e8723d0"
+      ]
+    },
+    {
+      "id": "0cdc92c8-2e1c-4197-9399-b1a3eae4a6da",
+      "order_id": "03d57e55-9687-4cf7-a1ff-0452850749f6",
+      "seq_in_order": 0,
+      "state_id": "f6bd0107-9dfc-467e-b80b-e5b255906bed",
+      "base_duration_min": 20,
+      "eligible_wc_ids": [
+        "b50f9a7c-3378-4edc-8255-866c680785cf",
+        "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+        "db33e217-5058-4afa-8333-8cf5bcb97353",
+        "80bf0443-5b5a-4a19-ae28-b8668e8723d0"
+      ]
+    }
+  ],
+  "work_centers": [
+    {
+      "id": "b50f9a7c-3378-4edc-8255-866c680785cf",
+      "code": "WC-1",
+      "capability_group": "machining",
+      "speed_factor": 1.0
+    },
+    {
+      "id": "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+      "code": "WC-2",
+      "capability_group": "machining",
+      "speed_factor": 1.2
+    },
+    {
+      "id": "db33e217-5058-4afa-8333-8cf5bcb97353",
+      "code": "WC-3",
+      "capability_group": "assembly",
+      "speed_factor": 0.9
+    },
+    {
+      "id": "80bf0443-5b5a-4a19-ae28-b8668e8723d0",
+      "code": "WC-4",
+      "capability_group": "assembly",
+      "speed_factor": 1.1
+    }
+  ],
+  "setup_matrix": [
+    {
+      "id": "57e2654b-ff90-4239-8121-6a011c503ec6",
+      "work_center_id": "b50f9a7c-3378-4edc-8255-866c680785cf",
+      "from_state_id": "f6bd0107-9dfc-467e-b80b-e5b255906bed",
+      "to_state_id": "814c4465-9aae-48b6-8839-2389e9f416ef",
+      "setup_minutes": 8,
+      "material_loss": 0.5
+    },
+    {
+      "id": "a0e175fe-2bac-4e79-a299-8a76454f530e",
+      "work_center_id": "b50f9a7c-3378-4edc-8255-866c680785cf",
+      "from_state_id": "814c4465-9aae-48b6-8839-2389e9f416ef",
+      "to_state_id": "f6bd0107-9dfc-467e-b80b-e5b255906bed",
+      "setup_minutes": 12,
+      "material_loss": 0.8
+    },
+    {
+      "id": "3ac4a29e-aaf1-41cb-a39a-68b5b5097e0c",
+      "work_center_id": "b50f9a7c-3378-4edc-8255-866c680785cf",
+      "from_state_id": "f6bd0107-9dfc-467e-b80b-e5b255906bed",
+      "to_state_id": "9c0cf67e-68f2-49da-bf31-f71dd22decec",
+      "setup_minutes": 10,
+      "material_loss": 0.3
+    },
+    {
+      "id": "9a06f340-4b33-46bd-aaae-23ee79caf021",
+      "work_center_id": "b50f9a7c-3378-4edc-8255-866c680785cf",
+      "from_state_id": "9c0cf67e-68f2-49da-bf31-f71dd22decec",
+      "to_state_id": "f6bd0107-9dfc-467e-b80b-e5b255906bed",
+      "setup_minutes": 14,
+      "material_loss": 0.6
+    },
+    {
+      "id": "c9f91d88-f191-4c4b-96da-8168d501d5dd",
+      "work_center_id": "b50f9a7c-3378-4edc-8255-866c680785cf",
+      "from_state_id": "814c4465-9aae-48b6-8839-2389e9f416ef",
+      "to_state_id": "9c0cf67e-68f2-49da-bf31-f71dd22decec",
+      "setup_minutes": 6,
+      "material_loss": 0.2
+    },
+    {
+      "id": "ac0281ab-9933-4c88-b989-b9cc048874fc",
+      "work_center_id": "b50f9a7c-3378-4edc-8255-866c680785cf",
+      "from_state_id": "9c0cf67e-68f2-49da-bf31-f71dd22decec",
+      "to_state_id": "814c4465-9aae-48b6-8839-2389e9f416ef",
+      "setup_minutes": 9,
+      "material_loss": 0.4
+    },
+    {
+      "id": "b695899c-7efd-4630-9e0b-dc95169415d9",
+      "work_center_id": "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+      "from_state_id": "f6bd0107-9dfc-467e-b80b-e5b255906bed",
+      "to_state_id": "814c4465-9aae-48b6-8839-2389e9f416ef",
+      "setup_minutes": 9,
+      "material_loss": 0.5
+    },
+    {
+      "id": "26bd7bc3-4867-4380-ae76-2af6e963b2ea",
+      "work_center_id": "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+      "from_state_id": "814c4465-9aae-48b6-8839-2389e9f416ef",
+      "to_state_id": "f6bd0107-9dfc-467e-b80b-e5b255906bed",
+      "setup_minutes": 13,
+      "material_loss": 0.8
+    },
+    {
+      "id": "7e11c48d-1bb2-46b8-b2d2-f1dd78543cf9",
+      "work_center_id": "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+      "from_state_id": "f6bd0107-9dfc-467e-b80b-e5b255906bed",
+      "to_state_id": "9c0cf67e-68f2-49da-bf31-f71dd22decec",
+      "setup_minutes": 11,
+      "material_loss": 0.3
+    },
+    {
+      "id": "2ba168c3-6bf5-46b4-9844-78f1ec616bae",
+      "work_center_id": "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+      "from_state_id": "9c0cf67e-68f2-49da-bf31-f71dd22decec",
+      "to_state_id": "f6bd0107-9dfc-467e-b80b-e5b255906bed",
+      "setup_minutes": 15,
+      "material_loss": 0.6
+    },
+    {
+      "id": "05aa0d18-0318-4a8d-9309-1ca46cf82663",
+      "work_center_id": "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+      "from_state_id": "814c4465-9aae-48b6-8839-2389e9f416ef",
+      "to_state_id": "9c0cf67e-68f2-49da-bf31-f71dd22decec",
+      "setup_minutes": 7,
+      "material_loss": 0.2
+    },
+    {
+      "id": "69928b79-639c-4d58-a1fe-28bedce56e76",
+      "work_center_id": "388d07b8-c2f5-486a-91cf-ecae2383fddf",
+      "from_state_id": "9c0cf67e-68f2-49da-bf31-f71dd22decec",
+      "to_state_id": "814c4465-9aae-48b6-8839-2389e9f416ef",
+      "setup_minutes": 10,
+      "material_loss": 0.4
+    },
+    {
+      "id": "afde309f-ee16-4558-b710-db7c900b9d5b",
+      "work_center_id": "db33e217-5058-4afa-8333-8cf5bcb97353",
+      "from_state_id": "f6bd0107-9dfc-467e-b80b-e5b255906bed",
+      "to_state_id": "814c4465-9aae-48b6-8839-2389e9f416ef",
+      "setup_minutes": 10,
+      "material_loss": 0.5
+    },
+    {
+      "id": "3b218238-ccb5-43a6-81fe-eec478d92561",
+      "work_center_id": "db33e217-5058-4afa-8333-8cf5bcb97353",
+      "from_state_id": "814c4465-9aae-48b6-8839-2389e9f416ef",
+      "to_state_id": "f6bd0107-9dfc-467e-b80b-e5b255906bed",
+      "setup_minutes": 14,
+      "material_loss": 0.8
+    },
+    {
+      "id": "8d6cd009-8a26-4fc8-bbca-37a4156ae22c",
+      "work_center_id": "db33e217-5058-4afa-8333-8cf5bcb97353",
+      "from_state_id": "f6bd0107-9dfc-467e-b80b-e5b255906bed",
+      "to_state_id": "9c0cf67e-68f2-49da-bf31-f71dd22decec",
+      "setup_minutes": 12,
+      "material_loss": 0.3
+    }
+  ],
+  "auxiliary_resources": [
+    {
+      "id": "5f61bfb6-2a78-4f9e-95a0-518c8cf53f65",
+      "code": "JIG-1",
+      "resource_type": "fixture",
+      "pool_size": 2
+    }
+  ],
+  "aux_requirements": [
+    {
+      "operation_id": "17af4bfc-efdb-42c7-9705-da59757a15e4",
+      "aux_resource_id": "5f61bfb6-2a78-4f9e-95a0-518c8cf53f65",
+      "quantity_needed": 1
+    },
+    {
+      "operation_id": "cdfcb2fb-0181-4dfb-847f-10747365fef7",
+      "aux_resource_id": "5f61bfb6-2a78-4f9e-95a0-518c8cf53f65",
+      "quantity_needed": 1
+    },
+    {
+      "operation_id": "671fcf46-5125-4d34-9878-deb92b12bea8",
+      "aux_resource_id": "5f61bfb6-2a78-4f9e-95a0-518c8cf53f65",
+      "quantity_needed": 1
+    },
+    {
+      "operation_id": "a34d6838-9378-4ba4-b6d0-0e6b82de6473",
+      "aux_resource_id": "5f61bfb6-2a78-4f9e-95a0-518c8cf53f65",
+      "quantity_needed": 1
+    }
+  ],
+  "planning_horizon_start": "2026-04-01T08:00:00+00:00",
+  "planning_horizon_end": "2026-04-01T20:00:00+00:00"
+}

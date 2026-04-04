@@ -1,5 +1,5 @@
 {
-  "_comment": "Metallurgy domain parametrization example for Syn-APS",
+  "_comment": "Metallurgy domain parametrization example for SynAPS",
   "states": [
     {
       "code": "AISI-304-ROD-12mm",

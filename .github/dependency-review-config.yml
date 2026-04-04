@@ -1,0 +1,8 @@
+fail-on-severity: high
+deny-licenses:
+  - AGPL-3.0-only
+  - AGPL-3.0-or-later
+  - GPL-3.0-only
+  - GPL-3.0-or-later
+retry-on-snapshot-warnings: true
+retry-on-snapshot-warnings-timeout: 180

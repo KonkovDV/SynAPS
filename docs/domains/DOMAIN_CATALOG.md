@@ -1,10 +1,10 @@
-# Domain Catalog — Syn-APS Universal Applicability
+# Domain Catalog — SynAPS Universal Applicability
 
 > **Purpose**: Master index of industry domains where MO-FJSP-SDST-ML-ARC applies. Each domain maps the canonical APS model to its specific vocabulary, constraints, KPIs, and compliance requirements.
 
 <details><summary>🇷🇺 Краткое описание</summary>
 
-Каталог отраслевых доменов Syn-APS. Каждый домен описывает маппинг канонической модели FJSP на специфику отрасли: словарь состояний (state dictionary), семантику матрицы переналадок, вспомогательные ресурсы, палитру KPI, нормативные требования. 8 доменов: металлургия, фармацевтика, электроника, ЦОД, энергетика, пищевая промышленность, логистика, аэрокосмос.
+Каталог отраслевых доменов SynAPS. Каждый домен описывает маппинг канонической модели FJSP на специфику отрасли: словарь состояний (state dictionary), семантику матрицы переналадок, вспомогательные ресурсы, палитру KPI, нормативные требования. 8 доменов: металлургия, фармацевтика, электроника, ЦОД, энергетика, пищевая промышленность, логистика, аэрокосмос.
 </details>
 
 ---

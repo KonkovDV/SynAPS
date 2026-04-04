@@ -1,5 +1,5 @@
 {
-  "_comment": "Data Center (GPU workload scheduling) domain parametrization example for Syn-APS",
+  "_comment": "Data Center (GPU workload scheduling) domain parametrization example for SynAPS",
   "states": [
     {
       "code": "WL-LLM-TRAIN-70B",

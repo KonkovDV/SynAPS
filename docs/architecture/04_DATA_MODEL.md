@@ -1,10 +1,10 @@
 # 04 — Universal Data Model
 
-> **Scope**: Canonical entities, SQL DDL (PostgreSQL 18), JSONB domain parametrization, event model, stream topology, and partitioning strategy.
+> **Scope**: Canonical entities, SQL DDL (PostgreSQL 17+), JSONB domain parametrization, event model, stream topology, and partitioning strategy.
 
 <details><summary>🇷🇺 Краткое описание</summary>
 
-Универсальная модель данных на PostgreSQL 18. Десять таблиц покрывают полный цикл: состояния продукции, заказы, операции, рабочие центры, матрица переналадок (SDST), вспомогательные ресурсы, расписания и действия оператора. Поле `domain_attributes JSONB` параметризует схему под любую отрасль (металлургия, фарма, электроника, ЦОД и т.д.) без изменения DDL. Событийная модель — Outbox + NATS JetStream 2.11 — обеспечивает exactly-once доставку.
+Универсальная модель данных на PostgreSQL 17+. Десять таблиц покрывают полный цикл: состояния продукции, заказы, операции, рабочие центры, матрица переналадок (SDST), вспомогательные ресурсы, расписания и действия оператора. Поле `domain_attributes JSONB` параметризует схему под любую отрасль (металлургия, фарма, электроника, ЦОД и т.д.) без изменения DDL. Событийная модель — Outbox + NATS JetStream 2.12+ — обеспечивает exactly-once доставку.
 </details>
 
 ---
@@ -268,7 +268,7 @@ The `domain_attributes` field in every core table enables industry-specific exte
 | Timestamp with TZ | `TIMESTAMPTZ` | `DateTime(timezone=True)` | `DateTime` | `timestamp with time zone` |
 | Enums | `VARCHAR` + app validation | Enum type | `enum` | `enum` |
 
-**Recommendation**: Use JSONB for domain attributes instead of EAV (Entity-Attribute-Value) tables. JSONB supports GIN indexing for fast `@>` containment queries and is natively supported by PostgreSQL 18.
+**Recommendation**: Use JSONB for domain attributes instead of EAV (Entity-Attribute-Value) tables. JSONB supports GIN indexing for fast `@>` containment queries and is natively supported by PostgreSQL 17+.
 
 ---
 
@@ -309,7 +309,7 @@ All state changes are published as events through an **Outbox** pattern:
 
 ---
 
-## 6. Stream Topology (NATS JetStream 2.11)
+## 6. Stream Topology (NATS JetStream 2.12+)
 
 ```
 STREAM: scheduling

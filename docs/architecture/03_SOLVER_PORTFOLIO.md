@@ -75,20 +75,24 @@ flowchart LR
 - **Solver**: Google OR-Tools CP-SAT v9.10+
 - **Decides**: Exact operation order on 2–3 bottleneck work centers
 - **Constraints**: `NO_OVERLAP` intervals with SDST transition matrix, auxiliary resource capacity
-- **Complexity reduction**: From $O((M!)^N)$ for the full plant to solvable clusters of 50–200 operations
+- **Complexity reduction**: From $O((M!)^N)$ for the full operating network to solvable clusters of 50–200 operations
 
 ### Benders Cut Protocol
 1. Master produces global assignment
 2. Sub-problem attempts exact sequencing on bottleneck WCs
 3. If infeasible → sub-problem generates a **no-good cut** (Benders cut) sent back to Master
-4. Master re-solves with additional constraints
-5. Iterate until sub-problem finds feasible + optimal sequence (typically 3–8 iterations)
+4. If feasible but suboptimal → **capacity cuts** (Hooker & Ottosson 2003) tighten the makespan lower bound on the bottleneck machine
+5. **Load-balance cuts** enforce `C_max ≥ total_processing / num_machines` as a relaxation-free bound
+6. Master re-solves with additional constraints
+7. Iterate until convergence (typically 3–8 iterations, 1% optimality gap)
+
+> **Implemented status (2026-04)**: `LBBD-5` and `LBBD-10` profiles ship with HiGHS master, CP-SAT subproblems, no-good + capacity + load-balance cuts. Verified on `medium_stress_20x4.json` (181 min LBBD vs 289 min GREED). See `synaps/solvers/lbbd_solver.py`.
 
 ---
 
 ## 4. Constructive Heuristic: GREED / ATCS Dispatch
 
-For the initial schedule and non-bottleneck work centers, the system uses an Apparent Tardiness Cost with Setups (ATCS) composite priority rule:
+For the initial schedule and non-bottleneck work centers, the system uses an Apparent Tardiness Cost with Setups (ATCS) composite priority rule (Lee, Bhaskaran & Pinedo 1997):
 
 $$I_j = \frac{w_j}{p_j} \cdot \exp\!\Bigl(-\frac{\max(d_j - p_j - t, 0)}{K_1 \bar{p}}\Bigr) \cdot \exp\!\Bigl(-\frac{s_{lj}}{K_2 \bar{s}}\Bigr)$$
 
@@ -102,6 +106,8 @@ Where:
 - $\bar{p}, \bar{s}$ — average processing time and average setup time
 
 **Properties**: $O(n \log n)$ per dispatch step, deterministic, explainable, produces feasible schedules immediately. Serves as warm-start for exact solvers.
+
+> **Implemented status (2026-04)**: Log-space ATCS scoring (avoids float underflow), queue-local setup scale, speed-factor-aware durations. See `synaps/solvers/greedy_dispatch.py`.
 
 ---
 
@@ -128,6 +134,8 @@ When disruptions occur (machine breakdown, rush order, material shortage), the s
 | Material shortage | All ops requiring material | Constraint tightening + greedy |
 | Quality hold | Batch + successor ops | Freeze + reschedule successors |
 
+> **Implemented status (2026-04)**: `IncrementalRepair` engine with priority-aware greedy redispatch, correct per-order tardiness computation, and post-hoc setup recomputation. Horizon-bound validation added to `FeasibilityChecker`. See `synaps/solvers/incremental_repair.py`, `synaps/solvers/feasibility_checker.py`.
+
 **Stability metric**: $\text{Nervousness} = \frac{|\text{moved operations}|}{|\text{total operations}|}$ — target $< 5\%$ per repair cycle.
 
 ---
@@ -138,7 +146,7 @@ A Heterogeneous Graph Attention Network (HGAT) predicts optimal solver parameter
 
 ### Graph Encoding
 
-The plant is encoded as a heterogeneous graph $G = (V, E)$:
+The operating network is encoded as a heterogeneous graph $G = (V, E)$:
 
 | Node Type | Features | Count |
 |-----------|----------|-------|
@@ -184,7 +192,7 @@ class WeightPredictor(torch.nn.Module):
 
 | Surface | Input | Output | Consumer |
 |---------|-------|--------|----------|
-| **Weight Predictor** | Plant graph state | Objective weights $Q_i$, ATCS params $K_1, K_2$ | GREED heuristic, NSGA-III |
+| **Weight Predictor** | Operating graph state | Objective weights $Q_i$, ATCS params $K_1, K_2$ | GREED heuristic, NSGA-III |
 | **Bottleneck Detector** | Utilization + queue depths | Top-K bottleneck WC IDs | LBBD sub-problem selection |
 | **Setup Aggregator** | Order features + SDST matrix | Recommended batching groups | Pre-processing step |
 | **Duration Estimator** | Historical + state attributes | Predicted $p_j$ per operation-WC pair | All solvers |
@@ -220,6 +228,18 @@ Every scheduling decision must be explainable to a human operator:
 | **Weight adjustment** | "GNN predicted Q₃ (material loss) increased 40% due to high raw material cost this week" | Weight change log + reasoning |
 
 **Rule**: If the XAI layer cannot produce an explanation, the decision is rejected and falls back to the previous known-good schedule.
+
+---
+
+## 8.1 Execution Language Boundary
+
+The solver portfolio is intentionally polyglot:
+
+1. control-plane orchestration and operator-facing APIs belong outside the hot path;
+2. Python remains the canonical proof surface for exact solving and ML advisory;
+3. Rust is the target for measured hot-path kernels such as feasibility and ALNS operators.
+
+See [Language & Runtime Strategy](06_LANGUAGE_AND_RUNTIME_STRATEGY.md) for the explicit boundary contract.
 
 ---
 

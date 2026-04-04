@@ -3,7 +3,7 @@
 <details>
 <summary>🇷🇺 Каноническая математическая форма</summary>
 
-Формальная спецификация задачи планирования Syn-APS: MO-FJSP-SDST-ML-ARC. Описаны множества, переменные, ограничения, целевая функция и робастное расширение.
+Формальная спецификация задачи планирования SynAPS: MO-FJSP-SDST-ML-ARC. Описаны множества, переменные, ограничения, целевая функция и робастное расширение.
 
 </details>
 
@@ -56,14 +56,14 @@ $$\forall m \in \mathcal{M},\; \forall t: \quad \sum_{o: x_{om}=1,\; s_o \leq t 
 
 $$J = w_1 T + w_2 S + w_3 M + w_4 B + w_5 R + w_6 E$$
 
-| Term | Formula | Description |
-|------|---------|-------------|
-| $T$ | $\sum_{j} \alpha_j \max(0,\, C_j - d_j)$ | Weighted tardiness |
-| $S$ | $\sum_{m} \sum_{\text{consecutive } (a,b)} \sigma(a, b, m)$ | Total setup time |
-| $M$ | $\sum_{o} \text{material\_cost}(o)$ | Material waste / auxiliary resource cost |
-| $B$ | $\text{Var}(\text{load}_m)$ or $\max(\text{load}_m) - \min(\text{load}_m)$ | Load imbalance |
-| $R$ | $\|A_{\text{new}} \triangle A_{\text{old}}\| / \|A_{\text{old}}\|$ | Schedule stability |
-| $E$ | $\sum_{m,t} \text{tariff}(t) \cdot \text{power}(m, t)$ | Energy cost |
+| Term | Formula | Description | Status |
+|------|---------|-------------|--------|
+| $T$ | $\sum_{j} \alpha_j \max(0,\, C_j - d_j)$ | Weighted tardiness | **Implemented** (CP-SAT) |
+| $S$ | $\sum_{m} \sum_{\text{consecutive } (a,b)} \sigma(a, b, m)$ | Total setup time | **Implemented** (CP-SAT, Greedy) |
+| $M$ | $\sum_{o} \text{material\_cost}(o)$ | Material waste / auxiliary resource cost | **Implemented** (CP-SAT) |
+| $B$ | $\text{Var}(\text{load}_m)$ or $\max(\text{load}_m) - \min(\text{load}_m)$ | Load imbalance | Roadmap |
+| $R$ | $\|A_{\text{new}} \triangle A_{\text{old}}\| / \|A_{\text{old}}\|$ | Schedule stability | Roadmap |
+| $E$ | $\sum_{m,t} \text{tariff}(t) \cdot \text{power}(m, t)$ | Energy cost | Roadmap |
 
 **Weights** $w_1, \ldots, w_6$ are configurable per policy profile and can be tuned by ML advisory or operator override.
 

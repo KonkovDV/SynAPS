@@ -1,9 +1,12 @@
 """Tests for Pydantic domain model (model.py)."""
 
-from datetime import datetime, timezone
-from uuid import UUID
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
 
-from syn_aps.model import (
+import pytest
+from pydantic import ValidationError
+
+from synaps.model import (
     ObjectiveValues,
     Operation,
     Order,
@@ -24,7 +27,7 @@ class TestDomainModel:
     def test_order_defaults(self) -> None:
         o = Order(
             external_ref="ORD-001",
-            due_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            due_date=datetime(2026, 1, 1, tzinfo=UTC),
         )
         assert o.priority == 500
         assert o.quantity == 1.0
@@ -56,14 +59,72 @@ class TestDomainModel:
     def test_schedule_problem_roundtrip(self) -> None:
         problem = ScheduleProblem(
             states=[State(code="A")],
-            orders=[Order(external_ref="O1", due_date=datetime(2026, 6, 1, tzinfo=timezone.utc))],
+            orders=[Order(external_ref="O1", due_date=datetime(2026, 6, 1, tzinfo=UTC))],
             operations=[],
             work_centers=[WorkCenter(code="WC1", capability_group="mill")],
             setup_matrix=[],
-            planning_horizon_start=datetime(2026, 6, 1, tzinfo=timezone.utc),
-            planning_horizon_end=datetime(2026, 6, 2, tzinfo=timezone.utc),
+            planning_horizon_start=datetime(2026, 6, 1, tzinfo=UTC),
+            planning_horizon_end=datetime(2026, 6, 2, tzinfo=UTC),
         )
         json_str = problem.model_dump_json()
         restored = ScheduleProblem.model_validate_json(json_str)
         assert len(restored.states) == 1
         assert restored.states[0].code == "A"
+
+    def test_schedule_problem_rejects_invalid_cross_references(
+        self, simple_problem: ScheduleProblem
+    ) -> None:
+        data = simple_problem.model_dump()
+        data["operations"][0]["eligible_wc_ids"] = [uuid4()]
+        data["setup_matrix"][0]["from_state_id"] = uuid4()
+        data["aux_requirements"] = [
+            {
+                "operation_id": data["operations"][0]["id"],
+                "aux_resource_id": uuid4(),
+                "quantity_needed": 1,
+            }
+        ]
+
+        with pytest.raises(ValidationError) as exc_info:
+            ScheduleProblem.model_validate(data)
+
+        message = str(exc_info.value)
+        assert "unknown eligible_wc_ids" in message
+        assert "unknown from_state_id" in message
+        assert "unknown aux_resource_id" in message
+
+    def test_schedule_problem_rejects_duplicate_setup_and_aux_links(
+        self, simple_problem: ScheduleProblem
+    ) -> None:
+        data = simple_problem.model_dump()
+        duplicated_setup = dict(data["setup_matrix"][0])
+        data["setup_matrix"].append(duplicated_setup)
+
+        resource_id = uuid4()
+        data["auxiliary_resources"] = [
+            {
+                "id": resource_id,
+                "code": "TOOL-1",
+                "resource_type": "fixture",
+                "pool_size": 1,
+            }
+        ]
+        data["aux_requirements"] = [
+            {
+                "operation_id": data["operations"][0]["id"],
+                "aux_resource_id": resource_id,
+                "quantity_needed": 1,
+            },
+            {
+                "operation_id": data["operations"][0]["id"],
+                "aux_resource_id": resource_id,
+                "quantity_needed": 1,
+            },
+        ]
+
+        with pytest.raises(ValidationError) as exc_info:
+            ScheduleProblem.model_validate(data)
+
+        message = str(exc_info.value)
+        assert "duplicate setup_matrix key" in message
+        assert "duplicate aux_requirement key" in message

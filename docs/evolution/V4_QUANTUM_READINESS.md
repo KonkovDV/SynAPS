@@ -20,7 +20,7 @@ Combinatorial scheduling (MO-FJSP-SDST) belongs to the NP-hard problem class whe
 | Large scale (2000–50K ops) | Heuristics + LBBD | Quantum annealing may find better local optima |
 | Hyper-scale (50K+ ops) | Decomposition only | Future fault-tolerant QC |
 
-**Current stance (2026)**: Quantum annealing (D-Wave Advantage2, 7000+ qubits) is the most practical backend. Gate-model QPUs lack qubit count for production scheduling. Syn-APS provides the abstraction layer now so that quantum hardware can be plugged in as it matures.
+**Current stance (2026)**: Quantum annealing (D-Wave Advantage2, ~4,400 qubits, Zephyr topology) is the most practical backend. Gate-model QPUs lack qubit count for production scheduling. SynAPS provides the abstraction layer now so that quantum hardware can be plugged in as it matures.
 
 ---
 
@@ -125,8 +125,8 @@ graph LR
 
 | Platform | Type | Qubits | Connectivity | SDK | Status |
 |----------|------|--------|-------------|-----|--------|
-| D-Wave Advantage2 | Annealer | 7000+ | Zephyr graph | Ocean | Production |
-| IBM Heron / Flamingo | Gate (superconducting) | 1000+ | Heavy-hex | Qiskit | Research |
+| D-Wave Advantage2 | Annealer | ~4,400 | Zephyr graph | Ocean | Production |
+| IBM Eagle / Heron | Gate (superconducting) | 127-156 | Superconducting lattice | Qiskit | Research |
 | IonQ Forte Enterprise | Gate (trapped ion) | 36 algorithmic | All-to-all | Native / Braket | Research |
 | Rigetti Ankaa-3 | Gate (superconducting) | 84 | Square lattice | pyQuil / Braket | Research |
 | QuEra Aquila | Neutral atom | 256 | Programmable | Bloqade / Braket | Experimental |

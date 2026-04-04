@@ -2,7 +2,7 @@
 
 ## Our Pledge
 
-We as contributors and maintainers pledge to make participation in Syn-APS a harassment-free experience for everyone, regardless of background, identity, or experience level.
+We as contributors and maintainers pledge to make participation in SynAPS a harassment-free experience for everyone, regardless of background, identity, or experience level.
 
 ## Our Standards
 
@@ -19,7 +19,9 @@ We as contributors and maintainers pledge to make participation in Syn-APS a har
 
 ## Enforcement
 
-Instances of abusive behavior may be reported by opening an issue or contacting the maintainers. All complaints will be reviewed and investigated fairly.
+Instances of abusive behavior should be reported through repository owner or maintainer channels, not escalated inside the same public thread that caused the problem.
+
+All complaints will be reviewed and investigated fairly.
 
 ## Attribution
 

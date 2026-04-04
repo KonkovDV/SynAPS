@@ -1,14 +1,29 @@
 ---
 name: Feature request
-about: Suggest a new solver, domain, or platform capability
+about: Suggest a bounded new solver, domain, packaging, or publication capability
 title: "[FEAT] "
 labels: enhancement
 ---
 
-**Area** (solver / schema / domain / benchmark / infra):
+## Area
 
-**Problem or motivation:**
+- [ ] Solver
+- [ ] Schema / canonical form
+- [ ] Domain parametrization
+- [ ] Benchmark harness
+- [ ] Packaging / release
+- [ ] Documentation / publication surface
 
-**Proposed solution:**
+## Problem or motivation
 
-**Alternatives considered:**
+## Proposed solution
+
+## Alternatives considered
+
+## Success criteria
+
+Describe what would be observably true when this request is done.
+
+## Evidence or references
+
+Link papers, benchmark families, standards, or comparable OSS projects when relevant.

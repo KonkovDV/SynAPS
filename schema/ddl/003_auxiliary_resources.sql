@@ -1,5 +1,5 @@
 -- schema/ddl/003_auxiliary_resources.sql
--- Syn-APS: Shared / auxiliary resources (PostgreSQL 18+)
+-- SynAPS: Shared / auxiliary resources (PostgreSQL 18+)
 
 BEGIN;
 

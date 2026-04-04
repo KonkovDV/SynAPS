@@ -1,5 +1,5 @@
 -- schema/ddl/001_core_tables.sql
--- Syn-APS: Core entity tables (PostgreSQL 18+)
+-- SynAPS: Core entity tables (PostgreSQL 18+)
 
 BEGIN;
 
@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS orders (
     domain_attributes JSONB        NOT NULL DEFAULT '{}'
 );
 
-COMMENT ON TABLE orders IS 'Production / service orders to be scheduled.';
+COMMENT ON TABLE orders IS 'Work items / service requests to be scheduled.';
 
 CREATE TABLE IF NOT EXISTS work_centers (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -47,6 +47,6 @@ CREATE TABLE IF NOT EXISTS operations (
     UNIQUE (order_id, seq_in_order)
 );
 
-COMMENT ON TABLE operations IS 'Individual processing steps within an order. Sequence-dependent setup times are resolved via the setup_matrix.';
+COMMENT ON TABLE operations IS 'Individual processing steps within a work item. Sequence-dependent setup times are resolved via the setup_matrix.';
 
 COMMIT;

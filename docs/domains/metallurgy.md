@@ -1,10 +1,10 @@
 # Metallurgy Domain Guide
 
-> **Scope**: Steel, non-ferrous, casting, rolling, and heat-treatment operations modeled through the Syn-APS canonical kernel.
+> **Scope**: Steel, non-ferrous, casting, rolling, and heat-treatment operations modeled through the SynAPS canonical kernel.
 
 <details><summary>🇷🇺 Краткое описание</summary>
 
-Металлургия хорошо ложится на каноническую модель Syn-APS: операции связаны тепловой инерцией, сменой марок сплава, общими кранами, ковшами и печами. Главный SDST-драйвер здесь не цвет или SKU, а переход между марками, температурными режимами и состояниями футеровки.
+Металлургия хорошо ложится на каноническую модель SynAPS: операции связаны тепловой инерцией, сменой марок сплава, общими кранами, ковшами и печами. Главный SDST-драйвер здесь не цвет или SKU, а переход между марками, температурными режимами и состояниями футеровки.
 </details>
 
 ---

@@ -1,5 +1,5 @@
 {
-  "_comment": "Food & Beverage domain parametrization example for Syn-APS",
+  "_comment": "Food & Beverage domain parametrization example for SynAPS",
   "states": [
     {
       "code": "BEV-DAIRY-MILK-3.5",

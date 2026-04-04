@@ -4,7 +4,7 @@
 
 <details><summary>🇷🇺 Краткое описание</summary>
 
-Для ЦОД каноническая модель работает не хуже, чем для завода: job — это batch workload или migration wave, work center — GPU cluster, rack, node group или storage tier, setup — миграция контейнеров, прогрев кэша, смена образа, выделение сети. Ограничения задаются мощностью, охлаждением, affinity и SLA.
+Для ЦОД каноническая модель работает не хуже, чем для промышленной площадки: job — это batch workload или migration wave, work center — GPU cluster, rack, node group или storage tier, setup — миграция контейнеров, прогрев кэша, смена образа, выделение сети. Ограничения задаются мощностью, охлаждением, affinity и SLA.
 </details>
 
 ---

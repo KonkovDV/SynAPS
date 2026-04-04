@@ -1,4 +1,4 @@
-"""Benchmark runner for Syn-APS solver portfolio.
+"""Benchmark runner for SynAPS solver portfolio.
 
 Usage (CLI):
     python -m benchmark.run_benchmark benchmark/instances/tiny_3x3.json --solvers GREED CPSAT-30
@@ -15,26 +15,20 @@ import time
 from pathlib import Path
 from typing import Any
 
-from syn_aps.model import ScheduleProblem, ScheduleResult
-from syn_aps.solvers.cpsat_solver import CpSatSolver
-from syn_aps.solvers.greedy_dispatch import GreedyDispatch
+from synaps import solve_schedule
+from synaps.model import ScheduleProblem, ScheduleResult
+from synaps.problem_profile import build_problem_profile
+from synaps.solvers.registry import available_solver_configs, create_solver
 
 # ---------------------------------------------------------------------------
-# Solver registry — map config names to (class, kwargs)
+# Solver registry — shared package surface used by tooling and runtime routing.
 # ---------------------------------------------------------------------------
-
-_SOLVER_REGISTRY: dict[str, tuple[type, dict[str, Any]]] = {
-    "GREED": (GreedyDispatch, {}),
-    "GREED-K1-3": (GreedyDispatch, {"k1": 3.0}),
-    "CPSAT-10": (CpSatSolver, {"time_limit_s": 10}),
-    "CPSAT-30": (CpSatSolver, {"time_limit_s": 30}),
-    "CPSAT-120": (CpSatSolver, {"time_limit_s": 120}),
-}
 
 
 def available_solvers() -> list[str]:
     """Return registered solver configuration names."""
-    return list(_SOLVER_REGISTRY)
+
+    return ["AUTO", *available_solver_configs()]
 
 
 # ---------------------------------------------------------------------------
@@ -59,18 +53,27 @@ def _run_single(
     runs: int = 1,
 ) -> dict[str, Any]:
     """Execute *solver_name* on *problem* for *runs* repetitions."""
-    cls, ctor_kwargs = _SOLVER_REGISTRY[solver_name]
-    solver = cls(**{k: v for k, v in ctor_kwargs.items() if k not in ("time_limit_s",)})
-    solve_kwargs: dict[str, Any] = {
-        k: v for k, v in ctor_kwargs.items() if k in ("time_limit_s", "random_seed")
-    }
+    solver = None
+    solve_kwargs: dict[str, object] = {}
+    selected_solver_config = solver_name
+
+    if solver_name != "AUTO":
+        solver, solve_kwargs = create_solver(solver_name)
 
     wall_times: list[float] = []
     last_result: ScheduleResult | None = None
 
     for _ in range(runs):
         t0 = time.perf_counter()
-        result = solver.solve(problem, **solve_kwargs)
+        if solver_name == "AUTO":
+            result = solve_schedule(problem, verify_feasibility=False)
+            portfolio_metadata = result.metadata.get("portfolio", {})
+            resolved_solver_config = portfolio_metadata.get("solver_config")
+            if isinstance(resolved_solver_config, str):
+                selected_solver_config = resolved_solver_config
+        else:
+            assert solver is not None
+            result = solver.solve(problem, **solve_kwargs)
         wall_times.append(time.perf_counter() - t0)
         last_result = result
 
@@ -79,9 +82,11 @@ def _run_single(
 
     return {
         "solver_config": solver_name,
+        "selected_solver_config": selected_solver_config,
         "results": {
             "status": last_result.status.value,
             "feasible": last_result.status.value in ("optimal", "feasible"),
+            "solver_name": last_result.solver_name,
             "makespan_minutes": obj.makespan_minutes,
             "total_setup_minutes": obj.total_setup_minutes,
             "total_tardiness_minutes": obj.total_tardiness_minutes,
@@ -122,17 +127,20 @@ def run_benchmark(
     """
     names = solver_names or ["GREED"]
     problem = load_problem(instance_path)
+    problem_profile = build_problem_profile(problem).as_dict()
 
     if compare and len(names) > 1:
         comparisons = [_run_single(problem, n, runs) for n in names]
         return {
             "instance": instance_path.name,
+            "problem_profile": problem_profile,
             "comparisons": comparisons,
         }
 
     # Single-solver mode (first name only)
     report = _run_single(problem, names[0], runs)
     report["instance"] = instance_path.name
+    report["problem_profile"] = problem_profile
     return report
 
 
@@ -142,7 +150,7 @@ def run_benchmark(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Syn-APS Benchmark Runner")
+    parser = argparse.ArgumentParser(description="SynAPS Benchmark Runner")
     parser.add_argument("path", type=Path, help="Instance JSON file or directory")
     parser.add_argument(
         "--solvers",

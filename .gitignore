@@ -10,6 +10,10 @@ Desktop.ini
 *.swo
 *~
 
+# Node / TypeScript
+node_modules/
+*.tsbuildinfo
+
 # Python
 __pycache__/
 *.py[cod]
@@ -21,21 +25,30 @@ build/
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+.hypothesis/
+.nox/
+.tox/
 htmlcov/
 .coverage
+.coverage.*
+pip-wheel-metadata/
 
 # Virtual environments
 .venv/
 venv/
 env/
+.python-version
 
 # Benchmark outputs
 benchmark/results/
+.benchmarks/
 
 # Temporary
 *.log
 *.tmp
 *.bak
+_*_run.txt
+_run_*.py
 
 # Legacy archive (not published)
 archive/

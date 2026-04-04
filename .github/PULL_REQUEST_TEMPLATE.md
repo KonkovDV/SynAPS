@@ -1,24 +1,29 @@
 ## What
 
-<!-- Brief description of changes -->
+<!-- Focused summary of the change -->
 
 ## Why
 
-<!-- Motivation, issue reference -->
+<!-- Problem statement, motivation, issue reference, or benchmark gap -->
 
 ## Type
 
 - [ ] Solver improvement
-- [ ] Schema change
+- [ ] Schema or data-model change
 - [ ] New domain parametrization
-- [ ] Documentation
-- [ ] Benchmark
-- [ ] CI / tooling
+- [ ] Documentation or publication surface
+- [ ] Benchmark or evidence update
+- [ ] CI / packaging / release tooling
 
-## Checklist
+## Validation
 
-- [ ] Tests pass (`pytest`)
-- [ ] Linter clean (`ruff check .`)
-- [ ] Types check (`mypy solver/`)
-- [ ] Benchmark results included (if solver change)
-- [ ] Documentation updated (if applicable)
+- [ ] `pytest tests/ -v`
+- [ ] `ruff check synaps tests benchmark --select F,E9`
+- [ ] `python -m build`
+- [ ] `twine check dist/*`
+
+## Additional checks
+
+- [ ] Benchmark evidence attached or summarized if solver behavior changed
+- [ ] Public docs updated if user-facing claims or workflows changed
+- [ ] No secrets, customer data, or proprietary datasets added to the diff

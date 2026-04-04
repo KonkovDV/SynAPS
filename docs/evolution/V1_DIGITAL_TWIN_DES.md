@@ -4,7 +4,7 @@
 
 <details><summary>🇷🇺 Краткое описание</summary>
 
-Цифровой двойник производства на основе SimPy. Позволяет запускать what-if сценарии, тренировать RL-агентов (TorchRL) для динамического перепланирования и моделировать каскадные сбои до их наступления. Среда `GenericPlantEnv` параметризуется через `domain_attributes` — одна кодовая база для любой отрасли.
+Цифровой двойник операций на основе SimPy. Позволяет запускать what-if сценарии, тренировать RL-агентов (TorchRL) для динамического перепланирования и моделировать каскадные сбои до их наступления. Среда `GenericSiteEnv` параметризуется через `domain_attributes` — одна кодовая база для любой отрасли.
 </details>
 
 ---
@@ -14,7 +14,7 @@
 ```mermaid
 graph TB
     subgraph Digital Twin
-        ENV[GenericPlantEnv<br/>SimPy + Gymnasium]
+        ENV[GenericSiteEnv<br/>SimPy + Gymnasium]
         WC_SIM[WorkCenter Simulation<br/>SDST state machine]
         DISRUPTION[Disruption Injector<br/>stochastic + replay]
     end
@@ -23,7 +23,7 @@ graph TB
         REPLAY[Replay Buffer<br/>LazyTensorStorage]
         REWARD[Reward Function<br/>multi-objective]
     end
-    subgraph Production
+    subgraph Operations
         SOLVER[Solver Portfolio]
         RL_POLICY[Trained Policy<br/>TorchScript export]
     end
@@ -39,7 +39,7 @@ graph TB
 
 ---
 
-## 2. GenericPlantEnv
+## 2. GenericSiteEnv
 
 ```python
 """Gymnasium-compatible environment wrapping SimPy DES."""
@@ -50,9 +50,9 @@ import numpy as np
 from gymnasium import spaces
 
 
-class GenericPlantEnv(gym.Env):
+class GenericSiteEnv(gym.Env):
     """
-    Universal plant simulation parametrized by domain_attributes.
+    Universal site simulation parametrized by domain_attributes.
 
     Observation space:
         - Work center utilization (float per WC)
@@ -117,7 +117,7 @@ class GenericPlantEnv(gym.Env):
 | Environment | SimPy + Gymnasium | 4.x + 1.0 | DES engine + RL interface |
 | Agent | TorchRL | 0.6+ | PPO, SAC, multi-objective reward |
 | Replay buffer | TorchRL LazyTensorStorage | 0.6+ | Efficient GPU-backed buffer |
-| Export | TorchScript | PyTorch 2.6 | Inference in production (no Python dep) |
+| Export | TorchScript | PyTorch 2.6 | Inference in operations (no Python dep) |
 | Logging | TensorBoard / W&B | latest | Training metrics |
 
 ### 4.1 Reward Function
@@ -152,7 +152,7 @@ async def run_what_if(
 
 | Mode | Trigger | Flow |
 |------|---------|------|
-| **Offline training** | Cron / manual | GenericPlantEnv → TorchRL → checkpoint → model registry |
+| **Offline training** | Cron / manual | GenericSiteEnv → TorchRL → checkpoint → model registry |
 | **Online inference** | Disruption detected | RL policy suggests repair action → Repair Engine validates → apply |
 | **What-if** | Planner request | SimPy scenario → statistics → Gantt comparison |
 

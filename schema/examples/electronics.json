@@ -1,5 +1,5 @@
 {
-  "_comment": "Electronics (SMT) domain parametrization example for Syn-APS",
+  "_comment": "Electronics (SMT) domain parametrization example for SynAPS",
   "states": [
     {
       "code": "PCB-4L-FR4-BGA256",

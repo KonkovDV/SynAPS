@@ -1,5 +1,5 @@
 -- schema/ddl/005_indexes.sql
--- Syn-APS: Secondary indexes for common query patterns (PostgreSQL 18+)
+-- SynAPS: Secondary indexes for common query patterns (PostgreSQL 18+)
 
 BEGIN;
 

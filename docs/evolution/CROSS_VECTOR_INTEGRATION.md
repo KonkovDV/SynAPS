@@ -4,7 +4,7 @@
 
 <details><summary>🇷🇺 Краткое описание</summary>
 
-Карта интеграции четырёх эволюционных векторов Syn-APS: Цифровой двойник (V1), LLM-копилот (V2), Федеративное обучение (V3), Квантовая готовность (V4). Граф зависимостей, матрица взаимодействия, разделяемая инфраструктура (NATS, Temporal, MLflow, PG+pgvector, ClickHouse, MinIO, ONNX Runtime), матрица рисков R1–R10, стратегия поэтапного развёртывания.
+Карта интеграции четырёх эволюционных векторов SynAPS: Цифровой двойник (V1), LLM-копилот (V2), Федеративное обучение (V3), Квантовая готовность (V4). Граф зависимостей, матрица взаимодействия, разделяемая инфраструктура (NATS, Temporal, MLflow, PG+pgvector, ClickHouse, MinIO, ONNX Runtime), матрица рисков R1–R10, стратегия поэтапного развёртывания.
 </details>
 
 ---
@@ -14,8 +14,8 @@
 | Vector | Title | Core Technology | Primary Deliverable |
 |--------|-------|----------------|---------------------|
 | **V1** | [Digital Twin & DES](V1_DIGITAL_TWIN_DES.md) | SimPy + TorchRL | Offline RL dispatch policies trained on digital twin |
-| **V2** | [LLM Copilot](V2_LLM_COPILOT.md) | SGLang + GLM-5.1 + RAG | Natural-language scheduling assistant |
-| **V3** | [Federated Learning](V3_FEDERATED_LEARNING.md) | Flower FL + ExecuTorch | Cross-plant GNN training without data sharing |
+| **V2** | [LLM Copilot](V2_LLM_COPILOT.md) | SGLang + GLM-5/GLM-4-32B + RAG | Natural-language scheduling assistant |
+| **V3** | [Federated Learning](V3_FEDERATED_LEARNING.md) | Flower FL + ExecuTorch | Cross-site GNN training without data sharing |
 | **V4** | [Quantum Readiness](V4_QUANTUM_READINESS.md) | D-Wave + PennyLane | QUBO/QAOA hybrid for combinatorial subproblems |
 
 ---
@@ -50,7 +50,7 @@ graph LR
 
 | From → To | Dependency Type | Data Flow | Coupling |
 |-----------|----------------|-----------|----------|
-| Core → V1 | Hard | Schedule + plant model → SimPy environment | Async (NATS events) |
+| Core → V1 | Hard | Schedule + site model → SimPy environment | Async (NATS events) |
 | Core → V2 | Hard | Schema + solver output → RAG corpus | Async (PG + NATS) |
 | Core → V4 | Soft | Assignment subproblem → QUBO encoding | Sync (API call) |
 | V1 → V2 | Soft | DES scenarios → copilot what-if engine | Async (NATS request-reply) |
@@ -87,8 +87,8 @@ All four vectors share a common platform layer to minimize operational complexit
 
 | Component | Role | Used By | Config Surface |
 |-----------|------|---------|---------------|
-| **NATS JetStream 2.11** | Event backbone, request-reply | V1 (events), V2 (queries), V3 (FL coordination) | `streams.yaml` |
-| **PostgreSQL 18** | Relational store + pgvector | V2 (RAG embeddings), Core (schedule data) | `schema/ddl/` |
+| **NATS JetStream 2.12+** | Event backbone, request-reply | V1 (events), V2 (queries), V3 (FL coordination) | `streams.yaml` |
+| **PostgreSQL 17+** | Relational store + pgvector | V2 (RAG embeddings), Core (schedule data) | `schema/ddl/` |
 | **ClickHouse** | Analytics projection | V1 (trajectory stats), V2 (query analytics) | `clickhouse/` |
 | **MLflow 2.x** | Experiment tracking, model registry | V1 (RL experiments), V3 (FL rounds), V4 (QAOA circuits) | `mlflow.yaml` |
 | **MinIO** (S3-compatible) | Artifact store | V1 (checkpoints), V3 (model files), V4 (QUBO matrices) | `minio.yaml` |
@@ -116,12 +116,12 @@ V4 Quantum  ·     ·    ·     ✓       ✓       ✓       ·     ✓
 Vectors communicate via NATS JetStream subjects, preserving loose coupling.
 
 ```
-syn-aps.schedule.published     → V1 (twin update), V2 (RAG index)
-syn-aps.twin.trajectory.done   → V3 (FL aggregation trigger)
-syn-aps.fl.model.updated       → V1 (weight refresh)
-syn-aps.quantum.result         → Core (solution merge)
-syn-aps.copilot.query          → V2 (RAG pipeline)
-syn-aps.copilot.whatif         → V1 (scenario fork)
+synaps.schedule.published     → V1 (twin update), V2 (RAG index)
+synaps.twin.trajectory.done   → V3 (FL aggregation trigger)
+synaps.fl.model.updated       → V1 (weight refresh)
+synaps.quantum.result         → Core (solution merge)
+synaps.copilot.query          → V2 (RAG pipeline)
+synaps.copilot.whatif         → V1 (scenario fork)
 ```
 
 ### 5.2 Synchronous Integration (Secondary)
@@ -188,14 +188,14 @@ Vectors are deployed in dependency order to minimize integration risk.
 | **P1** | Q2 2026 | V2: LLM Copilot (read-only) | Core APS, PG18 + pgvector |
 | **P2** | Q3 2026 | V1: Digital Twin (offline training) | Core APS, NATS, MLflow |
 | **P3** | Q4 2026 | V2: Copilot actions + V1↔V2 what-if | V1 + V2 integration |
-| **P4** | Q1 2027 | V3: Federated Learning (2-plant pilot) | V1 (training data source) |
+| **P4** | Q1 2027 | V3: Federated Learning (2-site pilot) | V1 (training data source) |
 | **P5** | Q2 2027 | V3: Edge deployment (ExecuTorch) | V3 FL + ONNX export |
 | **P6** | Q3 2027 | V4: Quantum hybrid (simulator) | Core APS, neal |
 | **P7** | 2028+ | V4: Quantum hardware integration | QPU access, error correction |
 
 ```mermaid
 gantt
-    title Syn-APS Vector Rollout
+    title SynAPS Vector Rollout
     dateFormat  YYYY-MM
     axisFormat  %Y-Q%q
 
@@ -211,7 +211,7 @@ gantt
     P3 V1↔V2 What-if     :p3b, 2026-10, 2026-12
 
     section V3 FL
-    P4 2-Plant Pilot      :p4, 2027-01, 2027-03
+    P4 2-Site Pilot       :p4, 2027-01, 2027-03
     P5 Edge Deploy        :p5, 2027-04, 2027-06
 
     section V4 Quantum

@@ -1,5 +1,5 @@
 {
-  "_comment": "Pharmaceutical domain parametrization example for Syn-APS",
+  "_comment": "Pharmaceutical domain parametrization example for SynAPS",
   "states": [
     {
       "code": "API-AMOXICILLIN-GRANULATE",

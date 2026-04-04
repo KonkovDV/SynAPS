@@ -1,17 +1,17 @@
-# Academic Literature Review — Syn-APS Foundations
+# Academic Literature Review — SynAPS Foundations
 
-> **Scope**: Comprehensive survey of the academic SOTA underpinning Syn-APS: FJSP variants, constraint programming, metaheuristics, graph neural networks for scheduling, reinforcement learning, multi-objective optimization, federated learning, quantum readiness, and retrieval-augmented generation for industrial copilots.
+> **Scope**: Comprehensive survey of the academic SOTA underpinning SynAPS: FJSP variants, constraint programming, metaheuristics, graph neural networks for scheduling, reinforcement learning, multi-objective optimization, federated learning, quantum readiness, and retrieval-augmented generation for industrial copilots.
 
 <details><summary>🇷🇺 Краткое описание</summary>
 
-Обзор академической базы Syn-APS: варианты FJSP, точные решатели (CP-SAT, MIP, LBBD), метаэвристики (NSGA-III), графовые нейросети (GNN/HGAT), обучение с подкреплением (Offline RL / TorchRL), федеративное обучение (Flower), квантовая готовность (QUBO / QAOA), и LLM-копилот с RAG. 48+ ссылок, структурированных по дисциплинам.
+Обзор академической базы SynAPS: варианты FJSP, точные решатели (CP-SAT, MIP, LBBD), метаэвристики (NSGA-III), графовые нейросети (GNN/HGAT), обучение с подкреплением (Offline RL / TorchRL), федеративное обучение (Flower), квантовая готовность (QUBO / QAOA), и LLM-копилот с RAG. 48+ ссылок, структурированных по дисциплинам.
 </details>
 
 ---
 
 ## 1. Job-Shop Scheduling & FJSP Variants
 
-The Flexible Job-Shop Scheduling Problem (FJSP) generalizes the classical JSP by allowing each operation to execute on a subset of eligible machines. Syn-APS addresses the **MO-FJSP-SDST-ML-ARC** variant — multi-objective, flexible, with sequence-dependent setup times, machine learning advisory, and auxiliary resource constraints.
+The Flexible Job-Shop Scheduling Problem (FJSP) generalizes the classical JSP by allowing each operation to execute on a subset of eligible machines. SynAPS addresses the **MO-FJSP-SDST-ML-ARC** variant — multi-objective, flexible, with sequence-dependent setup times, machine learning advisory, and auxiliary resource constraints.
 
 | Ref | Citation | Contribution |
 |-----|----------|-------------|
@@ -23,7 +23,7 @@ The Flexible Job-Shop Scheduling Problem (FJSP) generalizes the classical JSP by
 
 ### SDST — Sequence-Dependent Setup Times
 
-Setup time depends on the predecessor–successor pair on a given machine. Allahverdi et al. [6] provide the definitive survey. The setup matrix forms a weighted digraph per work center — the encoding used in Syn-APS's `setup_matrix` schema.
+Setup time depends on the predecessor–successor pair on a given machine. Allahverdi et al. [6] provide the definitive survey. The setup matrix forms a weighted digraph per work center — the encoding used in SynAPS's `setup_matrix` schema.
 
 | Ref | Citation | Contribution |
 |-----|----------|-------------|
@@ -36,7 +36,7 @@ Setup time depends on the predecessor–successor pair on a given machine. Allah
 
 ### 2.1 CP-SAT
 
-Google's CP-SAT solver (Perron & Furnon, 2023) is the backbone of Syn-APS's exact solving layer. It combines clause-driven search, linear relaxation, and lazy clause generation.
+Google's CP-SAT solver (Perron & Furnon, 2023) is the backbone of SynAPS's exact solving layer. It combines clause-driven search, linear relaxation, and lazy clause generation.
 
 | Ref | Citation | Contribution |
 |-----|----------|-------------|
@@ -45,16 +45,16 @@ Google's CP-SAT solver (Perron & Furnon, 2023) is the backbone of Syn-APS's exac
 
 ### 2.2 MIP / LP Solvers
 
-HiGHS (Huangfu & Hall, 2018) serves as the LP/MIP engine in Syn-APS's LBBD master problem.
+HiGHS (Huangfu & Hall, 2018) serves as the LP/MIP engine in SynAPS's LBBD master problem.
 
 | Ref | Citation | Contribution |
 |-----|----------|-------------|
 | [10] | Huangfu, Q. & Hall, J.A.J. (2018). Parallelizing the dual revised simplex method. *Math. Prog. Comp.*, 10. | HiGHS LP solver foundations. |
-| [11] | HiGHS Development Team (2024). HiGHS v1.7+ Release Notes. | MIP branch-and-cut improvements. |
+| [11] | HiGHS Development Team (2026). HiGHS v1.13.1 Release Notes. | Current LP/MIP release line; presolve, build, and packaging improvements. |
 
 ### 2.3 Logic-Based Benders Decomposition (LBBD)
 
-LBBD separates the global assignment master (MIP) from the local sequencing subproblem (CP). Syn-APS applies this to decompose large-scale MO-FJSP instances into manageable portions.
+LBBD separates the global assignment master (MIP) from the local sequencing subproblem (CP). SynAPS applies this to decompose large-scale MO-FJSP instances into manageable portions.
 
 | Ref | Citation | Contribution |
 |-----|----------|-------------|
@@ -77,13 +77,13 @@ For $N_c \geq 4$ objective functions, NSGA-III (Deb & Jain, 2014) uses reference
 
 ### 3.2 ATCS Dispatch Heuristic
 
-The Apparent Tardiness Cost with Setups (ATCS) composite priority rule (Lee et al., 1997) drives Syn-APS's `GREED` heuristic layer:
+The Apparent Tardiness Cost with Setups (ATCS) composite priority rule (Lee et al., 1997) drives SynAPS's `GREED` heuristic layer:
 
 $$I_j = \frac{w_j}{p_j} \cdot \exp\!\Bigl(-\frac{\max(d_j - p_j - t, 0)}{K_1 \bar{p}}\Bigr) \cdot \exp\!\Bigl(-\frac{s_{ij}}{K_2 \bar{s}}\Bigr)$$
 
 | Ref | Citation | Contribution |
 |-----|----------|-------------|
-| [17] | Lee, Y.H. et al. (1997). Scheduling by ATCS composite dispatch rule. *IJPR*, 35(7). | ATCS dispatch rule for weighted tardiness + SDST. |
+| [17] | Lee, Y.H., Bhaskaran, K. & Pinedo, M. (1997). A heuristic to minimize the total weighted tardiness with sequence-dependent setups. *IIE Transactions*, 29(1), 45–52. | ATCS dispatch rule for weighted tardiness + SDST. |
 
 ---
 
@@ -91,13 +91,13 @@ $$I_j = \frac{w_j}{p_j} \cdot \exp\!\Bigl(-\frac{\max(d_j - p_j - t, 0)}{K_1 \ba
 
 ### 4.1 Heterogeneous Graph Attention Networks (HGAT)
 
-Syn-APS models the scheduling problem as a heterogeneous graph $G = (V, E)$ with node types (operations, machines, auxiliary resources) and edge types (precedence, eligibility, setup). HGAT learns vector embeddings that predict solver weights *before* optimization.
+SynAPS models the scheduling problem as a heterogeneous graph $G = (V, E)$ with node types (operations, machines, auxiliary resources) and edge types (precedence, eligibility, setup). HGAT learns vector embeddings that predict solver weights *before* optimization.
 
 | Ref | Citation | Contribution |
 |-----|----------|-------------|
 | [18] | Park, J. et al. (2021). Learning to schedule job-shop problems: representation and policy learning using GNN. *IJPR*, 59(11). | GNN for JSSP dispatch policy. |
-| [19] | Wang, Y. et al. (2023). Flexible job-shop scheduling via graph neural network and deep reinforcement learning. *Computers & IE*, 176. | GNN + DRL for FJSP. |
-| [20] | Zhang, C. et al. (2024). Heterogeneous graph transformer for FJSP with SDST. *Expert Systems with Applications*, 238. | Heterogeneous GNN for FJSP-SDST. |
+| [19] | Wang, Y. et al. (2022). Flexible job-shop scheduling via graph neural network and deep reinforcement learning. *IEEE Transactions on Industrial Informatics*, 19, 1600–1610. | GNN + DRL for FJSP. |
+| [20] | Tang, H. & Dong, J. (2024). Solving flexible job-shop scheduling problem with heterogeneous graph neural network based on relation and deep reinforcement learning. *Machines*, 12(8), 584. | Heterogeneous GNN + DRL for FJSP. |
 | [21] | Schlichtkrull, M. et al. (2018). Modeling relational data with graph convolutional networks. *ESWC 2018*. | R-GCN: relational message-passing baseline. |
 | [22] | Fey, M. & Lenssen, J.E. (2019). Fast graph representation learning with PyTorch Geometric. *ICLR Workshop*. | PyG library. |
 
@@ -118,7 +118,7 @@ The GNN predicts objective-function weight vectors $\hat{w}$ that the determinis
 
 ### 5.2 Offline RL
 
-Offline RL learns from logged production data without risky online exploration on the real plant. Syn-APS uses offline methods (CQL, IQL) trained on digital twin trajectories, promoted via shadow–canary–production pipeline.
+Offline RL learns from logged operational data without risky online exploration on the live environment. SynAPS uses offline methods (CQL, IQL) trained on digital twin trajectories, promoted via shadow–canary–production pipeline.
 
 | Ref | Citation | Contribution |
 |-----|----------|-------------|
@@ -150,15 +150,15 @@ Offline RL learns from logged production data without risky online exploration o
 | Ref | Citation | Contribution |
 |-----|----------|-------------|
 | [31] | Lewis, P. et al. (2020). Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks. *NeurIPS*. | RAG foundational paper. |
-| [32] | Wang, L. et al. (2024). Embedding models for multilingual retrieval: `multilingual-e5-large`. *arXiv*. | Multilingual embedding model used for pgvector. |
+| [32] | Wang, L. et al. (2024). Multilingual E5 Text Embeddings: A Technical Report. *arXiv:2402.05672*. | Multilingual embedding model (`multilingual-e5-large`) used for pgvector. |
 
 ### 7.2 LLM Inference
 
 | Ref | Citation | Contribution |
 |-----|----------|-------------|
-| [33] | Zheng, L. et al. (2024). SGLang: Efficient Execution of Structured Language Model Programs. *arXiv:2312.07104*. | SGLang: RadixAttention, 2× throughput vs. vLLM. |
+| [33] | Zheng, L. et al. (2024). SGLang: Efficient Execution of Structured Language Model Programs. *arXiv:2312.07104*. | SGLang: RadixAttention, up to 6.4× throughput vs. SOTA inference systems. |
 | [34] | Kwon, W. et al. (2023). Efficient Memory Management for LLM Serving with PagedAttention. *SOSP*. | vLLM: PagedAttention baseline. |
-| [35] | GLM Team (2025). GLM-4/5 Series: Open Bilingual Language Models. *Zhipu AI*. | GLM-5.1: primary on-prem LLM. |
+| [35] | Team GLM et al. (2024). ChatGLM: A Family of Large Language Models from GLM-130B to GLM-4 All Tools. *arXiv:2406.12793*. GLM-5 Team (2026). GLM-5: from Vibe Coding to Agentic Engineering. *arXiv:2602.15763*. | GLM-5 (744B MoE, cloud API); GLM-4-32B (on-prem bilingual LLM). |
 | [36] | Touvron, H. et al. (2024). Llama 3: Open Foundation Models. *Meta AI*. | Llama 3 family. |
 
 ---
@@ -168,8 +168,8 @@ Offline RL learns from logged production data without risky online exploration o
 | Ref | Citation | Contribution |
 |-----|----------|-------------|
 | [37] | McMahan, H.B. et al. (2017). Communication-Efficient Learning of Deep Networks from Decentralized Data. *AISTATS*. | FedAvg algorithm. |
-| [38] | Li, T. et al. (2020). Federated Optimization in Heterogeneous Networks. *MLSys*. | FedProx: regularization for non-IID plants. |
-| [39] | Beutel, D.J. et al. (2022). Flower: A Friendly Federated Learning Framework. *arXiv:2007.14390*. | Flower FL framework. |
+| [38] | Li, T. et al. (2020). Federated Optimization in Heterogeneous Networks. *MLSys*. | FedProx: regularization for non-IID sites. |
+| [39] | Beutel, D.J. et al. (2022). Flower: A Friendly Federated Learning Research Framework. *arXiv:2007.14390*. | Flower FL framework. |
 
 ---
 
@@ -178,7 +178,7 @@ Offline RL learns from logged production data without risky online exploration o
 | Ref | Citation | Contribution |
 |-----|----------|-------------|
 | [40] | Zhou, L. et al. (2020). Quantum Approximate Optimization Algorithm. *Physical Review X*. | QAOA for combinatorial optimization. |
-| [41] | Beigl, M. et al. (2023). Quantum Annealing for Job-Shop Scheduling. *Quantum Science and Technology*. | QUBO encoding for JSSP. |
+| [41] | Venturelli, D. et al. (2016). Quantum Annealing Implementation of Job-Shop Scheduling. *arXiv:1506.08479*. | JSSP QUBO encoding and D-Wave-oriented formulation. |
 | [42] | D-Wave Systems (2024). Ocean SDK 6.x Documentation. | dimod, neal, dwave-system. |
 | [43] | Bergholm, V. et al. (2022). PennyLane: Automatic Differentiation of Hybrid Quantum-Classical Computations. *arXiv:1811.04968*. | PennyLane: variational quantum circuits. |
 
@@ -203,7 +203,7 @@ Offline RL learns from logged production data without risky online exploration o
 
 ---
 
-## Cross-Reference to Syn-APS Subsystems
+## Cross-Reference to SynAPS Subsystems
 
 | Subsystem | Primary References | Doc |
 |-----------|-------------------|-----|

@@ -3,7 +3,7 @@
 <details>
 <summary>🇷🇺 Обзор архитектуры</summary>
 
-Syn-APS строится как модульный монолит с чёткими границами контекстов. Сервисная декомпозиция допустима только после подтверждённых bottleneck'ов. Все решения по планированию аудитируемы. AI-рекомендации — advisory, не authoritative.
+SynAPS строится как модульный монолит с чёткими границами контекстов. Сервисная декомпозиция допустима только после подтверждённых bottleneck'ов. Все решения по планированию аудитируемы. AI-рекомендации — advisory, не authoritative.
 
 </details>
 
@@ -26,7 +26,7 @@ graph TB
     MES["MES<br/>(routing, technological cards)"]
     IOT["IoT / SCADA / OPC-UA<br/>(machine states, telemetry)"]
     USERS["Operators & Managers"]
-    APS["Syn-APS Platform"]
+    APS["SynAPS Platform"]
     ANALYTICS["BI & Analytics"]
     ALERTS["Alert Channels<br/>(dashboards, notifications)"]
 
@@ -44,9 +44,9 @@ graph TB
 
 ```mermaid
 graph TB
-    subgraph SynAPS["Syn-APS"]
+    subgraph SynAPS["SynAPS"]
         UI["Operator UI<br/>React + TypeScript"]
-        BFF["API / BFF<br/>FastAPI or Axum"]
+        BFF["API / BFF<br/>TypeScript + Fastify"]
         CORE["Planning Core<br/>Domain logic + Use cases"]
         OPT["Solver Portfolio<br/>GREED · CP-SAT · HiGHS · pymoo"]
         RT["Realtime Engine<br/>JetStream + Temporal"]
@@ -55,7 +55,7 @@ graph TB
     end
 
     subgraph Data["Data Platform"]
-        PG["PostgreSQL 17<br/>Canonical OLTP"]
+        PG["PostgreSQL 17+<br/>Canonical OLTP"]
         CH["ClickHouse<br/>OLAP aggregations"]
         NATS["NATS JetStream<br/>Event streaming"]
         CACHE["Valkey<br/>Cache + distributed locks"]
@@ -117,6 +117,7 @@ graph LR
 | ADR-015 | LLM Copilot on-prem only; no data leaves the perimeter |
 | ADR-016 | Federated Learning with differential privacy guarantees |
 | ADR-017 | Quantum readiness via QUBO formulation, classical fallback mandatory |
+| ADR-018 | Language follows boundary and hot path: TypeScript at the edge, Python for optimizer and ML orchestration, Rust for native kernels |
 
 ## Rollout Model
 
@@ -129,13 +130,26 @@ Freeze        1 shift)      Loop                          & Evolution
 
 **Key rule:** No service extraction before production evidence of bottlenecks. No ML promotion without replay-validated improvement over deterministic baseline.
 
+## Language Boundary
+
+SynAPS is intentionally polyglot at production scale:
+
+1. **TypeScript** owns operator UI and control-plane edges.
+2. **Python** owns exact solver orchestration, ML advisory, and simulation-heavy work.
+3. **Rust** owns measured hot paths such as heuristic kernels, feasibility checks, and future metaheuristic workers.
+4. **Rules and policy** should stay declarative where possible instead of being buried in solver code.
+5. The current verified boundary to external runtimes is the JSON request/response contract under `schema/contracts/` plus the bounded CLI/package entrypoints.
+6. The current public network proof is the minimal TypeScript BFF in `control-plane/`, which validates the runtime contract and invokes the Python kernel over the contract CLI.
+
+See [Language & Runtime Strategy](06_LANGUAGE_AND_RUNTIME_STRATEGY.md) for the full contract.
+
 ## Technology Stack
 
 | Layer | Primary | Reserve / Alternative |
 |-------|---------|----------------------|
 | **Frontend** | React 19 + TypeScript + Vite | — |
 | **State management** | TanStack Query + Zustand | — |
-| **API / BFF** | FastAPI (Python) | Axum (Rust, hot path) |
+| **API / BFF** | TypeScript on Node.js or Bun | FastAPI or Axum for optimizer-adjacent service boundaries |
 | **Solver kernel** | OR-Tools CP-SAT | HiGHS (LP/MIP), pymoo (NSGA-III) |
 | **Heuristic core** | Custom GREED/ATCS (Rust or Python) | — |
 | **Hyperparameter** | Optuna | — |
@@ -166,3 +180,5 @@ Freeze        1 shift)      Loop                          & Evolution
 - [Solver Portfolio](03_SOLVER_PORTFOLIO.md) — solver selection and routing
 - [Data Model](04_DATA_MODEL.md) — universal schema and events
 - [Deployment](05_DEPLOYMENT.md) — infrastructure and operations
+- [Language & Runtime Strategy](06_LANGUAGE_AND_RUNTIME_STRATEGY.md) — polyglot boundaries and migration rules
+- [Runtime Contract](07_RUNTIME_CONTRACT.md) — current TypeScript ↔ Python invocation boundary

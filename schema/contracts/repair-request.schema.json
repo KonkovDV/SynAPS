@@ -1,0 +1,492 @@
+{
+  "$defs": {
+    "Assignment": {
+      "description": "One operation \u2192 machine assignment in the result.",
+      "properties": {
+        "aux_resource_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Aux Resource Ids",
+          "type": "array"
+        },
+        "end_time": {
+          "format": "date-time",
+          "title": "End Time",
+          "type": "string"
+        },
+        "operation_id": {
+          "format": "uuid",
+          "title": "Operation Id",
+          "type": "string"
+        },
+        "setup_minutes": {
+          "default": 0,
+          "title": "Setup Minutes",
+          "type": "integer"
+        },
+        "start_time": {
+          "format": "date-time",
+          "title": "Start Time",
+          "type": "string"
+        },
+        "work_center_id": {
+          "format": "uuid",
+          "title": "Work Center Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation_id",
+        "work_center_id",
+        "start_time",
+        "end_time"
+      ],
+      "title": "Assignment",
+      "type": "object"
+    },
+    "AuxiliaryResource": {
+      "description": "Shared resource (tool, fixture, operator, etc.).",
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "domain_attributes": {
+          "additionalProperties": true,
+          "title": "Domain Attributes",
+          "type": "object"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "pool_size": {
+          "default": 1,
+          "title": "Pool Size",
+          "type": "integer"
+        },
+        "resource_type": {
+          "title": "Resource Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "resource_type"
+      ],
+      "title": "AuxiliaryResource",
+      "type": "object"
+    },
+    "Operation": {
+      "description": "Single processing step within a work item.",
+      "properties": {
+        "base_duration_min": {
+          "title": "Base Duration Min",
+          "type": "integer"
+        },
+        "domain_attributes": {
+          "additionalProperties": true,
+          "title": "Domain Attributes",
+          "type": "object"
+        },
+        "eligible_wc_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Eligible Wc Ids",
+          "type": "array"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "order_id": {
+          "format": "uuid",
+          "title": "Order Id",
+          "type": "string"
+        },
+        "predecessor_op_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Predecessor Op Id"
+        },
+        "seq_in_order": {
+          "title": "Seq In Order",
+          "type": "integer"
+        },
+        "state_id": {
+          "format": "uuid",
+          "title": "State Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "order_id",
+        "seq_in_order",
+        "state_id",
+        "base_duration_min"
+      ],
+      "title": "Operation",
+      "type": "object"
+    },
+    "OperationAuxRequirement": {
+      "description": "Operation \u2192 auxiliary resource requirement link.",
+      "properties": {
+        "aux_resource_id": {
+          "format": "uuid",
+          "title": "Aux Resource Id",
+          "type": "string"
+        },
+        "operation_id": {
+          "format": "uuid",
+          "title": "Operation Id",
+          "type": "string"
+        },
+        "quantity_needed": {
+          "default": 1,
+          "title": "Quantity Needed",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "operation_id",
+        "aux_resource_id"
+      ],
+      "title": "OperationAuxRequirement",
+      "type": "object"
+    },
+    "Order": {
+      "description": "Work item or service request to schedule.",
+      "properties": {
+        "domain_attributes": {
+          "additionalProperties": true,
+          "title": "Domain Attributes",
+          "type": "object"
+        },
+        "due_date": {
+          "format": "date-time",
+          "title": "Due Date",
+          "type": "string"
+        },
+        "external_ref": {
+          "title": "External Ref",
+          "type": "string"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "priority": {
+          "default": 500,
+          "title": "Priority",
+          "type": "integer"
+        },
+        "quantity": {
+          "default": 1.0,
+          "title": "Quantity",
+          "type": "number"
+        },
+        "unit": {
+          "default": "pcs",
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "external_ref",
+        "due_date"
+      ],
+      "title": "Order",
+      "type": "object"
+    },
+    "ScheduleProblem": {
+      "description": "Complete input to any solver.",
+      "properties": {
+        "aux_requirements": {
+          "items": {
+            "$ref": "#/$defs/OperationAuxRequirement"
+          },
+          "title": "Aux Requirements",
+          "type": "array"
+        },
+        "auxiliary_resources": {
+          "items": {
+            "$ref": "#/$defs/AuxiliaryResource"
+          },
+          "title": "Auxiliary Resources",
+          "type": "array"
+        },
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/Operation"
+          },
+          "title": "Operations",
+          "type": "array"
+        },
+        "orders": {
+          "items": {
+            "$ref": "#/$defs/Order"
+          },
+          "title": "Orders",
+          "type": "array"
+        },
+        "planning_horizon_end": {
+          "format": "date-time",
+          "title": "Planning Horizon End",
+          "type": "string"
+        },
+        "planning_horizon_start": {
+          "format": "date-time",
+          "title": "Planning Horizon Start",
+          "type": "string"
+        },
+        "setup_matrix": {
+          "items": {
+            "$ref": "#/$defs/SetupEntry"
+          },
+          "title": "Setup Matrix",
+          "type": "array"
+        },
+        "states": {
+          "items": {
+            "$ref": "#/$defs/State"
+          },
+          "title": "States",
+          "type": "array"
+        },
+        "work_centers": {
+          "items": {
+            "$ref": "#/$defs/WorkCenter"
+          },
+          "title": "Work Centers",
+          "type": "array"
+        }
+      },
+      "required": [
+        "states",
+        "orders",
+        "operations",
+        "work_centers",
+        "setup_matrix",
+        "planning_horizon_start",
+        "planning_horizon_end"
+      ],
+      "title": "ScheduleProblem",
+      "type": "object"
+    },
+    "SetupEntry": {
+      "description": "One cell in the SDST graph: changeover from state A to B on a work center.",
+      "properties": {
+        "domain_attributes": {
+          "additionalProperties": true,
+          "title": "Domain Attributes",
+          "type": "object"
+        },
+        "energy_kwh": {
+          "default": 0.0,
+          "title": "Energy Kwh",
+          "type": "number"
+        },
+        "from_state_id": {
+          "format": "uuid",
+          "title": "From State Id",
+          "type": "string"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "material_loss": {
+          "default": 0.0,
+          "title": "Material Loss",
+          "type": "number"
+        },
+        "setup_minutes": {
+          "title": "Setup Minutes",
+          "type": "integer"
+        },
+        "to_state_id": {
+          "format": "uuid",
+          "title": "To State Id",
+          "type": "string"
+        },
+        "work_center_id": {
+          "format": "uuid",
+          "title": "Work Center Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "work_center_id",
+        "from_state_id",
+        "to_state_id",
+        "setup_minutes"
+      ],
+      "title": "SetupEntry",
+      "type": "object"
+    },
+    "SolveRegime": {
+      "description": "Operational contexts described in the solver portfolio docs.",
+      "enum": [
+        "nominal",
+        "rush_order",
+        "breakdown",
+        "material_shortage",
+        "interactive",
+        "what_if"
+      ],
+      "title": "SolveRegime",
+      "type": "string"
+    },
+    "State": {
+      "description": "Product / process state used in SDST transitions.",
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "domain_attributes": {
+          "additionalProperties": true,
+          "title": "Domain Attributes",
+          "type": "object"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "label": {
+          "default": "",
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code"
+      ],
+      "title": "State",
+      "type": "object"
+    },
+    "WorkCenter": {
+      "description": "Execution resource, station, or processing unit.",
+      "properties": {
+        "capability_group": {
+          "title": "Capability Group",
+          "type": "string"
+        },
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "domain_attributes": {
+          "additionalProperties": true,
+          "title": "Domain Attributes",
+          "type": "object"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "max_parallel": {
+          "default": 1,
+          "title": "Max Parallel",
+          "type": "integer"
+        },
+        "speed_factor": {
+          "default": 1.0,
+          "title": "Speed Factor",
+          "type": "number"
+        }
+      },
+      "required": [
+        "code",
+        "capability_group"
+      ],
+      "title": "WorkCenter",
+      "type": "object"
+    }
+  },
+  "description": "Canonical request contract for bounded repair execution.",
+  "properties": {
+    "base_assignments": {
+      "items": {
+        "$ref": "#/$defs/Assignment"
+      },
+      "title": "Base Assignments",
+      "type": "array"
+    },
+    "contract_version": {
+      "const": "2026-04-03",
+      "default": "2026-04-03",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "disrupted_op_ids": {
+      "items": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "title": "Disrupted Op Ids",
+      "type": "array"
+    },
+    "problem": {
+      "$ref": "#/$defs/ScheduleProblem"
+    },
+    "radius": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Radius"
+    },
+    "regime": {
+      "$ref": "#/$defs/SolveRegime",
+      "default": "breakdown"
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Request Id"
+    },
+    "verify_feasibility": {
+      "default": true,
+      "title": "Verify Feasibility",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "problem",
+    "base_assignments",
+    "disrupted_op_ids"
+  ],
+  "title": "RepairRequest",
+  "type": "object"
+}
