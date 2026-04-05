@@ -12,10 +12,10 @@ The repository currently contains a Python scheduling core, canonical schema sur
 
 ### Implemented today
 
-- Exact CP-SAT scheduling paths with sequence-dependent setup handling and auxiliary resources.
-- Greedy dispatch with queue-local log-space ATCS scoring and bounded incremental repair heuristics with accurate tardiness accounting.
-- First-class epsilon-constrained CP-SAT profiles for setup-vs-makespan (`CPSAT-EPS-SETUP-110`) and tardiness-vs-makespan (`CPSAT-EPS-TARD-110`) trade-off studies.
-- Logic-Based Benders Decomposition (LBBD) solver with HiGHS master, CP-SAT subproblems, bottleneck capacity cuts, load-balance cuts (Hooker 2007, §7.3), and post-assembly cross-cluster precedence/setup enforcement.
+- Exact CP-SAT scheduling paths with sequence-dependent setup handling, auxiliary resources, and exact `max_parallel` handling through cumulative constraints or virtual disjunctive lanes when SDST requires them.
+- Greedy dispatch with queue-local log-space ATCS scoring, explicit material-loss penalties, and bounded incremental repair heuristics with accurate tardiness and material-loss accounting.
+- First-class epsilon-constrained CP-SAT profiles for setup-vs-makespan (`CPSAT-EPS-SETUP-110`), tardiness-vs-makespan (`CPSAT-EPS-TARD-110`), and material-loss-vs-makespan (`CPSAT-EPS-MATERIAL-110`) trade-off studies.
+- Logic-Based Benders Decomposition (LBBD) solver with HiGHS master, CP-SAT subproblems, bottleneck capacity cuts, setup-cost cuts, load-balance cuts (Hooker 2007, §7.3), master warm-start support, and post-assembly cross-cluster precedence/setup enforcement.
 - Property-based test suite (Hypothesis) validating structural invariants across random problem instances.
 - Cross-solver consistency tests ensuring all solvers satisfy the same feasibility, precedence, and objective-sign contracts.
 - Benchmark regression tests with pinned quality bounds as CI guardrails.
@@ -78,11 +78,14 @@ twine check dist/*
 ## Repository Map
 
 - [docs/README.md](docs/README.md): architecture, domain, evolution, and research navigation.
+- [docs/README_RU.md](docs/README_RU.md): Russian router for the technical documentation surfaces.
 - [docs/PUBLIC_GITHUB_POST_PUSH_CHECKLIST.md](docs/PUBLIC_GITHUB_POST_PUSH_CHECKLIST.md): manual GitHub setup after the first public push.
 - [benchmark/README.md](benchmark/README.md): reproducible solver benchmarking.
+- [benchmark/README_RU.md](benchmark/README_RU.md): Russian benchmark guide.
 - `python -m synaps solve <instance.json>`: high-level routed solver execution with JSON output.
 - [`schema/contracts/`](schema/contracts/README.md): stable JSON request/response contract for future TypeScript control-plane integration.
 - [`control-plane/`](control-plane/README.md): minimal TypeScript BFF proving the network-facing control-plane boundary.
+- [`control-plane/README_RU.md`](control-plane/README_RU.md): Russian guide for the TypeScript control-plane boundary.
 - [CONTRIBUTING.md](CONTRIBUTING.md): contribution workflow and validation expectations.
 - [SUPPORT.md](SUPPORT.md): supported public support channels.
 - [SECURITY.md](SECURITY.md): vulnerability reporting path.
@@ -94,8 +97,9 @@ The repository includes a broader architecture thesis and domain exploration mat
 - [docs/architecture/01_OVERVIEW.md](docs/architecture/01_OVERVIEW.md)
 - [docs/architecture/02_CANONICAL_FORM.md](docs/architecture/02_CANONICAL_FORM.md)
 - [docs/architecture/03_SOLVER_PORTFOLIO.md](docs/architecture/03_SOLVER_PORTFOLIO.md)
-- [research/SYNAPS_MASTER_BLUEPRINT.md](research/SYNAPS_MASTER_BLUEPRINT.md)
 - [research/SYNAPS_OSS_STACK_2026.md](research/SYNAPS_OSS_STACK_2026.md)
+- [research/SYNAPS_UNIVERSAL_ARCHITECTURE.md](research/SYNAPS_UNIVERSAL_ARCHITECTURE.md)
+- [research/SYNAPS_AIR_GAPPED_OFFLINE.md](research/SYNAPS_AIR_GAPPED_OFFLINE.md)
 
 These documents are useful for understanding direction, but the current implementation boundary is defined by the code, tests, benchmark harness, and packaging surfaces in this repository.
 
@@ -112,3 +116,5 @@ These documents are useful for understanding direction, but the current implemen
 An optional diligence packet can live under `docs/investor/`.
 
 That surface is intentionally secondary. The open-source code, tests, benchmark harness, and packaging do not depend on that subtree. Start with the engineering entrypoints above if your primary goal is to understand what the repository implements today.
+
+If you do need the diligence layer, start with [docs/investor/README.md](docs/investor/README.md). That router now points only to the reduced active set and the archive boundary.

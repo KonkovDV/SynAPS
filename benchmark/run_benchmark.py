@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import statistics
 import sys
 import time
@@ -53,6 +54,11 @@ def _run_single(
     runs: int = 1,
 ) -> dict[str, Any]:
     """Execute *solver_name* on *problem* for *runs* repetitions."""
+    try:
+        import resource as _resource  # noqa: PLC0415
+    except ImportError:
+        _resource = None  # type: ignore[assignment]
+
     solver = None
     solve_kwargs: dict[str, object] = {}
     selected_solver_config = solver_name
@@ -62,6 +68,7 @@ def _run_single(
 
     wall_times: list[float] = []
     last_result: ScheduleResult | None = None
+    peak_rss_kb = 0
 
     for _ in range(runs):
         t0 = time.perf_counter()
@@ -76,30 +83,72 @@ def _run_single(
             result = solver.solve(problem, **solve_kwargs)
         wall_times.append(time.perf_counter() - t0)
         last_result = result
+        try:
+            if _resource is not None:
+                peak_rss_kb = max(peak_rss_kb, _resource.getrusage(_resource.RUSAGE_SELF).ru_maxrss)
+        except Exception:
+            pass
 
     assert last_result is not None
     obj = last_result.objective
 
+    meta = last_result.metadata or {}
+    best_bound = meta.get("best_objective_bound")
+    gap_pct: float | None = None
+    if best_bound is not None and obj.weighted_sum:
+        gap_pct = round(
+            (obj.weighted_sum - best_bound) / max(abs(best_bound), 1e-9) * 100,
+            3,
+        )
+
+    peak_rss_mb: float | None = None
+    try:
+        if os.name == "nt":
+            import psutil  # noqa: PLC0415
+
+            peak_rss_mb = round(psutil.Process().memory_info().peak_wset / 1024 / 1024, 1)
+        elif peak_rss_kb > 0:
+            peak_rss_mb = round(peak_rss_kb / 1024, 1)
+    except Exception:
+        pass
+
+    statistics_block: dict[str, Any] = {
+        "runs": runs,
+        "wall_time_s_mean": round(statistics.mean(wall_times), 4),
+        "wall_time_s_min": round(min(wall_times), 4),
+        "wall_time_s_max": round(max(wall_times), 4),
+    }
+    if runs > 1:
+        statistics_block["wall_time_s_median"] = round(statistics.median(wall_times), 4)
+        if runs >= 3:
+            statistics_block["wall_time_s_stdev"] = round(statistics.stdev(wall_times), 4)
+    if peak_rss_mb is not None:
+        statistics_block["peak_rss_mb"] = peak_rss_mb
+
+    results_block: dict[str, Any] = {
+        "status": last_result.status.value,
+        "feasible": last_result.status.value in ("optimal", "feasible"),
+        "proved_optimal": last_result.status.value == "optimal",
+        "solver_name": last_result.solver_name,
+        "makespan_minutes": obj.makespan_minutes,
+        "total_setup_minutes": obj.total_setup_minutes,
+        "total_tardiness_minutes": obj.total_tardiness_minutes,
+        "total_material_loss": obj.total_material_loss,
+        "weighted_sum": obj.weighted_sum,
+        "assignments": len(last_result.assignments),
+    }
+    if best_bound is not None:
+        results_block["best_objective_bound"] = best_bound
+    if gap_pct is not None:
+        results_block["gap_pct"] = gap_pct
+    if meta.get("warm_started"):
+        results_block["warm_started"] = True
+
     return {
         "solver_config": solver_name,
         "selected_solver_config": selected_solver_config,
-        "results": {
-            "status": last_result.status.value,
-            "feasible": last_result.status.value in ("optimal", "feasible"),
-            "solver_name": last_result.solver_name,
-            "makespan_minutes": obj.makespan_minutes,
-            "total_setup_minutes": obj.total_setup_minutes,
-            "total_tardiness_minutes": obj.total_tardiness_minutes,
-            "total_material_loss": obj.total_material_loss,
-            "weighted_sum": obj.weighted_sum,
-            "assignments": len(last_result.assignments),
-        },
-        "statistics": {
-            "runs": runs,
-            "wall_time_s_mean": round(statistics.mean(wall_times), 4),
-            "wall_time_s_min": round(min(wall_times), 4),
-            "wall_time_s_max": round(max(wall_times), 4),
-        },
+        "results": results_block,
+        "statistics": statistics_block,
     }
 
 

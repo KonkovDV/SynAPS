@@ -19,6 +19,7 @@ def test_available_solver_configs_matches_public_portfolio() -> None:
         "CPSAT-120",
         "CPSAT-EPS-SETUP-110",
         "CPSAT-EPS-TARD-110",
+        "CPSAT-EPS-MATERIAL-110",
         "LBBD-5",
         "LBBD-10",
     ]

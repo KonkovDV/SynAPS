@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from datetime import timedelta
 from typing import Any
+from uuid import NAMESPACE_DNS, UUID, uuid5
 
 from ortools.sat.python import cp_model
 
@@ -21,6 +22,91 @@ from synaps.solvers import BaseSolver
 class CpSatSolver(BaseSolver):
     """Exact / time-boxed CP-SAT solver for flexible job-shop with SDST."""
 
+    def _virtualize_parallel_work_centers(
+        self,
+        problem: ScheduleProblem,
+    ) -> tuple[ScheduleProblem, dict[UUID, UUID]]:
+        """Expand parallel work centers into exact disjunctive lanes when SDST matters.
+
+        `AddCircuit` models sequence-dependent setups exactly only for disjunctive
+        resources. When a work center has `max_parallel > 1` and non-zero setup
+        times, we split it into identical virtual lanes, each with
+        `max_parallel = 1`. This preserves exact SDST semantics while still
+        allowing the original amount of concurrency overall.
+        """
+        setup_by_work_center: dict[UUID, bool] = {}
+        for entry in problem.setup_matrix:
+            if entry.setup_minutes > 0:
+                setup_by_work_center[entry.work_center_id] = True
+
+        expandable = {
+            work_center.id: work_center
+            for work_center in problem.work_centers
+            if work_center.max_parallel > 1 and setup_by_work_center.get(work_center.id, False)
+        }
+        if not expandable:
+            return problem, {}
+
+        virtual_to_original: dict[UUID, UUID] = {}
+        expanded_ids: dict[UUID, list[UUID]] = {}
+        new_work_centers = []
+        for work_center in problem.work_centers:
+            if work_center.id not in expandable:
+                new_work_centers.append(work_center)
+                continue
+
+            lane_ids: list[UUID] = []
+            for lane in range(1, work_center.max_parallel + 1):
+                lane_id = uuid5(NAMESPACE_DNS, f"{work_center.id}:lane:{lane}")
+                lane_ids.append(lane_id)
+                virtual_to_original[lane_id] = work_center.id
+                new_work_centers.append(
+                    work_center.model_copy(
+                        update={
+                            "id": lane_id,
+                            "code": f"{work_center.code}::L{lane}",
+                            "max_parallel": 1,
+                            "domain_attributes": {
+                                **work_center.domain_attributes,
+                                "virtualized_from": str(work_center.id),
+                                "virtual_lane": lane,
+                            },
+                        }
+                    )
+                )
+            expanded_ids[work_center.id] = lane_ids
+
+        default_eligible = [work_center.id for work_center in problem.work_centers]
+        new_operations = []
+        for operation in problem.operations:
+            base_eligible = operation.eligible_wc_ids or default_eligible
+            expanded_eligible: list[UUID] = []
+            for work_center_id in base_eligible:
+                expanded_eligible.extend(expanded_ids.get(work_center_id, [work_center_id]))
+            new_operations.append(operation.model_copy(update={"eligible_wc_ids": expanded_eligible}))
+
+        new_setup_matrix = []
+        for entry in problem.setup_matrix:
+            lane_ids = expanded_ids.get(entry.work_center_id)
+            if not lane_ids:
+                new_setup_matrix.append(entry)
+                continue
+            for lane_id in lane_ids:
+                new_setup_matrix.append(entry.model_copy(update={"work_center_id": lane_id}))
+
+        transformed_problem = ScheduleProblem(
+            states=problem.states,
+            orders=problem.orders,
+            operations=new_operations,
+            work_centers=new_work_centers,
+            setup_matrix=new_setup_matrix,
+            auxiliary_resources=problem.auxiliary_resources,
+            aux_requirements=problem.aux_requirements,
+            planning_horizon_start=problem.planning_horizon_start,
+            planning_horizon_end=problem.planning_horizon_end,
+        )
+        return transformed_problem, virtual_to_original
+
     @property
     def name(self) -> str:
         return "cpsat"
@@ -35,7 +121,7 @@ class CpSatSolver(BaseSolver):
         presences: dict[tuple[Any, Any], Any],
         setup_minutes_lookup: dict[tuple[Any, Any, Any], int],
         setup_material_lookup: dict[tuple[Any, Any, Any], int],
-    ) -> tuple[list[Any], list[Any]]:
+    ) -> tuple[list[Any], list[Any], dict[Any, list[tuple[Any, Any]]]]:
         """Model SDST via AddCircuit (O(N²) arcs per machine, not O(N³) booleans).
 
         Uses a virtual depot node per machine.  Self-loops model absent operations.
@@ -60,9 +146,21 @@ class CpSatSolver(BaseSolver):
             if not machine_operations:
                 continue
 
-            model.add_no_overlap(
-                [intervals[(operation.id, work_center.id)] for operation in machine_operations]
-            )
+            machine_intervals = [
+                intervals[(operation.id, work_center.id)] for operation in machine_operations
+            ]
+
+            if work_center.max_parallel <= 1:
+                model.add_no_overlap(machine_intervals)
+            else:
+                model.add_cumulative(
+                    machine_intervals,
+                    [1] * len(machine_intervals),
+                    work_center.max_parallel,
+                )
+
+            if work_center.max_parallel > 1:
+                continue
 
             n = len(machine_operations)
             op_index: dict[Any, int] = {op.id: idx for idx, op in enumerate(machine_operations)}
@@ -418,32 +516,38 @@ class CpSatSolver(BaseSolver):
         epsilon_constraints: dict[str, int] | None = kwargs.get("epsilon_constraints", None)
         objective_mode = str(kwargs.get("objective_mode", "weighted_sum"))
         primary_objective = str(kwargs.get("primary_objective", "makespan"))
+        warm_start_assignments: list[Assignment] | None = kwargs.get("warm_start_assignments", None)
+        enable_symmetry_breaking = bool(kwargs.get("enable_symmetry_breaking", True))
 
         t0 = time.monotonic()
         model = cp_model.CpModel()
 
+        solve_problem, virtual_to_original = self._virtualize_parallel_work_centers(problem)
+
         horizon = int(
-            (problem.planning_horizon_end - problem.planning_horizon_start).total_seconds() / 60
+            (
+                solve_problem.planning_horizon_end - solve_problem.planning_horizon_start
+            ).total_seconds() / 60
         )
 
-        wc_by_id = {work_center.id: work_center for work_center in problem.work_centers}
+        wc_by_id = {work_center.id: work_center for work_center in solve_problem.work_centers}
         eligible_by_op = {
             operation.id: (
                 operation.eligible_wc_ids
                 if operation.eligible_wc_ids
-                else [work_center.id for work_center in problem.work_centers]
+                else [work_center.id for work_center in solve_problem.work_centers]
             )
-            for operation in problem.operations
+            for operation in solve_problem.operations
         }
         setup_minutes_lookup = {
             (entry.work_center_id, entry.from_state_id, entry.to_state_id): entry.setup_minutes
-            for entry in problem.setup_matrix
+            for entry in solve_problem.setup_matrix
         }
         setup_material_lookup = {
             (entry.work_center_id, entry.from_state_id, entry.to_state_id): int(
                 round(entry.material_loss * material_loss_scale)
             )
-            for entry in problem.setup_matrix
+            for entry in solve_problem.setup_matrix
         }
 
         starts: dict[tuple[Any, Any], Any] = {}
@@ -453,7 +557,7 @@ class CpSatSolver(BaseSolver):
         selected_starts: dict[Any, Any] = {}
         selected_ends: dict[Any, Any] = {}
 
-        for operation in problem.operations:
+        for operation in solve_problem.operations:
             selected_start = model.new_int_var(0, horizon, f"selected_start_{operation.id}")
             selected_end = model.new_int_var(0, horizon, f"selected_end_{operation.id}")
             selected_starts[operation.id] = selected_start
@@ -487,13 +591,13 @@ class CpSatSolver(BaseSolver):
 
             model.add_exactly_one(presence_vars)
 
-        for operation in problem.operations:
+        for operation in solve_problem.operations:
             if operation.predecessor_op_id is not None:
                 model.add(selected_starts[operation.id] >= selected_ends[operation.predecessor_op_id])
 
         setup_terms, material_terms, setup_intervals_by_op = self._add_machine_order_and_adjacency(
             model,
-            problem,
+            solve_problem,
             starts,
             ends,
             intervals,
@@ -502,16 +606,16 @@ class CpSatSolver(BaseSolver):
             setup_material_lookup,
         )
         self._add_aux_resource_cumulative_constraints(
-            model, problem, eligible_by_op, intervals, setup_intervals_by_op
+            model, solve_problem, eligible_by_op, intervals, setup_intervals_by_op
         )
 
         makespan = model.new_int_var(0, horizon, "makespan")
-        for operation in problem.operations:
+        for operation in solve_problem.operations:
             model.add(makespan >= selected_ends[operation.id])
 
         total_setup, total_material_scaled, total_tardiness, secondary_bound, weights, scale = self._build_weighted_objective(
             model,
-            problem,
+            solve_problem,
             horizon,
             makespan,
             setup_terms,
@@ -523,6 +627,56 @@ class CpSatSolver(BaseSolver):
             objective_mode=objective_mode,
             primary_objective=primary_objective,
         )
+
+        if enable_symmetry_breaking:
+            machine_groups: dict[tuple[str, float], list[Any]] = {}
+            for work_center in solve_problem.work_centers:
+                key = (work_center.capability_group, work_center.speed_factor)
+                machine_groups.setdefault(key, []).append(work_center)
+            for group_work_centers in machine_groups.values():
+                if len(group_work_centers) < 2:
+                    continue
+                group_work_center_ids = {work_center.id for work_center in group_work_centers}
+                for work_center_a, work_center_b in zip(group_work_centers[:-1], group_work_centers[1:]):
+                    presences_a: list[Any] = []
+                    presences_b: list[Any] = []
+                    for operation in solve_problem.operations:
+                        if not group_work_center_ids.issubset(set(eligible_by_op[operation.id])):
+                            continue
+                        presence_a = presences.get((operation.id, work_center_a.id))
+                        presence_b = presences.get((operation.id, work_center_b.id))
+                        if presence_a is not None:
+                            presences_a.append(presence_a)
+                        if presence_b is not None:
+                            presences_b.append(presence_b)
+                    if presences_a and presences_b:
+                        model.add(sum(presences_a) >= sum(presences_b))
+
+        if warm_start_assignments is None and time_limit_s >= 5 and not virtual_to_original:
+            from synaps.solvers.greedy_dispatch import GreedyDispatch
+
+            greedy_result = GreedyDispatch().solve(problem)
+            if greedy_result.assignments:
+                warm_start_assignments = greedy_result.assignments
+
+        hint_count = 0
+        if warm_start_assignments and not virtual_to_original:
+            hint_by_operation = {assignment.operation_id: assignment for assignment in warm_start_assignments}
+            for operation in solve_problem.operations:
+                hint = hint_by_operation.get(operation.id)
+                if hint is None:
+                    continue
+                start_offset = int(
+                    (hint.start_time - problem.planning_horizon_start).total_seconds() / 60.0
+                )
+                start_offset = max(0, min(start_offset, horizon))
+                for work_center_id in eligible_by_op[operation.id]:
+                    is_assigned = work_center_id == hint.work_center_id
+                    model.add_hint(presences[(operation.id, work_center_id)], int(is_assigned))
+                    hint_count += 1
+                    if is_assigned:
+                        model.add_hint(starts[(operation.id, work_center_id)], start_offset)
+                        hint_count += 1
 
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = time_limit_s
@@ -539,7 +693,7 @@ class CpSatSolver(BaseSolver):
         result_status = status_map.get(status_code, SolverStatus.TIMEOUT)
 
         assignments, objective, metadata = self._extract_solution_and_objective(
-            problem,
+            solve_problem,
             solver,
             result_status,
             eligible_by_op,
@@ -554,11 +708,25 @@ class CpSatSolver(BaseSolver):
             scale,
             secondary_bound,
         )
+        if virtual_to_original:
+            for assignment in assignments:
+                assignment.work_center_id = virtual_to_original.get(
+                    assignment.work_center_id,
+                    assignment.work_center_id,
+                )
         metadata.update(
             {
                 "objective_mode": objective_mode,
                 "primary_objective": primary_objective,
                 "epsilon_constraints": dict(epsilon_constraints or {}),
+                "warm_started": warm_start_assignments is not None and not virtual_to_original,
+                "hint_count": hint_count,
+                "symmetry_breaking": enable_symmetry_breaking,
+                "parallel_virtualization": {
+                    "enabled": bool(virtual_to_original),
+                    "virtual_lane_count": len(virtual_to_original),
+                    "original_parallel_work_centers": len(set(virtual_to_original.values())),
+                },
             }
         )
 

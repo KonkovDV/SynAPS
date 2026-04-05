@@ -1,9 +1,9 @@
 ---
 title: "SynAPS Verification Coverage Audit 2026-04"
 status: "active"
-version: "1.3.0"
-last_updated: "2026-04-04"
-date: "2026-04-04"
+version: "1.3.1"
+last_updated: "2026-04-05"
+date: "2026-04-05"
 tags: [synaps, verification, tests, audit, investor]
 mode: "evidence"
 ---
@@ -26,11 +26,11 @@ This document records what was actually re-run during the April 2026 audit pass 
 
 | Check | Fresh result | Evidence basis |
 | --- | --- | --- |
-| Python `pytest` (106 tests) | PASS | standalone SynAPS test suite — 106/106 passed in 13.3 s (expanded from 27 in Phase 2 hardening) |
+| Python `pytest` (120 tests) | PASS | standalone SynAPS test suite - 120/120 passed in the current full-suite verification run (expanded from 27 in Phase 2 hardening) |
 | runtime contract + CLI tests | PASS | dedicated contract, request-CLI, and orchestration tests passed |
 | TypeScript control-plane tests | PASS | BFF request validation, mock flow, and real Python bridge integration passed |
 | TypeScript control-plane build | PASS | isolated Fastify BFF compiled cleanly |
-| `ruff check synaps tests benchmark --select F,E9` | PASS | targeted standalone lint gate — zero violations |
+| `ruff check synaps tests benchmark --select F,E9` | PASS | targeted standalone lint gate - zero violations |
 | `python -m build` | PASS | sdist and wheel built successfully |
 | `twine check dist/*` | PASS | built artifacts passed packaging metadata validation |
 | benchmark smoke: `tiny_3x3` | PASS | GREED feasible on the smoke instance |

@@ -1,9 +1,9 @@
 ---
 title: "SynAPS Glossary 2026-04"
 status: "active"
-version: "1.0.0"
-last_updated: "2026-04-02"
-date: "2026-04-02"
+version: "1.0.1"
+last_updated: "2026-04-05"
+date: "2026-04-05"
 tags: [synaps, glossary, investor, terminology]
 mode: "reference"
 ---
@@ -23,7 +23,7 @@ The investor pack uses a three-level confidence scale to separate what is proven
 | Level | Name | Meaning | Example |
 |-------|------|---------|---------|
 | **C1** | Hypothesis | A strategic or commercial assumption without sufficient external or runtime evidence. Useful for planning, not yet defensible as fact. | Market size projections, cross-industry portability, unit economics |
-| **C2** | Internal evidence | Supported by repository artifacts, passing tests, internal benchmarks, or bounded technical proof. Credible for roadmap discussion, not yet externally validated. | Solver baseline works (27/27 tests pass), universal schema exists, benchmark harness runs |
+| **C2** | Internal evidence | Supported by repository artifacts, passing tests, internal benchmarks, or bounded technical proof. Credible for roadmap discussion, not yet externally validated. | Solver baseline works (120/120 tests pass), universal schema exists, benchmark harness runs |
 | **C3** | External validation | Supported by pilot data, third-party benchmarks, audited controls, or official external sources. Defensible as a public claim. | KPI uplift from a pilot deployment, independent benchmark comparison, regulatory certification |
 
 **Key rule:** an official data source (e.g., World Bank statistics) combined with internal assumptions (e.g., pricing per site) produces a C2 hybrid, not pure C3.
@@ -42,7 +42,7 @@ The pack uses a seven-tier evidence hierarchy. Higher tiers constrain lower-tier
 | **E4** | Public vendor positioning | Asprova, DELMIA Ortems, DELMIA Quintiq product pages |
 | **E5** | Public open-source comparables | Supabase, PostHog, Airbyte GitHub presentation patterns |
 | **E6** | Internal repository verification | Passing tests, benchmark runs, architecture checks, docs closure |
-| **E7** | Roadmap or strategy hypotheses | Pricing assumptions, wedge estimates, pilot thresholds — labeled C1 only |
+| **E7** | Roadmap or strategy hypotheses | Pricing assumptions, wedge estimates, pilot thresholds - labeled C1 only |
 
 ---
 
@@ -60,7 +60,7 @@ The pack uses a seven-tier evidence hierarchy. Higher tiers constrain lower-tier
 
 ### B
 
-**Benchmark harness:** the testing infrastructure that runs solver algorithms against standardized scheduling problem instances and measures key performance indicators (makespan, tardiness, setup time, wall time). SynAPS has a working benchmark harness verified at the smoke level (tiny 3×3 instance).
+**Benchmark harness:** the testing infrastructure that runs solver algorithms against standardized scheduling problem instances and measures key performance indicators (makespan, tardiness, setup time, wall time). SynAPS has a working benchmark harness verified at the smoke level (tiny 3x3 instance).
 
 **Bounded repair:** see *Incremental repair*.
 
@@ -88,9 +88,9 @@ The pack uses a seven-tier evidence hierarchy. Higher tiers constrain lower-tier
 
 ### F
 
-**Feasibility gate (truth gate):** a hard check that rejects any proposed schedule that violates physical constraints. A schedule either passes the feasibility gate or it does not — there is no "partially feasible" state.
+**Feasibility gate (truth gate):** a hard check that rejects any proposed schedule that violates physical constraints. A schedule either passes the feasibility gate or it does not - there is no "partially feasible" state.
 
-**Federated learning:** a machine learning approach where multiple production sites train models collaboratively without sharing raw data. In SynAPS, this is a long-horizon research option (15–25 year timeframe), not a current capability.
+**Federated learning:** a machine learning approach where multiple production sites train models collaboratively without sharing raw data. In SynAPS, this is a long-horizon research option (15-25 year timeframe), not a current capability.
 
 **FJSP (Flexible Job-Shop Scheduling Problem):** a scheduling problem where each operation can be processed on one of several eligible machines. This is the academic problem class that production scheduling belongs to.
 
@@ -110,7 +110,7 @@ The pack uses a seven-tier evidence hierarchy. Higher tiers constrain lower-tier
 
 ### K
 
-**Kernel thesis (product-kernel thesis, scheduling kernel):** the central product hypothesis of SynAPS — that a single, reusable scheduling core can be parameterized across multiple industrial domains (metals, pharma, FMCG, electronics, etc.) rather than building a separate scheduling system for each industry. "Kernel" here means "core engine," not an operating system kernel.
+**Kernel thesis (product-kernel thesis, scheduling kernel):** the central product hypothesis of SynAPS - that a single, reusable scheduling core can be parameterized across multiple industrial domains (metals, pharma, FMCG, electronics, etc.) rather than building a separate scheduling system for each industry. "Kernel" here means "core engine," not an operating system kernel.
 
 ### L
 
@@ -131,11 +131,11 @@ The pack uses a seven-tier evidence hierarchy. Higher tiers constrain lower-tier
 
 **NIST AI RMF (AI Risk Management Framework):** a voluntary U.S. framework published by the National Institute of Standards and Technology for managing risks in AI systems. SynAPS aligns with its principles for trustworthy, explainable, and bounded AI.
 
-**NIST SP 800-82 Rev. 3:** a U.S. publication on security guidance for operational technology (OT) environments — the factory-floor control systems that SynAPS would interact with in deployment.
+**NIST SP 800-82 Rev. 3:** a U.S. publication on security guidance for operational technology (OT) environments - the factory-floor control systems that SynAPS would interact with in deployment.
 
 ### O
 
-**OT (Operational Technology):** the hardware and software systems that monitor and control physical industrial processes — PLCs, SCADA systems, MES, factory-floor equipment. Distinct from IT (information technology). OT environments have strict security and availability requirements.
+**OT (Operational Technology):** the hardware and software systems that monitor and control physical industrial processes - PLCs, SCADA systems, MES, factory-floor equipment. Distinct from IT (information technology). OT environments have strict security and availability requirements.
 
 **OR-Tools:** Google's open-source software suite for combinatorial optimization, including the CP-SAT solver used by SynAPS. Latest version: v9.15 (January 2026). 13,300+ GitHub stars. Apache 2.0 license.
 
@@ -143,7 +143,7 @@ The pack uses a seven-tier evidence hierarchy. Higher tiers constrain lower-tier
 
 **Penetration rate:** the fraction of addressable market sites expected to become customers. In the SynAPS market model, this is an internal assumption (C1), not an externally validated conversion rate.
 
-**Pilot KPI evidence:** measurements from actual customer deployments (before/after comparison of scheduling performance). SynAPS does not yet have pilot KPI evidence — this is an explicitly acknowledged open gap.
+**Pilot KPI evidence:** measurements from actual customer deployments (before/after comparison of scheduling performance). SynAPS does not yet have pilot KPI evidence - this is an explicitly acknowledged open gap.
 
 **Product-kernel thesis:** see *Kernel thesis*.
 
@@ -151,7 +151,7 @@ The pack uses a seven-tier evidence hierarchy. Higher tiers constrain lower-tier
 
 ### Q
 
-**QUBO (Quadratic Unconstrained Binary Optimization):** a mathematical optimization formulation compatible with quantum computing hardware. In SynAPS, QUBO compatibility is a distant research option (25–45 year horizon) contingent on quantum hardware economics.
+**QUBO (Quadratic Unconstrained Binary Optimization):** a mathematical optimization formulation compatible with quantum computing hardware. In SynAPS, QUBO compatibility is a distant research option (25-45 year horizon) contingent on quantum hardware economics.
 
 ### R
 
@@ -159,21 +159,21 @@ The pack uses a seven-tier evidence hierarchy. Higher tiers constrain lower-tier
 
 ### S
 
-**SAM (Serviceable Addressable Market):** the subset of TAM that SynAPS can realistically target given its current product scope and go-to-market strategy. Calculated as: eligible sites × wedge fraction × ACV.
+**SAM (Serviceable Addressable Market):** the subset of TAM that SynAPS can realistically target given its current product scope and go-to-market strategy. Calculated as: eligible sites x wedge fraction x ACV.
 
 **SBOM (Software Bill of Materials):** a complete inventory of all software components, libraries, and dependencies in a product. Increasingly required for enterprise software supply-chain security and regulatory compliance.
 
 **SDST (Sequence-Dependent Setup Times):** the property where the time needed to set up a machine between products depends on the specific sequence. Changing from steel alloy A to alloy B may take 45 minutes, while changing from B to A takes 90 minutes. This is a key cost driver in multi-product manufacturing.
 
-**Smoke instance (smoke test):** a minimal test that verifies a system works end-to-end on a simple case. The SynAPS smoke benchmark uses a tiny 3×3 instance (3 jobs, 3 machines). Smoke testing proves the harness works but does not prove broad performance.
+**Smoke instance (smoke test):** a minimal test that verifies a system works end-to-end on a simple case. The SynAPS smoke benchmark uses a tiny 3x3 instance (3 jobs, 3 machines). Smoke testing proves the harness works but does not prove broad performance.
 
-**SOM (Serviceable Obtainable Market):** the portion of SAM that SynAPS realistically expects to capture in early commercial phases. Calculated as: SAM sites × penetration rate × ACV.
+**SOM (Serviceable Obtainable Market):** the portion of SAM that SynAPS realistically expects to capture in early commercial phases. Calculated as: SAM sites x penetration rate x ACV.
 
 **Solver portfolio:** the combination of multiple solving strategies (fast heuristic, exact solver, incremental repair) that SynAPS uses. Different strategies are appropriate for different problem sizes and time constraints.
 
 ### T
 
-**TAM (Total Addressable Market):** the total revenue opportunity if every eligible manufacturer purchased the product. In SynAPS: calculated from official U.S. Census establishment counts × assumed ACV. The denominator (site count) is E2 evidence; the ACV is a C1 assumption.
+**TAM (Total Addressable Market):** the total revenue opportunity if every eligible manufacturer purchased the product. In SynAPS: calculated from official U.S. Census establishment counts x assumed ACV. The denominator (site count) is E2 evidence; the ACV is a C1 assumption.
 
 **Tardiness:** how much a production schedule exceeds its due dates. Zero tardiness means all orders finish on time. This is the second major optimization objective after makespan.
 
@@ -194,6 +194,6 @@ The pack uses a seven-tier evidence hierarchy. Higher tiers constrain lower-tier
 When reading any SynAPS investor document:
 
 1. If a term appears in **bold** or is followed by "(see Glossary)," look it up here.
-2. The confidence labels **C1**, **C2**, **C3** appear throughout — they always mean Hypothesis, Internal Evidence, and External Validation respectively.
-3. The evidence tiers **E1–E7** are ordered from strongest (official standards) to weakest (internal hypotheses).
+2. The confidence labels **C1**, **C2**, **C3** appear throughout - they always mean Hypothesis, Internal Evidence, and External Validation respectively.
+3. The evidence tiers **E1-E7** are ordered from strongest (official standards) to weakest (internal hypotheses).
 4. Market numbers always carry a source tag: official sources are E2, pricing assumptions are C1/E7.

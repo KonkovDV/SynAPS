@@ -32,6 +32,54 @@ class IncrementalRepair(BaseSolver):
         DEFAULT    → 5 operations forward
     """
 
+    def _cpsat_fallback(
+        self,
+        problem: ScheduleProblem,
+        frozen_assignments: list[Assignment],
+        remaining_op_ids: set[Any],
+        already_scheduled_ids: set[Any],
+    ) -> list[Assignment] | None:
+        """Use a micro CP-SAT solve when constructive repair cannot place the remainder."""
+        from synaps.solvers.cpsat_solver import CpSatSolver
+
+        ops_by_id = {operation.id: operation for operation in problem.operations}
+        needed_ids = set(remaining_op_ids)
+        for op_id in remaining_op_ids:
+            operation = ops_by_id.get(op_id)
+            if operation and operation.predecessor_op_id:
+                needed_ids.add(operation.predecessor_op_id)
+
+        sub_operations = [operation for operation in problem.operations if operation.id in needed_ids]
+        if not sub_operations:
+            return None
+
+        sub_problem = ScheduleProblem(
+            states=problem.states,
+            orders=problem.orders,
+            operations=sub_operations,
+            work_centers=problem.work_centers,
+            setup_matrix=problem.setup_matrix,
+            auxiliary_resources=problem.auxiliary_resources,
+            aux_requirements=[
+                requirement for requirement in problem.aux_requirements if requirement.operation_id in needed_ids
+            ],
+            planning_horizon_start=problem.planning_horizon_start,
+            planning_horizon_end=problem.planning_horizon_end,
+        )
+
+        result = CpSatSolver().solve(
+            sub_problem,
+            time_limit_s=5,
+            num_workers=4,
+            enable_symmetry_breaking=False,
+        )
+
+        if result.status in (SolverStatus.INFEASIBLE, SolverStatus.ERROR, SolverStatus.TIMEOUT):
+            if not result.assignments:
+                return None
+
+        return [assignment for assignment in result.assignments if assignment.operation_id in remaining_op_ids]
+
     @property
     def name(self) -> str:
         return "incremental_repair"
@@ -70,6 +118,7 @@ class IncrementalRepair(BaseSolver):
         frozen = [a for a in base_assignments if a.operation_id not in neighbourhood]
         to_repair = [ops_by_id[oid] for oid in neighbourhood if oid in ops_by_id]
         horizon_start = problem.planning_horizon_start
+        used_cpsat_fallback = False
 
         repaired: list[Assignment] = []
         scheduled_ids: set[Any] = {a.operation_id for a in frozen}
@@ -121,16 +170,42 @@ class IncrementalRepair(BaseSolver):
                     # Priority-aware candidate key: high-priority operations (higher number)
                     # are preferred even if they start later.  Negative priority ensures
                     # descending sort.  Within the same priority class, prefer earlier
-                    # end_offset to minimise makespan impact.
+                    # end_offset to minimise makespan impact, then lower material loss.
                     op_priority = orders_by_id[operation.order_id].priority
-                    candidate_key = (-op_priority, slot.end_offset, slot.start_offset, operation.seq_in_order)
-                    if best_candidate is None or candidate_key < best_candidate[:4]:
-                        best_candidate = (-op_priority, slot.end_offset, slot.start_offset, operation, work_center_id, slot)
+                    candidate_key = (
+                        -op_priority,
+                        slot.end_offset,
+                        slot.material_loss,
+                        slot.start_offset,
+                        operation.seq_in_order,
+                    )
+                    if best_candidate is None or candidate_key < best_candidate[:5]:
+                        best_candidate = (
+                            -op_priority,
+                            slot.end_offset,
+                            slot.material_loss,
+                            slot.start_offset,
+                            operation,
+                            work_center_id,
+                            slot,
+                        )
 
             if best_candidate is None:
+                remaining_ids = {operation.id for operation in remaining_repair}
+                cpsat_result = self._cpsat_fallback(
+                    problem,
+                    frozen + repaired,
+                    remaining_ids,
+                    scheduled_ids,
+                )
+                if cpsat_result is not None:
+                    repaired.extend(cpsat_result)
+                    scheduled_ids.update(assignment.operation_id for assignment in cpsat_result)
+                    remaining_repair.clear()
+                    used_cpsat_fallback = True
                 break
 
-            _, _, _, operation, work_center_id, slot = best_candidate
+            _, _, _, _, operation, work_center_id, slot = best_candidate
             repaired.append(
                 Assignment(
                     operation_id=operation.id,
@@ -150,6 +225,20 @@ class IncrementalRepair(BaseSolver):
         # sequence — prevents ghost setups when a repaired op is inserted
         # between two frozen ops.
         total_setup = recompute_assignment_setups(all_assignments, dispatch_context)
+
+        total_material_loss = 0.0
+        by_machine: dict[Any, list[Assignment]] = {}
+        for assignment in all_assignments:
+            by_machine.setdefault(assignment.work_center_id, []).append(assignment)
+        for work_center_id, machine_assignments in by_machine.items():
+            machine_assignments.sort(key=lambda assignment: assignment.start_time)
+            for index in range(1, len(machine_assignments)):
+                previous_state = ops_by_id[machine_assignments[index - 1].operation_id].state_id
+                current_state = ops_by_id[machine_assignments[index].operation_id].state_id
+                total_material_loss += dispatch_context.material_loss.get(
+                    (work_center_id, previous_state, current_state),
+                    0.0,
+                )
 
         makespan = max(
             (a.end_time - horizon_start).total_seconds() / 60.0 for a in all_assignments
@@ -180,6 +269,7 @@ class IncrementalRepair(BaseSolver):
             objective=ObjectiveValues(
                 makespan_minutes=makespan,
                 total_setup_minutes=total_setup,
+                total_material_loss=total_material_loss,
                 total_tardiness_minutes=total_tardiness,
             ),
             duration_ms=elapsed_ms,
@@ -187,5 +277,6 @@ class IncrementalRepair(BaseSolver):
                 "neighbourhood_size": len(neighbourhood),
                 "frozen_count": len(frozen),
                 "repaired_count": len(repaired),
+                "used_cpsat_fallback": used_cpsat_fallback,
             },
         )

@@ -114,7 +114,7 @@ They provide macro context showing that SynAPS is aimed at a very large industri
 
 Formula:
 
-`U.S. operational TAM = official 100+ employee manufacturing establishments × annual software ACV per site`
+`U.S. operational TAM = official 100+ employee manufacturing establishments x annual software ACV per site`
 
 | Scenario | Sites | ACV | Operational TAM |
 | --- | ---: | ---: | ---: |
@@ -132,7 +132,7 @@ It is more credible than a vague global software-market claim, even though it re
 
 Formula:
 
-`SAM = official 100+ employee manufacturing establishments × target wedge fraction × annual software ACV`
+`SAM = official 100+ employee manufacturing establishments x target wedge fraction x annual software ACV`
 
 | Scenario | Wedge sites | ACV | SAM |
 | --- | ---: | ---: | ---: |
@@ -150,7 +150,7 @@ That is still a large commercial wedge without assuming universal applicability 
 
 Formula:
 
-`SOM = base-case SAM site count × realistic early penetration rate × annual software ACV`
+`SOM = base-case SAM site count x realistic early penetration rate x annual software ACV`
 
 For the first commercial phase, the model uses penetration against the **base-case** SAM site count of `5,160`.
 

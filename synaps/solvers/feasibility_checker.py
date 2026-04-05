@@ -42,6 +42,7 @@ class FeasibilityChecker:
     ) -> list[FeasibilityViolation]:
         violations: list[FeasibilityViolation] = []
         ops_by_id = {op.id: op for op in problem.operations}
+        work_centers_by_id = {work_center.id: work_center for work_center in problem.work_centers}
         setup_lookup = {
             (entry.work_center_id, entry.from_state_id, entry.to_state_id): entry.setup_minutes
             for entry in problem.setup_matrix
@@ -111,6 +112,35 @@ class FeasibilityChecker:
             by_machine.setdefault(a.work_center_id, []).append(a)
 
         for wc_id, machine_assignments in by_machine.items():
+            work_center = work_centers_by_id.get(wc_id)
+            max_parallel = work_center.max_parallel if work_center is not None else 1
+
+            if max_parallel > 1:
+                events: list[tuple[Any, int, Any]] = []
+                for assignment in machine_assignments:
+                    events.append((assignment.start_time, 1, assignment.operation_id))
+                    events.append((assignment.end_time, -1, assignment.operation_id))
+
+                in_use = 0
+                for timestamp, delta, operation_id in sorted(
+                    events, key=lambda item: (item[0], 0 if item[1] < 0 else 1)
+                ):
+                    in_use += delta
+                    if in_use > max_parallel:
+                        violations.append(
+                            FeasibilityViolation(
+                                "MACHINE_CAPACITY_VIOLATION",
+                                (
+                                    f"Machine {wc_id} exceeds max_parallel={max_parallel} at {timestamp}: "
+                                    f"usage is {in_use}."
+                                ),
+                                operation_id=operation_id,
+                                work_center_id=wc_id,
+                            )
+                        )
+                        break
+                continue
+
             sorted_a = sorted(machine_assignments, key=lambda x: x.start_time)
             for i in range(len(sorted_a) - 1):
                 current = sorted_a[i]

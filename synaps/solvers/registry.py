@@ -92,6 +92,16 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
         },
         description="Two-stage CP-SAT epsilon profile: minimise tardiness under a 10% near-optimal makespan cap",
     ),
+    "CPSAT-EPS-MATERIAL-110": SolverRegistration(
+        factory=_build_pareto_slice_cpsat,
+        solve_kwargs={
+            "time_limit_s": 30,
+            "stage1_time_limit_s": 10,
+            "primary_objective": "material_loss",
+            "max_makespan_ratio": 1.10,
+        },
+        description="Two-stage CP-SAT epsilon profile: minimise material loss under a 10% near-optimal makespan cap",
+    ),
     "LBBD-5": SolverRegistration(
         factory=_build_lbbd,
         solve_kwargs={"max_iterations": 5, "time_limit_s": 30},

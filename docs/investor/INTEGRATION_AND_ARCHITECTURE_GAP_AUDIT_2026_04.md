@@ -24,10 +24,10 @@ How far has SynAPS progressed from a validated scheduling kernel to a deployable
 
 ## Evidence Used
 
-1. `docs/investor/PITCH_MEMO.md`;
+1. `docs/investor/PITCH_MEMO_2026_04.md`;
 2. `docs/investor/INVESTOR_DILIGENCE_PACKET_2026_04.md`;
 3. `docs/investor/TECHNICAL_VERIFICATION_REPORT_2026_04.md`;
-4. `docs/investor/WORLD_CLASS_TECHNICAL_DILIGENCE_FRAMEWORK_2026_04.md`;
+4. `docs/investor/HYPERDEEP_AUDIT_REPORT_2026_04.md`;
 5. `docs/investor/CLAIM_EVIDENCE_REGISTER_2026_04.md`.
 
 ## Verified Findings
@@ -68,7 +68,7 @@ However, verified evidence is still missing for:
 
 ### 4. The current investor-facing SynAPS narrative is largely honest about this boundary
 
-`PITCH_MEMO.md` already states that the repository currently captures SynAPS as a venture thesis and architecture-mathematical formalization rather than a fully realized APS runtime.
+`PITCH_MEMO_2026_04.md` already states that the repository currently captures SynAPS as a venture thesis and architecture-mathematical formalization rather than a fully realized APS runtime.
 
 That is consistent with the code evidence.
 

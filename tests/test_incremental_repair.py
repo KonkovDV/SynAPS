@@ -1,8 +1,11 @@
 """Tests for IncrementalRepair solver."""
 
-from datetime import timedelta
+from __future__ import annotations
 
-from synaps.model import Assignment, ScheduleProblem, SolverStatus
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
+
+from synaps.model import Assignment, Operation, Order, ScheduleProblem, State, SolverStatus, WorkCenter
 from synaps.solvers.feasibility_checker import FeasibilityChecker
 from synaps.solvers.greedy_dispatch import GreedyDispatch
 from synaps.solvers.incremental_repair import IncrementalRepair
@@ -11,11 +14,9 @@ from tests.conftest import HORIZON_START
 
 class TestIncrementalRepair:
     def test_repair_maintains_feasibility(self, simple_problem: ScheduleProblem) -> None:
-        # Build a base schedule
         greedy = GreedyDispatch()
         base_result = greedy.solve(simple_problem)
 
-        # Disrupt one operation
         disrupted_id = simple_problem.operations[0].id
 
         repair = IncrementalRepair()
@@ -189,19 +190,11 @@ class TestIncrementalRepair:
         assert violations == [], f"Violations after repair: {violations}"
 
     def test_repair_computes_nonzero_tardiness_for_tight_due_dates(self) -> None:
-        """Repaired schedule where order finishes past its due date must
-        report positive total_tardiness_minutes (D3 regression)."""
-        from datetime import UTC, datetime
-        from uuid import uuid4
-
-        from synaps.model import Operation, Order, State, WorkCenter
-
         horizon_start = datetime(2026, 4, 1, 8, 0, tzinfo=UTC)
         horizon_end = horizon_start + timedelta(hours=4)
         state = State(id=uuid4(), code="STATE-A", label="State A")
         wc = WorkCenter(id=uuid4(), code="WC-1", capability_group="machining")
 
-        # Due date is 20 min from horizon start — but the single op is 60 min.
         order = Order(
             id=uuid4(),
             external_ref="ORD-TIGHT",
@@ -244,5 +237,57 @@ class TestIncrementalRepair:
         )
 
         assert result.status == SolverStatus.FEASIBLE
-        # Op finishes at +60 min; due at +20 min → tardiness = 40 min
         assert result.objective.total_tardiness_minutes >= 40.0
+
+    def test_cpsat_fallback_returns_assignments_for_remaining_ops(
+        self,
+        simple_problem: ScheduleProblem,
+    ) -> None:
+        repair = IncrementalRepair()
+        remaining_op_ids = {simple_problem.operations[-1].id}
+
+        fallback_assignments = repair._cpsat_fallback(
+            simple_problem,
+            [],
+            remaining_op_ids,
+            set(),
+        )
+
+        assert fallback_assignments is not None
+        assert {assignment.operation_id for assignment in fallback_assignments} == remaining_op_ids
+
+    def test_uses_cpsat_fallback_when_constructive_dispatch_finds_no_slot(
+        self,
+        simple_problem: ScheduleProblem,
+        monkeypatch,
+    ) -> None:
+        base_result = GreedyDispatch().solve(simple_problem)
+        disrupted_op_id = simple_problem.operations[-1].id
+        preserved_assignments = [
+            assignment for assignment in base_result.assignments if assignment.operation_id == disrupted_op_id
+        ]
+
+        monkeypatch.setattr(
+            "synaps.solvers.incremental_repair.find_earliest_feasible_slot",
+            lambda *args, **kwargs: None,
+        )
+        monkeypatch.setattr(
+            IncrementalRepair,
+            "_cpsat_fallback",
+            lambda self, problem, frozen_assignments, remaining_op_ids, already_scheduled_ids: preserved_assignments,
+        )
+
+        result = IncrementalRepair().solve(
+            simple_problem,
+            base_assignments=base_result.assignments,
+            disrupted_op_ids=[disrupted_op_id],
+            radius=1,
+        )
+
+        assert result.status == SolverStatus.FEASIBLE
+        assert result.metadata["used_cpsat_fallback"] is True
+        assert any(assignment.operation_id == disrupted_op_id for assignment in result.assignments)
+
+        checker = FeasibilityChecker()
+        violations = checker.check(simple_problem, result.assignments)
+        assert violations == []

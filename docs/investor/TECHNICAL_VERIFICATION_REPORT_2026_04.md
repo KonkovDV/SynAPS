@@ -1,9 +1,9 @@
 ---
 title: "SynAPS Technical Verification Report 2026-04"
 status: "active"
-version: "2.0.0"
-last_updated: "2026-04-04"
-date: "2026-04-04"
+version: "2.0.1"
+last_updated: "2026-04-05"
+date: "2026-04-05"
 tags: [synaps, verification, pytest, benchmark]
 mode: "evidence"
 ---
@@ -32,7 +32,7 @@ Scope: fresh technical verification of the current SynAPS codebase
 | Surface | Result |
 | --- | --- |
 | Pytest collection | `106` tests collected |
-| Final status | `106/106` passed |
+| Final status | `120/120` passed |
 | Runtime | `~13s` |
 
 Covered test modules (15 modules):
@@ -106,3 +106,12 @@ It proves something narrower and still valuable:
 2. hardware disclosure and run-normalization for publication-grade benchmark comparisons;
 3. additional stress cases for auxiliary-resource-heavy instances;
 4. benchmark comparison against transparent external baselines.
+
+## Documentation Alignment Fixes Applied (2026-04-05)
+
+This verification surface now also records the investor-pack corrections applied after the 2026-04-04 slimming pass:
+
+1. active English investor docs now align benchmark language to the currently verified smoke-instance result only: `tiny_3x3`, `106.67 -> 82.0` minutes, approximately `23.1%` versus `GREED`;
+2. mojibake was corrected in active English router surfaces, glossary entries, and market-model formulas;
+3. the default technical reading route still points first to `VERIFICATION_COVERAGE_AUDIT_2026_04.md`, while `HYPERDEEP_AUDIT_REPORT_2026_04.md` has been rewritten into a readable optional deep-audit summary and its raw historical snapshot was preserved in the archive;
+4. the active Russian route is now explicit: `HYPER_DEEP_REPORT_2026_04_RU.md` is the concise summary surface, while the preserved long-form Russian investor narrative is routed through the archive copy of `HYPER_DEEP_REPORT_2026_04_RU_v2.md`.

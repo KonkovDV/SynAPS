@@ -50,6 +50,8 @@ class LbbdSolver(BaseSolver):
         time_limit_s: int = int(kwargs.get("time_limit_s", 60))
         random_seed: int = int(kwargs.get("random_seed", 42))
         sub_time_limit_s: int = max(1, time_limit_s // max(max_iterations, 1))
+        gap_threshold: float = float(kwargs.get("gap_threshold", 0.01))
+        setup_relaxation: bool = bool(kwargs.get("setup_relaxation", True))
 
         # Precompute lookups
         wc_by_id = {wc.id: wc for wc in problem.work_centers}
@@ -74,6 +76,22 @@ class LbbdSolver(BaseSolver):
         lb = 0.0
         benders_cuts: list[_BendersCut] = []
         iteration_log: list[dict[str, Any]] = []
+        prev_assignment_map: dict[UUID, UUID] | None = None
+        master_warm_start_iterations = 0
+
+        min_setup_by_wc: dict[UUID, float] = {}
+        if setup_relaxation and problem.setup_matrix:
+            for work_center in problem.work_centers:
+                work_center_setups = [
+                    entry.setup_minutes
+                    for entry in problem.setup_matrix
+                    if entry.work_center_id == work_center.id
+                ]
+                if not work_center_setups:
+                    min_setup_by_wc[work_center.id] = 0.0
+                    continue
+                positive_setups = [setup for setup in work_center_setups if setup > 0]
+                min_setup_by_wc[work_center.id] = min(positive_setups) if positive_setups else 0.0
 
         for iteration in range(1, max_iterations + 1):
             elapsed = time.monotonic() - t0
@@ -81,8 +99,15 @@ class LbbdSolver(BaseSolver):
                 break
 
             # --- Master Problem ---
+            if prev_assignment_map is not None:
+                master_warm_start_iterations += 1
             master_result = _solve_master(
-                problem, eligible_by_op, wc_by_id, benders_cuts,
+                problem,
+                eligible_by_op,
+                wc_by_id,
+                benders_cuts,
+                min_setup_by_wc=min_setup_by_wc,
+                prev_solution=prev_assignment_map,
             )
             if master_result is None:
                 # Master infeasible — no solution possible
@@ -95,6 +120,7 @@ class LbbdSolver(BaseSolver):
 
             assignment_map, master_bound = master_result
             lb = max(lb, master_bound)
+            prev_assignment_map = assignment_map
 
             # --- Subproblems (one CP-SAT per machine cluster) ---
             sub_assignments, sub_makespan = _solve_subproblems(
@@ -144,7 +170,7 @@ class LbbdSolver(BaseSolver):
 
             # --- Convergence check ---
             gap = (best_ub - lb) / max(best_ub, 1e-9)
-            if gap < 0.01:  # 1% optimality gap
+            if gap < gap_threshold:
                 break
 
             # --- Generate Benders cut ---
@@ -162,6 +188,44 @@ class LbbdSolver(BaseSolver):
                 rhs=sub_makespan,
                 bottleneck_ops=bottleneck_ops,
             ))
+
+            setup_lookup = {
+                (entry.work_center_id, entry.from_state_id, entry.to_state_id): entry.setup_minutes
+                for entry in problem.setup_matrix
+            }
+            assignments_by_machine: dict[UUID, list[Assignment]] = defaultdict(list)
+            for assignment in sub_assignments:
+                assignments_by_machine[assignment.work_center_id].append(assignment)
+
+            for work_center_id, machine_assignments in assignments_by_machine.items():
+                if len(machine_assignments) < 2:
+                    continue
+                machine_assignments_sorted = sorted(machine_assignments, key=lambda assignment: assignment.start_time)
+                actual_setup_total = 0.0
+                for index in range(len(machine_assignments_sorted) - 1):
+                    previous_op = ops_by_id.get(machine_assignments_sorted[index].operation_id)
+                    current_op = ops_by_id.get(machine_assignments_sorted[index + 1].operation_id)
+                    if previous_op is None or current_op is None:
+                        continue
+                    actual_setup_total += setup_lookup.get(
+                        (work_center_id, previous_op.state_id, current_op.state_id),
+                        0,
+                    )
+                if actual_setup_total <= 0:
+                    continue
+                processing_total = sum(
+                    max(
+                        1.0,
+                        ops_by_id[assignment.operation_id].base_duration_min / wc_by_id[work_center_id].speed_factor,
+                    )
+                    for assignment in machine_assignments
+                )
+                benders_cuts.append(_BendersCut(
+                    assignment_map=dict(assignment_map),
+                    kind="setup_cost",
+                    rhs=processing_total + actual_setup_total,
+                    bottleneck_ops={assignment.operation_id for assignment in machine_assignments},
+                ))
 
             # --- Load-balance cut (Hooker 2007, §7.3) ---
             # Strengthened form: C_max ≥ max(max_k load_k, total / |M|).
@@ -185,6 +249,9 @@ class LbbdSolver(BaseSolver):
 
         status = SolverStatus.FEASIBLE if best_assignments else SolverStatus.TIMEOUT
         elapsed_ms = int((time.monotonic() - t0) * 1000)
+        cut_kinds: dict[str, int] = {}
+        for cut in benders_cuts:
+            cut_kinds[cut.kind] = cut_kinds.get(cut.kind, 0) + 1
 
         return ScheduleResult(
             solver_name=self.name,
@@ -199,6 +266,13 @@ class LbbdSolver(BaseSolver):
                 "upper_bound": best_ub,
                 "gap": (best_ub - lb) / max(best_ub, 1e-9) if best_ub < float("inf") else None,
                 "iteration_log": iteration_log,
+                "gap_threshold": gap_threshold,
+                "setup_relaxation": setup_relaxation,
+                "master_warm_start_iterations": master_warm_start_iterations,
+                "cut_pool": {
+                    "size": len(benders_cuts),
+                    "kinds": cut_kinds,
+                },
             },
         )
 
@@ -231,6 +305,8 @@ def _solve_master(
     eligible_by_op: dict[UUID, list[UUID]],
     wc_by_id: dict[UUID, WorkCenter],
     cuts: list[_BendersCut],
+    min_setup_by_wc: dict[UUID, float] | None = None,
+    prev_solution: dict[UUID, UUID] | None = None,
 ) -> tuple[dict[UUID, UUID], float] | None:
     """Solve the assignment master problem via HiGHS MIP.
 
@@ -293,6 +369,10 @@ def _solve_master(
                 coeffs.append(duration)
         if not indices:
             continue
+        if min_setup_by_wc and wc.id in min_setup_by_wc:
+            min_setup = min_setup_by_wc[wc.id]
+            if min_setup > 0:
+                coeffs = [coefficient + min_setup for coefficient in coeffs]
         # ∑ P·y - C_max ≤ 0
         indices.append(cmax_idx)
         coeffs.append(-1.0)
@@ -357,9 +437,46 @@ def _solve_master(
                 cut.rhs, highspy.kHighsInf,
                 1, np.array([cmax_idx], dtype=np.int32), np.array([1.0]),
             )
+        elif cut.kind == "setup_cost":
+            indices = [cmax_idx]
+            coeffs = [1.0]
+            total_processing = 0.0
+            for op_id in cut.bottleneck_ops:
+                wc_id = cut.assignment_map.get(op_id)
+                if wc_id is None:
+                    continue
+                key = (op_id, wc_id)
+                if key not in var_index:
+                    continue
+                wc = wc_by_id.get(wc_id)
+                op = next((operation for operation in problem.operations if operation.id == op_id), None)
+                if wc is None or op is None:
+                    continue
+                processing_time = max(1.0, op.base_duration_min / wc.speed_factor)
+                total_processing += processing_time
+                indices.append(var_index[key])
+                coeffs.append(-processing_time)
+            if len(indices) > 1:
+                rhs_val = cut.rhs - total_processing
+                h.addRow(
+                    rhs_val, highspy.kHighsInf,
+                    len(indices), np.array(indices, dtype=np.int32), np.array(coeffs),
+                )
 
     # Solve
     h.changeObjectiveSense(highspy.ObjSense.kMinimize)
+    if prev_solution is not None and hasattr(h, "setSolution"):
+        hint_values = [0.0] * n_vars
+        for op in problem.operations:
+            previous_wc = prev_solution.get(op.id)
+            for wc_id in eligible_by_op[op.id]:
+                key = (op.id, wc_id)
+                if key in var_index:
+                    hint_values[var_index[key]] = 1.0 if wc_id == previous_wc else 0.0
+        hint_values[cmax_idx] = float(
+            int((problem.planning_horizon_end - problem.planning_horizon_start).total_seconds() / 60)
+        )
+        h.setSolution(n_vars, np.arange(n_vars, dtype=np.int32), np.array(hint_values))
     h.run()
 
     status = h.getInfoValue("primal_solution_status")[1]

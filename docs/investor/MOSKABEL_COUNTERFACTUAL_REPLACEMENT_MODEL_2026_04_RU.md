@@ -85,7 +85,7 @@ SynAPS сегодня доказывает:
 2. видимый базовый solver;
 3. логику ограниченного ремонта расписания;
 4. бенчмарк-харнесс;
-5. 27/27 проходящих тестов;
+5. 120/120 проходящих тестов;
 6. работающий дымовой бенчмарк.
 
 SynAPS пока **не** доказывает:
@@ -320,7 +320,7 @@ SynAPS по-прежнему не показывает публичных док
 ## 16. Связанные документы
 
 1. `SYNAPS_VS_APS_INFIMUM_2026_04_RU.md`
-2. `INVESTOR_LETTER_SYNAPS_VS_APS_INFIMUM_MOSKABEL_2026_04_RU.md`
+2. `SYNAPS_VS_APS_INFIMUM_2026_04_RU.md`
 3. `INVESTOR_DILIGENCE_PACKET_2026_04.md`
-4. `ACADEMIC_METHODS_APPENDIX_2026_04.md`
+4. `TECHNICAL_VERIFICATION_REPORT_2026_04.md`
 5. `CLAIM_EVIDENCE_REGISTER_2026_04.md`

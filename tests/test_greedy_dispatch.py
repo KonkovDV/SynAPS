@@ -9,6 +9,7 @@ from synaps.model import (
     OperationAuxRequirement,
     Order,
     ScheduleProblem,
+    SetupEntry,
     State,
     SolverStatus,
     WorkCenter,
@@ -131,3 +132,90 @@ class TestGreedyDispatch:
         checker = FeasibilityChecker()
         violations = checker.check(problem, result.assignments)
         assert violations == [], f"Violations found: {violations}"
+
+    def test_prefers_lower_material_loss_when_setup_and_due_terms_tie(self) -> None:
+        horizon_start = datetime(2026, 4, 1, 8, 0, tzinfo=UTC)
+        horizon_end = horizon_start + timedelta(hours=6)
+
+        state_a = State(id=uuid4(), code="STATE-A")
+        state_b = State(id=uuid4(), code="STATE-B")
+        work_center_1 = WorkCenter(id=uuid4(), code="WC-1", capability_group="machining")
+        work_center_2 = WorkCenter(id=uuid4(), code="WC-2", capability_group="machining")
+
+        order_a = Order(
+            id=uuid4(),
+            external_ref="ORD-A",
+            due_date=horizon_start + timedelta(hours=1),
+            priority=1000,
+        )
+        order_b = Order(
+            id=uuid4(),
+            external_ref="ORD-B",
+            due_date=horizon_start + timedelta(hours=1),
+            priority=900,
+        )
+        order_c = Order(
+            id=uuid4(),
+            external_ref="ORD-C",
+            due_date=horizon_start + timedelta(hours=4),
+            priority=500,
+        )
+
+        operation_a = Operation(
+            id=uuid4(),
+            order_id=order_a.id,
+            seq_in_order=0,
+            state_id=state_a.id,
+            base_duration_min=30,
+            eligible_wc_ids=[work_center_1.id],
+        )
+        operation_b = Operation(
+            id=uuid4(),
+            order_id=order_b.id,
+            seq_in_order=0,
+            state_id=state_a.id,
+            base_duration_min=30,
+            eligible_wc_ids=[work_center_2.id],
+        )
+        operation_c = Operation(
+            id=uuid4(),
+            order_id=order_c.id,
+            seq_in_order=0,
+            state_id=state_b.id,
+            base_duration_min=30,
+            eligible_wc_ids=[work_center_1.id, work_center_2.id],
+        )
+
+        problem = ScheduleProblem(
+            states=[state_a, state_b],
+            orders=[order_a, order_b, order_c],
+            operations=[operation_a, operation_b, operation_c],
+            work_centers=[work_center_1, work_center_2],
+            setup_matrix=[
+                SetupEntry(
+                    work_center_id=work_center_1.id,
+                    from_state_id=state_a.id,
+                    to_state_id=state_b.id,
+                    setup_minutes=5,
+                    material_loss=9.0,
+                ),
+                SetupEntry(
+                    work_center_id=work_center_2.id,
+                    from_state_id=state_a.id,
+                    to_state_id=state_b.id,
+                    setup_minutes=5,
+                    material_loss=1.0,
+                ),
+            ],
+            planning_horizon_start=horizon_start,
+            planning_horizon_end=horizon_end,
+        )
+
+        result = GreedyDispatch().solve(problem)
+
+        assert result.status == SolverStatus.FEASIBLE
+        material_sensitive_assignment = next(
+            assignment for assignment in result.assignments if assignment.operation_id == operation_c.id
+        )
+        assert material_sensitive_assignment.work_center_id == work_center_2.id
+        assert result.objective.total_material_loss == 1.0

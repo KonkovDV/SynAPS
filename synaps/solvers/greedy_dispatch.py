@@ -39,9 +39,10 @@ class GreedyDispatch(BaseSolver):
         s̄   = mean setup time
     """
 
-    def __init__(self, k1: float = 2.0, k2: float = 0.5) -> None:
+    def __init__(self, k1: float = 2.0, k2: float = 0.5, k3: float = 0.5) -> None:
         self._k1 = k1
         self._k2 = k2
+        self._k3 = k3
 
     @property
     def name(self) -> str:
@@ -146,6 +147,15 @@ class GreedyDispatch(BaseSolver):
                     sum(nonzero_machine_setups) / max(len(nonzero_machine_setups), 1),
                     1.0,
                 )
+            global_nonzero_material_losses = [
+                record["slot"].material_loss
+                for record in candidate_records
+                if record["slot"].material_loss > 0
+            ]
+            material_scale = max(
+                sum(global_nonzero_material_losses) / max(len(global_nonzero_material_losses), 1),
+                1.0,
+            )
 
             best_log_score = float("-inf")
             best_record = candidate_records[0]
@@ -159,14 +169,22 @@ class GreedyDispatch(BaseSolver):
                     if slot.setup_minutes > 0
                     else 0.0
                 )
+                material_penalty = (
+                    slot.material_loss / (self._k3 * material_scale)
+                    if slot.material_loss > 0
+                    else 0.0
+                )
 
                 # Compare in log-space to avoid exp() underflow on sparse or
                 # heavy-tailed SDST matrices while preserving ATCS ranking.
+                # Extended ATCS: material-loss penalty reduces the attractiveness
+                # of transitions with equal setup time but higher material waste.
                 log_score = (
                     log(max(record["weight"], 1e-9))
                     - log(max(p_j, 0.1))
                     - (slack / (self._k1 * ready_p_bar))
                     - setup_penalty
+                    - material_penalty
                 )
                 if log_score > best_log_score:
                     best_log_score = log_score
@@ -200,6 +218,20 @@ class GreedyDispatch(BaseSolver):
         # final machine sequence — corrects ghost setups after gap insertions.
         total_setup = recompute_assignment_setups(assignments, dispatch_context)
 
+        total_material_loss = 0.0
+        assignments_by_machine: dict[Any, list[Assignment]] = {}
+        for assignment in assignments:
+            assignments_by_machine.setdefault(assignment.work_center_id, []).append(assignment)
+        for work_center_id, machine_assignments in assignments_by_machine.items():
+            machine_assignments.sort(key=lambda assignment: assignment.start_time)
+            for index in range(1, len(machine_assignments)):
+                previous_state = dispatch_context.ops_by_id[machine_assignments[index - 1].operation_id].state_id
+                current_state = dispatch_context.ops_by_id[machine_assignments[index].operation_id].state_id
+                total_material_loss += dispatch_context.material_loss.get(
+                    (work_center_id, previous_state, current_state),
+                    0.0,
+                )
+
         # Compute per-order tardiness (last operation per order determines tardiness)
         order_completion: dict[Any, float] = {}
         for assignment in assignments:
@@ -230,6 +262,7 @@ class GreedyDispatch(BaseSolver):
             objective=ObjectiveValues(
                 makespan_minutes=makespan,
                 total_setup_minutes=total_setup,
+                total_material_loss=total_material_loss,
                 total_tardiness_minutes=total_tardiness,
             ),
             duration_ms=elapsed_ms,

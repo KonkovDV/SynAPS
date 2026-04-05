@@ -14,6 +14,7 @@ class DispatchContext:
     ops_by_id: dict[Any, Any]
     wc_by_id: dict[Any, Any]
     setup_minutes: dict[tuple[Any, Any, Any], int]
+    material_loss: dict[tuple[Any, Any, Any], float]
     requirements_by_op: dict[Any, list[Any]]
     resources_by_id: dict[Any, Any]
 
@@ -23,6 +24,7 @@ class SlotCandidate:
     start_offset: float
     end_offset: float
     setup_minutes: int
+    material_loss: float
     aux_resource_ids: list[Any]
 
 
@@ -73,6 +75,10 @@ def build_dispatch_context(problem: ScheduleProblem) -> DispatchContext:
         wc_by_id={work_center.id: work_center for work_center in problem.work_centers},
         setup_minutes={
             (entry.work_center_id, entry.from_state_id, entry.to_state_id): entry.setup_minutes
+            for entry in problem.setup_matrix
+        },
+        material_loss={
+            (entry.work_center_id, entry.from_state_id, entry.to_state_id): entry.material_loss
             for entry in problem.setup_matrix
         },
         requirements_by_op=requirements_by_op,
@@ -186,6 +192,11 @@ def find_earliest_feasible_slot(
             if previous_state is not None
             else 0
         )
+        material_loss_before = (
+            context.material_loss.get((work_center_id, previous_state, operation.state_id), 0.0)
+            if previous_state is not None
+            else 0.0
+        )
         gap_start = max(earliest_start, previous_end + setup_before)
 
         if following is not None:
@@ -223,6 +234,7 @@ def find_earliest_feasible_slot(
                     start_offset=candidate_start,
                     end_offset=end_offset,
                     setup_minutes=setup_before,
+                    material_loss=material_loss_before,
                     aux_resource_ids=aux_resource_ids,
                 )
 

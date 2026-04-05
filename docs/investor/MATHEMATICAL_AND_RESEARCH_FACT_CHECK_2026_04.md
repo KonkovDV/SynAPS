@@ -31,7 +31,7 @@ This document draws a hard line between:
 3. benchmark protocol;
 4. `docs/investor/HYPERDEEP_AUDIT_REPORT_2026_04.md`;
 5. `docs/investor/TECHNICAL_VERIFICATION_REPORT_2026_04.md`;
-6. `docs/investor/PITCH_MEMO.md`;
+6. `docs/investor/PITCH_MEMO_2026_04.md`;
 7. official OR-Tools job-shop guidance already used in the SynAPS evidence stack as the deterministic baseline reference.
 
 ## What Is Well-Supported Today

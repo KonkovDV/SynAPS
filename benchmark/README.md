@@ -1,5 +1,7 @@
 # SynAPS Benchmark Harness
 
+Language: **EN** | [RU](README_RU.md)
+
 Reproducible solver evaluation for the SynAPS scheduling platform.
 
 ## Quick Start
@@ -38,18 +40,19 @@ python -m benchmark.run_benchmark benchmark/instances/ --solvers GREED CPSAT-30
 | `CPSAT-120` | CpSatSolver | time_limit=120s |
 | `CPSAT-EPS-SETUP-110` | ParetoSliceCpSatSolver | 2-stage CP-SAT, minimise setup under a `1.10x` makespan cap |
 | `CPSAT-EPS-TARD-110` | ParetoSliceCpSatSolver | 2-stage CP-SAT, minimise tardiness under a `1.10x` makespan cap |
+| `CPSAT-EPS-MATERIAL-110` | ParetoSliceCpSatSolver | 2-stage CP-SAT, minimise material loss under a `1.10x` makespan cap |
 | `LBBD-5` | LbbdSolver | HiGHS master + CP-SAT sub, 5 iterations, capacity + load-balance cuts |
 | `LBBD-10` | LbbdSolver | HiGHS master + CP-SAT sub, 10 iterations |
 | `AUTO` | Portfolio router | Chooses a concrete solver configuration per instance |
 
 ## Academic Portfolio Note
 
-`CPSAT-EPS-SETUP-110` and `CPSAT-EPS-TARD-110` are the public academic epsilon-constraint profiles in the SynAPS portfolio.
+`CPSAT-EPS-SETUP-110`, `CPSAT-EPS-TARD-110`, and `CPSAT-EPS-MATERIAL-110` are the public academic epsilon-constraint profiles in the SynAPS portfolio.
 
 They are intentionally not marketed as full Pareto-front explorers. Instead, each exposes one reproducible and benchmarkable Pareto slice:
 
 1. stage 1 finds a strong exact incumbent with the default makespan-first CP-SAT model;
-2. stage 2 constrains makespan to within `10%` of that incumbent and minimises the chosen secondary objective (setup or tardiness);
+2. stage 2 constrains makespan to within `10%` of that incumbent and minimises the chosen secondary objective (setup, tardiness, or material loss);
 3. inside the slice, the solver tie-breaks on makespan to avoid arbitrary slack.
 
 `LBBD-5` and `LBBD-10` demonstrate Logic-Based Benders Decomposition with HiGHS MIP master and CP-SAT subproblems. The master emits two cut types per iteration:
@@ -71,14 +74,19 @@ This gives a current-proof surface for both multi-objective and decomposition re
   "results": {
     "status": "feasible",
     "feasible": true,
+    "proved_optimal": false,
     "solver_name": "greedy_dispatch",
     "makespan_minutes": 95.0,
     "total_setup_minutes": 18.0,
+    "total_material_loss": 0.0,
     "assignments": 6
   },
   "statistics": {
     "runs": 1,
-    "wall_time_s_mean": 0.0012
+    "wall_time_s_mean": 0.0012,
+    "wall_time_s_min": 0.0012,
+    "wall_time_s_max": 0.0012,
+    "peak_rss_mb": 85.0
   }
 }
 ```

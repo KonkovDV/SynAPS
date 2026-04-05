@@ -1,6 +1,6 @@
 ﻿# SynAPS
 
-Deterministic-first движок планирования и оркестрации ресурсов для задач класса MO-FJSP-SDST-ML-ARC.
+Открытый движок планирования и оркестрации ресурсов для задач класса MO-FJSP-SDST-ML-ARC.
 
 Language: [EN](README.md) | **RU**
 
@@ -8,34 +8,40 @@ Language: [EN](README.md) | **RU**
 
 SynAPS сейчас является публичным исследовательским и инженерным репозиторием.
 
-В кодовой базе уже есть Python-ядро расписаний, каноническая схема данных, benchmark harness и surfaces для валидации. При этом репозиторий **не** заявляет, что вся целевая архитектура "Алеф", киберфизическая интеграция или production-развёртывание уже реализованы как готовое ПО.
+В кодовой базе уже есть Python-ядро расписаний, каноническая схема данных, система бенчмарков и инструменты проверки. При этом репозиторий **не** заявляет, что вся целевая архитектура "Алеф", киберфизическая интеграция или промышленное развёртывание уже реализованы как готовое ПО.
 
 ### Что реализовано сегодня
 
-- Точные CP-SAT сценарии с учётом sequence-dependent setups и auxiliary resources.
-- Жадный диспетчер и bounded incremental repair.
+- Точные сценарии CP-SAT с учётом переналадок, зависящих от последовательности, дополнительных ресурсов и точной обработки `max_parallel` через cumulative-ограничения или виртуальные disjunctive lanes там, где это требуется для SDST.
+- Жадкий диспетчер с устойчивой логарифмической оценкой приоритета, явным штрафом за потери материала и ограниченным режимом локального ремонта с корректным учётом tardiness и material loss.
+- Профили CP-SAT с ограничением по допуску для режимов `setup-vs-makespan` (`CPSAT-EPS-SETUP-110`), `tardiness-vs-makespan` (`CPSAT-EPS-TARD-110`) и `material-loss-vs-makespan` (`CPSAT-EPS-MATERIAL-110`).
+- Solver LBBD на базе HiGHS и CP-SAT с отсечениями по узким местам, setup-cost cuts, балансировке нагрузки, master warm-start и межкластерным ограничениям.
+- Проверки на случайных данных через Hypothesis.
+- Проверки согласованности между solver-режимами.
+- Регрессионные benchmark-проверки с фиксированными границами качества.
+- Horizon-bound validation в feasibility checker.
 - Pydantic-модель текущего канонического формата данных.
-- Воспроизводимый benchmark harness в [benchmark/README.md](benchmark/README.md).
-- Репозиторная валидация через `pytest`, targeted `ruff` checks и packaging metadata.
+- Воспроизводимый набор benchmark-сценариев с тремя уровнями входных данных (`tiny`, `medium`, `medium-stress`) в [benchmark/README.md](benchmark/README.md).
+- Репозиторная проверка через `pytest`, `ruff` и сборку пакета.
 
 ### Что относится к target blueprint
 
 Длинные архитектурные документы описывают целевое развитие системы, включая:
 
-- event-sourced orchestration и более строгие boundary между слоями;
-- hardware-aware hot paths, например Rust или PyO3 мосты;
+- событийную оркестрацию и более строгие границы между слоями;
+- аппаратно-ориентированные быстрые участки, например мосты на Rust или PyO3;
 - decomposition и LBBD для более крупных инстансов;
-- advisory ML или LLM-слои с явными guardrails.
+- вспомогательные ML- или LLM-слои с явными ограничителями.
 
-Эти части следует считать roadmap и research direction, если для них нет прямого подтверждения текущим кодом, тестами и бенчмарками в этом репозитории.
+Если эти элементы не подтверждены текущим кодом и данными из бенчмарков, их нужно читать как план развития, а не как уже поставленную функциональность.
 
 ## Границы заявлений
 
-Читать SynAPS лучше как engineering surface, а не как маркетинговый манифест.
+На SynAPS лучше смотреть как на инженерный репозиторий, а не как на маркетинговый манифест.
 
-- Репозиторий не утверждает, что hardware pinning, zero-copy IPC, event sourcing, GNN cuts или LLM explanation уже реализованы здесь сегодня.
-- Публичная публикация репозитория не означает production readiness, regulator-ready состояние или сертифицированную интеграцию с заводским контуром.
-- Investor и diligence материалы являются вспомогательным контекстом, а не единственным техническим SSOT.
+- Репозиторий не утверждает, что здесь уже реализованы pinning железа, zero-copy IPC, event sourcing, GNN-отсечения или LLM-пояснения.
+- Публичная публикация репозитория не означает промышленную готовность, регуляторную готовность или сертифицированную интеграцию с заводским контуром.
+- Инвесторские материалы являются вспомогательным контекстом, а не единственным техническим источником правды.
 
 ## Быстрый старт
 
@@ -44,13 +50,13 @@ git clone https://github.com/synaps/synaps.git
 cd synaps
 python -m pip install -e ".[dev]"
 
-# Routed solve через portfolio API с JSON output
+# Запуск расчёта через portfolio API с JSON-ответом
 python -m synaps solve benchmark/instances/tiny_3x3.json
 
-# Сгенерировать runtime contract schemas для TS outer shell
+# Сгенерировать схемы контрактов для внешнего TypeScript-слоя
 python -m synaps write-contract-schemas --output-dir schema/contracts
 
-# Запустить минимальный TypeScript control-plane BFF
+# Запустить минимальный TypeScript-шлюз
 cd control-plane
 npm install
 npm run dev
@@ -71,37 +77,44 @@ twine check dist/*
 
 ## Карта репозитория
 
-- [docs/README.md](docs/README.md): навигация по архитектурным, доменным, эволюционным и research документам.
-- [docs/PUBLIC_GITHUB_POST_PUSH_CHECKLIST.md](docs/PUBLIC_GITHUB_POST_PUSH_CHECKLIST.md): ручной GitHub checklist после первого публичного push.
-- [benchmark/README.md](benchmark/README.md): воспроизводимое сравнение solver-ов.
-- `python -m synaps solve <instance.json>`: high-level routed solve с JSON output.
-- [`schema/contracts/`](schema/contracts/README.md): стабильный JSON contract для будущего TS control-plane.
-- [`control-plane/`](control-plane/README.md): минимальный TypeScript BFF как proof network-facing control-plane boundary.
-- [CONTRIBUTING.md](CONTRIBUTING.md): правила contribution flow и проверки.
+- [docs/README.md](docs/README.md): англоязычный путеводитель по архитектурным, доменным, эволюционным и исследовательским документам.
+- [docs/README_RU.md](docs/README_RU.md): русскоязычный путеводитель по технической документации.
+- [docs/PUBLIC_GITHUB_POST_PUSH_CHECKLIST.md](docs/PUBLIC_GITHUB_POST_PUSH_CHECKLIST.md): ручной список действий после первого публичного push в GitHub.
+- [benchmark/README.md](benchmark/README.md): англоязычное описание системы бенчмарков.
+- [benchmark/README_RU.md](benchmark/README_RU.md): русскоязычное описание системы бенчмарков.
+- `python -m synaps solve <instance.json>`: запуск расчёта с JSON-ответом.
+- [`schema/contracts/`](schema/contracts/README.md): стабильный JSON-контракт для будущего TypeScript-слоя.
+- [`control-plane/`](control-plane/README.md): англоязычное описание минимального TypeScript-шлюза.
+- [`control-plane/README_RU.md`](control-plane/README_RU.md): русскоязычное описание сетевой границы TypeScript-слоя.
+- [CONTRIBUTING.md](CONTRIBUTING.md): правила участия и проверки изменений.
 - [SUPPORT.md](SUPPORT.md): поддерживаемые публичные каналы поддержки.
 - [SECURITY.md](SECURITY.md): маршрут для сообщений об уязвимостях.
 
-## Архитектурные и research-материалы
+## Архитектурные и исследовательские материалы
 
 В репозитории есть более широкие документы по целевой системе и доменной модели:
 
 - [docs/architecture/01_OVERVIEW.md](docs/architecture/01_OVERVIEW.md)
 - [docs/architecture/02_CANONICAL_FORM.md](docs/architecture/02_CANONICAL_FORM.md)
 - [docs/architecture/03_SOLVER_PORTFOLIO.md](docs/architecture/03_SOLVER_PORTFOLIO.md)
-- [research/SYNAPS_MASTER_BLUEPRINT.md](research/SYNAPS_MASTER_BLUEPRINT.md)
 - [research/SYNAPS_OSS_STACK_2026.md](research/SYNAPS_OSS_STACK_2026.md)
+- [research/SYNAPS_UNIVERSAL_ARCHITECTURE.md](research/SYNAPS_UNIVERSAL_ARCHITECTURE.md)
+- [research/SYNAPS_AIR_GAPPED_OFFLINE.md](research/SYNAPS_AIR_GAPPED_OFFLINE.md)
 
-Эти материалы полезны для понимания направления развития, но текущую границу реализации всё равно определяют код, тесты, benchmark harness и packaging surfaces в самом репозитории.
+Эти материалы полезны для понимания направления развития, но текущую границу реализации всё равно определяют код, тесты, бенчмарки и поверхности сборки в самом репозитории.
 
 ## Темы roadmap
 
-- Усилить decomposition и масштабирование поверх текущего solver-centric baseline.
-- Вынести orchestration boundaries отдельно от математического ядра.
-- Добавить более зрелые public release и supply-chain surfaces.
-- Жёстко привязывать сильные claims к измеримым evidence.
+- Усилить декомпозицию и масштабирование поверх текущей LBBD-базы, включая более сильные отсечения и подсказки для поиска.
+- Вынести границы оркестрации отдельно от математического ядра, чтобы состояние расписания не оставалось целиком внутри solver-слоя.
+- Расширить набор epsilon-профилей до сценариев потерь материала и более явного многокритериального перебора.
+- Добавить более зрелые процессы релизов, обновления зависимостей и проверки цепочки поставки.
+- Жёстко привязывать сильные исследовательские утверждения к измеримым доказательствам.
 
 ## Investor и diligence материалы
 
 Опциональный diligence packet может жить в `docs/investor/`.
 
 Этот слой намеренно вторичен. Open-source код, тесты, benchmark harness и packaging от этой подпапки не зависят. Если задача в том, чтобы понять, что репозиторий умеет сегодня, начинать стоит с инженерных entrypoint-ов выше.
+
+Если investor-слой всё же нужен, начинайте с [docs/investor/README_RU.md](docs/investor/README_RU.md). Этот роутер теперь ведёт только к сокращённому активному набору и к границе архива.

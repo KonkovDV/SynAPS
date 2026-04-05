@@ -1,5 +1,7 @@
 # SynAPS TypeScript Control Plane
 
+Language: **EN** | [RU](README_RU.md)
+
 This package is the minimal TypeScript BFF layer above the Python SynAPS kernel.
 
 It does not implement operator UI, ERP/MES adapters, or long-lived workflow orchestration.

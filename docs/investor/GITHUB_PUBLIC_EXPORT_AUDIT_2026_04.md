@@ -1,9 +1,9 @@
 ---
 title: "SynAPS GitHub Public Export Audit 2026-04"
 status: "active"
-version: "1.1.0"
-last_updated: "2026-04-02"
-date: "2026-04-02"
+version: "1.2.0"
+last_updated: "2026-04-04"
+date: "2026-04-04"
 tags: [synaps, github, audit, publication, investor]
 mode: "evidence"
 ---
@@ -12,7 +12,7 @@ mode: "evidence"
 
 > **Terms are defined in [GLOSSARY](GLOSSARY_2026_04.md).**
 
-Date: 2026-04-02
+Date: 2026-04-04
 Status: active
 Scope: standalone SynAPS publication readiness for external GitHub review and investor-facing technical diligence
 
@@ -26,9 +26,9 @@ Convert the current SynAPS documentation and repository structure into a conserv
 2. GitHub Docs, community profile guidance: recommended community-health files and valid issue template metadata are visible in the public community checklist.
 3. GitHub Docs, security policy guidance: `SECURITY.md` should state supported versions and vulnerability reporting instructions.
 4. GitHub Docs, private vulnerability reporting guidance: public repositories can expose a private disclosure button when the setting is enabled.
-5. GitHub Docs, repository topics guidance: topics should be lowercase, hyphenated, and intentionally curated.
-6. GitHub Docs, CODEOWNERS guidance: owners must be valid users or teams with write access.
-7. GitHub Docs, artifact attestation guidance: provenance and SBOM attestations should stay verifiable in Actions.
+5. GitHub Docs, security features guidance: dependency graph, SPDX SBOM export, rulesets, secret scanning, and artifact attestations are GitHub-side capabilities with plan-dependent availability.
+6. GitHub Docs, repository topics guidance: topics should be lowercase, hyphenated, and intentionally curated.
+7. GitHub Docs, CODEOWNERS guidance: owners must be valid users or teams with write access.
 8. GitHub Docs, Dependabot guidance: version updates should be configured in `.github/dependabot.yml`.
 9. OpenSSF Scorecard as a public trust benchmark for repository hygiene.
 10. Citation File Format guidance: `CITATION.cff` is rendered by GitHub and provides machine-readable citation metadata.
@@ -38,30 +38,31 @@ Convert the current SynAPS documentation and repository structure into a conserv
 1. `README.md`, `SUPPORT.md`, `SECURITY.md`, `CONTRIBUTING.md`, and `CITATION.cff` as the public trust boundary.
 2. `docs/investor/` as the active SynAPS investor evidence pack.
 3. `docs/README.md` and local architecture docs as the current technical entrypoint.
-4. `.github/workflows/**` and `pyproject.toml` as the publication and supply-chain surfaces.
+4. `.github/workflows/**`, `.github/dependabot.yml`, issue templates, and `pyproject.toml` as the publication and supply-chain surfaces.
 
-## Verified Findings
+## Current Public Baseline
 
-| Surface | Status before this audit | Action | Result |
-| --- | --- | --- | --- |
-| Root README | present, but generic for external investors | add explicit public/investor routing | improved |
-| `CONTRIBUTING.md` | already present | keep and route to it | retained |
-| `LICENSE` | already present | keep and route to it | retained |
-| `SECURITY.md` | missing | add root security policy | closed |
-| `CODE_OF_CONDUCT.md` | missing | add root conduct policy | closed |
-| `SUPPORT.md` | missing | add root support routing | closed |
-| `CITATION.cff` | missing | add root citation metadata | closed |
-| `CONTRIBUTING.md` | present but too internal and oversized for public entry use | rewrite into a concise public router | closed |
-| issue templates | present but internal and not public-review ready | replace with bug, feature, and safe security templates plus chooser config | closed |
-| PR template | present but narrow and internal to one technical slice | rewrite into generic public PR template | closed |
-| SynAPS investor index | missing | add `docs/investor/README.md` | closed |
-| Publication audit artifact | missing | add this file | closed |
-| `Dependabot` config | missing | add `.github/dependabot.yml` for `npm`, `github-actions`, and `docker` | closed |
-| GitHub settings baseline | missing | add `docs/quality/PUBLIC_GITHUB_SETTINGS_BASELINE_2026_04.md` | closed |
-| Export manifest boundary | too broad for a standalone public snapshot | tighten to self-contained public surfaces | closed |
-| Root public routers | linked to excluded startup or agent-control-plane surfaces | rewrite into public-safe routers | closed |
-| SynAPS temporary merge task | obsolete one-shot residue | remove from `.vscode/tasks.json` | closed |
-| SynAPS temporary merge script | obsolete one-shot residue | delete `scripts/temp-merge-synaps.ps1` | closed |
+| Surface | Current state | Audit view |
+| --- | --- | --- |
+| Root README and Russian mirror | present and now bounded around current implementation | CLOSED |
+| Public trust files (`LICENSE`, `SECURITY.md`, `SUPPORT.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `CITATION.cff`) | present at repo root | CLOSED |
+| Issue templates and PR template | present under `.github/ISSUE_TEMPLATE/` and `.github/PULL_REQUEST_TEMPLATE.md` | CLOSED |
+| Dependabot config | present for `pip` and `github-actions` | PARTIAL |
+| Review and trust workflows | CI, dependency review, CodeQL, Scorecards, and release workflows are present | CLOSED |
+| Investor router | present as an optional diligence surface under `docs/investor/` | CLOSED |
+| Public GitHub post-push checklist | present at `docs/PUBLIC_GITHUB_POST_PUSH_CHECKLIST.md` | CLOSED |
+| Conservative export boundary | public engineering entrypoints do not depend on parent workspace files | CLOSED |
+
+## Boundary Discipline
+
+The current standalone repository uses the right public order of operations:
+
+1. root README first, as the engineering truth boundary;
+2. docs and benchmark routers second;
+3. investor materials only as an optional diligence layer;
+4. no claim that publication alone makes the repository production-ready.
+
+This matters because the public GitHub surface is not just a file inventory. It is also a claim-discipline surface.
 
 ## Cable-Donor Cleanup Status
 
@@ -78,27 +79,12 @@ Targeted searches for the following cable-donor markers were run against the act
 Observed result:
 
 1. the core SynAPS code and research surfaces returned no matches;
-2. inside `docs/investor/`, the only matches are the self-referential marker list in this audit file;
-3. active investor narrative files such as `README.md`, `PITCH_MEMO.md`, `EVIDENCE_BASE.md`, and `MARKET_COMPETITION_REPORT_2026_04.md` do not contain those donor markers.
+2. inside `docs/investor/`, the only active-surface hits are the self-referential marker list in this audit file itself;
+3. active investor narrative files such as `README.md`, `PITCH_MEMO_2026_04.md`, `CLAIM_EVIDENCE_REGISTER_2026_04.md`, and `MARKET_COMPETITION_REPORT_2026_04.md` do not contain those donor markers.
 
 Additional verification showed that the current legacy archive surface is empty.
 
 Verdict: active SynAPS investor-facing surfaces are already industry-agnostic. The required cleanup was removal of obsolete migration residue rather than content rewrite.
-
-## Dependency Freshness Audit
-
-### SynAPS Python environment
-
-`pip list --outdated --format=json` in the configured SynAPS environment reports `2` outdated packages:
-
-1. `protobuf` `6.33.6 -> 7.34.1`
-2. `pydantic_core` `2.41.5 -> 2.45.0`
-
-### Freshness verdict
-
-The repository is **not** yet on the latest software versions across the board.
-
-This publication-hardening task intentionally records the freshness gap instead of applying mass upgrades. Even the current Python gaps should be handled through a focused compatibility pass rather than folded into publication work.
 
 ## Verification Run
 
@@ -135,6 +121,28 @@ Applied outcomes:
 3. the curated snapshot now includes `Dependabot`, dependency-review configuration, and the public GitHub settings baseline;
 4. local build artifacts and unrelated parent-workspace files stay outside the default engineering export.
 
+## GitHub Security Baseline Interpretation
+
+The important distinction is between repository files and GitHub-side capabilities.
+
+Repository files already in place:
+
+1. trust and community-health docs;
+2. review and release workflows;
+3. issue and pull request templates;
+4. conservative public routers.
+
+GitHub-side capabilities that can strengthen the public repo after push:
+
+1. dependency graph and SPDX SBOM export;
+2. Dependabot alerts and security updates;
+3. private vulnerability reporting;
+4. secret scanning and push protection, where plan support exists;
+5. rulesets or branch protection requiring CI and dependency review;
+6. optional artifact attestations, if the future release workflow adopts them.
+
+The current export audit treats those as post-push platform settings, not as already-closed repository facts.
+
 ## CODEOWNERS Decision
 
 Current GitHub documentation requires CODEOWNERS entries to point to valid users or teams with write access.
@@ -152,18 +160,20 @@ Required manual follow-through:
 3. enable secret scanning and push protection for the public repository;
 4. require dependency review and the main CI checks in rulesets or branch protection;
 5. add repository topics and final public metadata;
-6. defer `CODEOWNERS` until the final public owners are verified.
+6. use GitHub's dependency graph to export an SPDX SBOM once the repo is public;
+7. defer `CODEOWNERS` until the final public owners are verified.
 
 ## Current Publication Verdict
 
-`PUBLIC_GITHUB_READY_WITH_BOUNDARIES`
+`PUBLIC_GITHUB_READY_WITH_CONSERVATIVE_BOUNDARIES`
 
 Meaning:
 
 1. the repository is now structurally fit for conservative public GitHub review;
 2. the SynAPS investor pack is explicitly navigable;
 3. trust and governance surfaces are visible at the repository root;
-4. evidence boundaries remain explicit rather than implied.
+4. evidence boundaries remain explicit rather than implied;
+5. GitHub-side security features are treated as follow-through settings, not as already-shipped repository guarantees.
 
 ## What This Verdict Does Not Mean
 
@@ -179,4 +189,5 @@ Meaning:
 3. dedicated dependency-upgrade program for the current codebase;
 4. public repository settings still need to be enabled in GitHub after the first push;
 5. stronger ownership routing once verified public maintainers are declared;
-6. Python supply-chain coverage for the current SynAPS codebase.
+6. Python SBOM, provenance, and vulnerability-scanning coverage for the current SynAPS codebase;
+7. optional npm freshness coverage for the minimal TypeScript sidecar.

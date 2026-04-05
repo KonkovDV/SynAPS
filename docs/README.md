@@ -1,8 +1,17 @@
 # SynAPS Documentation Map
 
+Language: **EN** | [RU](README_RU.md)
+
 This directory is the public router for SynAPS technical documentation.
 
 Start here if you want the larger system context around the current scheduling core.
+
+## Fast paths
+
+1. Start with [../README.md](../README.md) for the repository boundary and quick-start commands.
+2. Go to [../benchmark/README.md](../benchmark/README.md) if you want reproducible solver evidence.
+3. Go to [../control-plane/README.md](../control-plane/README.md) if you want the TypeScript runtime boundary.
+4. Go to [investor/README.md](investor/README.md) only if you need the optional investor and diligence layer.
 
 ## Architecture
 
@@ -36,23 +45,28 @@ Start here if you want the larger system context around the current scheduling c
 
 ## Research Notes
 
-- [SYNAPS_MASTER_BLUEPRINT.md](../research/SYNAPS_MASTER_BLUEPRINT.md)
 - [SYNAPS_OSS_STACK_2026.md](../research/SYNAPS_OSS_STACK_2026.md)
 - [SYNAPS_UNIVERSAL_ARCHITECTURE.md](../research/SYNAPS_UNIVERSAL_ARCHITECTURE.md)
-- [SYNAPS_ACADEMIC_WHITEPAPER.md](../research/SYNAPS_ACADEMIC_WHITEPAPER.md)
 - [SYNAPS_AIR_GAPPED_OFFLINE.md](../research/SYNAPS_AIR_GAPPED_OFFLINE.md)
+
+Legacy blueprint and whitepaper narrative files are no longer part of the active research route.
 
 ## Validation and Evidence
 
 - [benchmark/README.md](../benchmark/README.md)
+- [benchmark/README_RU.md](../benchmark/README_RU.md)
 - [control-plane/README.md](../control-plane/README.md)
+- [control-plane/README_RU.md](../control-plane/README_RU.md)
 - [README.md](../README.md)
+- [README_RU.md](../README_RU.md)
 - [PUBLIC_GITHUB_POST_PUSH_CHECKLIST.md](PUBLIC_GITHUB_POST_PUSH_CHECKLIST.md)
 - [CONTRIBUTING.md](../CONTRIBUTING.md)
 - [SECURITY.md](../SECURITY.md)
 
 ## Optional Investor Pack
 
-If present, `docs/investor/` contains a separate SynAPS diligence packet.
+`docs/investor/` contains the optional SynAPS diligence packet.
 
 The engineering surface is complete without that subtree, so removing it must not affect the code, tests, benchmark harness, or package build.
+
+Use [investor/README.md](investor/README.md) as the investor router. It now points to the reduced active packet and to the archive boundary for older or duplicate materials.

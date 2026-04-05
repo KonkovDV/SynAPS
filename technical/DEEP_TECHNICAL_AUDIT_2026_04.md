@@ -476,8 +476,9 @@ flwr: ">=1.16.0"
 - Bertsimas, D., & Sim, M. (2004). The price of robustness. *Operations Research*, 52(1), 35-53.
 
 ### Связанные документы SynAPS
-- `research/SYNAPS_MASTER_BLUEPRINT.md` — Сводный стратегический отчёт V3-V4
-- `research/SYNAPS_OSS_STACK_2026.md` — Аудит Open-Source стека (предыдущая версия)
+- `research/SYNAPS_OSS_STACK_2026.md` — Аудит Open-Source стека
+- `research/SYNAPS_UNIVERSAL_ARCHITECTURE.md` — CURRENT vs TARGET для универсальной архитектуры
+- `research/SYNAPS_AIR_GAPPED_OFFLINE.md` — CURRENT vs TARGET для air-gapped контура
 - `docs/architecture/03_SOLVER_PORTFOLIO.md` — Архитектура солверного портфеля
-- `docs/research/LITERATURE_REVIEW.md` — Обзор литературы
-- `docs/research/RESEARCH_ROADMAP_2025_2075.md` — Исследовательская дорожная карта
+- `docs/evolution/CROSS_VECTOR_INTEGRATION.md` — связка эволюционных треков
+- `docs/README_RU.md` — текущая карта документации SynAPS

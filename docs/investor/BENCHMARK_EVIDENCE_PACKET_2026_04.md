@@ -1,9 +1,9 @@
 ---
 title: "SynAPS Benchmark Evidence Packet 2026-04"
 status: "active"
-version: "1.0.0"
-last_updated: "2026-04-02"
-date: "2026-04-02"
+version: "1.1.0"
+last_updated: "2026-04-04"
+date: "2026-04-04"
 tags: [synaps, benchmark, evidence, investor]
 mode: "reference"
 ---
@@ -12,7 +12,7 @@ mode: "reference"
 
 > **Terms and confidence labels are defined in [GLOSSARY](GLOSSARY_2026_04.md).**
 
-Date: 2026-04-02
+Date: 2026-04-04
 Status: active
 Scope: investor-facing benchmark evidence policy and current benchmark proof state for SynAPS
 
@@ -26,13 +26,31 @@ This document defines what current benchmark evidence exists and what would be r
 
 Freshly verified in the workspace:
 
-1. the current pytest suite passed `27/27`;
+1. the current pytest suite passed `120/120`;
 2. canonical smoke benchmark on `tiny_3x3.json` ran successfully;
-3. `GREED` produced a feasible schedule with makespan `139.67` minutes;
-4. `CPSAT-10` produced an optimal schedule with makespan `81.0` minutes;
-5. on that smoke instance, CP-SAT beat GREED by `58.67` minutes or approximately `42.0%` in makespan.
+3. `GREED` produced a feasible schedule with makespan `106.67` minutes;
+4. `CPSAT-10` produced an optimal schedule with makespan `82.0` minutes;
+5. on that smoke instance, `CPSAT-10` beat `GREED` by `24.67` minutes or approximately `23.1%` in makespan;
+6. the active benchmark evidence is still a smoke-instance proof surface, not a broad publication-grade benchmark family.
 
 These results are recorded in `TECHNICAL_VERIFICATION_REPORT_2026_04.md`.
+
+## Current Gap-To-Optimality Status
+
+The benchmark evidence currently supports only one transparent exact-versus-heuristic delta:
+
+- `tiny_3x3.json`: `GREED` feasible at `106.67` minutes, `CPSAT-10` optimal at `82.0` minutes.
+
+That is enough to show that the exact solver can materially beat the current greedy baseline on at least one verified instance.
+
+It is not enough to claim a generalized gap-to-optimality story across instance families.
+
+Still missing from the active evidence layer:
+
+1. repeated `GREED` versus `CPSAT-*` tables for small and medium classes;
+2. distribution statistics for any stochastic or timeout-sensitive regime;
+3. auxiliary-resource-heavy benchmark cases called out as first-class evidence;
+4. transparent external baseline comparisons beyond the smoke run.
 
 ## What This Evidence Supports
 
@@ -40,7 +58,7 @@ The current benchmark evidence supports only these narrow claims:
 
 1. SynAPS has a working benchmark harness;
 2. the solver stack runs end-to-end on the canonical smoke instance;
-3. exact solving can materially outperform the current greedy baseline on at least one verified instance.
+3. exact solving can materially outperform the current greedy baseline on at least one verified tiny instance.
 
 ## What It Does Not Support
 
@@ -49,7 +67,8 @@ The current benchmark evidence does **not** yet support:
 1. broad benchmark leadership;
 2. externally validated superiority across industrial-size instances;
 3. performance claims against named APS vendors;
-4. generalized runtime or quality claims across domains.
+4. generalized runtime or quality claims across domains;
+5. a fully quantified gap-to-optimality narrative for the current portfolio.
 
 ## Publication-Grade Benchmark Requirements
 
@@ -88,4 +107,5 @@ SynAPS should not use benchmark language stronger than C2 unless all of the foll
 1. publish medium-instance repeated runs for `GREED`, `CPSAT-10`, and `CPSAT-60`;
 2. add a structured result table for at least tiny, small, and medium classes;
 3. add an auxiliary-resource-heavy case where the truth-gate semantics matter;
-4. link the benchmark packet from the investor diligence router once it moves beyond smoke-evidence level.
+4. add an explicit gap-to-optimality comparison lane with fixed timeout policy and disclosed hardware;
+5. keep the benchmark packet linked from the investor diligence router as a bounded smoke-evidence surface until stronger data exists.

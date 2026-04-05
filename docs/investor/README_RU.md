@@ -1,20 +1,52 @@
 ---
-title: "Инвесторский пакет SynAPS"
+title: "Инвесторские материалы SynAPS"
 status: "active"
-version: "2.0.1"
-last_updated: "2026-04-03"
-date: "2026-04-03"
-tags: [synaps, investor, startup, navigation, ru]
+version: "3.1.1"
+last_updated: "2026-04-05"
+date: "2026-04-05"
+tags: [synaps, investor, navigation, ru]
 mode: "reference"
 ---
 
-# Инвесторский пакет SynAPS
+# Инвесторские материалы SynAPS
 
 Language: [EN](README.md) | RU
 
-Эта директория — навигация по инвесторским материалам SynAPS. Оглавление и маршрутная карта, а не полная документация по продукту.
+Это сокращённый набор инвесторских материалов SynAPS.
 
-Этот subtree опционален. Его удаление не должно влиять на open-source код, тесты, benchmark harness и package build SynAPS.
+Папка опциональна. Её удаление не должно влиять на код, тесты, benchmark harness и сборку пакета.
+
+## Рекомендуемый маршрут по умолчанию
+
+Если нужен аккуратный маршрут через текущую доказательную базу репозитория, начинайте в таком порядке:
+
+1. [INVESTOR_DILIGENCE_PACKET_2026_04.md](INVESTOR_DILIGENCE_PACKET_2026_04.md)
+2. [CLAIM_EVIDENCE_REGISTER_2026_04.md](CLAIM_EVIDENCE_REGISTER_2026_04.md)
+3. [TECHNICAL_VERIFICATION_REPORT_2026_04.md](TECHNICAL_VERIFICATION_REPORT_2026_04.md)
+4. [BENCHMARK_EVIDENCE_PACKET_2026_04.md](BENCHMARK_EVIDENCE_PACKET_2026_04.md)
+
+## С чего начать
+
+Если нужен самый короткий деловой маршрут:
+
+1. [INVESTOR_ONE_PAGER_2026_04.md](INVESTOR_ONE_PAGER_2026_04.md)
+2. [INVESTOR_DECK_2026_04.md](INVESTOR_DECK_2026_04.md)
+3. [MARKET_MODEL_2026_04.md](MARKET_MODEL_2026_04.md)
+
+Если нужен самый короткий технический маршрут:
+
+1. [CLAIM_EVIDENCE_REGISTER_2026_04.md](CLAIM_EVIDENCE_REGISTER_2026_04.md)
+2. [TECHNICAL_VERIFICATION_REPORT_2026_04.md](TECHNICAL_VERIFICATION_REPORT_2026_04.md)
+3. [BENCHMARK_EVIDENCE_PACKET_2026_04.md](BENCHMARK_EVIDENCE_PACKET_2026_04.md)
+4. [VERIFICATION_COVERAGE_AUDIT_2026_04.md](VERIFICATION_COVERAGE_AUDIT_2026_04.md)
+
+Если нужна одна короткая русскоязычная summary-версия:
+
+1. [HYPER_DEEP_REPORT_2026_04_RU.md](HYPER_DEEP_REPORT_2026_04_RU.md)
+
+Если нужен сохранённый полный русский investor narrative:
+
+1. [../../archive/investor-2026-04-slimming/HYPER_DEEP_REPORT_2026_04_RU_v2.md](../../archive/investor-2026-04-slimming/HYPER_DEEP_REPORT_2026_04_RU_v2.md)
 
 ## Глоссарий
 
@@ -23,70 +55,53 @@ Language: [EN](README.md) | RU
 - **RU:** [GLOSSARY_2026_04_RU.md](GLOSSARY_2026_04_RU.md)
 - **EN:** [GLOSSARY_2026_04.md](GLOSSARY_2026_04.md)
 
-## Порядок чтения
+## Основной активный набор
 
-Документы расположены в последовательности, которая имеет наибольший смысл для первого прочтения. Не обязательно читать все 30 — первые 5–6 дают картину.
+В активном слое оставлены только ключевые файлы:
 
-1. `GLOSSARY_2026_04_RU.md` — термины, акронимы, уровни достоверности и шкала доказательств
-2. `INVESTOR_ONE_PAGER_2026_04.md` — самая быстрая инвесторская сводка
-3. `INVESTOR_DECK_2026_04.md` — повествование в формате презентации
-4. `INVESTOR_5_SLIDE_DECK_MOSKABEL_2026_04_RU.md` — короткий 5-слайдовый deck для русскоязычного разговора про Москабель, hard/software/math и ask
-5. `INVESTOR_5_SLIDE_DECK_MOSKABEL_PPT_READY_2026_04_RU.md` — готовый текст самих слайдов для PowerPoint, Keynote или Figma Slides
-6. `INVESTOR_DILIGENCE_PACKET_2026_04.md` — главная поверхность фактов для проверки
-7. `MARKET_MODEL_2026_04.md` — рыночная модель с привязкой к источникам
-8. `TECHNICAL_VERIFICATION_REPORT_2026_04.md` — свежие результаты технической проверки
-9. `BENCHMARK_EVIDENCE_PACKET_2026_04.md` — граница доказательств бенчмарков и стандарт следующей публикации
-10. `PILOT_KPI_PROTOCOL_2026_04.md` — как измерять будущие пилоты
-11. `INVESTOR_QA_2026_04.md` — краткий Q&A для живых разговоров
-12. `ACADEMIC_METHODS_APPENDIX_2026_04.md` — методология, иерархия доказательств, угрозы валидности
-13. `COMPLIANCE_TRUST_MATRIX_2026_04.md` — матрица соответствия и границы доверия
-14. `CLAIM_EVIDENCE_REGISTER_2026_04.md` — проверяемый реестр активных утверждений
-15. `WORLD_CLASS_TECHNICAL_DILIGENCE_FRAMEWORK_2026_04.md` — синтез мировых практик апреля 2026
-16. `VERSION_AND_SUPPLY_CHAIN_AUDIT_2026_04.md` — аудит свежести версий, SBOM и происхождения
-17. `INTEGRATION_AND_ARCHITECTURE_GAP_AUDIT_2026_04.md` — аудит продуктовой готовности и архитектурных пробелов
-18. `VERIFICATION_COVERAGE_AUDIT_2026_04.md` — что реально перепроверено
-19. `MATHEMATICAL_AND_RESEARCH_FACT_CHECK_2026_04.md` — проверка формализма и утверждений о solver'е
-20. `LONG_HORIZON_STRATEGIC_OPTIONS_2026_04.md` — рамка на 20–45 лет
-21. `INVESTOR_RED_TEAM_APPENDIX_2026_04.md` — самые жёсткие возражения и незакрытые пробелы
-22. `PITCH_MEMO_2026_04.md` — основное инвесторское повествование (EN)
-23. `PITCH_MEMO_2026_04_RU.md` — основное инвесторское повествование (RU)
-24. `EVIDENCE_BASE.md` — контроль утверждений и границ доказательств
-25. `MARKET_COMPETITION_REPORT_2026_04.md` — конкурентная основа и позиционирование
-26. `SYNAPS_VS_APS_INFIMUM_2026_04.md` — глубокое сравнение с вертикальным APS-продуктом
-27. `INVESTOR_LETTER_SYNAPS_VS_APS_INFIMUM_MOSKABEL_2026_04.md` — письмо инвестору по замене APS Infimum на Москабеле
-28. `MOSKABEL_COUNTERFACTUAL_REPLACEMENT_MODEL_2026_04.md` — экономика замены и пороговая модель
-29. `GITHUB_COMPARABLES_BEST_PRACTICES_2026_04.md` — лучшие практики GitHub-репозиториев
-30. `HYPERDEEP_AUDIT_REPORT_2026_04.md` — проверка фактов по первоисточникам
-31. `GITHUB_PUBLIC_EXPORT_AUDIT_2026_04.md` — готовность к публикации и граница верификации
+- [INVESTOR_DILIGENCE_PACKET_2026_04.md](INVESTOR_DILIGENCE_PACKET_2026_04.md): главный evidence-first маршрут
+- [CLAIM_EVIDENCE_REGISTER_2026_04.md](CLAIM_EVIDENCE_REGISTER_2026_04.md): граница между current proof и roadmap
+- [TECHNICAL_VERIFICATION_REPORT_2026_04.md](TECHNICAL_VERIFICATION_REPORT_2026_04.md): что реально запускается сейчас
+- [BENCHMARK_EVIDENCE_PACKET_2026_04.md](BENCHMARK_EVIDENCE_PACKET_2026_04.md): что benchmark evidence реально доказывает сегодня
+- [MARKET_MODEL_2026_04.md](MARKET_MODEL_2026_04.md): рыночная модель с привязкой к источникам
+- [INVESTOR_ONE_PAGER_2026_04.md](INVESTOR_ONE_PAGER_2026_04.md): самая короткая сводка
+- [INVESTOR_DECK_2026_04.md](INVESTOR_DECK_2026_04.md): презентационная версия истории
+- [HYPER_DEEP_REPORT_2026_04_RU.md](HYPER_DEEP_REPORT_2026_04_RU.md): короткая русскоязычная summary-версия
 
-## Где я стою
+## Дополнительные материалы
 
-SynAPS защитим как C2-гипотезу продуктового ядра. Схема, solver, бенчмарк-харнесс и исследовательская документация проверяемы. Инвесторские документы ограничены явными контролями. Рыночная модель привязана к источникам, но ROI из пилотов, лидерство в бенчмарках и регуляторная готовность — открытые пробелы, не закрытые доказательства. Против APS Infimum: SynAPS уже сильнее по открытым техническим доказательствам и дисциплине утверждений, но слабее по развёрнутому вертикальному продукту.
+Открывайте их только под конкретный вопрос:
 
-## Техническая поверхность
+- [VERIFICATION_COVERAGE_AUDIT_2026_04.md](VERIFICATION_COVERAGE_AUDIT_2026_04.md)
+- [HYPERDEEP_AUDIT_REPORT_2026_04.md](HYPERDEEP_AUDIT_REPORT_2026_04.md)
+- [PILOT_KPI_PROTOCOL_2026_04.md](PILOT_KPI_PROTOCOL_2026_04.md)
+- [COMPLIANCE_TRUST_MATRIX_2026_04.md](COMPLIANCE_TRUST_MATRIX_2026_04.md)
+- [MARKET_COMPETITION_REPORT_2026_04.md](MARKET_COMPETITION_REPORT_2026_04.md)
+- [MARKET_COMPETITION_REPORT_2026_04_RU.md](MARKET_COMPETITION_REPORT_2026_04_RU.md)
+- [SYNAPS_VS_APS_INFIMUM_2026_04.md](SYNAPS_VS_APS_INFIMUM_2026_04.md)
+- [SYNAPS_VS_APS_INFIMUM_2026_04_RU.md](SYNAPS_VS_APS_INFIMUM_2026_04_RU.md)
+- [MOSKABEL_COUNTERFACTUAL_REPLACEMENT_MODEL_2026_04.md](MOSKABEL_COUNTERFACTUAL_REPLACEMENT_MODEL_2026_04.md)
+- [MOSKABEL_COUNTERFACTUAL_REPLACEMENT_MODEL_2026_04_RU.md](MOSKABEL_COUNTERFACTUAL_REPLACEMENT_MODEL_2026_04_RU.md)
+- [../../archive/investor-2026-04-slimming/HYPER_DEEP_REPORT_2026_04_RU_v2.md](../../archive/investor-2026-04-slimming/HYPER_DEEP_REPORT_2026_04_RU_v2.md)
 
-Если нужен самый короткий технический маршрут в проект, начинайте здесь:
+## Что изменилось
 
-1. `TECHNICAL_VERIFICATION_REPORT_2026_04.md`
-2. `MATHEMATICAL_AND_RESEARCH_FACT_CHECK_2026_04.md`
-3. `INVESTOR_DILIGENCE_PACKET_2026_04.md`
+Раньше в активной папке было слишком много параллельных версий, специальных презентаций и файлов с методическими пояснениями.
 
-## Инженерные точки входа
+Теперь активный слой короче специально:
 
-Если сначала нужен технический репозиторий, начинайте здесь:
+- маршрут по умолчанию теперь начинается с diligence -> claims -> technical verification -> benchmark evidence
+- один роутер вместо роутера и отдельного manifest
+- verification coverage теперь идёт в default technical route, а deep audit остаётся дополнительной evidence surface; сырой исторический снимок вынесен в archive
+- в активном слое остаётся короткая русская summary-версия, а полный русский investor narrative сохранён в archive-route
+- меньше презентационных файлов в основном маршруте
 
-1. [../../README.md](../../README.md)
-2. [../README.md](../README.md)
-3. [../../benchmark/README.md](../../benchmark/README.md)
-4. [../../SUPPORT.md](../../SUPPORT.md)
-5. [../../SECURITY.md](../../SECURITY.md)
-6. [../../CONTRIBUTING.md](../../CONTRIBUTING.md)
-7. [../../CITATION.cff](../../CITATION.cff)
+Старые и дублирующие материалы перенесены в [../../archive/investor-2026-04-slimming/README.md](../../archive/investor-2026-04-slimming/README.md).
 
-## Публикационная позиция
+## Текущая позиция
 
-Репозиторий подготовлен для консервативного публичного рецензирования и инвесторского обсуждения.
+Сегодня сильная сторона SynAPS - открытое и проверяемое детерминированное ядро планирования с bounded repair, воспроизводимой верификацией и минимальной TypeScript control-plane границей.
 
-Я не заявляю паритет с полноценными APS-пакетами, подтверждённый пилотами ROI, регуляторную готовность и полное закрытие свежести зависимостей. Пакет выровнен по состоянию на апрель 2026 — публичные руководства GitHub, стандарты цитирования, паттерны из венчурных OSS-репозиториев. Внешний синтез: `GITHUB_COMPARABLES_BEST_PRACTICES_2026_04.md`.
+Слабая сторона - отсутствие подтверждённых пилотов, зрелой вертикальной интеграции и эксплуатационной истории уровня промышленного APS.
 
-Для продуктового сравнения с вертикальным APS: `SYNAPS_VS_APS_INFIMUM_2026_04.md`. Для инвесторского вывода по экономике Москабеля: `INVESTOR_LETTER_SYNAPS_VS_APS_INFIMUM_MOSKABEL_2026_04.md` вместе с `MOSKABEL_COUNTERFACTUAL_REPLACEMENT_MODEL_2026_04.md`.
+Активный инвесторский пакет теперь отражает именно эту границу, без лишнего шума.

@@ -1,6 +1,6 @@
 # SynAPS Market Competition Report
 
-> **Terms and confidence labels are defined in [GLOSSARY](GLOSSARY_2026_04.md).** | [ГЛОССАРИЙ (RU)](GLOSSARY_2026_04_RU.md)
+> **Terms and confidence labels are defined in [GLOSSARY](GLOSSARY_2026_04.md).** | [GLOSSARY (RU)](GLOSSARY_2026_04_RU.md)
 
 Language: EN | [RU](MARKET_COMPETITION_REPORT_2026_04_RU.md)
 
@@ -84,7 +84,7 @@ For SynAPS this means:
 
 ## 6. Go-to-Market Implications
 
-1. Lead with scheduling accuracy, constraint realism, and replanning responsiveness — not with frontier AI language.
+1. Lead with scheduling accuracy, constraint realism, and replanning responsiveness - not with frontier AI language.
 2. Treat ERP, MES, and shop-floor integration as a first-order product concern.
 3. Target sites where setup losses, bottlenecks, auxiliary resources, and rescheduling pain have immediate economic impact.
 4. Treat digital twin, multi-site learning, and broader control-tower behavior as roadmap items, not present-day category parity.

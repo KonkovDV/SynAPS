@@ -10,7 +10,7 @@ mode: "reference"
 
 # Moskabel Counterfactual Replacement Model 2026-04
 
-> **Terms and confidence labels are defined in [GLOSSARY](GLOSSARY_2026_04.md).** | [ГЛОССАРИЙ (RU)](GLOSSARY_2026_04_RU.md)
+> **Terms and confidence labels are defined in [GLOSSARY](GLOSSARY_2026_04.md).** | [GLOSSARY (RU)](GLOSSARY_2026_04_RU.md)
 
 Language: EN | [RU](MOSKABEL_COUNTERFACTUAL_REPLACEMENT_MODEL_2026_04_RU.md)
 
@@ -104,7 +104,7 @@ SynAPS currently proves:
 2. visible solver baseline;
 3. bounded repair logic;
 4. benchmark harness;
-5. `27/27` passing tests;
+5. `120/120` passing tests;
 6. a working smoke benchmark path.
 
 SynAPS does **not** yet prove:
@@ -339,7 +339,7 @@ SynAPS remains highly investable as:
 ## 16. Related Surfaces
 
 1. `SYNAPS_VS_APS_INFIMUM_2026_04.md`
-2. `INVESTOR_LETTER_SYNAPS_VS_APS_INFIMUM_MOSKABEL_2026_04.md`
+2. `SYNAPS_VS_APS_INFIMUM_2026_04.md`
 3. `INVESTOR_DILIGENCE_PACKET_2026_04.md`
-4. `ACADEMIC_METHODS_APPENDIX_2026_04.md`
+4. `TECHNICAL_VERIFICATION_REPORT_2026_04.md`
 5. `CLAIM_EVIDENCE_REGISTER_2026_04.md`
