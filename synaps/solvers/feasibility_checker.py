@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -34,7 +35,7 @@ class FeasibilityChecker:
         2. Assigned machine is in eligible set.
         3. Precedence constraints respected (predecessor ends before successor starts).
         4. No time overlap on same machine.
-        5. Auxiliary resource pool not exceeded at any point in time.
+        5. Auxiliary resource pool not exceeded at any point in time across setup + processing windows.
     """
 
     def check(
@@ -181,6 +182,25 @@ class FeasibilityChecker:
                         )
                     )
 
+        setup_window_start_by_op: dict[Any, Any] = {}
+        for wc_id, machine_assignments in by_machine.items():
+            sorted_assignments = sorted(machine_assignments, key=lambda assignment: assignment.start_time)
+            previous_assignment: Assignment | None = None
+            for assignment in sorted_assignments:
+                if previous_assignment is None:
+                    setup_window_start_by_op[assignment.operation_id] = assignment.start_time
+                else:
+                    previous_op = ops_by_id.get(previous_assignment.operation_id)
+                    current_op = ops_by_id.get(assignment.operation_id)
+                    required_setup = 0
+                    if previous_op is not None and current_op is not None:
+                        required_setup = setup_lookup.get(
+                            (wc_id, previous_op.state_id, current_op.state_id),
+                            0,
+                        )
+                    setup_window_start_by_op[assignment.operation_id] = assignment.start_time - timedelta(minutes=required_setup)
+                previous_assignment = assignment
+
         # 5. Auxiliary resource pools
         for resource_id, resource in resources_by_id.items():
             events: list[tuple[Any, int, Any]] = []
@@ -190,7 +210,7 @@ class FeasibilityChecker:
                         continue
                     events.append(
                         (
-                            assignment.start_time,
+                            setup_window_start_by_op.get(assignment.operation_id, assignment.start_time),
                             requirement.quantity_needed,
                             assignment.operation_id,
                         )

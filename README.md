@@ -12,7 +12,7 @@ The repository currently contains a Python scheduling core, canonical schema sur
 
 ### Implemented today
 
-- Exact CP-SAT scheduling paths with sequence-dependent setup handling, auxiliary resources, and exact `max_parallel` handling through cumulative constraints or virtual disjunctive lanes when SDST requires them.
+- Exact CP-SAT scheduling paths with sequence-dependent setup handling, auxiliary resources across setup and processing windows, and exact `max_parallel` handling through cumulative constraints or virtual disjunctive lanes when any sequence-dependent transition cost (setup, material loss, or energy) requires lane-level ordering.
 - Greedy dispatch with queue-local log-space ATCS scoring, explicit material-loss penalties, and bounded incremental repair heuristics with accurate tardiness and material-loss accounting.
 - First-class epsilon-constrained CP-SAT profiles for setup-vs-makespan (`CPSAT-EPS-SETUP-110`), tardiness-vs-makespan (`CPSAT-EPS-TARD-110`), and material-loss-vs-makespan (`CPSAT-EPS-MATERIAL-110`) trade-off studies.
 - Logic-Based Benders Decomposition (LBBD) solver with HiGHS master, CP-SAT subproblems, bottleneck capacity cuts, setup-cost cuts, load-balance cuts (Hooker 2007, §7.3), master warm-start support, and post-assembly cross-cluster precedence/setup enforcement.

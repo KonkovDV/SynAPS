@@ -10,6 +10,17 @@ Language: [EN](README.md) | **RU**
 # Один solver, один пример
 python -m benchmark.run_benchmark benchmark/instances/tiny_3x3.json --solvers GREED
 
+# Сгенерировать воспроизводимый large boundary instance для LBBD-исследований
+python -m benchmark.generate_instances benchmark/instances/generated_large.json \
+  --preset large --seed 7
+
+# Агрегировать поведение router по семействам preset/seed
+python -m benchmark.study_routing_boundary --presets medium large --seeds 1 2 3
+
+# Сравнить реальное поведение solver-ов на generated preset families
+python -m benchmark.study_solver_scaling --presets medium large --seeds 1 2 3 \
+  --solvers GREED CPSAT-30 LBBD-10 AUTO
+
 # Автоматический выбор solver-а
 python -m benchmark.run_benchmark benchmark/instances/tiny_3x3.json --solvers AUTO
 
@@ -121,6 +132,77 @@ _SOLVER_REGISTRY["MY-SOLVER"] = SolverRegistration(
 ```
 
 Специальный режим `AUTO` используется только для маршрута с автоматическим выбором и идёт через `synaps.solve_schedule()`.
+
+## Параметрическая генерация инстансов
+
+`benchmark.generate_instances` активирует planned synthetic-generator surface из benchmark protocol и даёт воспроизводимые JSON-инстансы в текущем формате `ScheduleProblem`.
+
+### Пресеты
+
+| Пресет | Целевой band | Назначение |
+|--------|--------------|------------|
+| `tiny` | small | smoke/CI и проверка схемы |
+| `small` | small | регрессии и сравнение эвристик |
+| `medium` | medium | exact-профили и epsilon-slice сравнения |
+| `large` | large | routing boundary для LBBD и decomposition studies |
+| `industrial` | large | офлайн stress generation для research runs |
+
+### Примеры CLI
+
+```bash
+# Использовать preset как есть
+python -m benchmark.generate_instances benchmark/instances/generated_medium.json \
+  --preset medium --seed 11
+
+# Переопределить параметры для boundary-сценария
+python -m benchmark.generate_instances benchmark/instances/generated_boundary.json \
+  --preset large --seed 17 --jobs 48 --machines 14 --operations-min 4 --operations-max 6
+```
+
+Генератор пишет JSON-файл в текущем schema-compatible формате и печатает summary с deterministic seed и вычисленным `problem_profile`. Поэтому получившийся инстанс можно сразу использовать в `python -m synaps solve ...` и `python -m benchmark.run_benchmark ...` без промежуточной конвертации.
+
+## Routing Boundary Study
+
+`benchmark.study_routing_boundary` превращает generated preset families в воспроизводимый академический отчёт.
+
+Утилита делает три вещи:
+
+1. генерирует каждый указанный preset для набора deterministic seed-ов;
+2. вычисляет `problem_profile` для каждого инстанса;
+3. фиксирует решение deterministic router-а, чтобы гипотезы Phase 1 про LBBD-boundary были подтверждены фактами, а не только narrative-ом.
+
+Пример:
+
+```bash
+python -m benchmark.study_routing_boundary \
+  --presets medium large \
+  --seeds 1 2 3 4 \
+  --write-dir benchmark/instances/studies
+```
+
+В JSON-отчёт входят записи по каждому инстансу и агрегат `summary_by_preset`: counts по routed solver-ам, size band-ам, статистика по числу операций и флаг `routing_stable`, который сразу показывает drift границы, если preset перестал маппиться в ожидаемый portfolio member.
+
+## Solver Scaling Study
+
+`benchmark.study_solver_scaling` использует те же preset families, но переводит их в исполнимое comparative evidence по solver-ам.
+
+Для каждой комбинации `preset × seed` утилита:
+
+1. материализует инстанс в текущем schema-compatible формате;
+2. прогоняет указанные solver-конфигурации через публичный benchmark harness;
+3. агрегирует mean runtime, mean makespan и feasibility rate по фактически выбранному solver-у.
+
+Пример:
+
+```bash
+python -m benchmark.study_solver_scaling \
+  --presets medium large \
+  --seeds 1 2 3 \
+  --solvers GREED CPSAT-30 LBBD-10 AUTO \
+  --write-dir benchmark/instances/scaling-studies
+```
+
+В отчёте сохраняются per-instance comparison records и агрегат `summary_by_preset`, который позволяет без ручного разбора ответить на вопросы вида: «схлопывается ли `AUTO` в `LBBD-10` на large generated instances?» и «какой runtime/quality trade-off получается между `GREED` и exact/decomposition profiles на одном и том же семействе preset-ов?`.
 
 ## Примеры входных данных
 

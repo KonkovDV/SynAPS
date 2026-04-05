@@ -110,3 +110,21 @@ def test_route_solver_prefers_epsilon_setup_for_what_if_small_with_setups() -> N
 
     assert decision.solver_config == "CPSAT-EPS-SETUP-110"
     assert "Pareto-slice" in decision.reason
+
+
+def test_route_solver_treats_material_only_transitions_as_setup_sensitive() -> None:
+    problem = make_simple_problem()
+    payload = problem.model_dump()
+    for entry in payload["setup_matrix"]:
+        entry["setup_minutes"] = 0
+        entry["energy_kwh"] = 0.0
+        entry["material_loss"] = 0.0
+    payload["setup_matrix"][0]["material_loss"] = 1.5
+    material_only_problem = problem.__class__.model_validate(payload)
+
+    decision = route_solver_config(
+        material_only_problem,
+        context=SolverRoutingContext(regime=SolveRegime.WHAT_IF),
+    )
+
+    assert decision.solver_config == "CPSAT-EPS-SETUP-110"

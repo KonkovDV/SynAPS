@@ -10,6 +10,17 @@ Reproducible solver evaluation for the SynAPS scheduling platform.
 # Single solver, single instance
 python -m benchmark.run_benchmark benchmark/instances/tiny_3x3.json --solvers GREED
 
+# Generate a reproducible large boundary instance for LBBD routing studies
+python -m benchmark.generate_instances benchmark/instances/generated_large.json \
+  --preset large --seed 7
+
+# Aggregate router behavior across generated preset/seed families
+python -m benchmark.study_routing_boundary --presets medium large --seeds 1 2 3
+
+# Compare actual solver behavior on generated preset families
+python -m benchmark.study_solver_scaling --presets medium large --seeds 1 2 3 \
+  --solvers GREED CPSAT-30 LBBD-10 AUTO
+
 # Routed portfolio mode (router chooses the concrete solver)
 python -m benchmark.run_benchmark benchmark/instances/tiny_3x3.json --solvers AUTO
 
@@ -126,6 +137,77 @@ _SOLVER_REGISTRY["MY-SOLVER"] = SolverRegistration(
 ```
 
 The special `AUTO` mode is benchmark-only and routes through `synaps.solve_schedule()`.
+
+## Parametric Instance Generation
+
+`benchmark.generate_instances` activates the planned synthetic-generator surface from the benchmark protocol.
+
+### Presets
+
+| Preset | Intended band | Typical use |
+|--------|---------------|-------------|
+| `tiny` | small | CI smoke and schema sanity |
+| `small` | small | regression and heuristic comparisons |
+| `medium` | medium | exact-profile and epsilon-slice comparisons |
+| `large` | large | LBBD routing boundary and decomposition studies |
+| `industrial` | large | offline stress generation for research runs |
+
+### CLI examples
+
+```bash
+# Start from a preset
+python -m benchmark.generate_instances benchmark/instances/generated_medium.json \
+  --preset medium --seed 11
+
+# Override preset parameters for a custom stress instance
+python -m benchmark.generate_instances benchmark/instances/generated_boundary.json \
+  --preset large --seed 17 --jobs 48 --machines 14 --operations-min 4 --operations-max 6
+```
+
+The generator writes a current-schema `ScheduleProblem` JSON file and prints a summary containing the deterministic seed and the derived `problem_profile`. This makes the generated instance directly usable with `python -m synaps solve ...` and `python -m benchmark.run_benchmark ...` without any conversion step.
+
+## Routing Boundary Study
+
+`benchmark.study_routing_boundary` turns the generated preset families into a reproducible academic report.
+
+It does three things:
+
+1. generates each requested preset across the supplied deterministic seeds;
+2. derives `problem_profile` for every generated instance;
+3. records the deterministic router decision so Phase 1 LBBD-boundary assumptions are backed by concrete evidence.
+
+Example:
+
+```bash
+python -m benchmark.study_routing_boundary \
+  --presets medium large \
+  --seeds 1 2 3 4 \
+  --write-dir benchmark/instances/studies
+```
+
+The emitted JSON includes per-instance records plus `summary_by_preset`, including routed solver counts, size-band counts, operation-count statistics, and a `routing_stable` flag that makes boundary drift obvious when presets stop mapping to the expected portfolio member.
+
+## Solver Scaling Study
+
+`benchmark.study_solver_scaling` takes the same preset families and turns them into executable solver-comparison evidence.
+
+For each generated preset/seed combination it:
+
+1. materializes a current-schema instance;
+2. runs the requested solver configurations through the public benchmark harness;
+3. aggregates mean runtime, mean makespan, and feasibility rate by selected solver.
+
+Example:
+
+```bash
+python -m benchmark.study_solver_scaling \
+  --presets medium large \
+  --seeds 1 2 3 \
+  --solvers GREED CPSAT-30 LBBD-10 AUTO \
+  --write-dir benchmark/instances/scaling-studies
+```
+
+The report keeps per-instance comparison records and emits `summary_by_preset`, which makes it straightforward to answer questions like “does `AUTO` collapse into `LBBD-10` on large generated instances?” and “what is the runtime trade-off between GREED and exact/decomposition profiles on the same preset family?”.
 
 ## Instances
 

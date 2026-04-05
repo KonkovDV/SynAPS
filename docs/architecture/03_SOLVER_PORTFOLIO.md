@@ -74,7 +74,7 @@ flowchart LR
 ### Sub-Problem (Bottleneck Sequencing)
 - **Solver**: Google OR-Tools CP-SAT v9.10+
 - **Decides**: Exact operation order on 2–3 bottleneck work centers
-- **Constraints**: `NO_OVERLAP` intervals with SDST transition matrix, auxiliary resource capacity
+- **Constraints**: `NO_OVERLAP` intervals with SDST transition matrix, plus auxiliary resource capacity across setup and processing windows
 - **Complexity reduction**: From $O((M!)^N)$ for the full operating network to solvable clusters of 50–200 operations
 
 ### Benders Cut Protocol
@@ -134,7 +134,9 @@ When disruptions occur (machine breakdown, rush order, material shortage), the s
 | Material shortage | All ops requiring material | Constraint tightening + greedy |
 | Quality hold | Batch + successor ops | Freeze + reschedule successors |
 
-> **Implemented status (2026-04)**: `IncrementalRepair` engine with priority-aware greedy redispatch, correct per-order tardiness computation, and post-hoc setup recomputation. Horizon-bound validation added to `FeasibilityChecker`. See `synaps/solvers/incremental_repair.py`, `synaps/solvers/feasibility_checker.py`.
+> **Implemented status (2026-04)**: `IncrementalRepair` engine with priority-aware greedy redispatch, correct per-order tardiness computation, and post-hoc setup recomputation. The shared dispatch path and `FeasibilityChecker` now reserve auxiliary resources across setup and processing windows, matching CP-SAT semantics. Horizon-bound validation is also enforced. See `synaps/solvers/incremental_repair.py`, `synaps/solvers/_dispatch_support.py`, `synaps/solvers/feasibility_checker.py`.
+
+For parallel work centers, lane virtualization now triggers whenever any sequence-dependent transition cost is non-zero, not only when `setup_minutes > 0`. That means material-loss-only or energy-only transitions still receive exact lane ordering in CP-SAT.
 
 **Stability metric**: $\text{Nervousness} = \frac{|\text{moved operations}|}{|\text{total operations}|}$ — target $< 5\%$ per repair cycle.
 

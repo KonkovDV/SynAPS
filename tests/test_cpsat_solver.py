@@ -448,3 +448,82 @@ def test_cpsat_can_minimise_setup_under_makespan_epsilon() -> None:
 
     checker = FeasibilityChecker()
     assert checker.check(problem, epsilon_result.assignments) == []
+
+
+def test_cpsat_virtualizes_parallel_work_centers_for_material_only_transitions() -> None:
+    state_a = State(id=uuid4(), code="STATE-A", label="State A")
+    state_b = State(id=uuid4(), code="STATE-B", label="State B")
+    work_center = WorkCenter(
+        id=uuid4(),
+        code="WC-PAR",
+        capability_group="machining",
+        max_parallel=2,
+    )
+    horizon_start = datetime(2026, 4, 1, 8, 0, tzinfo=UTC)
+    horizon_end = datetime(2026, 4, 1, 18, 0, tzinfo=UTC)
+
+    orders = [
+        Order(id=uuid4(), external_ref=f"ORD-{index}", due_date=horizon_end)
+        for index in range(3)
+    ]
+    operations = [
+        Operation(
+            id=uuid4(),
+            order_id=orders[0].id,
+            seq_in_order=0,
+            state_id=state_a.id,
+            base_duration_min=30,
+            eligible_wc_ids=[work_center.id],
+        ),
+        Operation(
+            id=uuid4(),
+            order_id=orders[1].id,
+            seq_in_order=0,
+            state_id=state_b.id,
+            base_duration_min=30,
+            eligible_wc_ids=[work_center.id],
+        ),
+        Operation(
+            id=uuid4(),
+            order_id=orders[2].id,
+            seq_in_order=0,
+            state_id=state_a.id,
+            base_duration_min=30,
+            eligible_wc_ids=[work_center.id],
+        ),
+    ]
+
+    problem = ScheduleProblem(
+        states=[state_a, state_b],
+        orders=orders,
+        operations=operations,
+        work_centers=[work_center],
+        setup_matrix=[
+            SetupEntry(
+                work_center_id=work_center.id,
+                from_state_id=state_a.id,
+                to_state_id=state_b.id,
+                setup_minutes=0,
+                material_loss=3.0,
+            ),
+            SetupEntry(
+                work_center_id=work_center.id,
+                from_state_id=state_b.id,
+                to_state_id=state_a.id,
+                setup_minutes=0,
+                material_loss=4.0,
+            ),
+        ],
+        planning_horizon_start=horizon_start,
+        planning_horizon_end=horizon_end,
+    )
+
+    result = CpSatSolver().solve(problem, time_limit_s=10, random_seed=13)
+
+    assert result.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
+    assert result.metadata["parallel_virtualization"]["enabled"] is True
+    assert result.metadata["parallel_virtualization"]["original_parallel_work_centers"] == 1
+    assert result.metadata["parallel_virtualization"]["virtual_lane_count"] == 2
+
+    checker = FeasibilityChecker()
+    assert checker.check(problem, result.assignments) == []

@@ -105,6 +105,8 @@ CREATE TABLE work_centers (
 );
 ```
 
+  `seq_in_order` is the canonical linear order inside an order. Runtime validation auto-fills `predecessor_op_id` from that order when it is omitted, and explicit `predecessor_op_id` values must match the same-order chain. Cross-order predecessors are rejected.
+
 ### 2.2 Setup Matrix (SDST Graph)
 
 ```sql
@@ -142,6 +144,8 @@ CREATE TABLE operation_aux_requirements (
     UNIQUE (operation_id, aux_resource_id)
 );
 ```
+
+  Auxiliary-resource reservations apply to the setup window immediately preceding an operation as well as to the processing interval itself. This keeps the constructive heuristics, feasibility checker, and CP-SAT model aligned on the same physical contract.
 
 ### 2.4 Scheduling Results
 

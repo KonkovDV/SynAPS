@@ -6,8 +6,13 @@ from uuid import uuid4
 from synaps.model import (
     Assignment,
     AuxiliaryResource,
+    Operation,
     OperationAuxRequirement,
+    Order,
     ScheduleProblem,
+    SetupEntry,
+    State,
+    WorkCenter,
 )
 from synaps.solvers.feasibility_checker import FeasibilityChecker
 from synaps.solvers.greedy_dispatch import GreedyDispatch
@@ -193,6 +198,112 @@ class TestFeasibilityChecker:
         resource_violations = [v for v in violations if v.kind == "AUX_RESOURCE_CAPACITY_VIOLATION"]
         assert len(resource_violations) == 1
         assert resource_violations[0].operation_id in {op_a.id, op_c.id}
+
+    def test_detects_auxiliary_resource_violation_during_setup_windows(self) -> None:
+        checker = FeasibilityChecker()
+        horizon_end = HORIZON_START + timedelta(hours=4)
+        state_a = State(id=uuid4(), code="STATE-A")
+        state_b = State(id=uuid4(), code="STATE-B")
+        wc_1 = WorkCenter(id=uuid4(), code="WC-1", capability_group="machining")
+        wc_2 = WorkCenter(id=uuid4(), code="WC-2", capability_group="machining")
+        tool = AuxiliaryResource(id=uuid4(), code="TOOL-SETUP", resource_type="crew", pool_size=1)
+        order_a = Order(id=uuid4(), external_ref="ORD-A", due_date=horizon_end)
+        order_b = Order(id=uuid4(), external_ref="ORD-B", due_date=horizon_end)
+
+        op_a1 = Operation(
+            id=uuid4(),
+            order_id=order_a.id,
+            seq_in_order=0,
+            state_id=state_a.id,
+            base_duration_min=30,
+            eligible_wc_ids=[wc_1.id],
+        )
+        op_a2 = Operation(
+            id=uuid4(),
+            order_id=order_a.id,
+            seq_in_order=1,
+            state_id=state_b.id,
+            base_duration_min=30,
+            eligible_wc_ids=[wc_1.id],
+            predecessor_op_id=op_a1.id,
+        )
+        op_b1 = Operation(
+            id=uuid4(),
+            order_id=order_b.id,
+            seq_in_order=0,
+            state_id=state_a.id,
+            base_duration_min=30,
+            eligible_wc_ids=[wc_2.id],
+        )
+        op_b2 = Operation(
+            id=uuid4(),
+            order_id=order_b.id,
+            seq_in_order=1,
+            state_id=state_b.id,
+            base_duration_min=30,
+            eligible_wc_ids=[wc_2.id],
+            predecessor_op_id=op_b1.id,
+        )
+
+        problem = ScheduleProblem(
+            states=[state_a, state_b],
+            orders=[order_a, order_b],
+            operations=[op_a1, op_a2, op_b1, op_b2],
+            work_centers=[wc_1, wc_2],
+            setup_matrix=[
+                SetupEntry(
+                    work_center_id=wc_1.id,
+                    from_state_id=state_a.id,
+                    to_state_id=state_b.id,
+                    setup_minutes=10,
+                ),
+                SetupEntry(
+                    work_center_id=wc_2.id,
+                    from_state_id=state_a.id,
+                    to_state_id=state_b.id,
+                    setup_minutes=10,
+                ),
+            ],
+            auxiliary_resources=[tool],
+            aux_requirements=[
+                OperationAuxRequirement(operation_id=op_a2.id, aux_resource_id=tool.id),
+                OperationAuxRequirement(operation_id=op_b2.id, aux_resource_id=tool.id),
+            ],
+            planning_horizon_start=HORIZON_START,
+            planning_horizon_end=horizon_end,
+        )
+
+        assignments = [
+            Assignment(
+                operation_id=op_a1.id,
+                work_center_id=wc_1.id,
+                start_time=HORIZON_START,
+                end_time=HORIZON_START + timedelta(minutes=30),
+            ),
+            Assignment(
+                operation_id=op_a2.id,
+                work_center_id=wc_1.id,
+                start_time=HORIZON_START + timedelta(minutes=40),
+                end_time=HORIZON_START + timedelta(minutes=70),
+            ),
+            Assignment(
+                operation_id=op_b1.id,
+                work_center_id=wc_2.id,
+                start_time=HORIZON_START,
+                end_time=HORIZON_START + timedelta(minutes=30),
+            ),
+            Assignment(
+                operation_id=op_b2.id,
+                work_center_id=wc_2.id,
+                start_time=HORIZON_START + timedelta(minutes=60),
+                end_time=HORIZON_START + timedelta(minutes=90),
+            ),
+        ]
+
+        violations = checker.check(problem, assignments)
+        resource_violations = [v for v in violations if v.kind == "AUX_RESOURCE_CAPACITY_VIOLATION"]
+        assert len(resource_violations) == 1
+        assert resource_violations[0].operation_id in {op_a2.id, op_b2.id}
 
     def test_detects_assignment_before_horizon_start(
         self, simple_problem: ScheduleProblem

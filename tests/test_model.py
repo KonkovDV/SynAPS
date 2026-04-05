@@ -128,3 +128,136 @@ class TestDomainModel:
         message = str(exc_info.value)
         assert "duplicate setup_matrix key" in message
         assert "duplicate aux_requirement key" in message
+
+    def test_schedule_problem_autofills_predecessor_chain_from_seq_in_order(self) -> None:
+        horizon_start = datetime(2026, 6, 1, tzinfo=UTC)
+        order = Order(external_ref="ORD-CHAIN", due_date=datetime(2026, 6, 2, tzinfo=UTC))
+        state = State(code="A")
+        work_center = WorkCenter(code="WC-1", capability_group="mill")
+        op_1 = Operation(
+            id=uuid4(),
+            order_id=order.id,
+            seq_in_order=0,
+            state_id=state.id,
+            base_duration_min=30,
+            eligible_wc_ids=[work_center.id],
+        )
+        op_2 = Operation(
+            id=uuid4(),
+            order_id=order.id,
+            seq_in_order=1,
+            state_id=state.id,
+            base_duration_min=30,
+            eligible_wc_ids=[work_center.id],
+        )
+        op_3 = Operation(
+            id=uuid4(),
+            order_id=order.id,
+            seq_in_order=2,
+            state_id=state.id,
+            base_duration_min=30,
+            eligible_wc_ids=[work_center.id],
+        )
+
+        problem = ScheduleProblem(
+            states=[state],
+            orders=[order],
+            operations=[op_1, op_2, op_3],
+            work_centers=[work_center],
+            setup_matrix=[],
+            planning_horizon_start=horizon_start,
+            planning_horizon_end=datetime(2026, 6, 3, tzinfo=UTC),
+        )
+
+        assert problem.operations[0].predecessor_op_id is None
+        assert problem.operations[1].predecessor_op_id == op_1.id
+        assert problem.operations[2].predecessor_op_id == op_2.id
+
+    def test_schedule_problem_rejects_conflicting_same_order_predecessor_chain(self) -> None:
+        horizon_start = datetime(2026, 6, 1, tzinfo=UTC)
+        order = Order(external_ref="ORD-BAD-CHAIN", due_date=datetime(2026, 6, 2, tzinfo=UTC))
+        state = State(code="A")
+        work_center = WorkCenter(code="WC-1", capability_group="mill")
+        op_1 = Operation(
+            id=uuid4(),
+            order_id=order.id,
+            seq_in_order=0,
+            state_id=state.id,
+            base_duration_min=30,
+            eligible_wc_ids=[work_center.id],
+        )
+        op_2 = Operation(
+            id=uuid4(),
+            order_id=order.id,
+            seq_in_order=1,
+            state_id=state.id,
+            base_duration_min=30,
+            eligible_wc_ids=[work_center.id],
+        )
+        op_3 = Operation(
+            id=uuid4(),
+            order_id=order.id,
+            seq_in_order=2,
+            state_id=state.id,
+            base_duration_min=30,
+            eligible_wc_ids=[work_center.id],
+            predecessor_op_id=op_1.id,
+        )
+
+        with pytest.raises(ValidationError) as exc_info:
+            ScheduleProblem(
+                states=[state],
+                orders=[order],
+                operations=[op_1, op_2, op_3],
+                work_centers=[work_center],
+                setup_matrix=[],
+                planning_horizon_start=horizon_start,
+                planning_horizon_end=datetime(2026, 6, 3, tzinfo=UTC),
+            )
+
+        assert "must reference predecessor_op_id" in str(exc_info.value)
+
+    def test_schedule_problem_rejects_cross_order_predecessor_reference(self) -> None:
+        horizon_start = datetime(2026, 6, 1, tzinfo=UTC)
+        state = State(code="A")
+        work_center = WorkCenter(code="WC-1", capability_group="mill")
+        order_a = Order(external_ref="ORD-A", due_date=datetime(2026, 6, 2, tzinfo=UTC))
+        order_b = Order(external_ref="ORD-B", due_date=datetime(2026, 6, 2, tzinfo=UTC))
+        foreign_op = Operation(
+            id=uuid4(),
+            order_id=order_b.id,
+            seq_in_order=0,
+            state_id=state.id,
+            base_duration_min=30,
+            eligible_wc_ids=[work_center.id],
+        )
+        local_op_1 = Operation(
+            id=uuid4(),
+            order_id=order_a.id,
+            seq_in_order=0,
+            state_id=state.id,
+            base_duration_min=30,
+            eligible_wc_ids=[work_center.id],
+        )
+        local_op_2 = Operation(
+            id=uuid4(),
+            order_id=order_a.id,
+            seq_in_order=1,
+            state_id=state.id,
+            base_duration_min=30,
+            eligible_wc_ids=[work_center.id],
+            predecessor_op_id=foreign_op.id,
+        )
+
+        with pytest.raises(ValidationError) as exc_info:
+            ScheduleProblem(
+                states=[state],
+                orders=[order_a, order_b],
+                operations=[local_op_1, local_op_2, foreign_op],
+                work_centers=[work_center],
+                setup_matrix=[],
+                planning_horizon_start=horizon_start,
+                planning_horizon_end=datetime(2026, 6, 3, tzinfo=UTC),
+            )
+
+        assert "different order" in str(exc_info.value)

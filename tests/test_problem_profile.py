@@ -32,3 +32,19 @@ def test_build_problem_profile_uses_all_work_centers_when_eligibility_is_empty()
     profile = build_problem_profile(modified_problem)
 
     assert profile.avg_eligible_work_centers >= 1.0
+
+
+def test_build_problem_profile_treats_material_only_transitions_as_sequence_dependent() -> None:
+    problem = make_simple_problem()
+    payload = problem.model_dump()
+    for entry in payload["setup_matrix"]:
+        entry["setup_minutes"] = 0
+        entry["energy_kwh"] = 0.0
+        entry["material_loss"] = 0.0
+    payload["setup_matrix"][0]["material_loss"] = 2.5
+
+    modified_problem = problem.__class__.model_validate(payload)
+    profile = build_problem_profile(modified_problem)
+
+    assert profile.setup_nonzero_entry_count == 1
+    assert profile.has_nonzero_setups is True

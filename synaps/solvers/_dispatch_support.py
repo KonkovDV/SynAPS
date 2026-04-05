@@ -91,14 +91,47 @@ def _offset_minutes(context: DispatchContext, assignment: Assignment, *, end: bo
     return (anchor - context.horizon_start).total_seconds() / 60.0
 
 
+def _assignment_setup_window_starts(
+    context: DispatchContext,
+    scheduled_assignments: list[Assignment],
+) -> dict[Any, float]:
+    setup_window_starts: dict[Any, float] = {}
+    by_machine: dict[Any, list[Assignment]] = {}
+    for assignment in scheduled_assignments:
+        by_machine.setdefault(assignment.work_center_id, []).append(assignment)
+
+    for machine_assignments in by_machine.values():
+        machine_assignments.sort(key=lambda assignment: assignment.start_time)
+        previous_assignment: Assignment | None = None
+        for assignment in machine_assignments:
+            start_offset = _offset_minutes(context, assignment, end=False)
+            if previous_assignment is None:
+                setup_window_starts[assignment.operation_id] = start_offset
+            else:
+                previous_state = context.ops_by_id[previous_assignment.operation_id].state_id
+                current_state = context.ops_by_id[assignment.operation_id].state_id
+                setup_before = context.setup_minutes.get(
+                    (assignment.work_center_id, previous_state, current_state),
+                    0,
+                )
+                setup_window_starts[assignment.operation_id] = start_offset - setup_before
+            previous_assignment = assignment
+
+    return setup_window_starts
+
+
 def _resource_is_feasible(
     context: DispatchContext,
     scheduled_assignments: list[Assignment],
     operation_id: Any,
     start_offset: float,
     end_offset: float,
+    setup_minutes: int,
 ) -> bool:
     requirements = context.requirements_by_op.get(operation_id, [])
+    candidate_window_start = start_offset - setup_minutes
+    setup_window_starts = _assignment_setup_window_starts(context, scheduled_assignments)
+
     for requirement in requirements:
         resource = context.resources_by_id.get(requirement.aux_resource_id)
         if resource is None:
@@ -111,17 +144,20 @@ def _resource_is_feasible(
                 if other_requirement.aux_resource_id != requirement.aux_resource_id:
                     continue
 
-                other_start = _offset_minutes(context, assignment, end=False)
+                other_start = setup_window_starts.get(
+                    assignment.operation_id,
+                    _offset_minutes(context, assignment, end=False),
+                )
                 other_end = _offset_minutes(context, assignment, end=True)
-                if other_start >= end_offset or other_end <= start_offset:
+                if other_start >= end_offset or other_end <= candidate_window_start:
                     continue
 
-                if other_start <= start_offset < other_end:
+                if other_start <= candidate_window_start < other_end:
                     active_demand += other_requirement.quantity_needed
                 else:
                     events.append((other_start, other_requirement.quantity_needed))
 
-                if start_offset < other_end < end_offset:
+                if candidate_window_start < other_end < end_offset:
                     events.append((other_end, -other_requirement.quantity_needed))
 
         if active_demand + requirement.quantity_needed > resource.pool_size:
@@ -141,6 +177,7 @@ def _candidate_starts(
     operation_id: Any,
     gap_start: float,
     latest_start: float,
+    setup_minutes: int,
 ) -> list[float]:
     starts = {gap_start}
     required_resource_ids = {
@@ -154,7 +191,7 @@ def _candidate_starts(
         for requirement in context.requirements_by_op.get(assignment.operation_id, []):
             if requirement.aux_resource_id not in required_resource_ids:
                 continue
-            release_offset = _offset_minutes(context, assignment, end=True)
+            release_offset = _offset_minutes(context, assignment, end=True) + setup_minutes
             if gap_start <= release_offset <= latest_start:
                 starts.add(release_offset)
             break
@@ -219,6 +256,7 @@ def find_earliest_feasible_slot(
             operation.id,
             gap_start,
             latest_start,
+            setup_before,
         ):
             end_offset = candidate_start + duration
             if candidate_start < gap_start - 1e-9 or candidate_start > latest_start + 1e-9:
@@ -229,6 +267,7 @@ def find_earliest_feasible_slot(
                 operation.id,
                 candidate_start,
                 end_offset,
+                setup_before,
             ):
                 return SlotCandidate(
                     start_offset=candidate_start,

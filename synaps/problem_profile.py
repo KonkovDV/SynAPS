@@ -32,6 +32,10 @@ class ProblemProfile:
         return asdict(self)
 
 
+def _has_sequence_dependent_transition_cost(entry) -> bool:
+    return entry.setup_minutes > 0 or entry.material_loss > 0 or entry.energy_kwh > 0
+
+
 def _size_band(operation_count: int) -> str:
     if operation_count <= 20:
         return "small"
@@ -54,7 +58,7 @@ def build_problem_profile(problem: ScheduleProblem) -> ProblemProfile:
     )
     setup_entry_count = len(problem.setup_matrix)
     setup_nonzero_entry_count = sum(
-        1 for entry in problem.setup_matrix if entry.setup_minutes > 0
+        1 for entry in problem.setup_matrix if _has_sequence_dependent_transition_cost(entry)
     )
 
     eligible_counts = [

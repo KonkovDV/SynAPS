@@ -34,9 +34,11 @@ This is a generalization that subsumes classical FJSP, JSSP, flow-shop, and para
 
 ## Hard Constraints
 
-**Supply ≤ Demand (auxiliary resources):**
+**Supply ≤ Demand (auxiliary resources, setup + processing):**
 
-$$\forall r \in \mathcal{R},\; \forall t \in \mathcal{T}: \quad \sum_{o \,:\, r \in \text{req}(o),\; s_o \leq t < s_o + p_{o}} 1 \;\leq\; \text{cap}(r, t)$$
+$$\forall r \in \mathcal{R},\; \forall t \in \mathcal{T}: \quad \sum_{o \,:\, r \in \text{req}(o),\; s_o - \hat{\sigma}_o \leq t < s_o + p_{o}} 1 \;\leq\; \text{cap}(r, t)$$
+
+where $\hat{\sigma}_o$ is the setup duration reserved immediately before operation $o$ on its assigned work center (and $\hat{\sigma}_o = 0$ when no setup is required).
 
 **Precedence:**
 

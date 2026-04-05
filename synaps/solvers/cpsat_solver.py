@@ -26,17 +26,18 @@ class CpSatSolver(BaseSolver):
         self,
         problem: ScheduleProblem,
     ) -> tuple[ScheduleProblem, dict[UUID, UUID]]:
-        """Expand parallel work centers into exact disjunctive lanes when SDST matters.
+        """Expand parallel work centers into exact disjunctive lanes when ordering matters.
 
-        `AddCircuit` models sequence-dependent setups exactly only for disjunctive
-        resources. When a work center has `max_parallel > 1` and non-zero setup
-        times, we split it into identical virtual lanes, each with
-        `max_parallel = 1`. This preserves exact SDST semantics while still
-        allowing the original amount of concurrency overall.
+        `AddCircuit` models sequence-dependent transitions exactly only for
+        disjunctive resources. When a work center has `max_parallel > 1` and any
+        non-zero sequence-dependent transition cost (setup time, material loss,
+        or energy) is present, we split it into identical virtual lanes, each
+        with `max_parallel = 1`. This preserves exact lane sequencing while
+        still allowing the original amount of concurrency overall.
         """
         setup_by_work_center: dict[UUID, bool] = {}
         for entry in problem.setup_matrix:
-            if entry.setup_minutes > 0:
+            if entry.setup_minutes > 0 or entry.material_loss > 0 or entry.energy_kwh > 0:
                 setup_by_work_center[entry.work_center_id] = True
 
         expandable = {

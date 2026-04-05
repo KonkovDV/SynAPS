@@ -142,6 +142,10 @@ class ScheduleProblem(BaseModel):
         operation_id_set = set(operation_ids)
         work_center_id_set = set(work_center_ids)
         aux_resource_id_set = set(aux_resource_ids)
+        operations_by_id = {operation.id: operation for operation in self.operations}
+        operations_by_order: dict[UUID, list[Operation]] = {}
+        for operation in self.operations:
+            operations_by_order.setdefault(operation.order_id, []).append(operation)
 
         setup_keys = [
             (entry.work_center_id, entry.from_state_id, entry.to_state_id)
@@ -192,6 +196,49 @@ class ScheduleProblem(BaseModel):
                 issues.append(
                     f"operation {operation.id} references unknown predecessor_op_id {operation.predecessor_op_id}"
                 )
+
+        for order_id, order_operations in operations_by_order.items():
+            duplicate_seq_in_order = self._duplicate_keys(
+                [operation.seq_in_order for operation in order_operations]
+            )
+            if duplicate_seq_in_order:
+                issues.append(
+                    f"duplicate seq_in_order values for order {order_id}: "
+                    f"{sorted(duplicate_seq_in_order)}"
+                )
+                continue
+
+            previous_operation: Operation | None = None
+            for operation in sorted(order_operations, key=lambda item: item.seq_in_order):
+                predecessor = (
+                    operations_by_id.get(operation.predecessor_op_id)
+                    if operation.predecessor_op_id is not None
+                    else None
+                )
+                if predecessor is not None and predecessor.order_id != order_id:
+                    issues.append(
+                        f"operation {operation.id} cannot reference predecessor {predecessor.id} from a different order"
+                    )
+                    previous_operation = operation
+                    continue
+
+                if previous_operation is None:
+                    if predecessor is not None:
+                        issues.append(
+                            f"first operation {operation.id} in order {order_id} cannot declare predecessor_op_id {predecessor.id}"
+                        )
+                    previous_operation = operation
+                    continue
+
+                expected_predecessor_id = previous_operation.id
+                if operation.predecessor_op_id is None:
+                    operation.predecessor_op_id = expected_predecessor_id
+                elif operation.predecessor_op_id != expected_predecessor_id:
+                    issues.append(
+                        f"operation {operation.id} must reference predecessor_op_id {expected_predecessor_id} based on seq_in_order within order {order_id}"
+                    )
+
+                previous_operation = operation
 
         for entry in self.setup_matrix:
             if entry.work_center_id not in work_center_id_set:

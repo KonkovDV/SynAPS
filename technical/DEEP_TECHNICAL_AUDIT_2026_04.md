@@ -5,6 +5,8 @@
 > **Статус**: COMPLETE — Фундаментальный аудит алгоритмического ядра, математическая архитектура, софтверный и аппаратный стек
 > **Область**: `synaps/solvers/`, `synaps/model/`, целевая архитектура v2.0+
 
+> **Update (2026-04-05)**: этот документ остаётся полезным как исторический дефект-реестр и architectural blueprint, но его Часть I больше нельзя читать как описание текущего `master` без перепроверки по коду и тестам. К April 2026 closeout уже были закрыты O(N³) adjacency-взрыв через `AddCircuit`, tardiness в CP-SAT, priority-aware repair selection и post-hoc setup recomputation. Дополнительно закрыт remaining gap по auxiliary resources на setup-окнах во всех deterministic paths, а виртуализация параллельных WC теперь триггерится не только по `setup_minutes`, но и по material/energy sequence costs.
+
 ---
 
 ## Содержание
