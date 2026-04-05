@@ -37,6 +37,8 @@ def test_run_benchmark_emits_single_solver_report(tmp_path: Path) -> None:
     assert report["selected_solver_config"] == "GREED"
     assert report["results"]["solver_name"] == "greedy_dispatch"
     assert report["results"]["feasible"] is True
+    assert report["verification"]["feasible"] is True
+    assert report["verification"]["violation_count"] == 0
     assert report["statistics"]["runs"] == 1
 
 
@@ -80,6 +82,54 @@ def test_run_benchmark_supports_academic_epsilon_profile(tmp_path: Path) -> None
     assert report["solver_config"] == "CPSAT-EPS-SETUP-110"
     assert report["selected_solver_config"] == "CPSAT-EPS-SETUP-110"
     assert report["results"]["feasible"] is True
+
+
+def test_run_benchmark_can_attach_replay_artifact(tmp_path: Path) -> None:
+    instance_path = _write_instance(tmp_path)
+
+    report = run_benchmark(
+        instance_path=instance_path,
+        solver_names=["GREED"],
+        runs=1,
+        include_replay=True,
+    )
+
+    replay = report["replay"]
+
+    assert replay["artifact_kind"] == "benchmark-run"
+    assert replay["artifact_source"] == "benchmark.run_benchmark"
+    assert replay["instance_name"] == instance_path.name
+    assert replay["solver_config"] == "GREED"
+    assert replay["selected_solver_config"] == "GREED"
+    assert replay["verification"]["feasible"] is True
+    assert replay["verification"]["violation_count"] == 0
+    assert replay["routing"]["routed"] is False
+    assert replay["problem_profile"]["order_count"] == 3
+
+
+def test_run_benchmark_can_write_replay_artifact_to_directory(tmp_path: Path) -> None:
+    instance_path = _write_instance(tmp_path, name="instance with spaces.json")
+    replay_dir = tmp_path / "replay"
+
+    report = run_benchmark(
+        instance_path=instance_path,
+        solver_names=["GREED"],
+        runs=1,
+        replay_output_dir=replay_dir,
+    )
+
+    replay_path = Path(report["replay_artifact_path"])
+
+    assert replay_path.exists()
+    assert replay_path.parent == replay_dir
+    manifest_path = replay_dir / "manifest.jsonl"
+    assert manifest_path.exists()
+    payload = json.loads(replay_path.read_text(encoding="utf-8"))
+    manifest_entries = [json.loads(line) for line in manifest_path.read_text(encoding="utf-8").splitlines()]
+    assert payload["instance_name"] == instance_path.name
+    assert payload["selected_solver_config"] == "GREED"
+    assert manifest_entries[0]["artifact_kind"] == "benchmark-run"
+    assert manifest_entries[0]["instance_name"] == instance_path.name
 
 
 def test_benchmark_tradeoff_instance_exposes_setup_improvement() -> None:

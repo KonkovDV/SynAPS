@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import time
 from datetime import timedelta
-from math import log
 from typing import Any
 
+from synaps.accelerators import compute_atcs_log_score, get_acceleration_status
 from synaps.model import (
     Assignment,
     ObjectiveValues,
@@ -50,6 +50,7 @@ class GreedyDispatch(BaseSolver):
 
     def solve(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
         t0 = time.monotonic()
+        acceleration_status = get_acceleration_status()
 
         # Precompute lookup tables
         orders_by_id = {o.id: o for o in problem.orders}
@@ -72,7 +73,26 @@ class GreedyDispatch(BaseSolver):
                 if op.predecessor_op_id is None or op.predecessor_op_id in scheduled_ops
             ]
             if not ready:
-                break  # deadlock — should not happen with valid input
+                elapsed_ms = int((time.monotonic() - t0) * 1000)
+                return ScheduleResult(
+                    solver_name=self.name,
+                    status=SolverStatus.ERROR,
+                    assignments=assignments,
+                    objective=ObjectiveValues(
+                        makespan_minutes=max(
+                            (
+                                (assignment.end_time - horizon_start).total_seconds() / 60.0
+                                for assignment in assignments
+                            ),
+                            default=0.0,
+                        ),
+                    ),
+                    duration_ms=elapsed_ms,
+                    metadata={
+                        "acceleration": acceleration_status,
+                        "error": "no ready operations available; precedence graph may contain a cycle",
+                    },
+                )
 
             ready_p_bar = max(
                 sum(op.base_duration_min for op in ready) / max(len(ready), 1),
@@ -133,7 +153,10 @@ class GreedyDispatch(BaseSolver):
                         ),
                     ),
                     duration_ms=elapsed_ms,
-                    metadata={"error": "no feasible constructive slot found"},
+                    metadata={
+                        "acceleration": acceleration_status,
+                        "error": "no feasible constructive slot found",
+                    },
                 )
 
             local_setup_scale_by_wc: dict[Any, float] = {}
@@ -179,12 +202,18 @@ class GreedyDispatch(BaseSolver):
                 # heavy-tailed SDST matrices while preserving ATCS ranking.
                 # Extended ATCS: material-loss penalty reduces the attractiveness
                 # of transitions with equal setup time but higher material waste.
-                log_score = (
-                    log(max(record["weight"], 1e-9))
-                    - log(max(p_j, 0.1))
-                    - (slack / (self._k1 * ready_p_bar))
-                    - setup_penalty
-                    - material_penalty
+                log_score = compute_atcs_log_score(
+                    weight=record["weight"],
+                    processing_minutes=p_j,
+                    slack=slack,
+                    ready_p_bar=ready_p_bar,
+                    setup_minutes=slot.setup_minutes,
+                    setup_scale=setup_scale,
+                    k1=self._k1,
+                    k2=self._k2,
+                    material_loss=slot.material_loss,
+                    material_scale=material_scale,
+                    k3=self._k3,
                 )
                 if log_score > best_log_score:
                     best_log_score = log_score
@@ -266,4 +295,5 @@ class GreedyDispatch(BaseSolver):
                 total_tardiness_minutes=total_tardiness,
             ),
             duration_ms=elapsed_ms,
+            metadata={"acceleration": acceleration_status},
         )

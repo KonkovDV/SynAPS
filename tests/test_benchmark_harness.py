@@ -44,6 +44,8 @@ def test_run_benchmark_reports_extended_result_fields(
     assert "proved_optimal" in results
     assert "total_material_loss" in results
     assert "best_objective_bound" in results
+    assert report["verification"]["feasible"] is True
+    assert report["verification"]["violation_count"] == 0
     assert "wall_time_s_mean" in stats
     assert "wall_time_s_min" in stats
     assert "wall_time_s_max" in stats

@@ -14,6 +14,7 @@ from synaps.contracts import (
     execute_solve_request,
     write_contract_schemas,
 )
+from synaps.replay import build_runtime_replay_artifact
 from synaps.model import SolverStatus
 from synaps.solvers.greedy_dispatch import GreedyDispatch
 from synaps.solvers.router import SolveRegime
@@ -52,6 +53,32 @@ def test_execute_repair_request_returns_contract_response() -> None:
     assert response.request_id == "repair-1"
     assert response.result.status == SolverStatus.FEASIBLE
     assert response.result.metadata["portfolio"]["solver_config"] == "INCREMENTAL_REPAIR"
+
+
+def test_runtime_replay_artifact_can_be_built_from_contract_response() -> None:
+    problem = make_simple_problem()
+    request = SolveRequest(
+        request_id="req-replay-1",
+        problem=problem,
+        context=RoutingContextContract(regime=SolveRegime.INTERACTIVE),
+    )
+
+    response = execute_solve_request(request)
+    artifact = build_runtime_replay_artifact(
+        artifact_kind="runtime-solve",
+        artifact_source="tests.contracts",
+        problem=problem,
+        result=response.result,
+        request_summary={"verify_feasibility": request.verify_feasibility},
+        request_id=request.request_id,
+        solver_config=request.solver_config,
+    )
+
+    assert artifact.request_id == "req-replay-1"
+    assert artifact.selected_solver_config == response.result.metadata["portfolio"]["solver_config"]
+    assert artifact.verification.performed is True
+    assert artifact.verification.violation_count == 0
+    assert artifact.routing.regime == SolveRegime.INTERACTIVE.value
 
 
 def test_build_contract_schema_bundle_contains_all_public_contracts() -> None:

@@ -25,6 +25,7 @@ class TestGreedyDispatch:
 
         assert result.status == SolverStatus.FEASIBLE
         assert result.solver_name == "greedy_dispatch"
+        assert result.metadata["acceleration"]["atcs_log_score_backend"] in {"python", "native"}
 
     def test_all_operations_assigned(self, simple_problem: ScheduleProblem) -> None:
         solver = GreedyDispatch()
@@ -219,3 +220,54 @@ class TestGreedyDispatch:
         )
         assert material_sensitive_assignment.work_center_id == work_center_2.id
         assert result.objective.total_material_loss == 1.0
+
+    def test_returns_error_when_precedence_graph_contains_cycle(self) -> None:
+        horizon_start = datetime(2026, 4, 1, 8, 0, tzinfo=UTC)
+        horizon_end = horizon_start + timedelta(hours=4)
+
+        state = State(id=uuid4(), code="STATE-A")
+        work_center = WorkCenter(id=uuid4(), code="WC-1", capability_group="machining")
+        order = Order(
+            id=uuid4(),
+            external_ref="ORD-CYCLE",
+            due_date=horizon_start + timedelta(hours=2),
+            priority=500,
+        )
+
+        operation_a_id = uuid4()
+        operation_b_id = uuid4()
+        operation_a = Operation(
+            id=operation_a_id,
+            order_id=order.id,
+            seq_in_order=0,
+            state_id=state.id,
+            base_duration_min=15,
+            eligible_wc_ids=[work_center.id],
+            predecessor_op_id=operation_b_id,
+        )
+        operation_b = Operation(
+            id=operation_b_id,
+            order_id=order.id,
+            seq_in_order=1,
+            state_id=state.id,
+            base_duration_min=15,
+            eligible_wc_ids=[work_center.id],
+            predecessor_op_id=operation_a_id,
+        )
+
+        problem = ScheduleProblem(
+            states=[state],
+            orders=[order],
+            operations=[operation_a, operation_b],
+            work_centers=[work_center],
+            setup_matrix=[],
+            planning_horizon_start=horizon_start,
+            planning_horizon_end=horizon_end,
+        )
+
+        result = GreedyDispatch().solve(problem)
+
+        assert result.status == SolverStatus.ERROR
+        assert result.assignments == []
+        assert "precedence graph may contain a cycle" in result.metadata["error"]
+        assert result.metadata["acceleration"]["atcs_log_score_backend"] in {"python", "native"}
