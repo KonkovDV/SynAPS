@@ -10,7 +10,7 @@ The repository should be treated as pre-production software and documentation, n
 
 | Surface | Status | Notes |
 | --- | --- | --- |
-| current `main` / active `0.1.x` line | best-effort security fixes | active development line |
+| current default branch (`master`) / active `0.1.x` line | best-effort security fixes | active development line |
 | historical snapshots, unpublished experiments, generated artifacts | unsupported | no security-fix commitment |
 
 ## Reporting A Vulnerability
@@ -19,7 +19,7 @@ Do **not** disclose exploitable details in a public issue, pull request, benchma
 
 Preferred reporting route:
 
-1. use GitHub Private Vulnerability Reporting for the target public repository: `https://github.com/synaps/synaps/security/advisories/new`;
+1. use GitHub Private Vulnerability Reporting for the target public repository: `https://github.com/KonkovDV/SynAPS/security/advisories/new`;
 2. if that route is not yet enabled during a publication rehearsal, pause public disclosure until the repository security settings are finished.
 
 ## Expected Response Windows

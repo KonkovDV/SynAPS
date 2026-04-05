@@ -68,13 +68,13 @@ dev = [
 all = ["synaps[ml,llm,rl,dev]"]
 
 [project.urls]
-Homepage = "https://github.com/synaps/synaps"
-Repository = "https://github.com/synaps/synaps"
-Documentation = "https://github.com/synaps/synaps/tree/main/docs"
-Issues = "https://github.com/synaps/synaps/issues"
-Changelog = "https://github.com/synaps/synaps/releases"
-Support = "https://github.com/synaps/synaps/blob/main/SUPPORT.md"
-Security = "https://github.com/synaps/synaps/security/policy"
+Homepage = "https://github.com/KonkovDV/SynAPS"
+Repository = "https://github.com/KonkovDV/SynAPS"
+Documentation = "https://github.com/KonkovDV/SynAPS/tree/master/docs"
+Issues = "https://github.com/KonkovDV/SynAPS/issues"
+Changelog = "https://github.com/KonkovDV/SynAPS/releases"
+Support = "https://github.com/KonkovDV/SynAPS/blob/master/SUPPORT.md"
+Security = "https://github.com/KonkovDV/SynAPS/security/policy"
 
 [tool.ruff]
 target-version = "py312"

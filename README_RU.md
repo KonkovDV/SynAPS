@@ -46,8 +46,8 @@ SynAPS сейчас является публичным исследовател
 ## Быстрый старт
 
 ```bash
-git clone https://github.com/synaps/synaps.git
-cd synaps
+git clone https://github.com/KonkovDV/SynAPS.git
+cd SynAPS
 python -m pip install -e ".[dev]"
 
 # Запуск расчёта через portfolio API с JSON-ответом

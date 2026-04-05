@@ -46,8 +46,8 @@ Read this repository as an engineering surface first.
 ## Quick Start
 
 ```bash
-git clone https://github.com/synaps/synaps.git
-cd synaps
+git clone https://github.com/KonkovDV/SynAPS.git
+cd SynAPS
 python -m pip install -e ".[dev]"
 
 # Routed portfolio solve with JSON output

@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/synaps/synaps/security/advisories/new
+    url: https://github.com/KonkovDV/SynAPS/security/advisories/new
     about: Use GitHub private vulnerability reporting for exploitable issues. Do not open public security bug reports.
   - name: Support and usage guidance
-    url: https://github.com/synaps/synaps/blob/main/SUPPORT.md
+    url: https://github.com/KonkovDV/SynAPS/blob/master/SUPPORT.md
     about: Read the supported public channels and response expectations before opening an issue.

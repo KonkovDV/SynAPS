@@ -5,7 +5,7 @@ type: software
 authors:
   - name: "SynAPS Contributors"
 license: MIT
-repository-code: "https://github.com/synaps/synaps"
+repository-code: "https://github.com/KonkovDV/SynAPS"
 keywords:
   - advanced-planning-scheduling
   - operations-research

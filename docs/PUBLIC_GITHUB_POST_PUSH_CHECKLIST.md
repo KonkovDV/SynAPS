@@ -19,7 +19,7 @@ This document is intentionally operational. It tells you what to configure in Gi
 3. Add curated repository topics in lowercase, hyphenated form.
 Recommended baseline:
 `aps`, `scheduling`, `optimization`, `operations-research`, `constraint-programming`, `manufacturing`, `job-shop-scheduling`, `python`
-4. Confirm the default branch is `main`.
+4. Confirm the default branch is `master` for the current public SynAPS repository, or update this checklist if you intentionally rename it.
 
 ## 2. Community Profile
 
@@ -51,7 +51,7 @@ Recommended baseline:
 ## 5. Rulesets Or Branch Protection
 
 1. Require pull requests before merge.
-2. Disable force pushes to `main`.
+2. Disable force pushes to `master`.
 3. Disable branch deletion for the protected default branch.
 4. Require the main CI checks and dependency review once the first PR run has established stable check names.
 Typical required checks:
