@@ -1,9 +1,9 @@
 ---
 title: "SynAPS GitHub Public Export Audit 2026-04"
 status: "active"
-version: "1.2.0"
-last_updated: "2026-04-04"
-date: "2026-04-04"
+version: "1.3.0"
+last_updated: "2026-04-05"
+date: "2026-04-05"
 tags: [synaps, github, audit, publication, investor]
 mode: "evidence"
 ---
@@ -32,6 +32,18 @@ Convert the current SynAPS documentation and repository structure into a conserv
 8. GitHub Docs, Dependabot guidance: version updates should be configured in `.github/dependabot.yml`.
 9. OpenSSF Scorecard as a public trust benchmark for repository hygiene.
 10. Citation File Format guidance: `CITATION.cff` is rendered by GitHub and provides machine-readable citation metadata.
+11. GitHub Docs, rulesets guidance: public repositories on GitHub Free can use rulesets and layer them with branch protection.
+
+## External Analogs Reviewed
+
+The following public repositories were reviewed as practical startup-grade comparison surfaces:
+
+1. `supabase/supabase`
+2. `PostHog/posthog`
+3. `airbytehq/airbyte`
+4. `calcom/cal.com`
+
+These were used as analogs for visible GitHub presentation patterns, not as product or architecture templates.
 
 ## Repo-Local Surfaces Used
 
@@ -52,6 +64,33 @@ Convert the current SynAPS documentation and repository structure into a conserv
 | Investor router | present as an optional diligence surface under `docs/investor/` | CLOSED |
 | Public GitHub post-push checklist | present at `docs/PUBLIC_GITHUB_POST_PUSH_CHECKLIST.md` | CLOSED |
 | Conservative export boundary | public engineering entrypoints do not depend on parent workspace files | CLOSED |
+
+## Observed Public State After Push
+
+Direct review of the public `KonkovDV/SynAPS` repository on 2026-04-05 showed:
+
+1. the repository is public and the default branch is `master`;
+2. `README.md`, `README_RU.md`, `SUPPORT.md`, `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, and `CITATION.cff` are visible in the root tree;
+3. `Security policy` renders correctly in the GitHub UI;
+4. `SUPPORT.md` renders correctly in the GitHub UI;
+5. the issue-template chooser is present, but anonymous viewers are redirected to sign-in before they can create an issue, which is normal GitHub behavior;
+6. the About panel is still missing description, homepage, and topics;
+7. no GitHub Releases are published yet;
+8. no GitHub Packages are published yet.
+
+One operational nuance also appeared during verification: immediately after rapid consecutive pushes, GitHub's repository HTML and root README blob page can lag behind the branch tip for a short time while `raw.githubusercontent.com` and file-history views already expose the newest content. That is a GitHub rendering lag, not a repository-state failure.
+
+## Best-Practice Patterns From Strong OSS Startup Repositories
+
+The analog repositories above converge on a small number of repeatable public-surface patterns:
+
+1. **Clear About panel**: a short category-first description, curated topics, and a real homepage link where available;
+2. **Truthful README boundary**: current product or OSS truth is separated from roadmap, cloud, or enterprise narratives;
+3. **Visible trust surfaces**: support, security, contribution, and code-of-conduct pages are first-class, not buried;
+4. **Releases as trust signals**: mature open-source startups make releases visible in GitHub, not just in commit history;
+5. **Community routing**: community and support channels are explicit instead of making users guess whether they should use Issues, Discussions, docs, Discord, Slack, or email.
+
+SynAPS now matches the third pattern well and the second pattern reasonably well. The main remaining gap is the first and fourth pattern: About-panel metadata and release visibility.
 
 ## Boundary Discipline
 
@@ -159,9 +198,21 @@ Required manual follow-through:
 2. enable private vulnerability reporting and security-alert notifications for maintainers;
 3. enable secret scanning and push protection for the public repository;
 4. require dependency review and the main CI checks in rulesets or branch protection;
-5. add repository topics and final public metadata;
+5. set final public metadata in the About panel.
+Recommended current description:
+`Deterministic-first scheduling and resource-orchestration engine for MO-FJSP-SDST-ML-ARC planning problems.`
+Recommended current topics:
+`advanced-planning-scheduling`, `scheduling`, `optimization`, `operations-research`, `constraint-programming`, `job-shop-scheduling`, `manufacturing`, `resource-orchestration`, `cp-sat`, `python`, `typescript`, `decision-support`
+Recommended homepage:
+leave empty until a real SynAPS landing page or docs site exists;
 6. use GitHub's dependency graph to export an SPDX SBOM once the repo is public;
 7. defer `CODEOWNERS` until the final public owners are verified.
+
+Optional but high-value follow-through once the basic settings are stable:
+
+1. enable `Discussions` only if maintainers are ready to moderate them;
+2. publish a first GitHub Release after the next stable tagged milestone;
+3. add a homepage only when there is a real public docs or product surface to link to.
 
 ## Current Publication Verdict
 
