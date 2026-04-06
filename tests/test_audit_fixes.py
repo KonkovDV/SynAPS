@@ -31,6 +31,7 @@ HORIZON_END = datetime(2026, 4, 1, 20, 0, tzinfo=UTC)
 
 # ── Ch.II: ATCS underflow on sparse SDST ─────────────────────────
 
+
 def test_atcs_nonzero_score_with_sparse_setup_matrix() -> None:
     """Sparse SDST (1 nonzero out of many cells) must not collapse all ATCS
     scores to zero.  Before the fix, s̄ → 0 caused exp(-s/(K2·s̄)) underflow."""
@@ -49,7 +50,9 @@ def test_atcs_nonzero_score_with_sparse_setup_matrix() -> None:
         ),
     ]
 
-    order = Order(id=uuid4(), external_ref="ORD-SPARSE", due_date=HORIZON_START + timedelta(hours=6))
+    order = Order(
+        id=uuid4(), external_ref="ORD-SPARSE", due_date=HORIZON_START + timedelta(hours=6)
+    )
     ops = []
     prev_id = None
     for i in range(3):
@@ -203,6 +206,7 @@ def test_atcs_uses_local_ready_queue_setup_scale() -> None:
 
 # ── Ch.IV: Repair priority-aware dispatch ─────────────────────────
 
+
 def test_repair_prefers_high_priority_over_early_finish() -> None:
     """VIP order (priority=900) must be repaired before regular (priority=100),
     even if the regular order could finish earlier."""
@@ -282,6 +286,7 @@ def test_repair_prefers_high_priority_over_early_finish() -> None:
 
 # ── Ch.I: ε-constraint scalarization ─────────────────────────────
 
+
 def test_epsilon_constraint_bounds_tardiness() -> None:
     """With max_tardiness_minutes=0, CP-SAT must produce zero tardiness
     (or declare infeasible if impossible)."""
@@ -290,9 +295,7 @@ def test_epsilon_constraint_bounds_tardiness() -> None:
     work_centers = [WorkCenter(id=wc_id, code="WC-1", capability_group="machining")]
 
     # Generous due date so zero-tardiness is achievable
-    order = Order(
-        id=uuid4(), external_ref="ORD-E", due_date=HORIZON_START + timedelta(hours=10)
-    )
+    order = Order(id=uuid4(), external_ref="ORD-E", due_date=HORIZON_START + timedelta(hours=10))
     op = Operation(
         id=uuid4(),
         order_id=order.id,
@@ -326,6 +329,7 @@ def test_epsilon_constraint_bounds_tardiness() -> None:
 
 # ── Ch.III: Ghost setup recomputation ─────────────────────────────
 
+
 def test_greedy_setup_minutes_correct_after_scheduling() -> None:
     """Per-assignment setup_minutes must reflect actual machine predecessor,
     not the constructive-time estimate (which may be stale after gap insertion)."""
@@ -353,7 +357,9 @@ def test_greedy_setup_minutes_correct_after_scheduling() -> None:
     ]
 
     # Three operations in one order: X → Y → X (chain with alternating states)
-    order = Order(id=uuid4(), external_ref="ORD-GHOST", due_date=HORIZON_START + timedelta(hours=10))
+    order = Order(
+        id=uuid4(), external_ref="ORD-GHOST", due_date=HORIZON_START + timedelta(hours=10)
+    )
     op_a_id, op_b_id, op_c_id = uuid4(), uuid4(), uuid4()
     ops = [
         Operation(
@@ -413,14 +419,15 @@ def test_greedy_setup_minutes_correct_after_scheduling() -> None:
         cur_state = ops_by_id[by_start[i].operation_id].state_id
         expected_setup = 0
         for entry in setup_matrix:
-            if (entry.work_center_id == wc_id
-                    and entry.from_state_id == prev_state
-                    and entry.to_state_id == cur_state):
+            if (
+                entry.work_center_id == wc_id
+                and entry.from_state_id == prev_state
+                and entry.to_state_id == cur_state
+            ):
                 expected_setup = entry.setup_minutes
                 break
         assert by_start[i].setup_minutes == expected_setup, (
-            f"Op at position {i}: expected setup={expected_setup}, "
-            f"got {by_start[i].setup_minutes}"
+            f"Op at position {i}: expected setup={expected_setup}, got {by_start[i].setup_minutes}"
         )
 
     # Also verify aggregate total_setup matches sum of individual setups
@@ -442,20 +449,36 @@ def test_repair_setup_recomputed_after_insertion() -> None:
     work_centers = [WorkCenter(id=wc_id, code="WC-1", capability_group="machining")]
 
     setup_matrix = [
-        SetupEntry(work_center_id=wc_id, from_state_id=state_x.id, to_state_id=state_y.id, setup_minutes=10),
-        SetupEntry(work_center_id=wc_id, from_state_id=state_y.id, to_state_id=state_x.id, setup_minutes=15),
+        SetupEntry(
+            work_center_id=wc_id, from_state_id=state_x.id, to_state_id=state_y.id, setup_minutes=10
+        ),
+        SetupEntry(
+            work_center_id=wc_id, from_state_id=state_y.id, to_state_id=state_x.id, setup_minutes=15
+        ),
     ]
 
     # Two orders — order_a with one op (state X), order_b with one op (state Y)
-    order_a = Order(id=uuid4(), external_ref="ORD-A", due_date=HORIZON_START + timedelta(hours=10), priority=500)
-    order_b = Order(id=uuid4(), external_ref="ORD-B", due_date=HORIZON_START + timedelta(hours=10), priority=500)
+    order_a = Order(
+        id=uuid4(), external_ref="ORD-A", due_date=HORIZON_START + timedelta(hours=10), priority=500
+    )
+    order_b = Order(
+        id=uuid4(), external_ref="ORD-B", due_date=HORIZON_START + timedelta(hours=10), priority=500
+    )
     op_frozen = Operation(
-        id=uuid4(), order_id=order_a.id, seq_in_order=0, state_id=state_x.id,
-        base_duration_min=20, eligible_wc_ids=[wc_id],
+        id=uuid4(),
+        order_id=order_a.id,
+        seq_in_order=0,
+        state_id=state_x.id,
+        base_duration_min=20,
+        eligible_wc_ids=[wc_id],
     )
     op_disrupted = Operation(
-        id=uuid4(), order_id=order_b.id, seq_in_order=0, state_id=state_y.id,
-        base_duration_min=20, eligible_wc_ids=[wc_id],
+        id=uuid4(),
+        order_id=order_b.id,
+        seq_in_order=0,
+        state_id=state_y.id,
+        base_duration_min=20,
+        eligible_wc_ids=[wc_id],
     )
 
     problem = ScheduleProblem(
@@ -512,9 +535,11 @@ def test_repair_setup_recomputed_after_insertion() -> None:
             cur_state = ops_by_id[assignment.operation_id].state_id
             expected = 0
             for entry in setup_matrix:
-                if (entry.work_center_id == wc_id
-                        and entry.from_state_id == prev_state
-                        and entry.to_state_id == cur_state):
+                if (
+                    entry.work_center_id == wc_id
+                    and entry.from_state_id == prev_state
+                    and entry.to_state_id == cur_state
+                ):
                     expected = entry.setup_minutes
                     break
             assert assignment.setup_minutes == expected

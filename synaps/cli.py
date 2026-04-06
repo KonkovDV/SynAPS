@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from typing import Literal
 
+from synaps import solve_schedule
 from synaps.contracts import (
     RepairRequest,
     SolveRequest,
@@ -15,9 +16,8 @@ from synaps.contracts import (
     execute_solve_request,
     write_contract_schemas,
 )
+from synaps.model import ScheduleProblem, ScheduleResult
 from synaps.replay import build_runtime_replay_artifact, write_replay_artifact
-from synaps import solve_schedule
-from synaps.model import ScheduleProblem
 from synaps.solvers.registry import available_solver_configs
 from synaps.solvers.router import SolveRegime, SolverRoutingContext
 
@@ -32,7 +32,7 @@ def _write_runtime_replay(
     artifact_kind: Literal["runtime-solve", "runtime-repair"],
     artifact_source: str,
     problem: ScheduleProblem,
-    result,
+    result: ScheduleResult,
     request_summary: dict[str, object],
     request_id: str | None,
     solver_config: str | None,
@@ -171,58 +171,66 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write("\n")
         return 0
 
-    if args.command == "solve-request":
-        request = SolveRequest.model_validate_json(args.request.read_text(encoding="utf-8"))
-        response = execute_solve_request(request)
+    elif args.command == "solve-request":
+        solve_request = SolveRequest.model_validate_json(args.request.read_text(encoding="utf-8"))
+        solve_response = execute_solve_request(solve_request)
         _write_runtime_replay(
             output_dir=args.replay_output_dir,
             artifact_kind="runtime-solve",
             artifact_source="synaps.cli.solve-request",
-            problem=request.problem,
-            result=response.result,
+            problem=solve_request.problem,
+            result=solve_response.result,
             request_summary={
                 "request_path": str(args.request),
-                "solver_config": request.solver_config,
-                "regime": request.context.regime.value,
-                "preferred_max_latency_s": request.context.preferred_max_latency_s,
-                "exact_required": request.context.exact_required,
-                "verify_feasibility": request.verify_feasibility,
-                "solve_options": request.solve_options.model_dump(exclude_none=True),
+                "solver_config": solve_request.solver_config,
+                "regime": solve_request.context.regime.value,
+                "preferred_max_latency_s": solve_request.context.preferred_max_latency_s,
+                "exact_required": solve_request.context.exact_required,
+                "verify_feasibility": solve_request.verify_feasibility,
+                "solve_options": solve_request.solve_options.model_dump(exclude_none=True),
             },
-            request_id=request.request_id,
-            solver_config=request.solver_config,
-            stem_parts=(request.request_id or args.request.stem, request.solver_config or "AUTO", "runtime-solve"),
+            request_id=solve_request.request_id,
+            solver_config=solve_request.solver_config,
+            stem_parts=(
+                solve_request.request_id or args.request.stem,
+                solve_request.solver_config or "AUTO",
+                "runtime-solve",
+            ),
         )
-        json.dump(response.model_dump(mode="json"), sys.stdout, indent=2)
+        json.dump(solve_response.model_dump(mode="json"), sys.stdout, indent=2)
         sys.stdout.write("\n")
         return 0
 
-    if args.command == "repair-request":
-        request = RepairRequest.model_validate_json(args.request.read_text(encoding="utf-8"))
-        response = execute_repair_request(request)
+    elif args.command == "repair-request":
+        repair_request = RepairRequest.model_validate_json(args.request.read_text(encoding="utf-8"))
+        repair_response = execute_repair_request(repair_request)
         _write_runtime_replay(
             output_dir=args.replay_output_dir,
             artifact_kind="runtime-repair",
             artifact_source="synaps.cli.repair-request",
-            problem=request.problem,
-            result=response.result,
+            problem=repair_request.problem,
+            result=repair_response.result,
             request_summary={
                 "request_path": str(args.request),
-                "regime": request.regime.value,
-                "radius": request.radius,
-                "verify_feasibility": request.verify_feasibility,
-                "base_assignment_count": len(request.base_assignments),
-                "disrupted_operation_count": len(request.disrupted_op_ids),
+                "regime": repair_request.regime.value,
+                "radius": repair_request.radius,
+                "verify_feasibility": repair_request.verify_feasibility,
+                "base_assignment_count": len(repair_request.base_assignments),
+                "disrupted_operation_count": len(repair_request.disrupted_op_ids),
             },
-            request_id=request.request_id,
+            request_id=repair_request.request_id,
             solver_config="INCREMENTAL_REPAIR",
-            stem_parts=(request.request_id or args.request.stem, "INCREMENTAL_REPAIR", "runtime-repair"),
+            stem_parts=(
+                repair_request.request_id or args.request.stem,
+                "INCREMENTAL_REPAIR",
+                "runtime-repair",
+            ),
         )
-        json.dump(response.model_dump(mode="json"), sys.stdout, indent=2)
+        json.dump(repair_response.model_dump(mode="json"), sys.stdout, indent=2)
         sys.stdout.write("\n")
         return 0
 
-    if args.command == "write-contract-schemas":
+    elif args.command == "write-contract-schemas":
         written = write_contract_schemas(args.output_dir)
         json.dump([str(path) for path in written], sys.stdout, indent=2)
         sys.stdout.write("\n")

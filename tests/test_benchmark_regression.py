@@ -32,10 +32,7 @@ def _make_stress_problem(
     n_states: int = 3,
 ) -> ScheduleProblem:
     """Build a deterministic stress problem for regression bounds."""
-    states = [
-        State(id=uuid4(), code=f"S-{i}", label=f"State {i}")
-        for i in range(n_states)
-    ]
+    states = [State(id=uuid4(), code=f"S-{i}", label=f"State {i}") for i in range(n_states)]
     work_centers = [
         WorkCenter(
             id=uuid4(),
@@ -54,37 +51,43 @@ def _make_stress_problem(
             for j, s_to in enumerate(states):
                 if i == j:
                     continue
-                setup_matrix.append(SetupEntry(
-                    work_center_id=wc.id,
-                    from_state_id=s_from.id,
-                    to_state_id=s_to.id,
-                    setup_minutes=5 + abs(i - j) * 3,
-                    material_loss=0.1 * abs(i - j),
-                ))
+                setup_matrix.append(
+                    SetupEntry(
+                        work_center_id=wc.id,
+                        from_state_id=s_from.id,
+                        to_state_id=s_to.id,
+                        setup_minutes=5 + abs(i - j) * 3,
+                        material_loss=0.1 * abs(i - j),
+                    )
+                )
 
     orders: list[Order] = []
     operations: list[Operation] = []
     for i in range(n_orders):
         order_id = uuid4()
-        orders.append(Order(
-            id=order_id,
-            external_ref=f"ORD-{i:04d}",
-            due_date=horizon_start + timedelta(hours=4 + i),
-            priority=500 + i * 50,
-        ))
+        orders.append(
+            Order(
+                id=order_id,
+                external_ref=f"ORD-{i:04d}",
+                due_date=horizon_start + timedelta(hours=4 + i),
+                priority=500 + i * 50,
+            )
+        )
         prev_op_id = None
         for j in range(ops_per_order):
             op_id = uuid4()
             state_idx = (i + j) % n_states
-            operations.append(Operation(
-                id=op_id,
-                order_id=order_id,
-                seq_in_order=j,
-                state_id=states[state_idx].id,
-                base_duration_min=20 + j * 5,
-                eligible_wc_ids=[wc.id for wc in work_centers],
-                predecessor_op_id=prev_op_id,
-            ))
+            operations.append(
+                Operation(
+                    id=op_id,
+                    order_id=order_id,
+                    seq_in_order=j,
+                    state_id=states[state_idx].id,
+                    base_duration_min=20 + j * 5,
+                    eligible_wc_ids=[wc.id for wc in work_centers],
+                    predecessor_op_id=prev_op_id,
+                )
+            )
             prev_op_id = op_id
 
     return ScheduleProblem(
@@ -153,7 +156,9 @@ class TestBenchmarkRegression:
         cpsat_result = cpsat.solve(problem, time_limit_s=10, random_seed=42)
         greedy_result = greedy.solve(problem)
 
-        assert cpsat_result.objective.makespan_minutes <= greedy_result.objective.makespan_minutes, (
+        assert (
+            cpsat_result.objective.makespan_minutes <= greedy_result.objective.makespan_minutes
+        ), (
             f"CP-SAT ({cpsat_result.objective.makespan_minutes}) worse than greedy "
             f"({greedy_result.objective.makespan_minutes})"
         )
@@ -185,10 +190,7 @@ class TestBenchmarkRegression:
 
         # 4 ops: A, B, A, B — alternating forces 3 setups
         # Optimal: A, A, B, B — only 1 setup
-        orders = [
-            Order(id=uuid4(), external_ref=f"O-{i}", due_date=horizon_end)
-            for i in range(4)
-        ]
+        orders = [Order(id=uuid4(), external_ref=f"O-{i}", due_date=horizon_end) for i in range(4)]
         ops = [
             Operation(
                 id=uuid4(),

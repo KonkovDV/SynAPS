@@ -6,7 +6,12 @@ from synaps.solvers.cpsat_solver import CpSatSolver
 from synaps.solvers.greedy_dispatch import GreedyDispatch
 from synaps.solvers.lbbd_solver import LbbdSolver
 from synaps.solvers.registry import available_solver_configs, create_solver
-from synaps.solvers.router import SolveRegime, SolverRoutingContext, route_solver_config, select_solver
+from synaps.solvers.router import (
+    SolveRegime,
+    SolverRoutingContext,
+    route_solver_config,
+    select_solver,
+)
 from tests.conftest import make_simple_problem
 
 

@@ -5,8 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from pathlib import Path
-from typing import Any, Literal, Sequence
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 from pydantic import BaseModel, Field
 
@@ -14,7 +13,11 @@ from synaps.contracts import CONTRACT_VERSION
 from synaps.model import ScheduleProblem, ScheduleResult, SolverStatus
 from synaps.problem_profile import build_problem_profile
 
-REPLAY_ARTIFACT_VERSION = "2026-04-05"
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
+
+REPLAY_ARTIFACT_VERSION: Final = "2026-04-05"
 
 
 class ReplayObjectiveSnapshot(BaseModel):
@@ -112,7 +115,9 @@ def _result_is_feasible(result: ScheduleResult) -> bool:
     return result.status in {SolverStatus.FEASIBLE, SolverStatus.OPTIMAL}
 
 
-def _build_verification_snapshot(portfolio_metadata: dict[str, Any], result: ScheduleResult) -> ReplayVerificationSnapshot:
+def _build_verification_snapshot(
+    portfolio_metadata: dict[str, Any], result: ScheduleResult
+) -> ReplayVerificationSnapshot:
     performed = isinstance(portfolio_metadata.get("verified_feasible"), bool)
     feasible = bool(portfolio_metadata.get("verified_feasible", _result_is_feasible(result)))
 
@@ -152,7 +157,9 @@ def write_replay_artifact(
     output_dir.mkdir(parents=True, exist_ok=True)
     stem = "__".join(slugify_replay_token(part) for part in stem_parts if part)
     artifact_path = output_dir / f"{stem or 'artifact'}__replay.json"
-    artifact_path.write_text(json.dumps(artifact.model_dump(mode="json"), indent=2), encoding="utf-8")
+    artifact_path.write_text(
+        json.dumps(artifact.model_dump(mode="json"), indent=2), encoding="utf-8"
+    )
 
     manifest_path = output_dir / "manifest.jsonl"
     manifest_entry: dict[str, Any] = {
@@ -199,7 +206,9 @@ def _lock_manifest_handle(handle: Any) -> None:
 
     import fcntl
 
-    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+    flock = fcntl.flock  # type: ignore[attr-defined]
+    lock_ex = fcntl.LOCK_EX  # type: ignore[attr-defined]
+    flock(handle.fileno(), lock_ex)
 
 
 def _unlock_manifest_handle(handle: Any) -> None:
@@ -212,7 +221,9 @@ def _unlock_manifest_handle(handle: Any) -> None:
 
     import fcntl
 
-    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    flock = fcntl.flock  # type: ignore[attr-defined]
+    lock_un = fcntl.LOCK_UN  # type: ignore[attr-defined]
+    flock(handle.fileno(), lock_un)
 
 
 def build_benchmark_replay_artifact(
@@ -333,7 +344,9 @@ def build_runtime_replay_artifact(
             routed=bool(portfolio_metadata.get("routed", False)),
             routing_reason=routing_reason,
             regime=regime,
-            preferred_max_latency_s=_coerce_int_or_none(portfolio_metadata.get("preferred_max_latency_s")),
+            preferred_max_latency_s=_coerce_int_or_none(
+                portfolio_metadata.get("preferred_max_latency_s")
+            ),
             exact_required=_coerce_bool_or_none(portfolio_metadata.get("exact_required")),
         ),
         request_summary=request_summary,

@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-
-from synaps.problem_profile import build_problem_profile
-from synaps.solvers.router import route_solver_config
+from typing import TYPE_CHECKING
 
 from benchmark.generate_instances import (
     GenerationSpec,
@@ -12,6 +9,11 @@ from benchmark.generate_instances import (
     preset_spec,
     write_problem_instance,
 )
+from synaps.problem_profile import build_problem_profile
+from synaps.solvers.router import route_solver_config
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_generate_problem_is_reproducible_for_the_same_seed() -> None:

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from enum import Enum
+from datetime import datetime  # noqa: TC003
+from enum import StrEnum
 from typing import Any, Self
 from uuid import UUID, uuid4
 
@@ -185,16 +185,22 @@ class ScheduleProblem(BaseModel):
             ]
             if missing_work_centers:
                 issues.append(
-                    f"operation {operation.id} references unknown eligible_wc_ids {missing_work_centers}"
+                    "operation "
+                    f"{operation.id} references unknown eligible_wc_ids "
+                    f"{missing_work_centers}"
                 )
             if operation.predecessor_op_id == operation.id:
-                issues.append(f"operation {operation.id} cannot reference itself as predecessor")
+                issues.append(
+                    f"operation {operation.id} cannot reference itself as predecessor"
+                )
             elif (
                 operation.predecessor_op_id is not None
                 and operation.predecessor_op_id not in operation_id_set
             ):
                 issues.append(
-                    f"operation {operation.id} references unknown predecessor_op_id {operation.predecessor_op_id}"
+                    "operation "
+                    f"{operation.id} references unknown predecessor_op_id "
+                    f"{operation.predecessor_op_id}"
                 )
 
         for order_id, order_operations in operations_by_order.items():
@@ -217,7 +223,9 @@ class ScheduleProblem(BaseModel):
                 )
                 if predecessor is not None and predecessor.order_id != order_id:
                     issues.append(
-                        f"operation {operation.id} cannot reference predecessor {predecessor.id} from a different order"
+                        "operation "
+                        f"{operation.id} cannot reference predecessor {predecessor.id} "
+                        "from a different order"
                     )
                     previous_operation = operation
                     continue
@@ -225,7 +233,9 @@ class ScheduleProblem(BaseModel):
                 if previous_operation is None:
                     if predecessor is not None:
                         issues.append(
-                            f"first operation {operation.id} in order {order_id} cannot declare predecessor_op_id {predecessor.id}"
+                            "first operation "
+                            f"{operation.id} in order {order_id} cannot declare "
+                            f"predecessor_op_id {predecessor.id}"
                         )
                     previous_operation = operation
                     continue
@@ -235,7 +245,10 @@ class ScheduleProblem(BaseModel):
                     operation.predecessor_op_id = expected_predecessor_id
                 elif operation.predecessor_op_id != expected_predecessor_id:
                     issues.append(
-                        f"operation {operation.id} must reference predecessor_op_id {expected_predecessor_id} based on seq_in_order within order {order_id}"
+                        "operation "
+                        f"{operation.id} must reference predecessor_op_id "
+                        f"{expected_predecessor_id} based on seq_in_order within "
+                        f"order {order_id}"
                     )
 
                 previous_operation = operation
@@ -243,25 +256,33 @@ class ScheduleProblem(BaseModel):
         for entry in self.setup_matrix:
             if entry.work_center_id not in work_center_id_set:
                 issues.append(
-                    f"setup entry {entry.id} references unknown work_center_id {entry.work_center_id}"
+                    "setup entry "
+                    f"{entry.id} references unknown work_center_id "
+                    f"{entry.work_center_id}"
                 )
             if entry.from_state_id not in state_id_set:
                 issues.append(
-                    f"setup entry {entry.id} references unknown from_state_id {entry.from_state_id}"
+                    "setup entry "
+                    f"{entry.id} references unknown from_state_id "
+                    f"{entry.from_state_id}"
                 )
             if entry.to_state_id not in state_id_set:
                 issues.append(
-                    f"setup entry {entry.id} references unknown to_state_id {entry.to_state_id}"
+                    "setup entry "
+                    f"{entry.id} references unknown to_state_id "
+                    f"{entry.to_state_id}"
                 )
 
         for requirement in self.aux_requirements:
             if requirement.operation_id not in operation_id_set:
                 issues.append(
-                    f"aux requirement references unknown operation_id {requirement.operation_id}"
+                    "aux requirement references unknown operation_id "
+                    f"{requirement.operation_id}"
                 )
             if requirement.aux_resource_id not in aux_resource_id_set:
                 issues.append(
-                    f"aux requirement references unknown aux_resource_id {requirement.aux_resource_id}"
+                    "aux requirement references unknown aux_resource_id "
+                    f"{requirement.aux_resource_id}"
                 )
 
         if issues:
@@ -270,7 +291,7 @@ class ScheduleProblem(BaseModel):
         return self
 
 
-class SolverStatus(str, Enum):
+class SolverStatus(StrEnum):
     OPTIMAL = "optimal"
     FEASIBLE = "feasible"
     INFEASIBLE = "infeasible"

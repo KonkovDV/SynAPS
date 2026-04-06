@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from benchmark.study_routing_boundary import study_routing_boundary
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_study_routing_boundary_reports_stable_lbbd_selection_for_large_preset() -> None:

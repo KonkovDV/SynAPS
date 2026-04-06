@@ -90,7 +90,9 @@ def _summarize_preset(records: list[dict[str, Any]]) -> dict[str, Any]:
     for record in records:
         for comparison in record["comparisons"]:
             selected_solver = comparison["selected_solver_config"]
-            selected_solver_counts[selected_solver] = selected_solver_counts.get(selected_solver, 0) + 1
+            selected_solver_counts[selected_solver] = (
+                selected_solver_counts.get(selected_solver, 0) + 1
+            )
             wall_time_by_solver.setdefault(selected_solver, []).append(
                 comparison["statistics"]["wall_time_s_mean"]
             )
@@ -120,7 +122,9 @@ def _summarize_preset(records: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Study SynAPS solver scaling across generated presets")
+    parser = argparse.ArgumentParser(
+        description="Study SynAPS solver scaling across generated presets"
+    )
     parser.add_argument(
         "--presets",
         nargs="+",

@@ -80,19 +80,25 @@ class CpSatSolver(BaseSolver):
         default_eligible = [work_center.id for work_center in problem.work_centers]
         new_operations = []
         for operation in problem.operations:
-            base_eligible = operation.eligible_wc_ids or default_eligible
+            base_eligible = (
+                list(operation.eligible_wc_ids)
+                if operation.eligible_wc_ids
+                else list(default_eligible)
+            )
             expanded_eligible: list[UUID] = []
             for work_center_id in base_eligible:
                 expanded_eligible.extend(expanded_ids.get(work_center_id, [work_center_id]))
-            new_operations.append(operation.model_copy(update={"eligible_wc_ids": expanded_eligible}))
+            new_operations.append(
+                operation.model_copy(update={"eligible_wc_ids": expanded_eligible})
+            )
 
         new_setup_matrix = []
         for entry in problem.setup_matrix:
-            lane_ids = expanded_ids.get(entry.work_center_id)
-            if not lane_ids:
+            entry_lane_ids = expanded_ids.get(entry.work_center_id)
+            if not entry_lane_ids:
                 new_setup_matrix.append(entry)
                 continue
-            for lane_id in lane_ids:
+            for lane_id in entry_lane_ids:
                 new_setup_matrix.append(entry.model_copy(update={"work_center_id": lane_id}))
 
         transformed_problem = ScheduleProblem(
@@ -187,9 +193,7 @@ class CpSatSolver(BaseSolver):
                     if op_i.id == op_j.id:
                         continue
 
-                    lit = model.new_bool_var(
-                        f"arc_{op_i.id}_{op_j.id}_{work_center.id}"
-                    )
+                    lit = model.new_bool_var(f"arc_{op_i.id}_{op_j.id}_{work_center.id}")
                     arcs.append((op_index[op_i.id], op_index[op_j.id], lit))
 
                     model.add_implication(lit, presences[(op_i.id, work_center.id)])
@@ -217,9 +221,7 @@ class CpSatSolver(BaseSolver):
                             lit,
                             f"setup_interval_{op_i.id}_{op_j.id}_{work_center.id}",
                         )
-                        setup_intervals_by_op.setdefault(op_j.id, []).append(
-                            (setup_interval, lit)
-                        )
+                        setup_intervals_by_op.setdefault(op_j.id, []).append((setup_interval, lit))
 
                     material_loss = setup_material_lookup.get(
                         (work_center.id, op_i.state_id, op_j.state_id), 0
@@ -298,7 +300,10 @@ class CpSatSolver(BaseSolver):
     ) -> tuple[Any, Any, Any, int, dict[str, int], int]:
         max_setup = max((entry.setup_minutes for entry in problem.setup_matrix), default=0)
         max_material_scaled = max(
-            (int(round(entry.material_loss * material_loss_scale)) for entry in problem.setup_matrix),
+            (
+                int(round(entry.material_loss * material_loss_scale))
+                for entry in problem.setup_matrix
+            ),
             default=0,
         )
 
@@ -317,16 +322,16 @@ class CpSatSolver(BaseSolver):
             model.add(total_material_scaled == 0)
 
         due_offsets = {
-            order.id: int(
-                (order.due_date - problem.planning_horizon_start).total_seconds() / 60.0
-            )
+            order.id: int((order.due_date - problem.planning_horizon_start).total_seconds() / 60.0)
             for order in problem.orders
         }
 
         tardiness_terms: list[Any] = []
         tardiness_ub = 0
         for order in problem.orders:
-            order_operations = [operation for operation in problem.operations if operation.order_id == order.id]
+            order_operations = [
+                operation for operation in problem.operations if operation.order_id == order.id
+            ]
             completion = model.new_int_var(0, horizon, f"completion_{order.id}")
             for operation in order_operations:
                 model.add(completion >= selected_ends[operation.id])
@@ -368,8 +373,10 @@ class CpSatSolver(BaseSolver):
             if "max_tardiness_minutes" in epsilon_constraints:
                 model.add(total_tardiness <= int(epsilon_constraints["max_tardiness_minutes"]))
             if "max_material_loss_scaled" in epsilon_constraints:
-                model.add(total_material_scaled <= int(epsilon_constraints["max_material_loss_scaled"]))
-        
+                model.add(
+                    total_material_scaled <= int(epsilon_constraints["max_material_loss_scaled"])
+                )
+
         if objective_mode == "epsilon_primary":
             objective_targets = {
                 "makespan": makespan,
@@ -388,7 +395,8 @@ class CpSatSolver(BaseSolver):
             except KeyError as exc:
                 supported = ", ".join(sorted(objective_targets))
                 raise ValueError(
-                    f"Unsupported primary_objective '{primary_objective}'. Expected one of: {supported}"
+                    "Unsupported primary_objective "
+                    f"'{primary_objective}'. Expected one of: {supported}"
                 ) from exc
 
             if primary_objective == "makespan":
@@ -410,7 +418,14 @@ class CpSatSolver(BaseSolver):
                 + weights["tardiness"] * total_tardiness
             )
 
-        return total_setup, total_material_scaled, total_tardiness, secondary_bound, weights, material_loss_scale
+        return (
+            total_setup,
+            total_material_scaled,
+            total_tardiness,
+            secondary_bound,
+            weights,
+            material_loss_scale,
+        )
 
     def _extract_solution_and_objective(
         self,
@@ -452,7 +467,8 @@ class CpSatSolver(BaseSolver):
                         Assignment(
                             operation_id=operation.id,
                             work_center_id=work_center_id,
-                            start_time=problem.planning_horizon_start + timedelta(minutes=start_offset),
+                            start_time=problem.planning_horizon_start
+                            + timedelta(minutes=start_offset),
                             end_time=problem.planning_horizon_start + timedelta(minutes=end_offset),
                             setup_minutes=0,
                             aux_resource_ids=[
@@ -490,7 +506,8 @@ class CpSatSolver(BaseSolver):
             objective = ObjectiveValues(
                 makespan_minutes=float(solver.value(makespan)),
                 total_setup_minutes=float(solver.value(total_setup)),
-                total_material_loss=float(solver.value(total_material_scaled)) / material_loss_scale,
+                total_material_loss=float(solver.value(total_material_scaled))
+                / material_loss_scale,
                 total_tardiness_minutes=float(solver.value(total_tardiness)),
                 weighted_sum=float(solver.objective_value),
             )
@@ -514,10 +531,10 @@ class CpSatSolver(BaseSolver):
         num_workers = int(kwargs.get("num_workers", 8))
         objective_weights = dict(kwargs.get("objective_weights", {}))
         material_loss_scale = int(kwargs.get("material_loss_scale", 1000))
-        epsilon_constraints: dict[str, int] | None = kwargs.get("epsilon_constraints", None)
+        epsilon_constraints: dict[str, int] | None = kwargs.get("epsilon_constraints")
         objective_mode = str(kwargs.get("objective_mode", "weighted_sum"))
         primary_objective = str(kwargs.get("primary_objective", "makespan"))
-        warm_start_assignments: list[Assignment] | None = kwargs.get("warm_start_assignments", None)
+        warm_start_assignments: list[Assignment] | None = kwargs.get("warm_start_assignments")
         enable_symmetry_breaking = bool(kwargs.get("enable_symmetry_breaking", True))
 
         t0 = time.monotonic()
@@ -528,7 +545,8 @@ class CpSatSolver(BaseSolver):
         horizon = int(
             (
                 solve_problem.planning_horizon_end - solve_problem.planning_horizon_start
-            ).total_seconds() / 60
+            ).total_seconds()
+            / 60
         )
 
         wc_by_id = {work_center.id: work_center for work_center in solve_problem.work_centers}
@@ -567,7 +585,9 @@ class CpSatSolver(BaseSolver):
             presence_vars: list[Any] = []
             for work_center_id in eligible_by_op[operation.id]:
                 work_center = wc_by_id[work_center_id]
-                duration = max(1, int(round(operation.base_duration_min / work_center.speed_factor)))
+                duration = max(
+                    1, int(round(operation.base_duration_min / work_center.speed_factor))
+                )
 
                 suffix = f"_{operation.id}_{work_center_id}"
                 start_var = model.new_int_var(0, horizon, f"start{suffix}")
@@ -594,7 +614,9 @@ class CpSatSolver(BaseSolver):
 
         for operation in solve_problem.operations:
             if operation.predecessor_op_id is not None:
-                model.add(selected_starts[operation.id] >= selected_ends[operation.predecessor_op_id])
+                model.add(
+                    selected_starts[operation.id] >= selected_ends[operation.predecessor_op_id]
+                )
 
         setup_terms, material_terms, setup_intervals_by_op = self._add_machine_order_and_adjacency(
             model,
@@ -614,19 +636,21 @@ class CpSatSolver(BaseSolver):
         for operation in solve_problem.operations:
             model.add(makespan >= selected_ends[operation.id])
 
-        total_setup, total_material_scaled, total_tardiness, secondary_bound, weights, scale = self._build_weighted_objective(
-            model,
-            solve_problem,
-            horizon,
-            makespan,
-            setup_terms,
-            material_terms,
-            selected_ends,
-            objective_weights,
-            material_loss_scale,
-            epsilon_constraints=epsilon_constraints,
-            objective_mode=objective_mode,
-            primary_objective=primary_objective,
+        total_setup, total_material_scaled, total_tardiness, secondary_bound, weights, scale = (
+            self._build_weighted_objective(
+                model,
+                solve_problem,
+                horizon,
+                makespan,
+                setup_terms,
+                material_terms,
+                selected_ends,
+                objective_weights,
+                material_loss_scale,
+                epsilon_constraints=epsilon_constraints,
+                objective_mode=objective_mode,
+                primary_objective=primary_objective,
+            )
         )
 
         if enable_symmetry_breaking:
@@ -638,7 +662,9 @@ class CpSatSolver(BaseSolver):
                 if len(group_work_centers) < 2:
                     continue
                 group_work_center_ids = {work_center.id for work_center in group_work_centers}
-                for work_center_a, work_center_b in zip(group_work_centers[:-1], group_work_centers[1:]):
+                for work_center_a, work_center_b in zip(
+                    group_work_centers[:-1], group_work_centers[1:], strict=False
+                ):
                     presences_a: list[Any] = []
                     presences_b: list[Any] = []
                     for operation in solve_problem.operations:
@@ -662,7 +688,9 @@ class CpSatSolver(BaseSolver):
 
         hint_count = 0
         if warm_start_assignments and not virtual_to_original:
-            hint_by_operation = {assignment.operation_id: assignment for assignment in warm_start_assignments}
+            hint_by_operation = {
+                assignment.operation_id: assignment for assignment in warm_start_assignments
+            }
             for operation in solve_problem.operations:
                 hint = hint_by_operation.get(operation.id)
                 if hint is None:

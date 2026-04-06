@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 from synaps.cli import main
 from synaps.contracts import RepairRequest, SolveRequest
@@ -10,8 +11,13 @@ from synaps.solvers.greedy_dispatch import GreedyDispatch
 from synaps.solvers.router import SolveRegime
 from tests.conftest import make_simple_problem
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-def _write_instance(tmp_path) -> str:
+    import pytest
+
+
+def _write_instance(tmp_path: Path) -> str:
     problem = make_simple_problem()
     instance_path = tmp_path / "instance.json"
     instance_path.write_text(
@@ -21,7 +27,10 @@ def _write_instance(tmp_path) -> str:
     return str(instance_path)
 
 
-def test_cli_solve_with_explicit_solver_config(tmp_path, capsys) -> None:
+def test_cli_solve_with_explicit_solver_config(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     instance_path = _write_instance(tmp_path)
 
     exit_code = main(["solve", instance_path, "--solver-config", "GREED"])
@@ -34,7 +43,10 @@ def test_cli_solve_with_explicit_solver_config(tmp_path, capsys) -> None:
     assert payload["metadata"]["portfolio"]["routed"] is False
 
 
-def test_cli_solve_uses_routed_portfolio_by_default(tmp_path, capsys) -> None:
+def test_cli_solve_uses_routed_portfolio_by_default(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     instance_path = _write_instance(tmp_path)
 
     exit_code = main(["solve", instance_path])
@@ -46,7 +58,10 @@ def test_cli_solve_uses_routed_portfolio_by_default(tmp_path, capsys) -> None:
     assert payload["metadata"]["portfolio"]["routed"] is True
 
 
-def test_cli_solve_request_executes_contract(tmp_path, capsys) -> None:
+def test_cli_solve_request_executes_contract(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     problem = make_simple_problem()
     request = SolveRequest(
         request_id="solve-contract-1",
@@ -64,7 +79,10 @@ def test_cli_solve_request_executes_contract(tmp_path, capsys) -> None:
     assert payload["result"]["metadata"]["portfolio"]["solver_config"] == "CPSAT-10"
 
 
-def test_cli_repair_request_executes_contract(tmp_path, capsys) -> None:
+def test_cli_repair_request_executes_contract(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     problem = make_simple_problem()
     base = GreedyDispatch().solve(problem)
     request = RepairRequest(
@@ -86,7 +104,10 @@ def test_cli_repair_request_executes_contract(tmp_path, capsys) -> None:
     assert payload["result"]["metadata"]["portfolio"]["solver_config"] == "INCREMENTAL_REPAIR"
 
 
-def test_cli_write_contract_schemas_writes_bundle(tmp_path, capsys) -> None:
+def test_cli_write_contract_schemas_writes_bundle(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     output_dir = tmp_path / "contracts"
 
     exit_code = main(["write-contract-schemas", "--output-dir", str(output_dir)])
@@ -99,7 +120,10 @@ def test_cli_write_contract_schemas_writes_bundle(tmp_path, capsys) -> None:
     assert (output_dir / "solve-response.schema.json").exists()
 
 
-def test_cli_solve_request_can_write_runtime_replay_artifact(tmp_path, capsys) -> None:
+def test_cli_solve_request_can_write_runtime_replay_artifact(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     problem = make_simple_problem()
     request = SolveRequest(
         request_id="solve-contract-replay-1",
@@ -109,12 +133,14 @@ def test_cli_solve_request_can_write_runtime_replay_artifact(tmp_path, capsys) -
     replay_dir = tmp_path / "replay"
     request_path.write_text(request.model_dump_json(indent=2), encoding="utf-8")
 
-    exit_code = main([
-        "solve-request",
-        str(request_path),
-        "--replay-output-dir",
-        str(replay_dir),
-    ])
+    exit_code = main(
+        [
+            "solve-request",
+            str(request_path),
+            "--replay-output-dir",
+            str(replay_dir),
+        ]
+    )
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
 
@@ -135,18 +161,23 @@ def test_cli_solve_request_can_write_runtime_replay_artifact(tmp_path, capsys) -
     assert manifest[0]["request_id"] == "solve-contract-replay-1"
 
 
-def test_cli_solve_can_write_runtime_replay_artifact(tmp_path, capsys) -> None:
+def test_cli_solve_can_write_runtime_replay_artifact(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     instance_path = _write_instance(tmp_path)
     replay_dir = tmp_path / "replay"
 
-    exit_code = main([
-        "solve",
-        instance_path,
-        "--solver-config",
-        "GREED",
-        "--replay-output-dir",
-        str(replay_dir),
-    ])
+    exit_code = main(
+        [
+            "solve",
+            instance_path,
+            "--solver-config",
+            "GREED",
+            "--replay-output-dir",
+            str(replay_dir),
+        ]
+    )
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
 
@@ -167,7 +198,10 @@ def test_cli_solve_can_write_runtime_replay_artifact(tmp_path, capsys) -> None:
     assert manifest[0]["solver_config"] == "GREED"
 
 
-def test_cli_repair_request_can_write_runtime_replay_artifact(tmp_path, capsys) -> None:
+def test_cli_repair_request_can_write_runtime_replay_artifact(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     problem = make_simple_problem()
     base = GreedyDispatch().solve(problem)
     request = RepairRequest(
@@ -181,12 +215,14 @@ def test_cli_repair_request_can_write_runtime_replay_artifact(tmp_path, capsys) 
     replay_dir = tmp_path / "replay"
     request_path.write_text(request.model_dump_json(indent=2), encoding="utf-8")
 
-    exit_code = main([
-        "repair-request",
-        str(request_path),
-        "--replay-output-dir",
-        str(replay_dir),
-    ])
+    exit_code = main(
+        [
+            "repair-request",
+            str(request_path),
+            "--replay-output-dir",
+            str(replay_dir),
+        ]
+    )
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
 

@@ -390,7 +390,9 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         help="Override probability that an operation needs an auxiliary resource",
     )
-    parser.add_argument("--aux-resource-types", type=int, help="Override number of auxiliary resource pools")
+    parser.add_argument(
+        "--aux-resource-types", type=int, help="Override number of auxiliary resource pools"
+    )
     return parser
 
 

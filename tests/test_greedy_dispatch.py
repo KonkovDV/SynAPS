@@ -1,8 +1,9 @@
 """Tests for GreedyDispatch solver."""
 
-import pytest
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
+
+import pytest
 from pydantic import ValidationError
 
 from synaps.model import (
@@ -12,8 +13,8 @@ from synaps.model import (
     Order,
     ScheduleProblem,
     SetupEntry,
-    State,
     SolverStatus,
+    State,
     WorkCenter,
 )
 from synaps.solvers.feasibility_checker import FeasibilityChecker
@@ -218,7 +219,9 @@ class TestGreedyDispatch:
 
         assert result.status == SolverStatus.FEASIBLE
         material_sensitive_assignment = next(
-            assignment for assignment in result.assignments if assignment.operation_id == operation_c.id
+            assignment
+            for assignment in result.assignments
+            if assignment.operation_id == operation_c.id
         )
         assert material_sensitive_assignment.work_center_id == work_center_2.id
         assert result.objective.total_material_loss == 1.0
@@ -315,7 +318,9 @@ class TestGreedyDispatch:
             key=lambda assignment: assignment.start_time,
         )
         assert len(follow_up_assignments) == 2
-        assert follow_up_assignments[1].start_time >= follow_up_assignments[0].end_time + timedelta(minutes=10)
+        assert follow_up_assignments[1].start_time >= follow_up_assignments[0].end_time + timedelta(
+            minutes=10
+        )
 
     def test_returns_error_when_precedence_graph_contains_cycle(self) -> None:
         horizon_start = datetime(2026, 4, 1, 8, 0, tzinfo=UTC)

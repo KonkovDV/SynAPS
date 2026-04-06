@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import time
 from datetime import timedelta
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from synaps.model import (
     Assignment,
     ObjectiveValues,
+    Operation,
     ScheduleProblem,
     ScheduleResult,
     SolverStatus,
@@ -19,6 +20,9 @@ from synaps.solvers._dispatch_support import (
     find_earliest_feasible_slot,
     recompute_assignment_setups,
 )
+
+if TYPE_CHECKING:
+    from uuid import UUID
 
 
 class IncrementalRepair(BaseSolver):
@@ -49,7 +53,9 @@ class IncrementalRepair(BaseSolver):
             if operation and operation.predecessor_op_id:
                 needed_ids.add(operation.predecessor_op_id)
 
-        sub_operations = [operation for operation in problem.operations if operation.id in needed_ids]
+        sub_operations = [
+            operation for operation in problem.operations if operation.id in needed_ids
+        ]
         if not sub_operations:
             return None
 
@@ -61,7 +67,9 @@ class IncrementalRepair(BaseSolver):
             setup_matrix=problem.setup_matrix,
             auxiliary_resources=problem.auxiliary_resources,
             aux_requirements=[
-                requirement for requirement in problem.aux_requirements if requirement.operation_id in needed_ids
+                requirement
+                for requirement in problem.aux_requirements
+                if requirement.operation_id in needed_ids
             ],
             planning_horizon_start=problem.planning_horizon_start,
             planning_horizon_end=problem.planning_horizon_end,
@@ -74,11 +82,17 @@ class IncrementalRepair(BaseSolver):
             enable_symmetry_breaking=False,
         )
 
-        if result.status in (SolverStatus.INFEASIBLE, SolverStatus.ERROR, SolverStatus.TIMEOUT):
-            if not result.assignments:
-                return None
+        if (
+            result.status in (SolverStatus.INFEASIBLE, SolverStatus.ERROR, SolverStatus.TIMEOUT)
+            and not result.assignments
+        ):
+            return None
 
-        return [assignment for assignment in result.assignments if assignment.operation_id in remaining_op_ids]
+        return [
+            assignment
+            for assignment in result.assignments
+            if assignment.operation_id in remaining_op_ids
+        ]
 
     @property
     def name(self) -> str:
@@ -126,7 +140,10 @@ class IncrementalRepair(BaseSolver):
         # then by sequence within order for stable tie-breaking.
         remaining_repair = sorted(
             to_repair,
-            key=lambda operation: (-orders_by_id[operation.order_id].priority, operation.seq_in_order),
+            key=lambda operation: (
+                -orders_by_id[operation.order_id].priority,
+                operation.seq_in_order,
+            ),
         )
 
         while remaining_repair:
@@ -139,7 +156,19 @@ class IncrementalRepair(BaseSolver):
             if not ready:
                 break
 
-            best_candidate: tuple[float, Any, Any, Any] | None = None
+            best_candidate: (
+                tuple[
+                    int,
+                    float,
+                    float,
+                    float,
+                    int,
+                    Operation,
+                    UUID,
+                    Any,
+                ]
+                | None
+            ) = None
             scheduled_assignments = frozen + repaired
 
             for operation in ready:
@@ -185,6 +214,7 @@ class IncrementalRepair(BaseSolver):
                             slot.end_offset,
                             slot.material_loss,
                             slot.start_offset,
+                            operation.seq_in_order,
                             operation,
                             work_center_id,
                             slot,
@@ -205,7 +235,7 @@ class IncrementalRepair(BaseSolver):
                     used_cpsat_fallback = True
                 break
 
-            _, _, _, _, operation, work_center_id, slot = best_candidate
+            _, _, _, _, _, operation, work_center_id, slot = best_candidate
             repaired.append(
                 Assignment(
                     operation_id=operation.id,
@@ -240,19 +270,24 @@ class IncrementalRepair(BaseSolver):
                     0.0,
                 )
 
-        makespan = max(
-            (a.end_time - horizon_start).total_seconds() / 60.0 for a in all_assignments
-        ) if all_assignments else 0.0
+        makespan = (
+            max((a.end_time - horizon_start).total_seconds() / 60.0 for a in all_assignments)
+            if all_assignments
+            else 0.0
+        )
 
         # Per-order tardiness
         order_completion: dict[Any, float] = {}
         for a in all_assignments:
-            op = ops_by_id.get(a.operation_id)
-            if op is None:
+            assigned_operation = ops_by_id.get(a.operation_id)
+            if assigned_operation is None:
                 continue
             end = (a.end_time - horizon_start).total_seconds() / 60.0
-            if op.order_id not in order_completion or end > order_completion[op.order_id]:
-                order_completion[op.order_id] = end
+            if (
+                assigned_operation.order_id not in order_completion
+                or end > order_completion[assigned_operation.order_id]
+            ):
+                order_completion[assigned_operation.order_id] = end
 
         total_tardiness = 0.0
         for order in problem.orders:

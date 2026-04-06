@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from benchmark.study_solver_scaling import study_solver_scaling
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_study_solver_scaling_compares_requested_solvers_for_large_preset() -> None:

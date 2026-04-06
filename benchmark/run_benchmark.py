@@ -90,8 +90,10 @@ def _run_single(
         wall_times.append(time.perf_counter() - t0)
         last_result = result
         try:
-            if _resource is not None:
-                peak_rss_kb = max(peak_rss_kb, _resource.getrusage(_resource.RUSAGE_SELF).ru_maxrss)
+            getrusage = getattr(_resource, "getrusage", None) if _resource is not None else None
+            usage_scope = getattr(_resource, "RUSAGE_SELF", None) if _resource is not None else None
+            if callable(getrusage) and usage_scope is not None:
+                peak_rss_kb = max(peak_rss_kb, getrusage(usage_scope).ru_maxrss)
         except Exception:
             pass
 
@@ -114,7 +116,7 @@ def _run_single(
     peak_rss_mb: float | None = None
     try:
         if os.name == "nt":
-            import psutil  # noqa: PLC0415
+            import psutil  # type: ignore[import-untyped]  # noqa: PLC0415
 
             peak_rss_mb = round(psutil.Process().memory_info().peak_wset / 1024 / 1024, 1)
         elif peak_rss_kb > 0:
@@ -154,15 +156,17 @@ def _run_single(
     if meta.get("warm_started"):
         results_block["warm_started"] = True
 
+    verification_block: dict[str, Any] = {
+        "feasible": verification.feasible,
+        "violation_count": verification.violation_count,
+        "violation_kinds": verification.violation_kinds,
+    }
+
     report = {
         "solver_config": solver_name,
         "selected_solver_config": selected_solver_config,
         "results": results_block,
-        "verification": {
-            "feasible": verification.feasible,
-            "violation_count": verification.violation_count,
-            "violation_kinds": verification.violation_kinds,
-        },
+        "verification": verification_block,
         "statistics": statistics_block,
     }
     if include_replay or replay_output_dir is not None:
@@ -171,7 +175,7 @@ def _run_single(
             solver_config=solver_name,
             selected_solver_config=selected_solver_config,
             results=results_block,
-            verification=report["verification"],
+            verification=verification_block,
             statistics=statistics_block,
             problem_profile=problem_profile,
             portfolio_metadata=portfolio_metadata,

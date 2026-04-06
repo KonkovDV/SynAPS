@@ -3,13 +3,25 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from synaps.model import Assignment, Operation, Order, ScheduleProblem, State, SolverStatus, WorkCenter
+from synaps.model import (
+    Assignment,
+    Operation,
+    Order,
+    ScheduleProblem,
+    SolverStatus,
+    State,
+    WorkCenter,
+)
 from synaps.solvers.feasibility_checker import FeasibilityChecker
 from synaps.solvers.greedy_dispatch import GreedyDispatch
 from synaps.solvers.incremental_repair import IncrementalRepair
 from tests.conftest import HORIZON_START
+
+if TYPE_CHECKING:
+    import pytest
 
 
 class TestIncrementalRepair:
@@ -246,7 +258,8 @@ class TestIncrementalRepair:
         repair = IncrementalRepair()
         remaining_op_ids = {simple_problem.operations[-1].id}
 
-        fallback_assignments = repair._cpsat_fallback(
+        fallback_fn = repair._cpsat_fallback
+        fallback_assignments = fallback_fn(
             simple_problem,
             [],
             remaining_op_ids,
@@ -259,22 +272,36 @@ class TestIncrementalRepair:
     def test_uses_cpsat_fallback_when_constructive_dispatch_finds_no_slot(
         self,
         simple_problem: ScheduleProblem,
-        monkeypatch,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         base_result = GreedyDispatch().solve(simple_problem)
         disrupted_op_id = simple_problem.operations[-1].id
         preserved_assignments = [
-            assignment for assignment in base_result.assignments if assignment.operation_id == disrupted_op_id
+            assignment
+            for assignment in base_result.assignments
+            if assignment.operation_id == disrupted_op_id
         ]
+
+        def no_slot(*_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def preserve_fallback(
+            _self: IncrementalRepair,
+            _problem: ScheduleProblem,
+            _frozen_assignments: list[Assignment],
+            _remaining_op_ids: set[Any],
+            _already_scheduled_ids: set[Any],
+        ) -> list[Assignment]:
+            return preserved_assignments
 
         monkeypatch.setattr(
             "synaps.solvers.incremental_repair.find_earliest_feasible_slot",
-            lambda *args, **kwargs: None,
+            no_slot,
         )
         monkeypatch.setattr(
             IncrementalRepair,
             "_cpsat_fallback",
-            lambda self, problem, frozen_assignments, remaining_op_ids, already_scheduled_ids: preserved_assignments,
+            preserve_fallback,
         )
 
         result = IncrementalRepair().solve(

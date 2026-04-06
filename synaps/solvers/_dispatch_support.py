@@ -3,20 +3,31 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from synaps.model import Assignment, ScheduleProblem
+if TYPE_CHECKING:
+    from datetime import datetime
+    from uuid import UUID
+
+    from synaps.model import (
+        Assignment,
+        AuxiliaryResource,
+        Operation,
+        OperationAuxRequirement,
+        ScheduleProblem,
+        WorkCenter,
+    )
 
 
 @dataclass(frozen=True)
 class DispatchContext:
-    horizon_start: Any
-    ops_by_id: dict[Any, Any]
-    wc_by_id: dict[Any, Any]
-    setup_minutes: dict[tuple[Any, Any, Any], int]
-    material_loss: dict[tuple[Any, Any, Any], float]
-    requirements_by_op: dict[Any, list[Any]]
-    resources_by_id: dict[Any, Any]
+    horizon_start: datetime
+    ops_by_id: dict[UUID, Operation]
+    wc_by_id: dict[UUID, WorkCenter]
+    setup_minutes: dict[tuple[UUID, UUID, UUID], int]
+    material_loss: dict[tuple[UUID, UUID, UUID], float]
+    requirements_by_op: dict[UUID, list[OperationAuxRequirement]]
+    resources_by_id: dict[UUID, AuxiliaryResource]
 
 
 @dataclass(frozen=True)
@@ -25,7 +36,7 @@ class SlotCandidate:
     end_offset: float
     setup_minutes: int
     material_loss: float
-    aux_resource_ids: list[Any]
+    aux_resource_ids: list[UUID]
 
 
 def recompute_assignment_setups(
@@ -88,7 +99,7 @@ def build_dispatch_context(problem: ScheduleProblem) -> DispatchContext:
 
 def _offset_minutes(context: DispatchContext, assignment: Assignment, *, end: bool) -> float:
     anchor = assignment.end_time if end else assignment.start_time
-    return (anchor - context.horizon_start).total_seconds() / 60.0
+    return float((anchor - context.horizon_start).total_seconds() / 60.0)
 
 
 def _assignment_setup_window_starts(
@@ -123,7 +134,7 @@ def _assignment_setup_window_starts(
 def _resource_is_feasible(
     context: DispatchContext,
     scheduled_assignments: list[Assignment],
-    operation_id: Any,
+    operation_id: UUID,
     start_offset: float,
     end_offset: float,
     setup_minutes: int,
@@ -174,7 +185,7 @@ def _resource_is_feasible(
 def _candidate_starts(
     context: DispatchContext,
     scheduled_assignments: list[Assignment],
-    operation_id: Any,
+    operation_id: UUID,
     gap_start: float,
     latest_start: float,
     setup_minutes: int,
@@ -202,8 +213,8 @@ def _candidate_starts(
 def find_earliest_feasible_slot(
     context: DispatchContext,
     scheduled_assignments: list[Assignment],
-    operation: Any,
-    work_center_id: Any,
+    operation: Operation,
+    work_center_id: UUID,
     earliest_start: float,
 ) -> SlotCandidate | None:
     work_center = context.wc_by_id.get(work_center_id)
@@ -215,11 +226,17 @@ def find_earliest_feasible_slot(
     ]
 
     machine_assignments = sorted(
-        [assignment for assignment in scheduled_assignments if assignment.work_center_id == work_center_id],
+        [
+            assignment
+            for assignment in scheduled_assignments
+            if assignment.work_center_id == work_center_id
+        ],
         key=lambda assignment: assignment.start_time,
     )
 
-    def evaluate_gap(previous: Assignment | None, following: Assignment | None) -> SlotCandidate | None:
+    def evaluate_gap(
+        previous: Assignment | None, following: Assignment | None
+    ) -> SlotCandidate | None:
         previous_end = _offset_minutes(context, previous, end=True) if previous is not None else 0.0
         previous_state = (
             context.ops_by_id[previous.operation_id].state_id if previous is not None else None

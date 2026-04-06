@@ -54,7 +54,8 @@ class TestLbbdSolver:
                 pred = assignment_map[op.predecessor_op_id]
                 cur = assignment_map[op.id]
                 assert cur.start_time >= pred.end_time, (
-                    f"Op {op.id} starts at {cur.start_time} before predecessor ends at {pred.end_time}"
+                    f"Op {op.id} starts at {cur.start_time} before predecessor ends at "
+                    f"{pred.end_time}"
                 )
 
     def test_converges_within_iterations(self, simple_problem: ScheduleProblem) -> None:
@@ -89,26 +90,37 @@ class TestLbbdSolver:
         wc_1 = WorkCenter(id=uuid4(), code="WC-1", capability_group="machining")
         wc_2 = WorkCenter(id=uuid4(), code="WC-2", capability_group="machining")
         resource = AuxiliaryResource(
-            id=uuid4(), code="TOOL-1", resource_type="tool", pool_size=1,
+            id=uuid4(),
+            code="TOOL-1",
+            resource_type="tool",
+            pool_size=1,
         )
 
         order_1 = Order(
-            id=uuid4(), external_ref="ORD-1",
+            id=uuid4(),
+            external_ref="ORD-1",
             due_date=horizon_start + timedelta(hours=3),
         )
         order_2 = Order(
-            id=uuid4(), external_ref="ORD-2",
+            id=uuid4(),
+            external_ref="ORD-2",
             due_date=horizon_start + timedelta(hours=3),
         )
 
         op_1 = Operation(
-            id=uuid4(), order_id=order_1.id, seq_in_order=0,
-            state_id=state.id, base_duration_min=60,
+            id=uuid4(),
+            order_id=order_1.id,
+            seq_in_order=0,
+            state_id=state.id,
+            base_duration_min=60,
             eligible_wc_ids=[wc_1.id, wc_2.id],
         )
         op_2 = Operation(
-            id=uuid4(), order_id=order_2.id, seq_in_order=0,
-            state_id=state.id, base_duration_min=60,
+            id=uuid4(),
+            order_id=order_2.id,
+            seq_in_order=0,
+            state_id=state.id,
+            base_duration_min=60,
             eligible_wc_ids=[wc_1.id, wc_2.id],
         )
 
@@ -121,10 +133,14 @@ class TestLbbdSolver:
             auxiliary_resources=[resource],
             aux_requirements=[
                 OperationAuxRequirement(
-                    operation_id=op_1.id, aux_resource_id=resource.id, quantity_needed=1,
+                    operation_id=op_1.id,
+                    aux_resource_id=resource.id,
+                    quantity_needed=1,
                 ),
                 OperationAuxRequirement(
-                    operation_id=op_2.id, aux_resource_id=resource.id, quantity_needed=1,
+                    operation_id=op_2.id,
+                    aux_resource_id=resource.id,
+                    quantity_needed=1,
                 ),
             ],
             planning_horizon_start=horizon_start,
@@ -153,7 +169,10 @@ class TestLbbdSolver:
         # (with tolerance — decomposition + post-assembly precedence/setup
         # enforcement may push makespan beyond greedy on small problems)
         assert lbbd_result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
-        assert lbbd_result.objective.makespan_minutes <= greedy_result.objective.makespan_minutes * 1.25
+        assert (
+            lbbd_result.objective.makespan_minutes
+            <= greedy_result.objective.makespan_minutes * 1.25
+        )
 
     def test_subproblem_includes_transitive_external_predecessors(self) -> None:
         horizon_start = datetime(2026, 4, 1, 8, 0, tzinfo=UTC)

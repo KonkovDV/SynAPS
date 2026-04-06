@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
+from synaps import solve_schedule
 from synaps.replay import build_runtime_replay_artifact, write_replay_artifact
 from synaps.solvers.greedy_dispatch import GreedyDispatch
 from synaps.solvers.router import SolveRegime, SolverRoutingContext
-from synaps import solve_schedule
 from tests.conftest import make_simple_problem
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-def test_write_replay_artifact_appends_manifest_entries(tmp_path) -> None:
+
+def test_write_replay_artifact_appends_manifest_entries(tmp_path: Path) -> None:
     problem = make_simple_problem()
     replay_dir = tmp_path / "replay"
 
@@ -38,8 +42,12 @@ def test_write_replay_artifact_appends_manifest_entries(tmp_path) -> None:
         solver_config="GREED",
     )
 
-    first_path = write_replay_artifact(replay_dir, first, stem_parts=("first-request", "runtime-solve"))
-    second_path = write_replay_artifact(replay_dir, second, stem_parts=("second-request", "runtime-solve"))
+    first_path = write_replay_artifact(
+        replay_dir, first, stem_parts=("first-request", "runtime-solve")
+    )
+    second_path = write_replay_artifact(
+        replay_dir, second, stem_parts=("second-request", "runtime-solve")
+    )
 
     manifest_entries = [
         json.loads(line)

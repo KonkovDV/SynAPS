@@ -91,8 +91,7 @@ class GreedyDispatch(BaseSolver):
                     metadata={
                         "acceleration": acceleration_status,
                         "error": (
-                            "no ready operations available; "
-                            "precedence graph may contain a cycle"
+                            "no ready operations available; precedence graph may contain a cycle"
                         ),
                     },
                 )
@@ -252,9 +251,7 @@ class GreedyDispatch(BaseSolver):
                 previous_state = dispatch_context.ops_by_id[
                     previous_assignment.operation_id
                 ].state_id
-                current_state = dispatch_context.ops_by_id[
-                    current_assignment.operation_id
-                ].state_id
+                current_state = dispatch_context.ops_by_id[current_assignment.operation_id].state_id
                 total_material_loss += dispatch_context.material_loss.get(
                     (work_center_id, previous_state, current_state),
                     0.0,

@@ -13,12 +13,14 @@ import json
 import statistics
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from benchmark.generate_instances import generate_problem, preset_spec, write_problem_instance
 from synaps.problem_profile import build_problem_profile
 from synaps.solvers.router import route_solver_config
 
-from benchmark.generate_instances import generate_problem, preset_spec, write_problem_instance
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 def study_routing_boundary(
@@ -72,8 +74,12 @@ def _summarize_preset(records: list[dict[str, Any]]) -> dict[str, Any]:
     operation_counts = [record["problem_profile"]["operation_count"] for record in records]
     routing_counts = _count_values(record["routing"]["solver_config"] for record in records)
     size_band_counts = _count_values(record["problem_profile"]["size_band"] for record in records)
-    aux_enabled_count = sum(1 for record in records if record["problem_profile"]["has_aux_constraints"])
-    setup_enabled_count = sum(1 for record in records if record["problem_profile"]["has_nonzero_setups"])
+    aux_enabled_count = sum(
+        1 for record in records if record["problem_profile"]["has_aux_constraints"]
+    )
+    setup_enabled_count = sum(
+        1 for record in records if record["problem_profile"]["has_nonzero_setups"]
+    )
 
     return {
         "instance_count": len(records),
@@ -90,7 +96,7 @@ def _summarize_preset(records: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _count_values(values) -> dict[str, int]:
+def _count_values(values: Iterable[str]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for value in values:
         counts[value] = counts.get(value, 0) + 1
@@ -98,7 +104,9 @@ def _count_values(values) -> dict[str, int]:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Study SynAPS routing boundaries across generated presets")
+    parser = argparse.ArgumentParser(
+        description="Study SynAPS routing boundaries across generated presets"
+    )
     parser.add_argument(
         "--presets",
         nargs="+",

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from math import log
+from typing import TYPE_CHECKING
 
 from synaps import accelerators
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def test_compute_atcs_log_score_matches_python_reference() -> None:
@@ -21,17 +25,15 @@ def test_compute_atcs_log_score_matches_python_reference() -> None:
     )
 
     expected = (
-        log(2.0)
-        - log(12.0)
-        - (5.0 / (2.0 * 10.0))
-        - (3.0 / (0.5 * 4.0))
-        - (1.5 / (0.5 * 2.0))
+        log(2.0) - log(12.0) - (5.0 / (2.0 * 10.0)) - (3.0 / (0.5 * 4.0)) - (1.5 / (0.5 * 2.0))
     )
 
     assert result == expected
 
 
-def test_compute_atcs_log_score_uses_native_backend_when_available(monkeypatch) -> None:
+def test_compute_atcs_log_score_uses_native_backend_when_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: dict[str, tuple[object, ...]] = {}
 
     def fake_native(*args: object) -> float:

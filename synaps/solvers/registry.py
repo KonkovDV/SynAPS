@@ -7,14 +7,18 @@ avoids configuration drift between CLI tooling, tests, and runtime routing.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from synaps.solvers import BaseSolver
 from synaps.solvers.cpsat_solver import CpSatSolver
 from synaps.solvers.greedy_dispatch import GreedyDispatch
 from synaps.solvers.lbbd_solver import LbbdSolver
 from synaps.solvers.pareto_slice_solver import ParetoSliceCpSatSolver
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
+    from synaps.solvers import BaseSolver
 
 
 @dataclass(frozen=True)
@@ -80,7 +84,10 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
             "primary_objective": "setup",
             "max_makespan_ratio": 1.10,
         },
-        description="Two-stage CP-SAT epsilon profile: minimise setup under a 10% near-optimal makespan cap",
+        description=(
+            "Two-stage CP-SAT epsilon profile: minimise setup under a 10% "
+            "near-optimal makespan cap"
+        ),
     ),
     "CPSAT-EPS-TARD-110": SolverRegistration(
         factory=_build_pareto_slice_cpsat,
@@ -90,7 +97,10 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
             "primary_objective": "tardiness",
             "max_makespan_ratio": 1.10,
         },
-        description="Two-stage CP-SAT epsilon profile: minimise tardiness under a 10% near-optimal makespan cap",
+        description=(
+            "Two-stage CP-SAT epsilon profile: minimise tardiness under a 10% "
+            "near-optimal makespan cap"
+        ),
     ),
     "CPSAT-EPS-MATERIAL-110": SolverRegistration(
         factory=_build_pareto_slice_cpsat,
@@ -100,7 +110,10 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
             "primary_objective": "material_loss",
             "max_makespan_ratio": 1.10,
         },
-        description="Two-stage CP-SAT epsilon profile: minimise material loss under a 10% near-optimal makespan cap",
+        description=(
+            "Two-stage CP-SAT epsilon profile: minimise material loss under a 10% "
+            "near-optimal makespan cap"
+        ),
     ),
     "LBBD-5": SolverRegistration(
         factory=_build_lbbd,

@@ -12,10 +12,9 @@ from __future__ import annotations
 import time
 from collections import defaultdict
 from datetime import timedelta
-from typing import Any
-from uuid import UUID
+from typing import TYPE_CHECKING, Any
 
-import highspy
+import highspy  # type: ignore[import-untyped]
 import numpy as np
 
 from synaps.model import (
@@ -30,6 +29,9 @@ from synaps.model import (
 )
 from synaps.solvers import BaseSolver
 from synaps.solvers.cpsat_solver import CpSatSolver
+
+if TYPE_CHECKING:
+    from uuid import UUID
 
 
 class LbbdSolver(BaseSolver):
@@ -59,9 +61,7 @@ class LbbdSolver(BaseSolver):
         orders_by_id = {o.id: o for o in problem.orders}
         eligible_by_op: dict[UUID, list[UUID]] = {
             op.id: (
-                op.eligible_wc_ids
-                if op.eligible_wc_ids
-                else [wc.id for wc in problem.work_centers]
+                op.eligible_wc_ids if op.eligible_wc_ids else [wc.id for wc in problem.work_centers]
             )
             for op in problem.operations
         }
@@ -136,18 +136,22 @@ class LbbdSolver(BaseSolver):
 
             if sub_assignments is None:
                 # Subproblem infeasible for this assignment → add nogood cut
-                benders_cuts.append(_BendersCut(
-                    assignment_map=dict(assignment_map),
-                    kind="nogood",
-                    rhs=0.0,
-                    bottleneck_ops=set(),
-                ))
-                iteration_log.append({
-                    "iteration": iteration,
-                    "master_bound": master_bound,
-                    "sub_makespan": None,
-                    "status": "sub_infeasible",
-                })
+                benders_cuts.append(
+                    _BendersCut(
+                        assignment_map=dict(assignment_map),
+                        kind="nogood",
+                        rhs=0.0,
+                        bottleneck_ops=set(),
+                    )
+                )
+                iteration_log.append(
+                    {
+                        "iteration": iteration,
+                        "master_bound": master_bound,
+                        "sub_makespan": None,
+                        "status": "sub_infeasible",
+                    }
+                )
                 continue
 
             ub = sub_makespan
@@ -157,16 +161,23 @@ class LbbdSolver(BaseSolver):
                 best_ub = ub
                 best_assignments = sub_assignments
                 best_objective = _compute_objective(
-                    problem, sub_assignments, sub_makespan, wc_by_id, ops_by_id, orders_by_id,
+                    problem,
+                    sub_assignments,
+                    sub_makespan,
+                    wc_by_id,
+                    ops_by_id,
+                    orders_by_id,
                 )
 
-            iteration_log.append({
-                "iteration": iteration,
-                "master_bound": master_bound,
-                "sub_makespan": sub_makespan,
-                "gap": (ub - lb) / max(ub, 1e-9),
-                "status": "feasible",
-            })
+            iteration_log.append(
+                {
+                    "iteration": iteration,
+                    "master_bound": master_bound,
+                    "sub_makespan": sub_makespan,
+                    "gap": (ub - lb) / max(ub, 1e-9),
+                    "status": "feasible",
+                }
+            )
 
             # --- Convergence check ---
             gap = (best_ub - lb) / max(best_ub, 1e-9)
@@ -179,15 +190,16 @@ class LbbdSolver(BaseSolver):
                 key=lambda kv: kv[1],
             )[0]
             bottleneck_ops = {
-                op_id for op_id, wc_id in assignment_map.items()
-                if wc_id == bottleneck_wc
+                op_id for op_id, wc_id in assignment_map.items() if wc_id == bottleneck_wc
             }
-            benders_cuts.append(_BendersCut(
-                assignment_map=dict(assignment_map),
-                kind="capacity",
-                rhs=sub_makespan,
-                bottleneck_ops=bottleneck_ops,
-            ))
+            benders_cuts.append(
+                _BendersCut(
+                    assignment_map=dict(assignment_map),
+                    kind="capacity",
+                    rhs=sub_makespan,
+                    bottleneck_ops=bottleneck_ops,
+                )
+            )
 
             setup_lookup = {
                 (entry.work_center_id, entry.from_state_id, entry.to_state_id): entry.setup_minutes
@@ -200,7 +212,9 @@ class LbbdSolver(BaseSolver):
             for work_center_id, machine_assignments in assignments_by_machine.items():
                 if len(machine_assignments) < 2:
                     continue
-                machine_assignments_sorted = sorted(machine_assignments, key=lambda assignment: assignment.start_time)
+                machine_assignments_sorted = sorted(
+                    machine_assignments, key=lambda assignment: assignment.start_time
+                )
                 actual_setup_total = 0.0
                 for index in range(len(machine_assignments_sorted) - 1):
                     previous_op = ops_by_id.get(machine_assignments_sorted[index].operation_id)
@@ -216,16 +230,21 @@ class LbbdSolver(BaseSolver):
                 processing_total = sum(
                     max(
                         1.0,
-                        ops_by_id[assignment.operation_id].base_duration_min / wc_by_id[work_center_id].speed_factor,
+                        ops_by_id[assignment.operation_id].base_duration_min
+                        / wc_by_id[work_center_id].speed_factor,
                     )
                     for assignment in machine_assignments
                 )
-                benders_cuts.append(_BendersCut(
-                    assignment_map=dict(assignment_map),
-                    kind="setup_cost",
-                    rhs=processing_total + actual_setup_total,
-                    bottleneck_ops={assignment.operation_id for assignment in machine_assignments},
-                ))
+                benders_cuts.append(
+                    _BendersCut(
+                        assignment_map=dict(assignment_map),
+                        kind="setup_cost",
+                        rhs=processing_total + actual_setup_total,
+                        bottleneck_ops={
+                            assignment.operation_id for assignment in machine_assignments
+                        },
+                    )
+                )
 
             # --- Load-balance cut (Hooker 2007, §7.3) ---
             # Strengthened form: C_max ≥ max(max_k load_k, total / |M|).
@@ -240,12 +259,14 @@ class LbbdSolver(BaseSolver):
                 max_load = max(machine_loads.values())
                 lb_cut_rhs = max(max_load, avg_load)
                 if lb_cut_rhs > lb:
-                    benders_cuts.append(_BendersCut(
-                        assignment_map=dict(assignment_map),
-                        kind="load_balance",
-                        rhs=lb_cut_rhs,
-                        bottleneck_ops=set(),
-                    ))
+                    benders_cuts.append(
+                        _BendersCut(
+                            assignment_map=dict(assignment_map),
+                            kind="load_balance",
+                            rhs=lb_cut_rhs,
+                            bottleneck_ops=set(),
+                        )
+                    )
 
         status = SolverStatus.FEASIBLE if best_assignments else SolverStatus.TIMEOUT
         elapsed_ms = int((time.monotonic() - t0) * 1000)
@@ -353,32 +374,41 @@ def _solve_master(
 
     # Constraint 1: unique assignment — ∑_k y[i,k] = 1 for each operation
     for op in problem.operations:
-        indices = [var_index[(op.id, wc_id)] for wc_id in eligible_by_op[op.id]]
-        coeffs = [1.0] * len(indices)
-        h.addRow(1.0, 1.0, len(indices), np.array(indices, dtype=np.int32), np.array(coeffs))
+        unique_indices = [var_index[(op.id, wc_id)] for wc_id in eligible_by_op[op.id]]
+        unique_coeffs = [1.0] * len(unique_indices)
+        h.addRow(
+            1.0,
+            1.0,
+            len(unique_indices),
+            np.array(unique_indices, dtype=np.int32),
+            np.array(unique_coeffs),
+        )
 
     # Constraint 2: relaxed capacity — ∑_i P[i,k] · y[i,k] ≤ C_max for each machine
     for wc in problem.work_centers:
-        indices: list[int] = []
-        coeffs: list[float] = []
+        capacity_indices: list[int] = []
+        capacity_coeffs: list[float] = []
         for op in problem.operations:
             key = (op.id, wc.id)
             if key in var_index:
                 duration = max(1.0, op.base_duration_min / wc.speed_factor)
-                indices.append(var_index[key])
-                coeffs.append(duration)
-        if not indices:
+                capacity_indices.append(var_index[key])
+                capacity_coeffs.append(duration)
+        if not capacity_indices:
             continue
         if min_setup_by_wc and wc.id in min_setup_by_wc:
             min_setup = min_setup_by_wc[wc.id]
             if min_setup > 0:
-                coeffs = [coefficient + min_setup for coefficient in coeffs]
+                capacity_coeffs = [coefficient + min_setup for coefficient in capacity_coeffs]
         # ∑ P·y - C_max ≤ 0
-        indices.append(cmax_idx)
-        coeffs.append(-1.0)
+        capacity_indices.append(cmax_idx)
+        capacity_coeffs.append(-1.0)
         h.addRow(
-            -highspy.kHighsInf, 0.0,
-            len(indices), np.array(indices, dtype=np.int32), np.array(coeffs),
+            -highspy.kHighsInf,
+            0.0,
+            len(capacity_indices),
+            np.array(capacity_indices, dtype=np.int32),
+            np.array(capacity_coeffs),
         )
 
     # Constraint 3: Benders cuts from previous iterations
@@ -394,8 +424,11 @@ def _solve_master(
                     coeffs.append(1.0)
             if indices:
                 h.addRow(
-                    -highspy.kHighsInf, len(indices) - 1.0,
-                    len(indices), np.array(indices, dtype=np.int32), np.array(coeffs),
+                    -highspy.kHighsInf,
+                    len(indices) - 1.0,
+                    len(indices),
+                    np.array(indices, dtype=np.int32),
+                    np.array(coeffs),
                 )
         elif cut.kind == "capacity":
             # Combinatorial Benders capacity cut (Hooker & Ottosson 2003).
@@ -405,62 +438,77 @@ def _solve_master(
             # Rearrange:  C_max − Σ p_i · y[i, k_i] ≥ rhs − Σ p_i
             #
             # The row added to HiGHS is:  C_max − Σ p·y  ≥  rhs − total_p
-            indices = [cmax_idx]
-            coeffs = [1.0]
+            capacity_cut_indices = [cmax_idx]
+            capacity_cut_coeffs = [1.0]
             total_processing = 0.0
             for op_id in cut.bottleneck_ops:
-                wc_id = cut.assignment_map.get(op_id)
-                if wc_id is None:
+                cut_wc_id = cut.assignment_map.get(op_id)
+                if cut_wc_id is None:
                     continue
-                key = (op_id, wc_id)
+                key = (op_id, cut_wc_id)
                 if key not in var_index:
                     continue
-                wc = wc_by_id.get(wc_id)
-                op = next((o for o in problem.operations if o.id == op_id), None)
-                if wc is None or op is None:
+                cut_wc = wc_by_id.get(cut_wc_id)
+                cut_op = next((o for o in problem.operations if o.id == op_id), None)
+                if cut_wc is None or cut_op is None:
                     continue
-                p = max(1.0, op.base_duration_min / wc.speed_factor)
+                p = max(1.0, cut_op.base_duration_min / cut_wc.speed_factor)
                 total_processing += p
-                indices.append(var_index[key])
+                capacity_cut_indices.append(var_index[key])
                 # Negative coefficient: C_max − p·y
-                coeffs.append(-p)
+                capacity_cut_coeffs.append(-p)
 
-            if len(indices) > 1:
+            if len(capacity_cut_indices) > 1:
                 rhs_val = cut.rhs - total_processing
                 h.addRow(
-                    rhs_val, highspy.kHighsInf,
-                    len(indices), np.array(indices, dtype=np.int32), np.array(coeffs),
+                    rhs_val,
+                    highspy.kHighsInf,
+                    len(capacity_cut_indices),
+                    np.array(capacity_cut_indices, dtype=np.int32),
+                    np.array(capacity_cut_coeffs),
                 )
         elif cut.kind == "load_balance":
             # Load-balance cut: C_max ≥ rhs (simple lower bound)
             h.addRow(
-                cut.rhs, highspy.kHighsInf,
-                1, np.array([cmax_idx], dtype=np.int32), np.array([1.0]),
+                cut.rhs,
+                highspy.kHighsInf,
+                1,
+                np.array([cmax_idx], dtype=np.int32),
+                np.array([1.0]),
             )
         elif cut.kind == "setup_cost":
-            indices = [cmax_idx]
-            coeffs = [1.0]
+            setup_cut_indices = [cmax_idx]
+            setup_cut_coeffs = [1.0]
             total_processing = 0.0
             for op_id in cut.bottleneck_ops:
-                wc_id = cut.assignment_map.get(op_id)
-                if wc_id is None:
+                setup_cut_wc_id = cut.assignment_map.get(op_id)
+                if setup_cut_wc_id is None:
                     continue
-                key = (op_id, wc_id)
+                key = (op_id, setup_cut_wc_id)
                 if key not in var_index:
                     continue
-                wc = wc_by_id.get(wc_id)
-                op = next((operation for operation in problem.operations if operation.id == op_id), None)
-                if wc is None or op is None:
+                setup_cut_wc = wc_by_id.get(setup_cut_wc_id)
+                setup_cut_op = next(
+                    (operation for operation in problem.operations if operation.id == op_id),
+                    None,
+                )
+                if setup_cut_wc is None or setup_cut_op is None:
                     continue
-                processing_time = max(1.0, op.base_duration_min / wc.speed_factor)
+                processing_time = max(
+                    1.0,
+                    setup_cut_op.base_duration_min / setup_cut_wc.speed_factor,
+                )
                 total_processing += processing_time
-                indices.append(var_index[key])
-                coeffs.append(-processing_time)
-            if len(indices) > 1:
+                setup_cut_indices.append(var_index[key])
+                setup_cut_coeffs.append(-processing_time)
+            if len(setup_cut_indices) > 1:
                 rhs_val = cut.rhs - total_processing
                 h.addRow(
-                    rhs_val, highspy.kHighsInf,
-                    len(indices), np.array(indices, dtype=np.int32), np.array(coeffs),
+                    rhs_val,
+                    highspy.kHighsInf,
+                    len(setup_cut_indices),
+                    np.array(setup_cut_indices, dtype=np.int32),
+                    np.array(setup_cut_coeffs),
                 )
 
     # Solve
@@ -474,7 +522,9 @@ def _solve_master(
                 if key in var_index:
                     hint_values[var_index[key]] = 1.0 if wc_id == previous_wc else 0.0
         hint_values[cmax_idx] = float(
-            int((problem.planning_horizon_end - problem.planning_horizon_start).total_seconds() / 60)
+            int(
+                (problem.planning_horizon_end - problem.planning_horizon_start).total_seconds() / 60
+            )
         )
         h.setSolution(n_vars, np.arange(n_vars, dtype=np.int32), np.array(hint_values))
     h.run()
@@ -610,8 +660,14 @@ def _solve_subproblems(
 
         # Build reduced ScheduleProblem for this cluster
         sub_problem = _build_subproblem(
-            problem, cluster_ops, cluster_wcs, cluster_op_ids,
-            assignment_map, wc_by_id, ops_by_id, orders_by_id,
+            problem,
+            cluster_ops,
+            cluster_wcs,
+            cluster_op_ids,
+            assignment_map,
+            wc_by_id,
+            ops_by_id,
+            orders_by_id,
         )
 
         # Solve with CP-SAT
@@ -632,17 +688,14 @@ def _solve_subproblems(
         # Only keep assignments for ops that belong to this cluster
         # (external predecessor ops may also have been solved but are
         # owned by their own cluster).
-        cluster_assignments = [
-            a for a in result.assignments if a.operation_id in cluster_op_ids
-        ]
+        cluster_assignments = [a for a in result.assignments if a.operation_id in cluster_op_ids]
         all_assignments.extend(cluster_assignments)
 
         # Track cluster makespan (only cluster-owned assignments, not
         # external predecessors that belong to another cluster).
         if cluster_assignments:
             cluster_makespan = max(
-                (a.end_time - horizon_start).total_seconds() / 60.0
-                for a in cluster_assignments
+                (a.end_time - horizon_start).total_seconds() / 60.0 for a in cluster_assignments
             )
             overall_makespan = max(overall_makespan, cluster_makespan)
 
@@ -697,7 +750,8 @@ def _solve_subproblems(
                 cur_state = ops_by_id[cur.operation_id].state_id
                 nxt_state = ops_by_id[nxt.operation_id].state_id
                 required_setup = setup_lookup.get(
-                    (wc_id, cur_state, nxt_state), timedelta(0),
+                    (wc_id, cur_state, nxt_state),
+                    timedelta(0),
                 )
                 earliest_next_start = cur.end_time + required_setup
                 if nxt.start_time < earliest_next_start:
@@ -707,10 +761,11 @@ def _solve_subproblems(
                     changed = True
 
     # Recompute overall makespan after shifts
-    overall_makespan = max(
-        (a.end_time - horizon_start).total_seconds() / 60.0
-        for a in all_assignments
-    ) if all_assignments else 0.0
+    overall_makespan = (
+        max((a.end_time - horizon_start).total_seconds() / 60.0 for a in all_assignments)
+        if all_assignments
+        else 0.0
+    )
 
     return all_assignments, overall_makespan
 
@@ -737,9 +792,7 @@ def _build_subproblem(
     # so external predecessors keep valid precedence constraints.
     all_op_ids = set(cluster_op_ids)
     pending_predecessors = [
-        op.predecessor_op_id
-        for op in cluster_ops
-        if op.predecessor_op_id is not None
+        op.predecessor_op_id for op in cluster_ops if op.predecessor_op_id is not None
     ]
     while pending_predecessors:
         predecessor_id = pending_predecessors.pop()
@@ -760,17 +813,23 @@ def _build_subproblem(
         if op_id in cluster_op_ids:
             # Restrict to assigned machine(s) within cluster
             assigned_wc = assignment_map.get(op_id)
-            eligible = [assigned_wc] if assigned_wc and assigned_wc in cluster_wcs else list(cluster_wcs)
-            sub_operations.append(Operation(
-                id=op.id,
-                order_id=op.order_id,
-                seq_in_order=op.seq_in_order,
-                state_id=op.state_id,
-                base_duration_min=op.base_duration_min,
-                eligible_wc_ids=eligible,
-                predecessor_op_id=op.predecessor_op_id if op.predecessor_op_id in all_op_ids else None,
-                domain_attributes=op.domain_attributes,
-            ))
+            eligible = (
+                [assigned_wc] if assigned_wc and assigned_wc in cluster_wcs else list(cluster_wcs)
+            )
+            sub_operations.append(
+                Operation(
+                    id=op.id,
+                    order_id=op.order_id,
+                    seq_in_order=op.seq_in_order,
+                    state_id=op.state_id,
+                    base_duration_min=op.base_duration_min,
+                    eligible_wc_ids=eligible,
+                    predecessor_op_id=op.predecessor_op_id
+                    if op.predecessor_op_id in all_op_ids
+                    else None,
+                    domain_attributes=op.domain_attributes,
+                )
+            )
         else:
             # External predecessor — restrict to its assigned machine
             assigned_wc = assignment_map.get(op_id)
@@ -778,16 +837,20 @@ def _build_subproblem(
                 continue
             # Add the assigned machine to cluster_wcs temporarily
             eligible = [assigned_wc]
-            sub_operations.append(Operation(
-                id=op.id,
-                order_id=op.order_id,
-                seq_in_order=op.seq_in_order,
-                state_id=op.state_id,
-                base_duration_min=op.base_duration_min,
-                eligible_wc_ids=eligible,
-                predecessor_op_id=op.predecessor_op_id if op.predecessor_op_id in all_op_ids else None,
-                domain_attributes=op.domain_attributes,
-            ))
+            sub_operations.append(
+                Operation(
+                    id=op.id,
+                    order_id=op.order_id,
+                    seq_in_order=op.seq_in_order,
+                    state_id=op.state_id,
+                    base_duration_min=op.base_duration_min,
+                    eligible_wc_ids=eligible,
+                    predecessor_op_id=op.predecessor_op_id
+                    if op.predecessor_op_id in all_op_ids
+                    else None,
+                    domain_attributes=op.domain_attributes,
+                )
+            )
 
     # Collect required entities
     needed_state_ids = {op.state_id for op in sub_operations}
@@ -803,17 +866,15 @@ def _build_subproblem(
     sub_wcs = [wc for wc in problem.work_centers if wc.id in needed_wc_ids]
 
     sub_setup = [
-        entry for entry in problem.setup_matrix
+        entry
+        for entry in problem.setup_matrix
         if entry.work_center_id in needed_wc_ids
         and entry.from_state_id in needed_state_ids
         and entry.to_state_id in needed_state_ids
     ]
 
     sub_op_ids = {op.id for op in sub_operations}
-    sub_aux_reqs = [
-        req for req in problem.aux_requirements
-        if req.operation_id in sub_op_ids
-    ]
+    sub_aux_reqs = [req for req in problem.aux_requirements if req.operation_id in sub_op_ids]
     needed_aux_ids = {req.aux_resource_id for req in sub_aux_reqs}
     sub_aux_resources = [r for r in problem.auxiliary_resources if r.id in needed_aux_ids]
 

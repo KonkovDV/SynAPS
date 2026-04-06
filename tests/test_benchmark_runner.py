@@ -125,7 +125,9 @@ def test_run_benchmark_can_write_replay_artifact_to_directory(tmp_path: Path) ->
     manifest_path = replay_dir / "manifest.jsonl"
     assert manifest_path.exists()
     payload = json.loads(replay_path.read_text(encoding="utf-8"))
-    manifest_entries = [json.loads(line) for line in manifest_path.read_text(encoding="utf-8").splitlines()]
+    manifest_entries = [
+        json.loads(line) for line in manifest_path.read_text(encoding="utf-8").splitlines()
+    ]
     assert payload["instance_name"] == instance_path.name
     assert payload["selected_solver_config"] == "GREED"
     assert manifest_entries[0]["artifact_kind"] == "benchmark-run"
@@ -144,11 +146,13 @@ def test_benchmark_tradeoff_instance_exposes_setup_improvement() -> None:
     )
 
     by_solver = {
-        comparison["solver_config"]: comparison["results"]
-        for comparison in report["comparisons"]
+        comparison["solver_config"]: comparison["results"] for comparison in report["comparisons"]
     }
 
-    assert by_solver["CPSAT-EPS-SETUP-110"]["total_setup_minutes"] < by_solver["CPSAT-10"]["total_setup_minutes"]
+    assert (
+        by_solver["CPSAT-EPS-SETUP-110"]["total_setup_minutes"]
+        < by_solver["CPSAT-10"]["total_setup_minutes"]
+    )
     assert by_solver["CPSAT-EPS-SETUP-110"]["makespan_minutes"] <= 121
 
 

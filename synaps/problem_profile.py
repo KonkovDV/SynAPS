@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from typing import TYPE_CHECKING
 
-from synaps.model import ScheduleProblem
+if TYPE_CHECKING:
+    from synaps.model import ScheduleProblem, SetupEntry
 
 
 @dataclass(frozen=True)
@@ -32,7 +34,7 @@ class ProblemProfile:
         return asdict(self)
 
 
-def _has_sequence_dependent_transition_cost(entry) -> bool:
+def _has_sequence_dependent_transition_cost(entry: SetupEntry) -> bool:
     return entry.setup_minutes > 0 or entry.material_loss > 0 or entry.energy_kwh > 0
 
 
@@ -65,9 +67,7 @@ def build_problem_profile(problem: ScheduleProblem) -> ProblemProfile:
         len(operation.eligible_wc_ids) if operation.eligible_wc_ids else work_center_count
         for operation in problem.operations
     ]
-    avg_eligible_work_centers = (
-        sum(eligible_counts) / operation_count if operation_count else 0.0
-    )
+    avg_eligible_work_centers = sum(eligible_counts) / operation_count if operation_count else 0.0
     avg_duration_min = (
         sum(operation.base_duration_min for operation in problem.operations) / operation_count
         if operation_count

@@ -8,15 +8,23 @@ explicit overrides are supported, and execution provenance is written back into
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from synaps.model import Assignment, ScheduleProblem, ScheduleResult
 from synaps.problem_profile import build_problem_profile
 from synaps.solvers.incremental_repair import IncrementalRepair
 from synaps.solvers.registry import create_solver
-from synaps.solvers.router import SolveRegime, SolverRoutingContext, SolverRoutingDecision, select_solver
+from synaps.solvers.router import (
+    SolveRegime,
+    SolverRoutingContext,
+    SolverRoutingDecision,
+    select_solver,
+)
 from synaps.validation import verify_schedule_result
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+    from synaps.model import Assignment, ScheduleProblem, ScheduleResult
 
 
 class PortfolioValidationError(RuntimeError):

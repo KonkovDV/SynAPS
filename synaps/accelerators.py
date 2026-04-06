@@ -4,17 +4,24 @@ from __future__ import annotations
 
 import os
 from math import log
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any
 
-_native_compute_atcs_log_score: Callable[..., float] | None
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+_native_compute_atcs_log_score: Callable[..., float] | None = None
 
 if os.getenv("SYNAPS_DISABLE_NATIVE_ACCELERATION") == "1":
     _native_compute_atcs_log_score = None
 else:
     try:
-        from synaps_native import compute_atcs_log_score as _native_compute_atcs_log_score
+        from synaps_native import (  # type: ignore[import-not-found]
+            compute_atcs_log_score as _synaps_native_compute_atcs_log_score,
+        )
     except ImportError:
         _native_compute_atcs_log_score = None
+    else:
+        _native_compute_atcs_log_score = _synaps_native_compute_atcs_log_score
 
 
 def compute_atcs_log_score(

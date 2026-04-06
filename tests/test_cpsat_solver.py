@@ -463,8 +463,7 @@ def test_cpsat_virtualizes_parallel_work_centers_for_material_only_transitions()
     horizon_end = datetime(2026, 4, 1, 18, 0, tzinfo=UTC)
 
     orders = [
-        Order(id=uuid4(), external_ref=f"ORD-{index}", due_date=horizon_end)
-        for index in range(3)
+        Order(id=uuid4(), external_ref=f"ORD-{index}", due_date=horizon_end) for index in range(3)
     ]
     operations = [
         Operation(

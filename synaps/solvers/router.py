@@ -10,11 +10,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
-from synaps.model import ScheduleProblem
 from synaps.problem_profile import build_problem_profile
-from synaps.solvers import BaseSolver
 from synaps.solvers.registry import create_solver
+
+if TYPE_CHECKING:
+    from synaps.model import ScheduleProblem
+    from synaps.solvers import BaseSolver
 
 
 class SolveRegime(StrEnum):
@@ -73,14 +76,22 @@ def route_solver_config(
     if ctx.regime is SolveRegime.INTERACTIVE:
         return SolverRoutingDecision(
             solver_config="GREED",
-            reason="interactive regime prioritizes immediate feasible feedback over global optimality",
+            reason=(
+                "interactive regime prioritizes immediate feasible feedback over "
+                "global optimality"
+            ),
         )
 
     if ctx.regime in {SolveRegime.BREAKDOWN, SolveRegime.RUSH_ORDER}:
-        if op_count <= 30 and (ctx.preferred_max_latency_s is None or ctx.preferred_max_latency_s >= 10):
+        if op_count <= 30 and (
+            ctx.preferred_max_latency_s is None or ctx.preferred_max_latency_s >= 10
+        ):
             return SolverRoutingDecision(
                 solver_config="CPSAT-10",
-                reason="small disruption window fits an exact CP-SAT patch within the latency budget",
+                reason=(
+                    "small disruption window fits an exact CP-SAT patch within the "
+                    "latency budget"
+                ),
             )
         return SolverRoutingDecision(
             solver_config="GREED",
@@ -95,14 +106,20 @@ def route_solver_config(
             )
         return SolverRoutingDecision(
             solver_config="LBBD-5",
-            reason="large constrained instances benefit from decomposition before exact local sequencing",
+            reason=(
+                "large constrained instances benefit from decomposition before exact "
+                "local sequencing"
+            ),
         )
 
     if ctx.regime is SolveRegime.WHAT_IF:
         if op_count <= 40 and has_nonzero_setups:
             return SolverRoutingDecision(
                 solver_config="CPSAT-EPS-SETUP-110",
-                reason="what-if analysis on a small setup-sensitive instance benefits from the Pareto-slice epsilon profile",
+                reason=(
+                    "what-if analysis on a small setup-sensitive instance benefits "
+                    "from the Pareto-slice epsilon profile"
+                ),
             )
         if op_count <= 120:
             return SolverRoutingDecision(
@@ -111,7 +128,10 @@ def route_solver_config(
             )
         return SolverRoutingDecision(
             solver_config="LBBD-10",
-            reason="large scenario analysis benefits from the slower but more scalable LBBD portfolio member",
+            reason=(
+                "large scenario analysis benefits from the slower but more scalable "
+                "LBBD portfolio member"
+            ),
         )
 
     if ctx.exact_required:
@@ -123,11 +143,17 @@ def route_solver_config(
         if op_count <= 120:
             return SolverRoutingDecision(
                 solver_config="CPSAT-30",
-                reason="exact solve explicitly required and the instance remains within the CP-SAT comfort zone",
+                reason=(
+                    "exact solve explicitly required and the instance remains within "
+                    "the CP-SAT comfort zone"
+                ),
             )
         return SolverRoutingDecision(
             solver_config="LBBD-10",
-            reason="exactness requested on a larger instance, so decomposition is the smallest sound path",
+            reason=(
+                "exactness requested on a larger instance, so decomposition is the "
+                "smallest sound path"
+            ),
         )
 
     if op_count <= 20 and wc_count <= 5 and not has_aux_constraints:
@@ -139,12 +165,18 @@ def route_solver_config(
     if op_count <= 120 and (has_nonzero_setups or has_aux_constraints or wc_count <= 20):
         return SolverRoutingDecision(
             solver_config="CPSAT-30",
-            reason="medium nominal instance with richer constraints still fits the exact CP-SAT path",
+            reason=(
+                "medium nominal instance with richer constraints still fits the exact "
+                "CP-SAT path"
+            ),
         )
 
     return SolverRoutingDecision(
         solver_config="LBBD-10",
-        reason="larger nominal instance benefits from decomposition before exact subproblem sequencing",
+        reason=(
+            "larger nominal instance benefits from decomposition before exact "
+            "subproblem sequencing"
+        ),
     )
 
 

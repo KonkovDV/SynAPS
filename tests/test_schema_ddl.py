@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 DDL_DIR = Path(__file__).resolve().parents[1] / "schema" / "ddl"
 CORE_DDL_PATH = DDL_DIR / "001_core_tables.sql"
 AUX_DDL_PATH = DDL_DIR / "003_auxiliary_resources.sql"
@@ -19,9 +18,7 @@ def test_auxiliary_ddl_includes_resource_tables_before_commit() -> None:
     ddl = AUX_DDL_PATH.read_text(encoding="utf-8")
 
     aux_table_pos = ddl.find("CREATE TABLE IF NOT EXISTS auxiliary_resources")
-    requirement_table_pos = ddl.find(
-        "CREATE TABLE IF NOT EXISTS operation_aux_requirements"
-    )
+    requirement_table_pos = ddl.find("CREATE TABLE IF NOT EXISTS operation_aux_requirements")
     commit_pos = ddl.find("COMMIT;")
 
     assert aux_table_pos != -1

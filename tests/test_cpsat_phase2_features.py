@@ -12,7 +12,15 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from synaps.model import Operation, Order, ScheduleProblem, SetupEntry, SolverStatus, State, WorkCenter
+from synaps.model import (
+    Operation,
+    Order,
+    ScheduleProblem,
+    SetupEntry,
+    SolverStatus,
+    State,
+    WorkCenter,
+)
 from synaps.solvers.cpsat_solver import CpSatSolver
 from synaps.solvers.feasibility_checker import FeasibilityChecker
 from synaps.solvers.greedy_dispatch import GreedyDispatch
@@ -21,7 +29,9 @@ HORIZON_START = datetime(2026, 4, 1, 8, 0, tzinfo=UTC)
 HORIZON_END = datetime(2026, 4, 1, 20, 0, tzinfo=UTC)
 
 
-def _make_parallel_no_setup_problem(max_parallel: int = 3, operation_count: int = 6) -> ScheduleProblem:
+def _make_parallel_no_setup_problem(
+    max_parallel: int = 3, operation_count: int = 6
+) -> ScheduleProblem:
     state = State(id=uuid4(), code="STATE-A", label="State A")
     work_center = WorkCenter(
         id=uuid4(),
@@ -188,13 +198,17 @@ def test_parallel_machine_with_sdst_uses_virtualization_and_maps_back() -> None:
     assert result.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
     assert result.metadata["parallel_virtualization"]["enabled"] is True
     assert result.metadata["parallel_virtualization"]["virtual_lane_count"] == 2
-    assert {assignment.work_center_id for assignment in result.assignments} == {original_work_center.id}
+    assert {assignment.work_center_id for assignment in result.assignments} == {
+        original_work_center.id
+    }
 
     violations = FeasibilityChecker().check(problem, result.assignments)
     assert violations == []
 
 
-def test_explicit_warm_start_assignments_reported_in_metadata(simple_problem: ScheduleProblem) -> None:
+def test_explicit_warm_start_assignments_reported_in_metadata(
+    simple_problem: ScheduleProblem,
+) -> None:
     warm_start = GreedyDispatch().solve(simple_problem).assignments
 
     result = CpSatSolver().solve(
@@ -213,11 +227,19 @@ def test_symmetry_breaking_toggle_preserves_feasible_solution() -> None:
     problem = _make_identical_machine_problem()
     solver = CpSatSolver()
 
-    with_symmetry = solver.solve(problem, time_limit_s=10, random_seed=42, enable_symmetry_breaking=True)
-    without_symmetry = solver.solve(problem, time_limit_s=10, random_seed=42, enable_symmetry_breaking=False)
+    with_symmetry = solver.solve(
+        problem, time_limit_s=10, random_seed=42, enable_symmetry_breaking=True
+    )
+    without_symmetry = solver.solve(
+        problem, time_limit_s=10, random_seed=42, enable_symmetry_breaking=False
+    )
 
     assert with_symmetry.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
     assert without_symmetry.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
-    assert with_symmetry.objective.makespan_minutes == without_symmetry.objective.makespan_minutes == 40
+    assert (
+        with_symmetry.objective.makespan_minutes
+        == without_symmetry.objective.makespan_minutes
+        == 40
+    )
     assert with_symmetry.metadata["symmetry_breaking"] is True
     assert without_symmetry.metadata["symmetry_breaking"] is False

@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Literal
-from uuid import UUID
+from typing import TYPE_CHECKING, Final, Literal
+from uuid import UUID  # noqa: TC003
 
 from pydantic import BaseModel, Field
 
-from synaps.model import Assignment, ScheduleProblem, ScheduleResult
+from synaps.model import Assignment, ScheduleProblem, ScheduleResult  # noqa: TC001
 from synaps.portfolio import repair_schedule, solve_schedule
 from synaps.solvers.router import SolveRegime, SolverRoutingContext
 
-CONTRACT_VERSION = "2026-04-03"
+if TYPE_CHECKING:
+    from pathlib import Path
+
+CONTRACT_VERSION: Final = "2026-04-03"
 
 
 class RoutingContextContract(BaseModel):

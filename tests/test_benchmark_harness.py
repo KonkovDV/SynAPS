@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from benchmark.run_benchmark import available_solvers, run_benchmark
-from synaps.model import ScheduleProblem
 from synaps.solvers.registry import available_solver_configs, create_solver
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from synaps.model import ScheduleProblem
 
 
 def test_registry_exposes_material_loss_epsilon_profile() -> None:

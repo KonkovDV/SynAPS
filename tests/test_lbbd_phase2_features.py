@@ -5,7 +5,15 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from synaps.model import Operation, Order, ScheduleProblem, SetupEntry, SolverStatus, State, WorkCenter
+from synaps.model import (
+    Operation,
+    Order,
+    ScheduleProblem,
+    SetupEntry,
+    SolverStatus,
+    State,
+    WorkCenter,
+)
 from synaps.solvers.lbbd_solver import LbbdSolver
 
 HORIZON_START = datetime(2026, 4, 1, 8, 0, tzinfo=UTC)
@@ -76,7 +84,7 @@ def test_setup_cost_cuts_are_exposed_in_metadata() -> None:
         max_iterations=4,
         time_limit_s=20,
         random_seed=42,
-            setup_relaxation=False,
+        setup_relaxation=False,
     )
 
     assert result.status in {SolverStatus.FEASIBLE, SolverStatus.OPTIMAL, SolverStatus.TIMEOUT}
@@ -91,7 +99,7 @@ def test_lbbd_reports_master_warm_start_iterations() -> None:
         max_iterations=4,
         time_limit_s=20,
         random_seed=42,
-            setup_relaxation=False,
+        setup_relaxation=False,
     )
 
     assert result.status in {SolverStatus.FEASIBLE, SolverStatus.OPTIMAL, SolverStatus.TIMEOUT}

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from synaps.contracts import (
     RepairRequest,
@@ -14,11 +14,14 @@ from synaps.contracts import (
     execute_solve_request,
     write_contract_schemas,
 )
-from synaps.replay import build_runtime_replay_artifact
 from synaps.model import SolverStatus
+from synaps.replay import build_runtime_replay_artifact
 from synaps.solvers.greedy_dispatch import GreedyDispatch
 from synaps.solvers.router import SolveRegime
 from tests.conftest import make_simple_problem
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_execute_solve_request_returns_contract_response() -> None:

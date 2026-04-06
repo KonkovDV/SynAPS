@@ -305,9 +305,7 @@ class TestFeasibilityChecker:
         assert len(resource_violations) == 1
         assert resource_violations[0].operation_id in {op_a2.id, op_b2.id}
 
-    def test_detects_assignment_before_horizon_start(
-        self, simple_problem: ScheduleProblem
-    ) -> None:
+    def test_detects_assignment_before_horizon_start(self, simple_problem: ScheduleProblem) -> None:
         """Assignment starting before planning_horizon_start must be flagged (D4)."""
         checker = FeasibilityChecker()
         op_a, op_b, op_c, op_d = simple_problem.operations
@@ -346,9 +344,7 @@ class TestFeasibilityChecker:
         assert len(horizon_violations) >= 1
         assert horizon_violations[0].operation_id == op_a.id
 
-    def test_detects_assignment_after_horizon_end(
-        self, simple_problem: ScheduleProblem
-    ) -> None:
+    def test_detects_assignment_after_horizon_end(self, simple_problem: ScheduleProblem) -> None:
         """Assignment ending after planning_horizon_end must be flagged (D4)."""
         from tests.conftest import HORIZON_END
 
