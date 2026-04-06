@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from synaps.cli import main
 from synaps.contracts import RepairRequest, SolveRequest

@@ -90,7 +90,10 @@ class GreedyDispatch(BaseSolver):
                     duration_ms=elapsed_ms,
                     metadata={
                         "acceleration": acceleration_status,
-                        "error": "no ready operations available; precedence graph may contain a cycle",
+                        "error": (
+                            "no ready operations available; "
+                            "precedence graph may contain a cycle"
+                        ),
                     },
                 )
 
@@ -187,16 +190,6 @@ class GreedyDispatch(BaseSolver):
                 p_j = record["processing_minutes"]
                 slack = max(record["due_offset"] - p_j - slot.start_offset, 0.0)
                 setup_scale = local_setup_scale_by_wc[record["work_center_id"]]
-                setup_penalty = (
-                    slot.setup_minutes / (self._k2 * setup_scale)
-                    if slot.setup_minutes > 0
-                    else 0.0
-                )
-                material_penalty = (
-                    slot.material_loss / (self._k3 * material_scale)
-                    if slot.material_loss > 0
-                    else 0.0
-                )
 
                 # Compare in log-space to avoid exp() underflow on sparse or
                 # heavy-tailed SDST matrices while preserving ATCS ranking.
@@ -254,8 +247,14 @@ class GreedyDispatch(BaseSolver):
         for work_center_id, machine_assignments in assignments_by_machine.items():
             machine_assignments.sort(key=lambda assignment: assignment.start_time)
             for index in range(1, len(machine_assignments)):
-                previous_state = dispatch_context.ops_by_id[machine_assignments[index - 1].operation_id].state_id
-                current_state = dispatch_context.ops_by_id[machine_assignments[index].operation_id].state_id
+                previous_assignment = machine_assignments[index - 1]
+                current_assignment = machine_assignments[index]
+                previous_state = dispatch_context.ops_by_id[
+                    previous_assignment.operation_id
+                ].state_id
+                current_state = dispatch_context.ops_by_id[
+                    current_assignment.operation_id
+                ].state_id
                 total_material_loss += dispatch_context.material_loss.get(
                     (work_center_id, previous_state, current_state),
                     0.0,

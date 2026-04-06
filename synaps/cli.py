@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Literal
 
 from synaps.contracts import (
     RepairRequest,
@@ -28,7 +29,7 @@ def _load_problem(path: Path) -> ScheduleProblem:
 def _write_runtime_replay(
     *,
     output_dir: Path | None,
-    artifact_kind: "runtime-solve" | "runtime-repair",
+    artifact_kind: Literal["runtime-solve", "runtime-repair"],
     artifact_source: str,
     problem: ScheduleProblem,
     result,
