@@ -26,14 +26,14 @@ This document defines what current benchmark evidence exists and what would be r
 
 Freshly verified in the workspace:
 
-1. the current pytest suite passed `120/120`;
+1. the active evidence pack still records an earlier `149/149` full-suite pytest pass, while the current repository now collects `175` tests across 26 modules;
 2. canonical smoke benchmark on `tiny_3x3.json` ran successfully;
 3. `GREED` produced a feasible schedule with makespan `106.67` minutes;
 4. `CPSAT-10` produced an optimal schedule with makespan `82.0` minutes;
 5. on that smoke instance, `CPSAT-10` beat `GREED` by `24.67` minutes or approximately `23.1%` in makespan;
 6. the active benchmark evidence is still a smoke-instance proof surface, not a broad publication-grade benchmark family.
 
-These results are recorded in `TECHNICAL_VERIFICATION_REPORT_2026_04.md`.
+These results are recorded in `TECHNICAL_VERIFICATION_REPORT_2026_04.md`, which now distinguishes the expanded suite size from the last fully recorded full-suite pass snapshot.
 
 ## Current Gap-To-Optimality Status
 

@@ -9,7 +9,7 @@ Language: [EN](README.md) | **RU**
 ## Быстрые маршруты
 
 1. Начните с [../README_RU.md](../README_RU.md), чтобы увидеть границы репозитория и команды быстрого старта.
-2. Переходите к [../benchmark/README_RU.md](../benchmark/README_RU.md), если нужна воспроизводимая проверка solver-ов.
+2. Переходите к [../benchmark/README_RU.md](../benchmark/README_RU.md), если нужна воспроизводимая проверка решателей.
 3. Переходите к [../control-plane/README_RU.md](../control-plane/README_RU.md), если нужна сетевая граница TypeScript-слоя.
 4. Открывайте [investor/README_RU.md](investor/README_RU.md) только если нужен опциональный инвесторский слой.
 
@@ -51,6 +51,11 @@ Language: [EN](README.md) | **RU**
 
 Legacy blueprint и whitepaper narrative-файлы больше не входят в активный исследовательский маршрут.
 
+## Аудиторские отчёты
+
+- [ACADEMIC_TECHNICAL_REPORT_2026_04.md](audit/ACADEMIC_TECHNICAL_REPORT_2026_04.md) — академический технический аудит: формальная классификация задачи, анализ solver-портфолио, конкурентное позиционирование, рекомендации.
+- [DISSERTATION_AUDIT_REPORT.md](audit/DISSERTATION_AUDIT_REPORT.md)
+
 ## Проверка и доказательная база
 
 - [../benchmark/README.md](../benchmark/README.md)
@@ -63,7 +68,7 @@ Legacy blueprint и whitepaper narrative-файлы больше не входя
 - [../CONTRIBUTING.md](../CONTRIBUTING.md)
 - [../SECURITY.md](../SECURITY.md)
 
-## Опциональный investor pack
+## Опциональный инвесторский пакет
 
 `docs/investor/` содержит опциональный пакет материалов для инвесторов и проверки утверждений.
 

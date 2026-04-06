@@ -104,7 +104,7 @@ SynAPS currently proves:
 2. visible solver baseline;
 3. bounded repair logic;
 4. benchmark harness;
-5. `120/120` passing tests;
+5. an earlier `149/149` fully recorded pass snapshot, while the current repository now collects `175` tests;
 6. a working smoke benchmark path.
 
 SynAPS does **not** yet prove:

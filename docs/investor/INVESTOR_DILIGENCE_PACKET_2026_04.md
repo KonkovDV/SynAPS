@@ -66,7 +66,7 @@ The active diligence route now centers on a smaller number of evidence-bearing d
 
 | Check | Result | Evidence |
 |-------|--------|----------|
-| Python `pytest` | PASS | `TECHNICAL_VERIFICATION_REPORT_2026_04.md` records `120/120` passing |
+| Python `pytest` | PASS / REFRESH NEEDED | `TECHNICAL_VERIFICATION_REPORT_2026_04.md` records an earlier `149/149` full-suite pass, while the current repository now collects `175` tests |
 | Benchmark smoke run | PASS | `TECHNICAL_VERIFICATION_REPORT_2026_04.md` records `tiny_3x3` GREED and `CPSAT-10` results |
 | Minimal control-plane boundary | PRESENT | `control-plane/README.md` documents schema validation plus Python bridge |
 | Public trust surfaces | PRESENT | `SUPPORT.md`, `SECURITY.md`, `CONTRIBUTING.md`, `CITATION.cff` are present at repo root |
@@ -110,7 +110,7 @@ It is not enough to support product-superiority, deployment-maturity, or plant-o
 |-----------|--------|-------|
 | Product thesis clarity | **CLOSED** | Clear kernel thesis - what's claimed matches what's shown |
 | GitHub presentation | **CLOSED** | Root README, security, support, citation files in place |
-| Internal technical proof | **CLOSED** | Schema, solver portfolio, benchmark harness, minimal BFF, `120/120` tests |
+| Internal technical proof | **CLOSED (bounded)** | Schema, solver portfolio, benchmark harness, minimal BFF, an earlier `149/149` full-suite pass, and a current 175-test collection boundary |
 | Competitive positioning | **CLOSED** | Explicit boundary, no full-suite parity claim |
 | Academic legibility | **STRONG PARTIAL** | Citation metadata, methods appendix, claim register - no DOI release yet |
 | Claim tracking | **CLOSED** | Active register with falsification triggers |

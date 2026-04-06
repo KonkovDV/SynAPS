@@ -31,40 +31,14 @@ Scope: fresh technical verification of the current SynAPS codebase
 
 | Surface | Result |
 | --- | --- |
-| Pytest collection | `106` tests collected |
-| Final status | `120/120` passed |
-| Runtime | `~13s` |
+| Current pytest collection | `175` tests collected across `26` modules |
+| Last fully recorded full-suite pass snapshot | `149/149` passed |
+| Snapshot provenance | earlier April 2026 full-suite verification run recorded in this evidence pack |
+| Current delta | the suite has expanded since that recorded pass snapshot |
 
-Covered test modules (15 modules):
+Current collection now spans 26 modules, including the earlier core verification surfaces plus newer coverage for accelerators, benchmark boundary and scaling studies, benchmark generation and harness routes, CP-SAT phase-2 features, LBBD-HD, LBBD phase-2 features, replay artifacts, schema DDL, and solver-portfolio registry/routing behavior.
 
-1. `tests/test_audit_fixes.py`
-2. `tests/test_benchmark_regression.py`
-3. `tests/test_benchmark_runner.py`
-4. `tests/test_cli.py`
-5. `tests/test_contracts.py`
-6. `tests/test_cpsat_solver.py`
-7. `tests/test_cross_solver.py`
-8. `tests/test_feasibility.py`
-9. `tests/test_greedy_dispatch.py`
-10. `tests/test_incremental_repair.py`
-11. `tests/test_lbbd_solver.py`
-12. `tests/test_model.py`
-13. `tests/test_portfolio_api.py`
-14. `tests/test_problem_profile.py`
-15. `tests/test_property_based.py`
-
-### Test categories
-
-| Category | Tests | Purpose |
-| --- | ---: | --- |
-| Unit (model, contracts, CLI) | 18 | Data model, schema contracts, CLI entry points |
-| Solver (CP-SAT, greedy, LBBD, incremental repair) | 40 | Correctness of each solver including feasibility, precedence, setup, tardiness |
-| Cross-solver consistency | 7 | All solvers satisfy the same feasibility and objective-sign contracts |
-| Property-based (Hypothesis) | 12 | Structural invariants across random problem instances |
-| Benchmark regression | 6 | Pinned quality bounds as CI guardrails |
-| Portfolio and problem profile | 8 | Solver routing and instance characterization |
-| Audit fixes | 5 | Regression tests for previously identified defects |
-| Feasibility checker | 10 | Constraint violation detection |
+This means the repository's test surface is broader than the last fully recorded pass snapshot. It does **not** yet mean that a fresh `175/175` full-suite pass has been captured in this dated report.
 
 ## Benchmark Smoke Result
 
@@ -88,13 +62,13 @@ This run does **not** prove production-grade superiority.
 It proves something narrower and still valuable:
 
 1. the SynAPS solver package is runnable in the current workspace;
-2. tests cover all four solvers (CP-SAT, greedy dispatch, LBBD, incremental repair) plus cross-solver consistency;
+2. tests cover the currently documented core solver families and surrounding routing surfaces, including CP-SAT, greedy dispatch, LBBD, incremental repair, LBBD-HD-related additions, and cross-solver consistency checks;
 3. property-based testing (Hypothesis) validates structural invariants across random problem instances;
 4. benchmark regression tests pin quality bounds to prevent silent regressions;
 5. the benchmark harness works end-to-end on the canonical smoke instance;
-6. the evidence cited in investor materials is current, not stale.
+6. the evidence cited in investor materials has been refreshed to distinguish the expanded suite size from the last fully recorded full-suite pass snapshot.
 
-### Defects fixed in this verification cycle (2026-04-04)
+### Defects fixed in the earlier full-suite verification cycle (2026-04-04)
 
 1. **LBBD cross-cluster precedence**: subproblems solved independently could produce assignments violating cross-cluster precedence and setup-gap constraints. Fixed with a post-assembly enforcement pass.
 2. **CP-SAT integer discretization tolerance**: property-based tests revealed that CP-SAT integer-minute rounding produces slightly worse makespans than greedy's fractional minutes on small instances with non-unit speed factors. Tolerance adjusted from fixed +1 min to 15%.
@@ -105,7 +79,8 @@ It proves something narrower and still valuable:
 1. medium and large instance benchmark families with repeated runs and statistical reporting;
 2. hardware disclosure and run-normalization for publication-grade benchmark comparisons;
 3. additional stress cases for auxiliary-resource-heavy instances;
-4. benchmark comparison against transparent external baselines.
+4. benchmark comparison against transparent external baselines;
+5. a new single-shot full-suite pass record for the now-expanded 175-test collection.
 
 ## Documentation Alignment Fixes Applied (2026-04-05)
 

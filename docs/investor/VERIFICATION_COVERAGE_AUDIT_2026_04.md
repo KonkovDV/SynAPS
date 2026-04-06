@@ -26,7 +26,7 @@ This document records what was actually re-run during the April 2026 audit pass 
 
 | Check | Fresh result | Evidence basis |
 | --- | --- | --- |
-| Python `pytest` (120 tests) | PASS | standalone SynAPS test suite - 120/120 passed in the current full-suite verification run (expanded from 27 in Phase 2 hardening) |
+| Python `pytest` | PASS / REFRESH NEEDED | active evidence pack still records an earlier `149/149` full-suite pass; current repository collection now reaches `175` tests across 26 modules |
 | runtime contract + CLI tests | PASS | dedicated contract, request-CLI, and orchestration tests passed |
 | TypeScript control-plane tests | PASS | BFF request validation, mock flow, and real Python bridge integration passed |
 | TypeScript control-plane build | PASS | isolated Fastify BFF compiled cleanly |
@@ -73,7 +73,8 @@ This verification snapshot does not by itself support claims such as:
 
 1. no fresh broad benchmark family beyond the smoke instance was re-run in this pass;
 2. the current investor-safe supply-chain story is still partial even though release attestations and SBOM surfaces now exist;
-3. the current public proof still does not show production deployment evidence for the new networked control-plane surface.
+3. the current public proof still does not show production deployment evidence for the new networked control-plane surface;
+4. the suite has expanded to 175 collected tests, but this snapshot does not yet contain a newly recorded `175/175` full-suite pass artifact.
 
 ## Bottom Line
 

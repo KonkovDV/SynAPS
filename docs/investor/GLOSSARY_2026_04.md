@@ -23,7 +23,7 @@ The investor pack uses a three-level confidence scale to separate what is proven
 | Level | Name | Meaning | Example |
 |-------|------|---------|---------|
 | **C1** | Hypothesis | A strategic or commercial assumption without sufficient external or runtime evidence. Useful for planning, not yet defensible as fact. | Market size projections, cross-industry portability, unit economics |
-| **C2** | Internal evidence | Supported by repository artifacts, passing tests, internal benchmarks, or bounded technical proof. Credible for roadmap discussion, not yet externally validated. | Solver baseline works (120/120 tests pass), universal schema exists, benchmark harness runs |
+| **C2** | Internal evidence | Supported by repository artifacts, passing tests, internal benchmarks, or bounded technical proof. Credible for roadmap discussion, not yet externally validated. | Solver baseline works (175 tests currently collected; `149/149` in the last fully recorded pass snapshot), universal schema exists, benchmark harness runs |
 | **C3** | External validation | Supported by pilot data, third-party benchmarks, audited controls, or official external sources. Defensible as a public claim. | KPI uplift from a pilot deployment, independent benchmark comparison, regulatory certification |
 
 **Key rule:** an official data source (e.g., World Bank statistics) combined with internal assumptions (e.g., pricing per site) produces a C2 hybrid, not pure C3.

@@ -1,9 +1,9 @@
 ---
 title: "SynAPS Investor Deck 2026-04"
 status: "active"
-version: "2.0.1"
-last_updated: "2026-04-05"
-date: "2026-04-05"
+version: "2.0.2"
+last_updated: "2026-04-06"
+date: "2026-04-06"
 tags: [synaps, investor, deck, presentation]
 mode: "tutorial"
 ---
@@ -40,7 +40,7 @@ The universal schema adapts across metals, pharma, FMCG, electronics - I configu
 
 ## Slide 6 - What exists today (C2)
 
-The universal schema and domain examples are working. The Python solver passes all 120 current tests. The benchmark harness shows a verified smoke-instance result on `tiny_3x3`: `CPSAT-10` improves makespan from `106.67` to `82.0` minutes, or about `23.1%` versus `GREED`. Broader benchmark coverage remains open. Research notes, benchmark methodology, and architecture docs are published. This investor pack tags every claim by evidence level. And the GitHub trust layer is live: security policy, support, citation, contribution guide.
+The universal schema and domain examples are working. The Python solver is currently covered by a 175-test suite in the repository; the last fully recorded full-suite pass in the active evidence packet remains `149/149` from the earlier April verification snapshot. The benchmark harness shows a verified smoke-instance result on `tiny_3x3`: `CPSAT-10` improves makespan from `106.67` to `82.0` minutes, or about `23.1%` versus `GREED`. Broader benchmark coverage remains open. Research notes, benchmark methodology, and architecture docs are published. This investor pack tags every claim by evidence level. And the GitHub trust layer is live: security policy, support, citation, contribution guide.
 
 ## Slide 7 - Market model
 
@@ -83,6 +83,7 @@ The next round should produce evidence, not vanity metrics. Pilot KPIs - before-
 - High-level audiences: stop around slides 7-10.
 - Technical audiences: route into [INVESTOR_DILIGENCE_PACKET](INVESTOR_DILIGENCE_PACKET_2026_04.md) and the [technical verification report](TECHNICAL_VERIFICATION_REPORT_2026_04.md).
 - If market size gets challenged: open [MARKET_MODEL](MARKET_MODEL_2026_04.md) and walk through the hard-data vs. assumption split.
+- For a Russian strategic-investor conversation with Mositlab-level diligence, route into [SYNAPS_MOSITLAB_INVESTOR_PITCH_2026_04.md](SYNAPS_MOSITLAB_INVESTOR_PITCH_2026_04.md).
 - All terms and confidence labels: [GLOSSARY](GLOSSARY_2026_04.md).
 
 ---
@@ -91,6 +92,6 @@ The next round should produce evidence, not vanity metrics. Pilot KPIs - before-
 
 1. Asprova: [asprova.com](https://www.asprova.com/en/) (vendor-reported, accessed 2026-04-01). DELMIA: [3ds.com/delmia](https://www.3ds.com/products/delmia) (accessed 2026-04-01).
 2. Google OR-Tools v9.15: [github.com/google/or-tools](https://github.com/google/or-tools) (accessed 2026-04-01).
-3. NIST AI RMF 1.0: [nist.gov/ai-rmf](https://www.nist.gov/artificial-intelligence/ai-risk-management-framework). NIST SP 800-82 Rev. 3: OT security.
+3. NIST AI RMF 1.0: [nist.gov/ai-rmf](https://www.nist.gov/itl/ai-risk-management-framework). NIST SP 800-82 Rev. 3: OT security.
 4. World Bank NV.IND.MANF.CD: [data.worldbank.org](https://data.worldbank.org/indicator/NV.IND.MANF.CD) (accessed 2026-04-01).
 5. U.S. Census CBP 2022, NAICS 31-33: [census.gov/programs-surveys/cbp.html](https://www.census.gov/programs-surveys/cbp.html).

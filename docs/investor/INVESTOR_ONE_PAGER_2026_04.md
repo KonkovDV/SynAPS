@@ -1,9 +1,9 @@
 ---
 title: "SynAPS Investor One-Pager 2026-04"
 status: "active"
-version: "2.0.1"
-last_updated: "2026-04-05"
-date: "2026-04-05"
+version: "2.0.2"
+last_updated: "2026-04-06"
+date: "2026-04-06"
 tags: [synaps, investor, one-pager, startup]
 mode: "reference"
 ---
@@ -34,7 +34,7 @@ Fourth, on-prem inference finally works. Open models and local inference stacks 
 
 ## What I've built (C2 - internally verified)
 
-The universal schema and domain examples are working. The Python solver, both heuristic and exact, passes all 120 current tests. I have a benchmark harness: on the verified smoke instance, `CPSAT-10` improves makespan from `106.67` to `82.0` minutes, or about `23.1%` versus `GREED`. Broader benchmark coverage remains open. There are published research notes, benchmark methodology surfaces, and architecture docs. And the investor pack you're reading tags every claim by evidence level.
+The universal schema and domain examples are working. The Python solver, both heuristic and exact, is currently covered by a 175-test suite in the repository; the last fully recorded full-suite pass in the active evidence packet remains `149/149` from the earlier April verification snapshot. I have a benchmark harness: on the verified smoke instance, `CPSAT-10` improves makespan from `106.67` to `82.0` minutes, or about `23.1%` versus `GREED`. Broader benchmark coverage remains open. There are published research notes, benchmark methodology surfaces, and architecture docs. And the investor pack you're reading tags every claim by evidence level.
 
 ## Why this engine
 
@@ -66,6 +66,7 @@ The technical foundation is solid. Internal verification is done. External valid
 2. [INVESTOR_QA](INVESTOR_QA_2026_04.md) - Q&A for live conversations
 3. [INVESTOR_DECK](INVESTOR_DECK_2026_04.md) - slide narrative
 4. [GLOSSARY](GLOSSARY_2026_04.md) - terms and acronyms
+5. [SYNAPS_MOSITLAB_INVESTOR_PITCH_2026_04.md](SYNAPS_MOSITLAB_INVESTOR_PITCH_2026_04.md) - Russian strategic-investor memo tailored to Mositlab-level diligence
 
 ---
 
@@ -73,6 +74,6 @@ The technical foundation is solid. Internal verification is done. External valid
 
 1. Asprova: [asprova.com](https://www.asprova.com/en/) (vendor-reported, accessed 2026-04-01). DELMIA Ortems: [delmia.com/scheduling](https://www.3ds.com/products/delmia/delmia-ortems) (accessed 2026-04-01). DELMIA Quintiq: [delmia.com/quintiq](https://www.3ds.com/products/delmia/delmia-quintiq) (accessed 2026-04-01).
 2. Google OR-Tools: [github.com/google/or-tools](https://github.com/google/or-tools) - v9.15, 13,300+ stars, 150 contributors, Apache 2.0 (accessed 2026-04-01).
-3. NIST AI Risk Management Framework 1.0: [nist.gov/ai-rmf](https://www.nist.gov/artificial-intelligence/ai-risk-management-framework). NIST SP 800-82 Rev. 3: OT security guidance.
+3. NIST AI Risk Management Framework 1.0: [nist.gov/ai-rmf](https://www.nist.gov/itl/ai-risk-management-framework). NIST SP 800-82 Rev. 3: OT security guidance.
 4. U.S. Census Bureau, County Business Patterns 2022, NAICS 31-33 (Manufacturing): [census.gov/programs-surveys/cbp.html](https://www.census.gov/programs-surveys/cbp.html).
 5. World Bank, Manufacturing value added (current US$), indicator NV.IND.MANF.CD: [data.worldbank.org](https://data.worldbank.org/indicator/NV.IND.MANF.CD).

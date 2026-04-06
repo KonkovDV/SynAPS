@@ -1,9 +1,9 @@
 ---
 title: "SynAPS Investor Pack"
 status: "active"
-version: "3.1.1"
-last_updated: "2026-04-05"
-date: "2026-04-05"
+version: "3.2.1"
+last_updated: "2026-04-06"
+date: "2026-04-06"
 tags: [synaps, investor, navigation]
 mode: "reference"
 ---
@@ -42,6 +42,10 @@ If you need one concise Russian summary:
 
 1. [HYPER_DEEP_REPORT_2026_04_RU.md](HYPER_DEEP_REPORT_2026_04_RU.md)
 
+If you need a Mositlab-specific Russian investor memo:
+
+1. [SYNAPS_MOSITLAB_INVESTOR_PITCH_2026_04.md](SYNAPS_MOSITLAB_INVESTOR_PITCH_2026_04.md)
+
 If you need the preserved full Russian investor narrative:
 
 1. [../../archive/investor-2026-04-slimming/HYPER_DEEP_REPORT_2026_04_RU_v2.md](../../archive/investor-2026-04-slimming/HYPER_DEEP_REPORT_2026_04_RU_v2.md)
@@ -78,8 +82,13 @@ Use these only when you need a specific angle:
 - [MARKET_COMPETITION_REPORT_2026_04_RU.md](MARKET_COMPETITION_REPORT_2026_04_RU.md)
 - [SYNAPS_VS_APS_INFIMUM_2026_04.md](SYNAPS_VS_APS_INFIMUM_2026_04.md)
 - [SYNAPS_VS_APS_INFIMUM_2026_04_RU.md](SYNAPS_VS_APS_INFIMUM_2026_04_RU.md)
+- [MONETIZATION_STRATEGY_2026_04.md](MONETIZATION_STRATEGY_2026_04.md): monetization models, cable industry case study, go-to-market plan, ROI calculator
+- [SYNAPS_MOSITLAB_INVESTOR_PITCH_2026_04.md](SYNAPS_MOSITLAB_INVESTOR_PITCH_2026_04.md): targeted Russian investor memo for Mositlab with explicit claim boundaries and current-state evidence framing
+- [MOSKABEL_VENTURE_PITCH_2026_04_RU.md](MOSKABEL_VENTURE_PITCH_2026_04_RU.md): Hyperdeep strategic memorandum (v6.0, RU) — targeted Moskabel memo covering the 13-config solver portfolio, the LBBD-HD scaling path, and the current 175-test collection boundary
 - [MOSKABEL_COUNTERFACTUAL_REPLACEMENT_MODEL_2026_04.md](MOSKABEL_COUNTERFACTUAL_REPLACEMENT_MODEL_2026_04.md)
 - [MOSKABEL_COUNTERFACTUAL_REPLACEMENT_MODEL_2026_04_RU.md](MOSKABEL_COUNTERFACTUAL_REPLACEMENT_MODEL_2026_04_RU.md)
+- [VC_CASE_STUDIES_2026_04.md](VC_CASE_STUDIES_2026_04.md): open-source infrastructure VC outcomes (Red Hat, HashiCorp, Confluent, Databricks, dbt Labs)
+- [VC_CASE_STUDIES_2026_04_RU.md](VC_CASE_STUDIES_2026_04_RU.md): Russian version of VC case studies
 - [../../archive/investor-2026-04-slimming/HYPER_DEEP_REPORT_2026_04_RU_v2.md](../../archive/investor-2026-04-slimming/HYPER_DEEP_REPORT_2026_04_RU_v2.md)
 
 ## What Changed
@@ -98,7 +107,7 @@ Older and duplicate materials were moved to [../../archive/investor-2026-04-slim
 
 ## Current Position
 
-SynAPS is strongest today as an inspectable deterministic scheduling core with bounded repair, reproducible verification, and a minimal TypeScript control-plane boundary.
+SynAPS is strongest today as an inspectable deterministic scheduling core with 13 solver configurations, a 175-test suite currently collected in the repository, bounded repair, reproducible verification, a minimal TypeScript control-plane boundary, and documented LBBD-HD variants in the solver portfolio.
 
 It is weaker as a deployed vertical APS product with proven pilot economics, field integration, or production-grade industrial operations.
 

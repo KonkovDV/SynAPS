@@ -51,6 +51,11 @@ Start here if you want the larger system context around the current scheduling c
 
 Legacy blueprint and whitepaper narrative files are no longer part of the active research route.
 
+## Audit Reports
+
+- [ACADEMIC_TECHNICAL_REPORT_2026_04.md](audit/ACADEMIC_TECHNICAL_REPORT_2026_04.md) — comprehensive academic-level audit: formal problem classification, solver portfolio analysis, competitive positioning, and actionable recommendations.
+- [DISSERTATION_AUDIT_REPORT.md](audit/DISSERTATION_AUDIT_REPORT.md)
+
 ## Validation and Evidence
 
 - [benchmark/README.md](../benchmark/README.md)

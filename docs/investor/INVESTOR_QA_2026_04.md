@@ -1,9 +1,9 @@
 ---
 title: "SynAPS Investor Q&A 2026-04"
 status: "active"
-version: "2.0.1"
-last_updated: "2026-04-05"
-date: "2026-04-05"
+version: "2.0.2"
+last_updated: "2026-04-06"
+date: "2026-04-06"
 tags: [synaps, investor, qa, diligence]
 mode: "how-to"
 ---
@@ -24,7 +24,7 @@ What exists is a C2 product kernel - working code, passing tests, internal bench
 
 ## What's actually built?
 
-The universal schema and domain examples are working. The Python solver, both heuristic and exact, passes 120 out of 120 current tests. The benchmark harness runs, and the active evidence packet confirms a verified smoke-instance result on `tiny_3x3`: `CPSAT-10` improves makespan from `106.67` to `82.0` minutes, or about `23.1%` versus `GREED`. Broader benchmark coverage remains open. The documentation stack is published too: research notes, benchmark methodology, architecture docs, all tagged by evidence level.
+The universal schema and domain examples are working. The Python solver, both heuristic and exact, is currently covered by a 175-test suite in the repository; the last fully recorded full-suite pass in the active evidence packet remains `149/149` from the earlier April verification snapshot. The benchmark harness runs, and the active evidence packet confirms a verified smoke-instance result on `tiny_3x3`: `CPSAT-10` improves makespan from `106.67` to `82.0` minutes, or about `23.1%` versus `GREED`. Broader benchmark coverage remains open. The documentation stack is published too: research notes, benchmark methodology, architecture docs, all tagged by evidence level.
 
 ## What's the moat?
 
@@ -59,3 +59,5 @@ Customer ROI - I need before-and-after KPI data from a real pilot. Broad benchma
 ## What should investors focus on?
 
 Whether the kernel is technically sound - check the solver, schema, and benchmark harness directly. Whether I'm honest about scope - look at what I don't claim in the [CLAIM_EVIDENCE_REGISTER](CLAIM_EVIDENCE_REGISTER_2026_04.md). Whether the team can convert this into pilot evidence - that's the next-phase question. And whether the market wedge is large enough - multi-stage manufacturers with high setup costs and bottleneck economics, where the pain is real and the sites are numerous.
+
+For a Russian strategic-investor framing tailored to Mositlab, use [SYNAPS_MOSITLAB_INVESTOR_PITCH_2026_04.md](SYNAPS_MOSITLAB_INVESTOR_PITCH_2026_04.md).

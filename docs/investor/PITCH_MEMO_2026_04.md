@@ -91,7 +91,7 @@ For go-to-market, I start with complex multi-stage plants that have expensive se
 
 I want to be precise here. SynAPS in its current state is a venture thesis backed by a working architectural-mathematical formalization. It's not a deployed APS runtime - I won't pretend otherwise. The strongest asset right now isn't product KPIs. It's a well-formulated kernel with universal economic logic across manufacturing domains, an explicit mathematical formulation, and a clear trajectory from the current heuristic core to an academically validatable hybrid stack.
 
-The universal schema works - DDL plus domain examples. The solver - both heuristic and exact - passes all 120 tests, and I've closed SDST parity for exact solve, repair, and feasibility checking. The benchmark harness supports a verified smoke-instance result on `tiny_3x3`: `CPSAT-10` improves makespan from `106.67` to `82.0` minutes, or about `23.1%` versus `GREED`. Broader benchmark coverage remains open. Research documentation is published.
+The universal schema works - DDL plus domain examples. The solver - both heuristic and exact - is currently covered by a 175-test suite in the repository, while the last fully recorded full-suite pass in the active evidence packet remains `149/149` from the earlier April verification snapshot. I've also closed SDST parity for exact solve, repair, and feasibility checking. The benchmark harness supports a verified smoke-instance result on `tiny_3x3`: `CPSAT-10` improves makespan from `106.67` to `82.0` minutes, or about `23.1%` versus `GREED`. Broader benchmark coverage remains open. Research documentation is published.
 
 What's not built: digital twin runtime, industrial connectors, a broad benchmark corpus, pilot KPI data, head-to-head comparison against named APS competitors, and full solver-side auxiliary-resource modeling across all constructive paths. I name these because hiding them would waste everyone's time.
 
@@ -138,6 +138,6 @@ Industry-specific packs will need separate compliance work: GMP and GxP for phar
 
 1. Asprova: [asprova.com](https://www.asprova.com/en/). DELMIA: [3ds.com/delmia](https://www.3ds.com/products/delmia) (vendor-reported, accessed 2026-04-01).
 2. Google OR-Tools v9.15: [github.com/google/or-tools](https://github.com/google/or-tools) (accessed 2026-04-01).
-3. NIST AI RMF 1.0: [nist.gov/ai-rmf](https://www.nist.gov/artificial-intelligence/ai-risk-management-framework). NIST SP 800-82 Rev. 3: OT security.
+3. NIST AI RMF 1.0: [nist.gov/ai-rmf](https://www.nist.gov/itl/ai-risk-management-framework). NIST SP 800-82 Rev. 3: OT security.
 4. U.S. Census Bureau, CBP 2022, NAICS 31-33: [census.gov/programs-surveys/cbp.html](https://www.census.gov/programs-surveys/cbp.html).
 5. World Bank, NV.IND.MANF.CD: [data.worldbank.org](https://data.worldbank.org/indicator/NV.IND.MANF.CD) (accessed 2026-04-01).
