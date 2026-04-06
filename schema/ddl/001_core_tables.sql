@@ -49,23 +49,4 @@ CREATE TABLE IF NOT EXISTS operations (
 
 COMMENT ON TABLE operations IS 'Individual processing steps within a work item. Sequence-dependent setup times are resolved via the setup_matrix.';
 
-CREATE TABLE IF NOT EXISTS auxiliary_resources (
-    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    code              VARCHAR(80)  NOT NULL UNIQUE,
-    resource_type     VARCHAR(80)  NOT NULL,
-    pool_size         INTEGER      NOT NULL DEFAULT 1 CHECK (pool_size >= 1),
-    domain_attributes JSONB        NOT NULL DEFAULT '{}'
-);
-
-COMMENT ON TABLE auxiliary_resources IS 'Shared scarce resources such as tools, fixtures, crews, or operators used across operations.';
-
-CREATE TABLE IF NOT EXISTS operation_aux_requirements (
-    operation_id      UUID         NOT NULL REFERENCES operations(id),
-    aux_resource_id   UUID         NOT NULL REFERENCES auxiliary_resources(id),
-    quantity_needed   INTEGER      NOT NULL DEFAULT 1 CHECK (quantity_needed >= 1),
-    PRIMARY KEY (operation_id, aux_resource_id)
-);
-
-COMMENT ON TABLE operation_aux_requirements IS 'Operation to auxiliary resource requirement links used by feasibility checking and solver capacity constraints.';
-
 COMMIT;

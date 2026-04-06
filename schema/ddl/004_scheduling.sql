@@ -1,5 +1,5 @@
 -- schema/ddl/004_scheduling.sql
--- SynAPS: Scheduling results, assignments, and operator overrides (PostgreSQL 18+)
+-- SynAPS: Scheduling results, assignments, and operator overrides (PostgreSQL 17+)
 
 BEGIN;
 
