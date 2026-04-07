@@ -43,7 +43,15 @@ def _size_band(operation_count: int) -> str:
         return "small"
     if operation_count <= 120:
         return "medium"
-    return "large"
+    if operation_count <= 500:
+        return "large"
+    if operation_count <= 2_000:
+        return "industrial"
+    if operation_count <= 10_000:
+        return "industrial-hd"
+    if operation_count <= 50_000:
+        return "mega"
+    return "ultra"
 
 
 def build_problem_profile(problem: ScheduleProblem) -> ProblemProfile:

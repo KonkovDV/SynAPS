@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from synaps.solvers.cpsat_solver import CpSatSolver
 from synaps.solvers.greedy_dispatch import GreedyDispatch
+from synaps.solvers.lbbd_hd_solver import LbbdHdSolver
 from synaps.solvers.lbbd_solver import LbbdSolver
 from synaps.solvers.pareto_slice_solver import ParetoSliceCpSatSolver
 
@@ -44,6 +45,10 @@ def _build_cpsat() -> BaseSolver:
 
 def _build_lbbd() -> BaseSolver:
     return LbbdSolver()
+
+
+def _build_lbbd_hd() -> BaseSolver:
+    return LbbdHdSolver()
 
 
 def _build_pareto_slice_cpsat() -> BaseSolver:
@@ -124,6 +129,51 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
         factory=_build_lbbd,
         solve_kwargs={"max_iterations": 10, "time_limit_s": 60},
         description="LBBD decomposition with 10 Benders iterations and 60-second budget",
+    ),
+    # ---- Hierarchical Decomposition variants (10k–50k+ operations) ----
+    "LBBD-5-HD": SolverRegistration(
+        factory=_build_lbbd_hd,
+        solve_kwargs={
+            "max_iterations": 5,
+            "time_limit_s": 120,
+            "max_ops_per_cluster": 200,
+            "num_workers": 8,
+            "use_warm_start": True,
+        },
+        description=(
+            "Hierarchical LBBD with balanced partitioning (≤200 ops/cluster), "
+            "greedy warm-start, parallel subproblems. 5 iterations, 120s budget."
+        ),
+    ),
+    "LBBD-10-HD": SolverRegistration(
+        factory=_build_lbbd_hd,
+        solve_kwargs={
+            "max_iterations": 10,
+            "time_limit_s": 300,
+            "max_ops_per_cluster": 200,
+            "num_workers": 8,
+            "use_warm_start": True,
+        },
+        description=(
+            "Hierarchical LBBD with balanced partitioning (≤200 ops/cluster), "
+            "greedy warm-start, parallel subproblems. 10 iterations, 300s budget. "
+            "Industrial scale: 10 000–50 000 operations."
+        ),
+    ),
+    "LBBD-20-HD": SolverRegistration(
+        factory=_build_lbbd_hd,
+        solve_kwargs={
+            "max_iterations": 20,
+            "time_limit_s": 600,
+            "max_ops_per_cluster": 150,
+            "num_workers": 8,
+            "use_warm_start": True,
+            "gap_threshold": 0.005,
+        },
+        description=(
+            "Extended Hierarchical LBBD for 50 000+ operations. "
+            "Tighter gap (0.5%), smaller clusters (≤150 ops), 20 iterations, 10min budget."
+        ),
     ),
 }
 

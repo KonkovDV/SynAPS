@@ -30,7 +30,7 @@ Use the About panel the way strong OSS startup repositories do:
 1. one-sentence category-first description, not a manifesto;
 2. topics that classify domain plus method plus runtime;
 3. homepage only when it is a real owned surface;
-4. no investor language in the About panel.
+4. no partner language in the About panel.
 
 ## 2. Community Profile
 
@@ -100,10 +100,10 @@ python -m benchmark.run_benchmark benchmark/instances/tiny_3x3.json --solvers GR
 
 3. Confirm the repository works without any parent workspace files.
 
-## 8. Optional Investor Pack Decision
+## 8. Optional Partner Pack Decision
 
-1. If you want a pure engineering-only public repo, remove `docs/investor/` before the first public push and rebuild the export.
-2. If you keep `docs/investor/`, treat it as an optional diligence packet rather than the primary technical entrypoint.
+1. If you want a pure engineering-only public repo, remove `docs/partners/` before the first public push and rebuild the export.
+2. If you keep `docs/partners/`, treat it as an optional diligence packet rather than the primary technical entrypoint.
 
 ## 9. Things Not To Claim
 

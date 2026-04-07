@@ -140,6 +140,69 @@ The control-plane should not reconstruct CP-SAT models in TypeScript. It should 
 
 ---
 
+
+### Example Request/Response Payloads
+
+**Solve Request:**
+```json
+{
+  "problem": {
+    "orders": [{"id": "O1", "priority": 500, "due_date": 1440}],
+    "operations": [
+      {"id": "op1", "order_id": "O1", "seq_in_order": 1, "state_id": "S1",
+       "base_duration_min": 60, "eligible_wc_ids": ["WC1", "WC2"]}
+    ],
+    "work_centers": [
+      {"id": "WC1", "code": "LATHE-01", "speed_factor": 1.0, "max_parallel": 1}
+    ],
+    "setup_entries": [
+      {"work_center_id": "WC1", "from_state_id": "S1", "to_state_id": "S2",
+       "setup_minutes": 30, "material_loss": 0.5, "energy_kwh": 2.0}
+    ],
+    "horizon_start": 0,
+    "horizon_end": 2880
+  },
+  "solver_config": "CPSAT-10",
+  "request_id": "req-2026-04-07-001"
+}
+```
+
+**Solve Response:**
+```json
+{
+  "solver_name": "CPSAT-10",
+  "status": "OPTIMAL",
+  "assignments": [
+    {"operation_id": "op1", "work_center_id": "WC1",
+     "start_offset": 0, "end_offset": 60, "setup_minutes": 0}
+  ],
+  "objective": {
+    "makespan": 60.0,
+    "total_setup_minutes": 0.0,
+    "total_material_loss": 0.0,
+    "total_tardiness": 0.0,
+    "weighted_sum": 60.0
+  },
+  "duration_ms": 26,
+  "metadata": {"portfolio": "CPSAT-10", "gap": 0.0}
+}
+```
+
+### Error Contract
+
+All BFF errors follow a consistent envelope:
+```json
+{
+  "error": "SynapsPythonBridgeError",
+  "message": "Solver returned INFEASIBLE: precedence cycle detected",
+  "request_id": "req-2026-04-07-001",
+  "status_code": 422
+}
+```
+
+HTTP status codes: `200` (success), `400` (invalid input, AJV rejection), `422` (infeasible/solver error), `502` (Python bridge failure), `504` (solver timeout).
+
+
 ## 8. Verification Surface
 
 The runtime contract is covered by:

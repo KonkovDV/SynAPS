@@ -1,10 +1,10 @@
 # 04 — Universal Data Model
 
-> **Scope**: Canonical entities, SQL DDL (PostgreSQL 17+), JSONB domain parametrization, event model, stream topology, and partitioning strategy.
+> **Scope**: Canonical entities, SQL DDL (PostgreSQL 17+), JSONB domain parametrization, and explicitly marked target eventing/deployment notes.
 
 <details><summary>🇷🇺 Краткое описание</summary>
 
-Универсальная модель данных на PostgreSQL 17+. Десять таблиц покрывают полный цикл: состояния продукции, заказы, операции, рабочие центры, матрица переналадок (SDST), вспомогательные ресурсы, расписания и действия оператора. Поле `domain_attributes JSONB` параметризует схему под любую отрасль (металлургия, фарма, электроника, ЦОД и т.д.) без изменения DDL. Событийная модель — Outbox + NATS JetStream 2.12+ — обеспечивает exactly-once доставку.
+Универсальная модель данных на PostgreSQL 17+. Десять таблиц покрывают полный цикл: состояния продукции, заказы, операции, рабочие центры, матрица переналадок (SDST), вспомогательные ресурсы, расписания и действия оператора. Поле `domain_attributes JSONB` параметризует схему под любую отрасль (металлургия, фарма, электроника, ЦОД и т.д.) без изменения DDL. Разделы про eventing, streams и partitioning ниже описывают target deployment architecture и не являются текущим runtime в этом standalone repo.
 </details>
 
 ---
@@ -262,6 +262,37 @@ The `domain_attributes` field in every core table enables industry-specific exte
 
 ---
 
+
+### Domain Attribute Validation (Pydantic v2 Runtime Contract)
+
+The `domain_attributes` JSONB column accepts arbitrary industry-specific parameters. In the current repository, validation is enforced through the canonical Pydantic v2 schema and the `ScheduleProblem` cross-reference validator; `domain_attributes` itself remains an open `dict[str, Any]` rather than a shipped set of per-industry discriminated unions:
+
+```python
+# model.py — domain_attributes validated at deserialization
+class Operation(BaseModel):
+    id: str
+    order_id: str
+    seq_in_order: int
+    state_id: str                          # Material/mode → SDST matrix key
+    base_duration_min: float               # Base duration (pre speed_factor)
+    eligible_wc_ids: list[str]             # Eligible work centers
+    predecessor_op_id: str | None = None   # BOM precedence
+    domain_attributes: dict[str, Any] = {} # Industry-specific params
+
+class ScheduleProblem(BaseModel):
+    """Cross-reference validation at deserialization:
+    - All operation IDs unique (no duplicates)
+    - All predecessor_op_id references resolve within the same order
+    - No cycles in precedence DAG (topological sort check)
+    - All eligible_wc_ids reference existing work centers
+    - Setup matrix triples (wc, from_state, to_state) are valid
+    - Horizon: end > start
+    """
+```
+
+This ensures that invalid references, duplicate keys, invalid predecessor chains, and horizon errors are rejected **before reaching any solver**, while still leaving room for domain-specific overlays above the canonical schema.
+
+
 ## 4. ORM Compatibility
 
 | Feature | PostgreSQL Native | SQLAlchemy | Prisma | TypeORM |
@@ -276,9 +307,11 @@ The `domain_attributes` field in every core table enables industry-specific exte
 
 ---
 
-## 5. Event Model
+## 5. Target Eventing Architecture (Roadmap)
 
-All state changes are published as events through an **Outbox** pattern:
+The standalone public repository does **not** currently ship an outbox runtime, event bus, or streaming backbone. The material in Sections 5-7 describes a future integrated deployment architecture that can sit around the current scheduling kernel.
+
+In that target architecture, state changes can be published through an outbox-backed event model:
 
 ### 5.1 Event Envelope
 
@@ -313,7 +346,7 @@ All state changes are published as events through an **Outbox** pattern:
 
 ---
 
-## 6. Stream Topology (NATS JetStream 2.12+)
+## 6. Target Stream Topology (Roadmap Example)
 
 ```
 STREAM: scheduling
@@ -331,11 +364,11 @@ STREAM: ml
 └── ml.promotions.>            (model lifecycle events)
 ```
 
-**Retention**: `scheduling` stream — 90 days (regulatory audit). `telemetry` — 30 days (high volume, archived to ClickHouse). `ml` — 180 days (model provenance).
+Illustrative retention policy: `scheduling` — 90 days for auditability, `telemetry` — 30 days for high-volume operational signals, `ml` — 180 days for future model provenance. These are deployment examples, not a currently wired runtime policy in this repo.
 
 ---
 
-## 7. Partitioning Strategy
+## 7. Target Partitioning Strategy (Deployment Option)
 
 | Table | Partition Key | Strategy | Rationale |
 |-------|--------------|----------|-----------|
@@ -344,7 +377,7 @@ STREAM: ml
 | `setup_matrix` | — | None (static, < 100K rows) | Fits in shared_buffers |
 | `operations` | — | None (bulk-loaded per planning horizon) | Refreshed each cycle |
 
-**Archive policy**: Partitions older than 12 months are detached and moved to cold storage (compressed, read-only tablespace or exported to Parquet).
+Example archive policy: partitions older than 12 months are detached and moved to cold storage (compressed, read-only tablespace or exported to Parquet). This is a deployment option, not a currently running maintenance lane in the standalone repository.
 
 ---
 

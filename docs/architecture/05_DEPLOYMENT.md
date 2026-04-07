@@ -1,22 +1,37 @@
 # 05 — Deployment & Operations
 
-> **Scope**: Environments, platform Bill of Materials, air-gapped deployment, CI/CD, security model, performance budgets, SLO classes, degraded modes, and observability stack.
+> **Scope**: current proof boundary plus the target deployment and operations model around the standalone SynAPS kernel.
 
 <details><summary>🇷🇺 Краткое описание</summary>
 
-Модель развёртывания SynAPS: четыре среды (dev — prod), полный BOM платформы (PostgreSQL 17+, NATS JetStream 2.12+, SGLang, PyTorch 2.6, OR-Tools CP-SAT v9.10+), изолированный (air-gapped) режим с оффлайн-артефактным пайплайном, трёхзонная модель безопасности (DMZ → App → Data), шесть канонических ролей RBAC, три класса SLO и стек наблюдаемости (Prometheus + Grafana + OpenTelemetry + ClickHouse). Все компоненты совместимы с OCI-контейнеризацией и Helm-чартами.
+Модель развёртывания SynAPS: текущая доказанная граница ограничена Python scheduling kernel, schema/contracts surfaces, benchmark harness и минимальным TypeScript Fastify BFF. Всё остальное в этом документе описывает целевую deployment architecture вокруг ядра: среды dev → prod, candidate BOM, air-gapped artifact pipeline, security zoning, SLO и observability.
 </details>
 
 ---
 
-## 1. Environment Matrix
+## 0. Current Proof Boundary
+
+The standalone repository currently proves a smaller runtime surface than the full deployment model described below:
+
+1. the Python solver kernel and benchmark harness;
+2. canonical schema and contract artifacts;
+3. CLI/package execution helpers;
+4. the minimal TypeScript Fastify BFF in `control-plane/`.
+
+Everything else in this document should be read as target deployment architecture unless a section explicitly says otherwise.
+
+---
+
+## 1. Target Environment Matrix
+
+These tiers describe the intended deployment progression around the current standalone kernel. The repository itself does not prove that staging, preprod, or prod environments below already exist.
 
 | Environment | Purpose | Infra | Data | Solvers |
 |-------------|---------|-------|------|---------|
-| **dev** | Local development | Docker Compose | Synthetic fixtures | Greedy only |
-| **staging** | Integration testing | Kubernetes (single node) | Anonymized production snapshot | All solvers |
-| **preprod** | UAT & performance benchmarks | Kubernetes (3-node) | Shadow production | All solvers + ML models |
-| **prod** | Live operations | Kubernetes (HA) | Production | All solvers + promoted ML |
+| **dev** | Local development and contract testing | Local Python env + optional TypeScript BFF | Synthetic fixtures | Current standalone solver portfolio |
+| **staging** | Target integration testing | Kubernetes (single node) | Anonymized production snapshot | Target deployed solver set |
+| **preprod** | Target UAT and performance benchmarks | Kubernetes (3-node) | Shadow production | Target solver set + promoted advisory models |
+| **prod** | Target live operations | Kubernetes (HA) | Production | Target solver set + promoted advisory models |
 
 ## 1.1 Zero-Touch Edge Posture
 
@@ -33,32 +48,34 @@ As of `2026-04-02`, Kubernetes `1.35.x` is the latest stable minor release and `
 
 ---
 
-## 2. Platform Bill of Materials (BOM)
+## 2. Target Platform Bill of Materials (BOM)
+
+The current repo-backed surfaces in this stack are the Python kernel, OR-Tools, HiGHS, schema/contracts artifacts, and the minimal Fastify + AJV BFF. The remaining entries are target deployment candidates, not shipped standalone dependencies.
 
 | Component | Version | Role | Licence |
 |-----------|---------|------|---------|
-| PostgreSQL | 17+ | RDBMS, event store, HNSW vector search (18 target) | PostgreSQL License |
-| NATS JetStream | 2.12+ | Event streaming, exactly-once delivery | Apache-2.0 |
+| PostgreSQL | 17+ | Current schema anchor; target transactional store and optional vector-search host (18 target) | PostgreSQL License |
+| NATS JetStream (target) | 2.12+ | Durable event-streaming candidate around the kernel | Apache-2.0 |
 | OR-Tools CP-SAT | 9.10+ | Constraint programming solver | Apache-2.0 |
 | HiGHS | 1.8+ | LP/MIP solver (LBBD master) | MIT |
-| Python | 3.13+ | Solver engine, ML pipelines | PSF License |
-| PyTorch | 2.6+ | ML training (Inductor compiler) | BSD-3 |
-| PyTorch Geometric | 2.6+ | GNN – HGAT weight predictor | MIT |
-| TorchRL | 0.6+ | Reinforcement learning (Digital Twin) | MIT |
-| SGLang | 0.4+ | LLM inference runtime | Apache-2.0 |
-| ExecuTorch | 0.5+ | Edge AI on ARM PLCs/gateways | BSD-3 |
-| FastAPI | 0.115+ | REST / WebSocket API | MIT |
-| Valkey | 9.0+ | Cache, session, distributed locks | BSD-3 |
-| Prometheus | 2.55+ | Metrics collection | Apache-2.0 |
-| Grafana | 11+ | Dashboards & alerting | AGPL-3.0 |
-| OpenTelemetry | 1.30+ | Distributed tracing | Apache-2.0 |
-| ClickHouse | 24+ | Telemetry archive, analytics | Apache-2.0 |
-| Helm | 3.16+ | Kubernetes package management | Apache-2.0 |
-| Trivy / Grype | latest | Container vulnerability scanning | Apache-2.0 |
+| Python | 3.13+ | Current solver engine; target ML orchestration host | PSF License |
+| PyTorch (target ML stack) | 2.6+ | Future ML training and advisory experiments | BSD-3 |
+| PyTorch Geometric (target) | 2.6+ | Future HGAT experiments | MIT |
+| TorchRL (target) | 0.6+ | Future digital-twin RL research | MIT |
+| SGLang (target) | 0.4+ | Future on-prem LLM inference candidate | Apache-2.0 |
+| ExecuTorch (target) | 0.5+ | Future Edge AI export lane | BSD-3 |
+| Fastify + AJV | 5.x | Current TypeScript BFF: REST boundary, schema validation, Python bridge | MIT |
+| Valkey (target) | 9.0+ | Future cache, session, distributed-lock layer | BSD-3 |
+| Prometheus (target observability) | 2.55+ | Metrics collection candidate | Apache-2.0 |
+| Grafana (target observability) | 11+ | Dashboards and alerting candidate | AGPL-3.0 |
+| OpenTelemetry (target observability) | 1.30+ | Distributed tracing candidate | Apache-2.0 |
+| ClickHouse (target analytics plane) | 24+ | Telemetry archive and analytics candidate | Apache-2.0 |
+| Helm (target deployment) | 3.16+ | Kubernetes package management candidate | Apache-2.0 |
+| Trivy / Grype (target supply-chain lane) | latest | Container vulnerability scanning candidate | Apache-2.0 |
 
 ---
 
-## 3. Platform Topology
+## 3. Target Platform Topology
 
 ```
                   ┌─────────────────────────────────────┐
@@ -70,7 +87,7 @@ As of `2026-04-02`, Kubernetes `1.35.x` is the latest stable minor release and `
                 │                 │                      │
         ┌───────▼───────┐ ┌──────▼──────┐ ┌────────────▼───────┐
         │  API Gateway  │ │  WebSocket  │ │   Grafana / UI     │
-        │  (FastAPI)    │ │  Server     │ │   (read-only)      │
+        │ (Fastify BFF) │ │  Server     │ │   (read-only)      │
         └───────┬───────┘ └──────┬──────┘ └────────────────────┘
                 │                │
         ┌───────▼────────────────▼──────┐
@@ -100,7 +117,7 @@ As of `2026-04-02`, Kubernetes `1.35.x` is the latest stable minor release and `
 
 ## 4. Air-Gapped Deployment
 
-For environments with no internet access (defense, critical infrastructure, secure operations), SynAPS supports fully offline deployment.
+The target deployment model includes a fully offline lane for environments with no internet access (defense, critical infrastructure, secure operations). The current standalone repo already supports offline kernel and BFF execution once dependencies are preloaded, but the full platform below remains target architecture.
 
 ### 4.1 Artifact Pipeline
 
@@ -140,7 +157,7 @@ grype sbom:sbom.spdx.json --fail-on critical
 
 ---
 
-## 5. CI/CD Pipeline
+## 5. Target CI/CD Pipeline
 
 ```mermaid
 graph LR
@@ -171,7 +188,7 @@ graph LR
 
 ---
 
-## 6. Security Model
+## 6. Target Security Model
 
 ### 6.1 Trust Zones
 
@@ -232,11 +249,45 @@ Every state-changing action produces an audit event:
 }
 ```
 
-Audit events are immutable and retained for 7 years (configurable per regulatory domain).
+In the target operating model, audit events are immutable and retained for 7 years (configurable per regulatory domain).
 
 ---
 
-## 7. Performance Budgets
+
+### Solver Resource Requirements (per instance size)
+
+| Solver | CPU Cores | RAM | Max Latency | Instance Size |
+|--------|-----------|-----|-------------|---------------|
+| GREED | 1 | 256 MB | $< 1$ s | Any ($N > 0$) |
+| CPSAT-10 | 4 | 2 GB | 10 s | $N \leq 20$ |
+| CPSAT-30 | 4 | 4 GB | 30 s | $N \leq 120$ |
+| CPSAT-120 | 8 | 8 GB | 120 s | $N \leq 200$ |
+| LBBD-5 | 4 | 4 GB | 30 s | $N \leq 500$ |
+| LBBD-10 | 8 | 8 GB | 60 s | $N \leq 500$ |
+| LBBD-5-HD | 16 | 16 GB | 120 s | $N \leq 50$K |
+| LBBD-10-HD | 16 | 32 GB | 300 s | $N \leq 50$K |
+| LBBD-20-HD | 32+ | 64 GB | 600 s | $N > 50$K |
+
+**Notes:**
+- LBBD-HD profiles require `ProcessPoolExecutor` with `num_workers` CPU cores dedicated
+- ECC RAM is **mandatory** for OR correctness (single bit-flip can invalidate constraints)
+- NUMA-aware scheduling recommended for $> 16$ cores (pin workers to local NUMA domain)
+- HiGHS MIP master is single-threaded; CP-SAT subproblems use up to 8 threads each
+
+### Scaling Characteristics
+
+```
+Instance Size (N ops)    Recommended Solver    Typical Wall Time
+1–20                      CPSAT-10              < 1 s
+20–120                    CPSAT-30              1–30 s
+120–500                   LBBD-10               30–60 s
+500–10K                   LBBD-10-HD (8 cores)  1–5 min
+10K–50K                   LBBD-10-HD (16 cores) 3–10 min
+50K+                      LBBD-20-HD (32 cores) 5–15 min
+```
+
+
+## 7. Target Performance Budgets
 
 ### 7.1 Latency Targets
 
@@ -261,7 +312,7 @@ Audit events are immutable and retained for 7 years (configurable per regulatory
 
 ---
 
-## 8. SLO Classes
+## 8. Target SLO Classes
 
 | Class | Availability | RTO | RPO | Use Case |
 |-------|-------------|-----|-----|----------|
@@ -271,7 +322,7 @@ Audit events are immutable and retained for 7 years (configurable per regulatory
 
 ---
 
-## 9. Degraded Mode Matrix
+## 9. Target Degraded Mode Matrix
 
 | Failure | Detection | Degraded Behavior | Recovery |
 |---------|-----------|-------------------|----------|
@@ -284,7 +335,7 @@ Audit events are immutable and retained for 7 years (configurable per regulatory
 
 ---
 
-## 10. Observability Stack
+## 10. Target Observability Stack
 
 ### 10.1 Metrics (Prometheus)
 
@@ -342,7 +393,7 @@ Trace: schedule-run-01HW...
 
 ---
 
-## 11. Helm Chart Structure
+## 11. Target Helm Chart Structure
 
 ```
 helm/synaps/

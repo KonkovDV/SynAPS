@@ -1,7 +1,7 @@
 # SynAPS: Универсальная платформа планирования — CURRENT vs TARGET
 
 > **Классификация**: `CURRENT` = реализовано и верифицировано; `TARGET` = целевая архитектура.
-> **Термины**: [GLOSSARY](../docs/investor/GLOSSARY_2026_04.md).
+> **Термины**: [GLOSSARY](../docs/partners/GLOSSARY_2026_04.md).
 
 Система **SynAPS** — математическое и алгоритмическое ядро для решения NP-трудных задач теории расписаний. Архитектура спроектирована как отраслево-независимая: один solver-портфолио, конфигурируемый под домен через параметры, а не перезаписываемый под каждую вертикаль.
 
@@ -17,7 +17,7 @@
 
 ### Точки монетизации:
 1. **Минимизация переналадок**: Solver выстраивает задания так, чтобы ресурсы перенастраивались как можно реже. (`CURRENT` — CP-SAT solver с SDST-матрицами)
-2. **Сглаживание энергопотребления**: Энергоёмкие процессы математически сдвигаются в окна дешёвых тарифов. (`CURRENT` — объективная функция CP-SAT включает energy-aware терм)
+2. **Сглаживание энергопотребления**: Энергоёмкие процессы в целевой архитектуре должны сдвигаться в окна дешёвых тарифов. (`TARGET` — текущая схема уже хранит `energy_kwh` в setup entries, но активный evidence pack пока не фиксирует отдельный energy-cost objective в shipped solver portfolio)
 3. **Хирургическая починка плана (Incremental Repair)**: При сбое ключевого узла расписание «лечится» только для затронутых компонентов. (`CURRENT` — `synaps/solvers/incremental_repair.py`)
 4. **Управление дефицитными ресурсами (Auxiliary Resources)**: Оптимизация движения инструментов, тары, оснастки. (`CURRENT` — auxiliary-resource constraints в модели, тесты на feasibility)
 
@@ -31,7 +31,7 @@
 
 | Solver | Роль | Файл | Статус |
 | --- | --- | --- | --- |
-| **Greedy Dispatch (ATCS)** | Быстрая начальная аллокация, log-space ATCS (Lee, Bhaskaran & Pinedo 1997) | `synaps/solvers/greedy_dispatch.py` | ✅ Реализован, 120/120 тестов |
+| **Greedy Dispatch (ATCS)** | Быстрая начальная аллокация, log-space ATCS (Lee, Bhaskaran & Pinedo 1997) | `synaps/solvers/greedy_dispatch.py` | ✅ Реализован; active evidence pack фиксирует последний полностью задокументированный прогон `149/149`, при том что текущий репозиторий собирает `175` тестов |
 | **CP-SAT** | Точный solver для bottleneck-подзадач (Google OR-Tools) | `synaps/solvers/cpsat_solver.py` | ✅ Реализован, SDST, multi-objective |
 | **Incremental Repair** | Локальная починка при сбое | `synaps/solvers/incremental_repair.py` | ✅ Реализован |
 | **LBBD** | Logic-Based Benders Decomposition — координация нескольких scheduling-слоёв | `synaps/solvers/lbbd_solver.py` | ✅ Реализован; публичная benchmark-оценка должна читаться через текущий evidence packet |

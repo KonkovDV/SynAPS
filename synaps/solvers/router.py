@@ -104,11 +104,19 @@ def route_solver_config(
                 solver_config="CPSAT-30",
                 reason="material scarcity benefits from exact propagation of tightened constraints",
             )
+        if op_count <= 500:
+            return SolverRoutingDecision(
+                solver_config="LBBD-5",
+                reason=(
+                    "large constrained instances benefit from decomposition before exact "
+                    "local sequencing"
+                ),
+            )
         return SolverRoutingDecision(
-            solver_config="LBBD-5",
+            solver_config="LBBD-10-HD",
             reason=(
-                "large constrained instances benefit from decomposition before exact "
-                "local sequencing"
+                "industrial-scale material-shortage instance routed to hierarchical "
+                "decomposition with balanced partitioning"
             ),
         )
 
@@ -126,11 +134,19 @@ def route_solver_config(
                 solver_config="CPSAT-30",
                 reason="what-if analysis favors stronger optimality on medium instances",
             )
+        if op_count <= 500:
+            return SolverRoutingDecision(
+                solver_config="LBBD-10",
+                reason=(
+                    "large scenario analysis benefits from the slower but more scalable "
+                    "LBBD portfolio member"
+                ),
+            )
         return SolverRoutingDecision(
-            solver_config="LBBD-10",
+            solver_config="LBBD-10-HD",
             reason=(
-                "large scenario analysis benefits from the slower but more scalable "
-                "LBBD portfolio member"
+                "industrial-scale what-if analysis routed to hierarchical LBBD "
+                "with parallel subproblems"
             ),
         )
 
@@ -148,11 +164,27 @@ def route_solver_config(
                     "the CP-SAT comfort zone"
                 ),
             )
+        if op_count <= 500:
+            return SolverRoutingDecision(
+                solver_config="LBBD-10",
+                reason=(
+                    "exactness requested on a larger instance, so decomposition is the "
+                    "smallest sound path"
+                ),
+            )
+        if op_count <= 50_000:
+            return SolverRoutingDecision(
+                solver_config="LBBD-10-HD",
+                reason=(
+                    "industrial-scale exact solve via hierarchical LBBD with balanced "
+                    "partitioning (≤200 ops/cluster)"
+                ),
+            )
         return SolverRoutingDecision(
-            solver_config="LBBD-10",
+            solver_config="LBBD-20-HD",
             reason=(
-                "exactness requested on a larger instance, so decomposition is the "
-                "smallest sound path"
+                "ultra-large exact solve (50k+ ops) via extended hierarchical LBBD "
+                "with tighter convergence and smaller clusters"
             ),
         )
 
@@ -171,11 +203,29 @@ def route_solver_config(
             ),
         )
 
+    if op_count <= 500:
+        return SolverRoutingDecision(
+            solver_config="LBBD-10",
+            reason=(
+                "larger nominal instance benefits from decomposition before exact "
+                "subproblem sequencing"
+            ),
+        )
+
+    if op_count <= 50_000:
+        return SolverRoutingDecision(
+            solver_config="LBBD-10-HD",
+            reason=(
+                "industrial-scale nominal instance (>500 ops) routed to hierarchical LBBD "
+                "with balanced partitioning, greedy warm-start, and parallel subproblems"
+            ),
+        )
+
     return SolverRoutingDecision(
-        solver_config="LBBD-10",
+        solver_config="LBBD-20-HD",
         reason=(
-            "larger nominal instance benefits from decomposition before exact "
-            "subproblem sequencing"
+            "ultra-large nominal instance (50k+ ops) routed to extended hierarchical LBBD "
+            "with tighter convergence, smaller clusters, and 20-iteration budget"
         ),
     )
 

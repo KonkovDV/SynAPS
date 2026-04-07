@@ -11,7 +11,7 @@ Start here if you want the larger system context around the current scheduling c
 1. Start with [../README.md](../README.md) for the repository boundary and quick-start commands.
 2. Go to [../benchmark/README.md](../benchmark/README.md) if you want reproducible solver evidence.
 3. Go to [../control-plane/README.md](../control-plane/README.md) if you want the TypeScript runtime boundary.
-4. Go to [investor/README.md](investor/README.md) only if you need the optional investor and diligence layer.
+4. Go to [partners/README.md](partners/README.md) only if you need the optional partner and diligence layer.
 
 ## Architecture
 
@@ -68,10 +68,10 @@ Legacy blueprint and whitepaper narrative files are no longer part of the active
 - [CONTRIBUTING.md](../CONTRIBUTING.md)
 - [SECURITY.md](../SECURITY.md)
 
-## Optional Investor Pack
+## Optional Partner Pack
 
-`docs/investor/` contains the optional SynAPS diligence packet.
+`docs/partners/` contains the optional SynAPS diligence packet.
 
 The engineering surface is complete without that subtree, so removing it must not affect the code, tests, benchmark harness, or package build.
 
-Use [investor/README.md](investor/README.md) as the investor router. It now points to the reduced active packet and to the archive boundary for older or duplicate materials.
+Use [partners/README.md](partners/README.md) as the partner router. It now points to the reduced active packet and to the archive boundary for older or duplicate materials.

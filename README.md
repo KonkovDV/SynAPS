@@ -10,6 +10,21 @@ SynAPS is a public research and engineering repository.
 
 The repository currently contains a Python scheduling core, canonical schema surfaces, a benchmark harness, and validation tooling. It does **not** yet claim full production deployment, cyber-physical plant integration, or the entire "Aleph" target architecture as implemented software.
 
+### Solver Portfolio (8 components, 4 315 LOC)
+
+| Component | Source | LOC | Algorithm | Quality Guarantee |
+|-----------|--------|-----|-----------|-------------------|
+| **CP-SAT Exact** | `cpsat_solver.py` | 772 | Circuit + NoOverlap + Cumulative (SDST, ARC) | Proven optimal on small-medium instances |
+| **LBBD** | `lbbd_solver.py` | 969 | HiGHS MIP master + CP-SAT subproblems + 4 Benders cut families | Gap-bounded convergence |
+| **LBBD-HD** | `lbbd_hd_solver.py` | 1 324 | Parallel subproblems + ARC-aware partitioning + topological post-assembly | Industrial scale (50K+ operations) |
+| **Greedy ATCS** | `greedy_dispatch.py` | 296 | Log-space ATCS index (Lee, Bhaskaran & Pinedo 1997) | Feasible schedule in < 1 s |
+| **Pareto Slice** | `pareto_slice_solver.py` | 104 | Two-stage ε-constraint (Haimes 1971, Mavrotas 2009) | Pareto-efficient near baseline |
+| **Incremental Repair** | `incremental_repair.py` | 318 | Neighbourhood radius + greedy fallback + micro-CP-SAT | < 5% nervousness |
+| **Portfolio Router** | `router.py` | 252 | Deterministic regime×size decision tree | Same input → same solver |
+| **FeasibilityChecker** | `feasibility_checker.py` | 280 | 7-class independent event-sweep validator | No solver bypasses verification |
+
+Additional surfaces: Graph Partitioning (271 LOC), Solver Registry with 13 profiles (210 LOC), Pydantic data model (333 LOC), TypeScript control-plane BFF (674 LOC). Test suite: 175 tests across 26 modules (5 553 LOC).
+
 ### Implemented today
 
 - Exact CP-SAT scheduling paths with sequence-dependent setup handling, auxiliary resources across setup and processing windows, and exact `max_parallel` handling through cumulative constraints or virtual disjunctive lanes when any sequence-dependent transition cost (setup, material loss, or energy) requires lane-level ordering.
@@ -41,7 +56,7 @@ Read this repository as an engineering surface first.
 
 - The root repository does not claim that hardware pinning, zero-copy IPC, event sourcing, GNN cuts, or LLM explanation layers are implemented here today.
 - Public publication of this repository does not imply production readiness, regulated deployment readiness, or plant-integration certification.
-- Investor or diligence materials are supporting context, not the sole technical source of truth.
+- Partner or diligence materials are supporting context, not the sole technical source of truth.
 
 ## Quick Start
 
@@ -111,10 +126,10 @@ These documents are useful for understanding direction, but the current implemen
 - Add safer publication and supply-chain surfaces for releases, dependency updates, and security scanning.
 - Keep research-grade claims bounded by measurable evidence.
 
-## Investor and Diligence Material
+## Partner and Diligence Material
 
-An optional diligence packet can live under `docs/investor/`.
+An optional diligence packet can live under `docs/partners/`.
 
 That surface is intentionally secondary. The open-source code, tests, benchmark harness, and packaging do not depend on that subtree. Start with the engineering entrypoints above if your primary goal is to understand what the repository implements today.
 
-If you do need the diligence layer, start with [docs/investor/README.md](docs/investor/README.md). That router now points only to the reduced active set and the archive boundary.
+If you do need the diligence layer, start with [docs/partners/README.md](docs/partners/README.md). That router now points only to the reduced active set and the archive boundary.

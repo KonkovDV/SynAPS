@@ -1,7 +1,7 @@
 # SynAPS — Академический Технический Отчёт
 
-> **Дата**: 2026-04-06 | **Версия кодовой базы**: `0.1.0` (Alpha)
-> **Класс задачи**: MO-FJSP-SDST-ML-ARC | **Язык ядра**: Python 3.12+
+> **Дата**: 2026-04-07 | **Версия кодовой базы**: `0.1.0` (Alpha)
+> **Класс задачи**: MO-FJSP-SDST-ARC (текущее ядро) / MO-FJSP-SDST-ML-ARC (целевой горизонт) | **Язык ядра**: Python 3.12+
 > **Лицензия**: MIT | **Репозиторий**: [github.com/KonkovDV/SynAPS](https://github.com/KonkovDV/SynAPS)
 
 ---
@@ -11,6 +11,27 @@
 1. [Аннотация](#1-аннотация)
 2. [Формальная постановка задачи](#2-формальная-постановка-задачи)
 3. [Архитектурный обзор системы](#3-архитектурный-обзор-системы)
+
+### Таблица исходного кода по компонентам (LOC — измеренные, не оценочные)
+
+| Компонент | Файл | LOC | Алгоритм |
+|-----------|------|-----|----------|
+| CP-SAT (точный решатель) | `cpsat_solver.py` | 687 | IntervalVar + Circuit (SDST) + NoOverlap + Cumulative (ARC) |
+| LBBD (декомпозиция) | `lbbd_solver.py` | 856 | HiGHS MIP master + CP-SAT sub + no-good/capacity/setup-cost/load-balance cuts |
+| LBBD-HD (параллельный) | `lbbd_hd_solver.py` | 1 145 | + ProcessPoolExecutor + ARC-разбиение + топологическая сборка |
+| Greedy ATCS | `greedy_dispatch.py` | 261 | Log-space ATCS, $O(N \log N)$ |
+| Pareto Slice | `pareto_slice_solver.py` | 86 | $\varepsilon$-constraint (двухэтапный) |
+| Incremental Repair | `incremental_repair.py` | 281 | Радиус ремонта + ATCS fallback + micro-CP-SAT |
+| Portfolio Router | `router.py` | 217 | Детерминированное дерево выбора (6 режимов) |
+| Partitioning | `partitioning.py` | 213 | Coarsening + FFD Bin-Packing + Refinement |
+| Registry | `registry.py` | 175 | 13 профилей |
+| FeasibilityChecker | `feasibility_checker.py` | 279 | Независимый валидатор с ARC event-sweep |
+| Data Model | `model.py` | 274 | Pydantic v2, cross-reference validator |
+| Control-Plane BFF | `control-plane/src/*.ts` | 609 | Fastify + AJV + Python bridge |
+| **Итого (solver/routing/validation surfaces)** | | **4 172** | |
+| **Итого (с моделью и BFF)** | | **5 055** | |
+
+
 4. [Анализ Solver-Портфолио](#4-анализ-solver-портфолио)
    - 4.1 [Greedy Dispatch (ATCS)](#41-greedy-dispatch-atcs)
    - 4.2 [CP-SAT Exact Solver](#42-cp-sat-exact-solver)
@@ -30,9 +51,9 @@
 
 ## 1. Аннотация
 
-SynAPS — это открытая (MIT) детерминистическая система планирования и оркестрации ресурсов, решающая задачи класса **MO-FJSP-SDST-ML-ARC** (Multi-Objective Flexible Job-Shop Scheduling Problem with Sequence-Dependent Setup Times, Material Loss, and Auxiliary Resource Constraints). Система реализована как Python-пакет с solver-портфолио из шести алгоритмических путей, покрывающих спектр от sub-200ms конструктивных эвристик до точных CP-SAT решателей и LBBD-декомпозиции.
+SynAPS — это открытая (MIT) детерминистическая система планирования и оркестрации ресурсов, решающая текущее ядро задач класса **MO-FJSP-SDST-ARC** (Multi-Objective Flexible Job-Shop Scheduling Problem with Sequence-Dependent Setup Times and Auxiliary Resource Constraints). Более широкая метка **MO-FJSP-SDST-ML-ARC** остаётся целевым горизонтом, если advisory ML слои будут добавлены позже. Система реализована как Python-пакет с solver-портфолио из детерминистических алгоритмических путей, покрывающих спектр от быстрых конструктивных эвристик до точных CP-SAT решателей и LBBD-декомпозиции.
 
-Ключевая проектная философия — **deterministic-first**: каждая AI/ML рекомендация имеет детерминированный fallback, и система гарантирует объяснимость каждого принятого решения о назначении.
+Ключевая проектная философия — **deterministic-first**: в текущем репозитории нет authoritative AI/ML execution path, а любые будущие advisory поверхности обязаны оставаться ограниченными детерминистическим fallback и независимой проверкой выполнимости.
 
 ---
 
@@ -96,13 +117,13 @@ $$Fm | S_{sd}, \text{prec}, M_j, \text{aux} | (C_{\max}, \sum T_j, \sum S_j, \su
 ```
 synaps/
 ├── __init__.py          # Lazy public API (solve_schedule, repair_schedule)
-├── model.py             # Pydantic v2 domain model (12 моделей, ~330 LOC)
+├── model.py             # Pydantic v2 domain model (11 моделей + SolverStatus)
 ├── contracts.py         # Stable JSON request/response contracts
 ├── portfolio.py         # High-level solve/repair orchestration
 ├── problem_profile.py   # Instance characterization for routing
 ├── replay.py            # Replay artifact surfaces
 ├── accelerators.py      # Optional native kernels (PyO3 seam)
-├── validation.py        # Thin validation facade
+├── validation.py        # Post-solve verification facade
 ├── cli.py               # Command-line interface
 └── solvers/
     ├── __init__.py       # BaseSolver ABC
@@ -116,7 +137,7 @@ synaps/
     └── _dispatch_support.py  # Shared dispatch infrastructure
 ```
 
-**Общий объём ядра**: ~4200 LOC Python, 26 тестовых файлов, ~170 LOC benchmark harness.
+**Общий объём ядра**: ~5.1K LOC Python solver/data core плюс тонкий TypeScript BFF на 674 LOC.
 
 ### 3.2 Многоязычная стратегия
 
@@ -124,7 +145,7 @@ synaps/
 |------|------|-------------|
 | Solver ядро | Python 3.12+ | OR-Tools, HiGHS, PyTorch bindings |
 | Control plane | TypeScript (BFF) | Fastify, валидация контрактов |
-| Hot-path ускорение | Rust/PyO3 (seam) | ATCS log-score, feasibility check |
+| Hot-path ускорение | Rust/PyO3 (target seam) | ATCS log-score, feasibility check |
 | Frontend (TARGET) | React + TypeScript | Operator UI |
 
 ### 3.3 Диаграмма потока данных
@@ -169,7 +190,7 @@ $$\text{score}(j) = \ln w_j - \ln p_j - \frac{\text{slack}}{K_1 \cdot \bar{p}} -
 4. **Native acceleration seam**: Предусмотрен PyO3 мост для Rust-реализации hot-path функции `compute_atcs_log_score`.
 
 > [!IMPORTANT]
-> **Оценка**: Log-space ATCS — математически корректная и грамотная модификация. $K_3$-расширение для material-loss является оригинальным вкладом, не встречающимся в стандартной литературе по ATCS.
+> **Оценка**: Log-space ATCS выглядит технически согласованным расширением базовой ATCS-эвристики для данного репозитория. $K_3$-терм для material-loss является repo-local extension относительно классической формулы; текущий аудит подтверждает его наличие и интеграцию в коде, но не доказывает исчерпывающую литературную новизну.
 
 **Сложность**: $O(n^2 \cdot k)$ для $n$ операций на $k$ машинах в worst-case однопроходного dispatch.
 
@@ -224,6 +245,8 @@ if warm_start_assignments is None and time_limit_s >= 5:
         warm_start_assignments = greedy_result.assignments
 ```
 
+В текущей реализации этот warm-start материализуется через `model.add_hint(...)` для assignment/start переменных и пропускается при активной виртуализации параллельных lanes.
+
 ---
 
 ### 4.3 Logic-Based Benders Decomposition
@@ -239,12 +262,15 @@ if warm_start_assignments is None and time_limit_s >= 5:
 
 #### 4.3.2 Типы Benders-отсечений
 
-| Тип | Формула | Описание |
-|-----|---------|----------|
+| Тип | Формула / идея | Описание |
+|-----|----------------|----------|
 | **Nogood** | $\sum y_{i,k_i} \leq |\mathcal{O}| - 1$ | Запрет точной комбинации назначений |
-| **Capacity** | $C_{\max} \geq \text{rhs} - \sum_{i \in B} p_i(1 - y_{i,k_i})$ (Hooker & Ottosson) | Bottleneck capacity bound |
-| **Setup-cost** | $C_{\max} \geq \sum p_i + \sum s_{ij}$ для операций на bottleneck-машине | Учитывает фактические SDST-затраты |
-| **Load-balance** (Hooker 2007, §7.3) | $C_{\max} \geq \max(\max_k \text{load}_k, \text{avg}(\text{load}))$ | Усиленная нижняя граница |
+| **Capacity** | $C_{\max} \geq \text{rhs} - \sum_{i \in B} p_i(1 - y_{i,k_i})$ | Bottleneck capacity bound |
+| **Setup-cost** | cluster-aware lower bound on setup burden | Усиление master lower bound по фактическим SDST-переходам |
+| **Load-balance** | $C_{\max} \geq \max(\max_k \text{load}_k, \text{avg}(\text{load}))$ | Усиленная нижняя граница |
+| **Critical-path tightening** | cluster-aware lower bounds | Реализовано в LBBD-HD path |
+
+Базовые профили `LBBD-5` и `LBBD-10` сейчас поставляются с no-good, capacity, setup-cost и load-balance cuts. Critical-path-tightening относится к иерархическому LBBD-HD пути.
 
 #### 4.3.3 Кластеризация subproblems
 
@@ -331,7 +357,7 @@ graph TD
 
 ### 5.1 Pydantic v2 Domain Model
 
-12 моделей с полной перекрёстной валидацией:
+11 Pydantic моделей + `SolverStatus` enum с полной перекрёстной валидацией:
 
 | Модель | Назначение | Ключевые валидации |
 |--------|-----------|-------------------|
@@ -371,7 +397,7 @@ graph TD
 
 ### 6.1 Feasibility Checker
 
-6 классов нарушений:
+7 классов проверок:
 
 | Класс | Проверка |
 |-------|----------|
@@ -424,7 +450,7 @@ ARC-проверка корректно учитывает **setup + processing 
 |-----------|-------------------|--------------|
 | ATCS heuristic | Lee, Bhaskaran & Pinedo (1997) | ✅ Расширена log-space + material-loss |
 | Circuit-based SDST | Grimes & Hebrard (2015) CP circuit constraints | ✅ $O(N^2)$ вместо $O(N^3)$ |
-| LBBD framework | Hooker & Ottosson (2003), Hooker (2007) | ✅ 4 типа cuts |
+| LBBD framework | Hooker & Ottosson (2003), Hooker (2007) | ✅ 3 базовых типа cuts + HD-расширения |
 | ε-constraint MO | Geoffrion (1968), Haimes et al. (1971) | ✅ 3 профиля |
 | Symmetry breaking | Van Hentenryck & Michel (2005) | ✅ Load-balance groups |
 
@@ -448,7 +474,7 @@ SynAPS занимает нишу **research-grade open-source APS**, где ка
 
 ### S2. Deterministic-first дизайн
 - Каждое решение объяснимо
-- AI/ML — advisory, never authoritative (ADR-006)
+- Shipping runtime целиком детерминистический; любые будущие AI/ML surfaces — advisory only (ADR-006)
 - Degraded modes — explicit (ADR-010)
 
 ### S3. Engineering maturity

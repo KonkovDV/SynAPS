@@ -3,13 +3,15 @@
 <details>
 <summary>🇷🇺 Каноническая математическая форма</summary>
 
-Формальная спецификация задачи планирования SynAPS: MO-FJSP-SDST-ML-ARC. Описаны множества, переменные, ограничения, целевая функция и робастное расширение.
+Формальная спецификация текущего ядра задачи планирования SynAPS: MO-FJSP-SDST-ARC, с отдельной пометкой для будущего advisory-ML горизонта. Описаны множества, переменные, ограничения, целевая функция и робастное расширение.
 
 </details>
 
 ## Problem Class
 
-**MO-FJSP-SDST-ML-ARC** — Multi-Objective Flexible Job-Shop Scheduling Problem with Sequence-Dependent Setup Times, Machine Learning advisory, and Auxiliary Resource Constraints.
+**Current kernel:** **MO-FJSP-SDST-ARC** — Multi-Objective Flexible Job-Shop Scheduling Problem with Sequence-Dependent Setup Times and Auxiliary Resource Constraints.
+
+**Extended target label:** **MO-FJSP-SDST-ML-ARC** adds a future machine-learning advisory layer above the deterministic kernel. That advisory layer is not part of the current standalone runtime.
 
 This is a generalization that subsumes classical FJSP, JSSP, flow-shop, and parallel-machine problems as special cases.
 
@@ -67,7 +69,7 @@ $$J = w_1 T + w_2 S + w_3 M + w_4 B + w_5 R + w_6 E$$
 | $R$ | $\|A_{\text{new}} \triangle A_{\text{old}}\| / \|A_{\text{old}}\|$ | Schedule stability | Roadmap |
 | $E$ | $\sum_{m,t} \text{tariff}(t) \cdot \text{power}(m, t)$ | Energy cost | Roadmap |
 
-**Weights** $w_1, \ldots, w_6$ are configurable per policy profile and can be tuned by ML advisory or operator override.
+**Weights** $w_1, \ldots, w_6$ are configurable per policy profile. Future advisory or operator surfaces may retune them, but no live ML tuner is shipped in the current repository.
 
 ## Robust Extension
 
@@ -95,6 +97,35 @@ For a fixed input snapshot, policy profile, and random seed:
 $$R_{\text{det}} = \frac{N_{\text{identical outputs}}}{N_{\text{replays}}}$$
 
 Target for deterministic lane: $R_{\text{det}} \geq 0.999$.
+
+
+## Scalarization Strategies (Multi-Objective to Single-Objective Reduction)
+
+The canonical 6-objective formulation $J = w_1 T + w_2 S + w_3 M + w_4 B + w_5 R + w_6 E$ must be reduced to a scalar for CP-SAT / HiGHS. SynAPS supports two strategies:
+
+### Hierarchical Weighted Sum (Default)
+
+$$f = C_{\max} \cdot (1 + |S_{\text{ub}}| + |\ell_{\text{ub}}| + |T_{\text{ub}}|) + w_s \cdot \text{total\_setup} + w_\ell \cdot \text{total\_material} + w_T \cdot \text{total\_tardiness}$$
+
+The multiplier $(1 + |S_{\text{ub}}| + \ldots)$ ensures **lexicographic dominance** of Makespan.
+
+### $\varepsilon$-Constraint (Pareto Slice)
+
+$$\min f_{\text{primary}} \quad \text{s.t.} \quad f_i \leq (1 + \varepsilon_i) \cdot f_i^* \quad \forall i \neq \text{primary}$$
+
+Current shipped Pareto profiles use $\varepsilon = 0.10$ (10% relaxation).
+
+## Repair-Radius Formalization
+
+| Disruption Type | Radius Formula | Typical Cardinality |
+|----------------|----------------|---------------------|
+| `BREAKDOWN` | $R = 2 \times |\text{downstream\_setup\_chain}|$ | 10–50 ops |
+| `RUSH_ORDER` | $R = \{o : |t_o - t_{\text{disrupt}}| \leq 30\text{ min}\}$ | 5–20 ops |
+| `MATERIAL` | $R = \{o : \text{state}(o) \in \text{same\_group}\}$ | Variable |
+| `DEFAULT` | $R = 5$ operations forward | 5 ops |
+
+**Stability metric**: $\text{Nervousness} = |\text{moved\_ops}| / |\text{total\_ops}| \leq 5\%$.
+
 
 ## Special Cases
 
