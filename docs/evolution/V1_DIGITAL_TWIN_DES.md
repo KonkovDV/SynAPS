@@ -1,6 +1,8 @@
 # V1 — Digital Twin & Discrete-Event Simulation
 
 > **Vector scope**: Embed a SimPy-based discrete-event simulation (DES) inside the scheduling loop for what-if analysis, reinforcement learning (RL) training, and disruption scenario planning.
+>
+> **Current status**: target architecture only. The standalone SynAPS repository does not currently ship a DES runtime, RL policy training loop, or production digital-twin integration. This document describes the intended next vector above the current deterministic kernel.
 
 <details><summary>🇷🇺 Краткое описание</summary>
 

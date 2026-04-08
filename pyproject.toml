@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "synaps"
 version = "0.1.0"
-description = "Universal scheduling and resource-orchestration engine for MO-FJSP-SDST-ML-ARC"
+description = "Deterministic-first scheduling and resource-orchestration engine for MO-FJSP-SDST-ARC planning problems"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

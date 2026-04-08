@@ -1,6 +1,6 @@
 ﻿# SynAPS
 
-Deterministic-first scheduling and resource-orchestration engine for planning problems modeled in the MO-FJSP-SDST-ML-ARC family.
+Deterministic-first scheduling and resource-orchestration engine for MO-FJSP-SDST-ARC planning problems (the extended MO-FJSP-SDST-ML-ARC label applies when advisory ML layers are added above the deterministic kernel).
 
 Language: **EN** | [RU](README_RU.md)
 
@@ -107,14 +107,12 @@ twine check dist/*
 
 ## Architecture and Research Notes
 
-The repository includes a broader architecture thesis and domain exploration material for readers who want the long-horizon system design:
+The repository includes a compact public architecture route for readers who want broader technical context without speculative side branches:
 
 - [docs/architecture/01_OVERVIEW.md](docs/architecture/01_OVERVIEW.md)
 - [docs/architecture/02_CANONICAL_FORM.md](docs/architecture/02_CANONICAL_FORM.md)
 - [docs/architecture/03_SOLVER_PORTFOLIO.md](docs/architecture/03_SOLVER_PORTFOLIO.md)
 - [research/SYNAPS_OSS_STACK_2026.md](research/SYNAPS_OSS_STACK_2026.md)
-- [research/SYNAPS_UNIVERSAL_ARCHITECTURE.md](research/SYNAPS_UNIVERSAL_ARCHITECTURE.md)
-- [research/SYNAPS_AIR_GAPPED_OFFLINE.md](research/SYNAPS_AIR_GAPPED_OFFLINE.md)
 
 These documents are useful for understanding direction, but the current implementation boundary is defined by the code, tests, benchmark harness, and packaging surfaces in this repository.
 
@@ -126,10 +124,4 @@ These documents are useful for understanding direction, but the current implemen
 - Add safer publication and supply-chain surfaces for releases, dependency updates, and security scanning.
 - Keep research-grade claims bounded by measurable evidence.
 
-## Partner and Diligence Material
-
-An optional diligence packet can live under `docs/partners/`.
-
-That surface is intentionally secondary. The open-source code, tests, benchmark harness, and packaging do not depend on that subtree. Start with the engineering entrypoints above if your primary goal is to understand what the repository implements today.
-
-If you do need the diligence layer, start with [docs/partners/README.md](docs/partners/README.md). That router now points only to the reduced active set and the archive boundary.
+The public GitHub route intentionally excludes the local-only partner pack.

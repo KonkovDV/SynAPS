@@ -16,20 +16,20 @@
 
 | Компонент | Файл | LOC | Алгоритм |
 |-----------|------|-----|----------|
-| CP-SAT (точный решатель) | `cpsat_solver.py` | 687 | IntervalVar + Circuit (SDST) + NoOverlap + Cumulative (ARC) |
-| LBBD (декомпозиция) | `lbbd_solver.py` | 856 | HiGHS MIP master + CP-SAT sub + no-good/capacity/setup-cost/load-balance cuts |
-| LBBD-HD (параллельный) | `lbbd_hd_solver.py` | 1 145 | + ProcessPoolExecutor + ARC-разбиение + топологическая сборка |
-| Greedy ATCS | `greedy_dispatch.py` | 261 | Log-space ATCS, $O(N \log N)$ |
-| Pareto Slice | `pareto_slice_solver.py` | 86 | $\varepsilon$-constraint (двухэтапный) |
-| Incremental Repair | `incremental_repair.py` | 281 | Радиус ремонта + ATCS fallback + micro-CP-SAT |
-| Portfolio Router | `router.py` | 217 | Детерминированное дерево выбора (6 режимов) |
-| Partitioning | `partitioning.py` | 213 | Coarsening + FFD Bin-Packing + Refinement |
-| Registry | `registry.py` | 175 | 13 профилей |
-| FeasibilityChecker | `feasibility_checker.py` | 279 | Независимый валидатор с ARC event-sweep |
-| Data Model | `model.py` | 274 | Pydantic v2, cross-reference validator |
-| Control-Plane BFF | `control-plane/src/*.ts` | 609 | Fastify + AJV + Python bridge |
-| **Итого (solver/routing/validation surfaces)** | | **4 172** | |
-| **Итого (с моделью и BFF)** | | **5 055** | |
+| CP-SAT (точный решатель) | `cpsat_solver.py` | 772 | IntervalVar + Circuit (SDST) + NoOverlap + Cumulative (ARC) |
+| LBBD (декомпозиция) | `lbbd_solver.py` | 969 | HiGHS MIP master + CP-SAT sub + no-good/capacity/setup-cost/load-balance cuts |
+| LBBD-HD (параллельный) | `lbbd_hd_solver.py` | 1 324 | + ProcessPoolExecutor + ARC-разбиение + топологическая сборка |
+| Greedy ATCS | `greedy_dispatch.py` | 296 | Log-space ATCS, $O(N \log N)$ |
+| Pareto Slice | `pareto_slice_solver.py` | 104 | $\varepsilon$-constraint (двухэтапный) |
+| Incremental Repair | `incremental_repair.py` | 318 | Радиус ремонта + ATCS fallback + micro-CP-SAT |
+| Portfolio Router | `router.py` | 252 | Детерминированное дерево выбора (6 режимов) |
+| Partitioning | `partitioning.py` | 271 | Coarsening + FFD Bin-Packing + Refinement |
+| Registry | `registry.py` | 210 | 13 профилей |
+| FeasibilityChecker | `feasibility_checker.py` | 280 | Независимый валидатор с ARC event-sweep |
+| Data Model | `model.py` | 333 | Pydantic v2, cross-reference validator |
+| Control-Plane BFF | `control-plane/src/*.ts` | 674 | Fastify + AJV + Python bridge |
+| **Итого (solver/routing/validation surfaces)** | | **4 796** | |
+| **Итого (с моделью и BFF)** | | **5 803** | |
 
 
 4. [Анализ Solver-Портфолио](#4-анализ-solver-портфолио)
@@ -53,7 +53,7 @@
 
 SynAPS — это открытая (MIT) детерминистическая система планирования и оркестрации ресурсов, решающая текущее ядро задач класса **MO-FJSP-SDST-ARC** (Multi-Objective Flexible Job-Shop Scheduling Problem with Sequence-Dependent Setup Times and Auxiliary Resource Constraints). Более широкая метка **MO-FJSP-SDST-ML-ARC** остаётся целевым горизонтом, если advisory ML слои будут добавлены позже. Система реализована как Python-пакет с solver-портфолио из детерминистических алгоритмических путей, покрывающих спектр от быстрых конструктивных эвристик до точных CP-SAT решателей и LBBD-декомпозиции.
 
-Ключевая проектная философия — **deterministic-first**: в текущем репозитории нет authoritative AI/ML execution path, а любые будущие advisory поверхности обязаны оставаться ограниченными детерминистическим fallback и независимой проверкой выполнимости.
+Ключевая проектная философия — **deterministic-first**: в текущем репозитории нет authoritative AI/ML execution path, а любые будущие advisory поверхности (например, LLM Copilot или Federated Learning) обязаны оставаться ограниченными детерминистическим fallback и независимой проверкой выполнимости.
 
 ---
 
@@ -137,7 +137,7 @@ synaps/
     └── _dispatch_support.py  # Shared dispatch infrastructure
 ```
 
-**Общий объём ядра**: ~5.1K LOC Python solver/data core плюс тонкий TypeScript BFF на 674 LOC.
+**Общий объём ядра**: ~5 130 LOC Python solver/data/routing code плюс тонкий TypeScript BFF на 674 LOC (итого ~5 800 LOC).
 
 ### 3.2 Многоязычная стратегия
 
@@ -437,12 +437,12 @@ ARC-проверка корректно учитывает **setup + processing 
 
 | Система | Класс задач | Solvers | SDST | ARC | Repair | Pareto |
 |---------|------------|---------|------|-----|--------|--------|
-| **SynAPS** | MO-FJSP-SDST-ML-ARC | ATCS, CP-SAT, LBBD, Repair, Pareto | ✅ Exact | ✅ Exact | ✅ Bounded | ✅ ε-constraint |
+| **SynAPS** | MO-FJSP-SDST-ARC | ATCS, CP-SAT, LBBD, Repair, Pareto | ✅ Exact | ✅ Exact | ✅ Bounded | ✅ ε-constraint |
 | OR-Tools examples | JSP/FJSP | CP-SAT | ❌ Manual | ❌ | ❌ | ❌ |
 | pyJSSP | JSP | GA, PSO | ❌ | ❌ | ❌ | ❌ |
 | JSScheduler | JSP | Priority dispatch | ❌ | ❌ | ❌ | ❌ |
 
-**Вывод**: SynAPS выглядит одной из немногих известных открытых систем, которые пытаются покрыть полный MO-FJSP-SDST-ML-ARC через портфель решателей и benchmark-инфраструктуру.
+**Вывод**: SynAPS выглядит одной из немногих известных открытых систем, которые пытаются покрыть полный MO-FJSP-SDST-ARC через портфель решателей и benchmark-инфраструктуру. Расширение до MO-FJSP-SDST-ML-ARC остаётся целевым горизонтом (advisory ML слои не реализованы в текущем коде).
 
 ### 7.2 Академическое соответствие
 
@@ -566,11 +566,11 @@ SynAPS занимает нишу **research-grade open-source APS**, где ка
 
 ## 11. Заключение
 
-SynAPS представляет собой **математически грамотную, инженерно зрелую и архитектурно дисциплинированную** систему для решения NP-трудных задач теории расписаний класса MO-FJSP-SDST-ML-ARC.
+SynAPS представляет собой **математически грамотную, инженерно зрелую и архитектурно дисциплинированную** систему для решения NP-трудных задач теории расписаний класса MO-FJSP-SDST-ARC (расширение до MO-FJSP-SDST-ML-ARC — целевой горизонт).
 
 **Ключевые достоинства системы**:
 
-1. **Solver-портфолио из 6 алгоритмических путей** покрывает весь спектр от sub-200ms эвристик до точных решателей с Benders decomposition — это уровень, не достигнутый ни одним известным open-source конкурентом.
+1. **Solver-портфолио из 5 реализаций (ATCS, CP-SAT, LBBD, Incremental Repair, Pareto Slice) при 13 pre-configured routing profiles** покрывает весь спектр от sub-200ms эвристик до точных решателей с Benders decomposition — это уровень, не достигнутый ни одним известным open-source конкурентом.
 
 2. **Математическая корректность** подтверждена: $O(N^2)$ circuit-based SDST modelling, корректная ε-constraint scalarization, ARC-aware feasibility с учётом setup windows.
 

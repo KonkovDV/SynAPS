@@ -16,7 +16,7 @@ This document is intentionally operational. It tells you what to configure in Gi
 
 1. Set the repository description to a short engineering-first summary of SynAPS.
 Recommended current value:
-`Deterministic-first scheduling and resource-orchestration engine for MO-FJSP-SDST-ML-ARC planning problems.`
+`Deterministic-first scheduling and resource-orchestration engine for MO-FJSP-SDST-ARC planning problems.`
 2. Set the homepage only if you have a real public landing page or product/docs site. If not, leave it empty instead of pointing to a GitHub blob URL.
 3. Add curated repository topics in lowercase, hyphenated form.
 Recommended baseline:
@@ -25,7 +25,7 @@ Recommended baseline:
 
 ### Metadata Quality Gate
 
-Use the About panel the way strong OSS startup repositories do:
+Use the About panel the way well-maintained OSS repositories do:
 
 1. one-sentence category-first description, not a manifesto;
 2. topics that classify domain plus method plus runtime;
@@ -100,10 +100,10 @@ python -m benchmark.run_benchmark benchmark/instances/tiny_3x3.json --solvers GR
 
 3. Confirm the repository works without any parent workspace files.
 
-## 8. Optional Partner Pack Decision
+## 8. Optional Private Material
 
-1. If you want a pure engineering-only public repo, remove `docs/partners/` before the first public push and rebuild the export.
-2. If you keep `docs/partners/`, treat it as an optional diligence packet rather than the primary technical entrypoint.
+1. Keep any local-only commercial or partner material outside the public technical route.
+2. If such material exists locally, ensure it stays gitignored and untracked before public publication.
 
 ## 9. Things Not To Claim
 

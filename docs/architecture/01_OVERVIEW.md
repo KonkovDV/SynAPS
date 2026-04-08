@@ -113,7 +113,7 @@ graph LR
 | ADR-012 | Target: ONNX CPU-first inference; Python remains the experimentation surface |
 | ADR-013 | Signed artifacts and SBOM are part of production readiness |
 | ADR-014 | Target: Digital Twin via SimPy DES, not proprietary simulation |
-| ADR-015 | LLM Copilot on-prem only; no data leaves the perimeter |
+| ADR-015 | Target: LLM Copilot on-prem only; no data leaves the perimeter |
 | ADR-016 | Target: Federated Learning with differential privacy guarantees |
 | ADR-017 | Target: Quantum readiness via QUBO formulation, classical fallback mandatory |
 | ADR-018 | Language follows boundary and hot path: TypeScript at the edge, Python for optimizer and ML orchestration, Rust for native kernels |
@@ -149,19 +149,19 @@ The solver portfolio is the core engineering asset. The current shipped runtime 
 
 | Component | Source | LOC | Primary Algorithm |
 |-----------|--------|-----|-------------------|
-| CP-SAT Exact Solver | `cpsat_solver.py` | 687 | OR-Tools CP-SAT: IntervalVar + Circuit (SDST) + NoOverlap + Cumulative (ARC) |
-| LBBD Decomposition | `lbbd_solver.py` | 856 | HiGHS MIP master + CP-SAT sub + Nogood/Capacity/Setup/Load-Balance cuts |
-| LBBD-HD (Parallel) | `lbbd_hd_solver.py` | 1 145 | + ProcessPoolExecutor + ARC-aware partitioning + topological post-assembly |
-| Greedy ATCS Dispatch | `greedy_dispatch.py` | 261 | Log-space ATCS priority index, $O(N \log N)$ |
-| Pareto Slice | `pareto_slice_solver.py` | 86 | Two-stage $\varepsilon$-constraint |
-| Incremental Repair | `incremental_repair.py` | 281 | Neighbourhood radius + greedy fallback + micro-CP-SAT |
-| Portfolio Router | `router.py` | 217 | Deterministic regime×size→solver decision tree (6 regimes) |
-| Graph Partitioning | `partitioning.py` | 213 | Coarsening (BFS) + FFD Bin-Packing + Refinement |
-| Solver Registry | `registry.py` | 175 | 13 pre-configured profiles (GREED through LBBD-20-HD) |
-| FeasibilityChecker | `feasibility_checker.py` | 251 | 7-class independent validator (event-sweep algorithm) |
-| Data Model | `model.py` | 274 | Pydantic v2, 8 entity classes, DAG + SDST validation |
-| Control-Plane BFF | `control-plane/src/*.ts` | 609 | Fastify + AJV + Python bridge (TypeScript) |
-| **Total** | | **5 055** | |
+| CP-SAT Exact Solver | `cpsat_solver.py` | 772 | OR-Tools CP-SAT: IntervalVar + Circuit (SDST) + NoOverlap + Cumulative (ARC) |
+| LBBD Decomposition | `lbbd_solver.py` | 969 | HiGHS MIP master + CP-SAT sub + Nogood/Capacity/Setup/Load-Balance cuts |
+| LBBD-HD (Parallel) | `lbbd_hd_solver.py` | 1 324 | + ProcessPoolExecutor + ARC-aware partitioning + topological post-assembly |
+| Greedy ATCS Dispatch | `greedy_dispatch.py` | 296 | Log-space ATCS priority index, $O(N \log N)$ |
+| Pareto Slice | `pareto_slice_solver.py` | 104 | Two-stage $\varepsilon$-constraint |
+| Incremental Repair | `incremental_repair.py` | 318 | Neighbourhood radius + greedy fallback + micro-CP-SAT |
+| Portfolio Router | `router.py` | 252 | Deterministic regime×size→solver decision tree (6 regimes) |
+| Graph Partitioning | `partitioning.py` | 271 | Coarsening (BFS) + FFD Bin-Packing + Refinement |
+| Solver Registry | `registry.py` | 210 | 13 pre-configured profiles (GREED through LBBD-20-HD) |
+| FeasibilityChecker | `feasibility_checker.py` | 280 | 7-class independent validator (event-sweep algorithm) |
+| Data Model | `model.py` | 333 | Pydantic v2, 8 entity classes, DAG + SDST validation |
+| Control-Plane BFF | `control-plane/src/*.ts` | 674 | Fastify + AJV + Python bridge (TypeScript) |
+| **Total** | | **5 803** | |
 
 The **Portfolio Router** automatically selects the solver based on: operational regime (NOMINAL, RUSH_ORDER, BREAKDOWN, MATERIAL_SHORTAGE, INTERACTIVE, WHAT_IF), time budget, and instance size. No ML — deterministic routing.
 
@@ -186,7 +186,7 @@ Only the Python kernel, checked-in contracts, replay and benchmark surfaces, and
 | **OLAP** | ClickHouse | — |
 | **Cache / locks** | Valkey | — |
 | **Object store** | MinIO | — |
-| **Event streaming** | NATS JetStream | — |
+| **Event streaming** | NATS JetStream (target integrated stack) | — |
 | **Workflow engine** | Temporal | — |
 | **IAM** | Keycloak + OPA | — |
 | **Workload identity** | SPIFFE / SPIRE | — |

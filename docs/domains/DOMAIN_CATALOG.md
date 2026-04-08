@@ -1,6 +1,6 @@
 # Domain Catalog — SynAPS Universal Applicability
 
-> **Purpose**: Master index of industry domains where MO-FJSP-SDST-ML-ARC applies. Each domain maps the canonical APS model to its specific vocabulary, constraints, KPIs, and compliance requirements.
+> **Purpose**: Master index of industry domains where the MO-FJSP-SDST-ARC canonical form applies. Each domain maps the canonical APS model to its specific vocabulary, constraints, KPIs, and compliance requirements.
 
 <details><summary>🇷🇺 Краткое описание</summary>
 
@@ -44,7 +44,7 @@ Each domain guide follows a uniform structure:
 
 Every domain maps to the canonical model via:
 
-$$\text{Domain-specific process} \xrightarrow{\text{adapter}} \text{MO-FJSP-SDST-ML-ARC}$$
+$$\text{Domain-specific process} \xrightarrow{\text{adapter}} \text{MO-FJSP-SDST-ARC}$$
 
 | Canonical Concept | Domain Realization (varies) |
 |-------------------|-----------------------------|

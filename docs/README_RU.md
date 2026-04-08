@@ -11,7 +11,6 @@ Language: [EN](README.md) | **RU**
 1. Начните с [../README_RU.md](../README_RU.md), чтобы увидеть границы репозитория и команды быстрого старта.
 2. Переходите к [../benchmark/README_RU.md](../benchmark/README_RU.md), если нужна воспроизводимая проверка решателей.
 3. Переходите к [../control-plane/README_RU.md](../control-plane/README_RU.md), если нужна сетевая граница TypeScript-слоя.
-4. Открывайте [partners/README_RU.md](partners/README_RU.md) только если нужен опциональный партнёрский слой.
 
 ## Архитектура
 
@@ -35,26 +34,19 @@ Language: [EN](README.md) | **RU**
 - [domains/pharmaceutical.md](domains/pharmaceutical.md)
 - [domains/data_center.md](domains/data_center.md)
 
-## Эволюционные треки
+## Ближайший эволюционный контур
 
-- [evolution/CROSS_VECTOR_INTEGRATION.md](evolution/CROSS_VECTOR_INTEGRATION.md)
 - [evolution/V1_DIGITAL_TWIN_DES.md](evolution/V1_DIGITAL_TWIN_DES.md)
-- [evolution/V2_LLM_COPILOT.md](evolution/V2_LLM_COPILOT.md)
-- [evolution/V3_FEDERATED_LEARNING.md](evolution/V3_FEDERATED_LEARNING.md)
-- [evolution/V4_QUANTUM_READINESS.md](evolution/V4_QUANTUM_READINESS.md)
 
 ## Исследовательские материалы
 
 - [../research/SYNAPS_OSS_STACK_2026.md](../research/SYNAPS_OSS_STACK_2026.md)
-- [../research/SYNAPS_UNIVERSAL_ARCHITECTURE.md](../research/SYNAPS_UNIVERSAL_ARCHITECTURE.md)
-- [../research/SYNAPS_AIR_GAPPED_OFFLINE.md](../research/SYNAPS_AIR_GAPPED_OFFLINE.md)
 
-Legacy blueprint и whitepaper narrative-файлы больше не входят в активный исследовательский маршрут.
+Спекулятивные blueprint- и whitepaper-материалы больше не входят в активный публичный исследовательский маршрут.
 
 ## Аудиторские отчёты
 
 - [ACADEMIC_TECHNICAL_REPORT_2026_04.md](audit/ACADEMIC_TECHNICAL_REPORT_2026_04.md) — академический технический аудит: формальная классификация задачи, анализ solver-портфолио, конкурентное позиционирование, рекомендации.
-- [DISSERTATION_AUDIT_REPORT.md](audit/DISSERTATION_AUDIT_REPORT.md)
 
 ## Проверка и доказательная база
 
@@ -68,10 +60,4 @@ Legacy blueprint и whitepaper narrative-файлы больше не входя
 - [../CONTRIBUTING.md](../CONTRIBUTING.md)
 - [../SECURITY.md](../SECURITY.md)
 
-## Опциональный партнёрский пакет
-
-`docs/partners/` содержит опциональный пакет материалов для партнёров и проверки утверждений.
-
-Инженерная поверхность полна и без этой подпапки, поэтому её удаление не должно затрагивать код, тесты, систему бенчмарков и сборку пакета.
-
-Используйте [partners/README_RU.md](partners/README_RU.md) как основной путеводитель по партнёрскому слою. В нём теперь оставлен сокращённый активный пакет и явная граница архива.
+Публичный технический роутер намеренно не включает локальный партнёрский пакет.

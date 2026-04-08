@@ -16,7 +16,8 @@ keywords:
   - resource-orchestration
 abstract: >-
   SynAPS is an open-source, industry-agnostic Advanced Planning & Scheduling
-  platform built on the MO-FJSP-SDST-ML-ARC canonical form. It provides a
-  deterministic-first solver portfolio, universal data schema, AI advisory layer,
-  and domain parametrization framework for logistics, infrastructure,
-  operations, and resource-scheduling verticals.
+  platform built on the MO-FJSP-SDST-ARC canonical form (MO-FJSP-SDST-ML-ARC
+  remains the target horizon when advisory ML layers are added). It provides a
+  deterministic-first solver portfolio, universal data schema, and domain
+  parametrization framework for manufacturing, logistics, and
+  resource-scheduling verticals.
