@@ -215,6 +215,55 @@ _PRESET_SPECS: dict[str, GenerationSpec] = {
         seed=1,
         preset_name="industrial-50k",
     ),
+    # ---- Industry-vertical presets ----
+    "pharma": GenerationSpec(
+        # Pharmaceutical: small batch, strict sequence, long changeovers (CIP/SIP)
+        n_jobs=15,
+        n_machines=8,
+        operations_per_job=(6, 10),
+        state_count=12,
+        flexibility=0.25,
+        sdst_density=0.90,
+        sdst_range=(30, 120),
+        proc_time_range=(60, 240),
+        due_date_tightness=0.20,
+        aux_resource_probability=0.60,
+        aux_resource_types=5,
+        seed=1,
+        preset_name="pharma",
+    ),
+    "semiconductor": GenerationSpec(
+        # Semiconductor fab: re-entrant flows, many machines, tight process windows
+        n_jobs=50,
+        n_machines=40,
+        operations_per_job=(8, 15),
+        state_count=20,
+        flexibility=0.15,
+        sdst_density=0.70,
+        sdst_range=(5, 25),
+        proc_time_range=(5, 45),
+        due_date_tightness=0.30,
+        aux_resource_probability=0.50,
+        aux_resource_types=8,
+        seed=1,
+        preset_name="semiconductor",
+    ),
+    "food-beverage": GenerationSpec(
+        # Food & Beverage: allergen-sensitive changeovers, perishable deadlines
+        n_jobs=25,
+        n_machines=6,
+        operations_per_job=(3, 5),
+        state_count=8,
+        flexibility=0.50,
+        sdst_density=0.95,
+        sdst_range=(15, 90),
+        proc_time_range=(10, 60),
+        due_date_tightness=0.15,
+        aux_resource_probability=0.30,
+        aux_resource_types=3,
+        seed=1,
+        preset_name="food-beverage",
+    ),
 }
 
 

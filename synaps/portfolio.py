@@ -10,6 +10,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from synaps.instrumentation import (
+    record_feasibility_event,
+    record_routing_event,
+    record_solve_event,
+)
 from synaps.logging import get_logger
 from synaps.problem_profile import build_problem_profile
 from synaps.solvers.incremental_repair import IncrementalRepair
@@ -152,6 +157,11 @@ def solve_schedule(
         op_count=profile.operation_count,
         size_band=profile.size_band,
     )
+    record_routing_event(
+        selected_solver_config,
+        regime=ctx.regime.value,
+        reason=routing_reason,
+    )
 
     result = solver.solve(problem, **_merge_kwargs(default_kwargs, solve_kwargs))
 
@@ -161,6 +171,12 @@ def solve_schedule(
         status=result.status.value,
         duration_ms=result.duration_ms,
         assignment_count=len(result.assignments),
+    )
+    record_solve_event(
+        selected_solver_config,
+        status=result.status.value,
+        duration_ms=result.duration_ms,
+        op_count=profile.operation_count,
     )
 
     verification_details: dict[str, object] = {"problem_profile": profile.as_dict()}
@@ -172,6 +188,11 @@ def solve_schedule(
                 "violation_count": verification.violation_count,
                 "violation_kinds": verification.violation_kinds,
             }
+        )
+        record_feasibility_event(
+            feasible=verification.feasible,
+            violation_count=verification.violation_count,
+            violation_kinds=verification.violation_kinds,
         )
         if result.status.value in {"feasible", "optimal"} and not verification.feasible:
             raise PortfolioValidationError(

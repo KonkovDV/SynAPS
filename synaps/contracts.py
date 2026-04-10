@@ -22,6 +22,26 @@ if TYPE_CHECKING:
 
 CONTRACT_VERSION: Final = "2026-04-03"
 
+# Supported contract versions for backward compatibility.
+SUPPORTED_CONTRACT_VERSIONS: Final[tuple[str, ...]] = ("2026-04-03",)
+
+
+class ContractVersionError(ValueError):
+    """Raised when a request uses an unsupported contract version."""
+
+
+def check_contract_version(version: str) -> None:
+    """Validate that *version* is supported by this runtime.
+
+    Raises :class:`ContractVersionError` if the version is not in the
+    supported set.
+    """
+    if version not in SUPPORTED_CONTRACT_VERSIONS:
+        raise ContractVersionError(
+            f"Contract version {version!r} is not supported. "
+            f"Supported versions: {', '.join(SUPPORTED_CONTRACT_VERSIONS)}"
+        )
+
 
 class RoutingContextContract(BaseModel):
     """JSON-serializable routing context for external callers."""
@@ -124,6 +144,7 @@ def parse_repair_request_json(payload: str) -> RepairRequest:
 def execute_solve_request(request: SolveRequest) -> SolveResponse:
     """Execute a stable solve contract against the SynAPS portfolio API."""
 
+    check_contract_version(request.contract_version)
     result = solve_schedule(
         request.problem,
         context=request.context.to_runtime(),
@@ -137,6 +158,7 @@ def execute_solve_request(request: SolveRequest) -> SolveResponse:
 def execute_repair_request(request: RepairRequest) -> RepairResponse:
     """Execute a stable repair contract against the SynAPS portfolio API."""
 
+    check_contract_version(request.contract_version)
     result = repair_schedule(
         request.problem,
         base_assignments=request.base_assignments,
@@ -173,6 +195,9 @@ def write_contract_schemas(output_dir: Path) -> list[Path]:
 
 __all__ = [
     "CONTRACT_VERSION",
+    "ContractVersionError",
+    "SUPPORTED_CONTRACT_VERSIONS",
+    "check_contract_version",
     "parse_repair_request_json",
     "parse_solve_request_json",
     "RepairRequest",
