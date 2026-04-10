@@ -16,6 +16,19 @@
           "title": "End Time",
           "type": "string"
         },
+        "lane_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lane Id"
+        },
         "operation_id": {
           "format": "uuid",
           "title": "Operation Id",

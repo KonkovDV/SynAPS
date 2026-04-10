@@ -5,9 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-import pytest
-
 from synaps.model import (
+    Assignment,
     AuxiliaryResource,
     Operation,
     OperationAuxRequirement,
@@ -19,9 +18,12 @@ from synaps.model import (
     WorkCenter,
 )
 from synaps.solvers.feasibility_checker import FeasibilityChecker
-from synaps.solvers.lbbd_hd_solver import LbbdHdSolver
+from synaps.solvers.lbbd_hd_solver import (
+    LbbdHdSolver,
+    find_critical_path,
+    find_earliest_machine_slot,
+)
 from synaps.solvers.partitioning import partition_machines
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -330,6 +332,96 @@ class TestLbbdHdSolver:
                     assert entry["cluster_count"] >= 2, (
                         "Expected multiple clusters with low cap"
                     )
+
+    def test_critical_path_tracks_machine_sequence_and_setup(self) -> None:
+        state_a = State(id=uuid4(), code="STATE-A", label="State A")
+        state_b = State(id=uuid4(), code="STATE-B", label="State B")
+        work_center = WorkCenter(id=uuid4(), code="WC-1", capability_group="machining")
+        orders = [
+            Order(id=uuid4(), external_ref="ORD-1", due_date=HORIZON_END),
+            Order(id=uuid4(), external_ref="ORD-2", due_date=HORIZON_END),
+        ]
+        op_a = Operation(
+            id=uuid4(),
+            order_id=orders[0].id,
+            seq_in_order=0,
+            state_id=state_a.id,
+            base_duration_min=10,
+            eligible_wc_ids=[work_center.id],
+        )
+        op_b = Operation(
+            id=uuid4(),
+            order_id=orders[1].id,
+            seq_in_order=0,
+            state_id=state_b.id,
+            base_duration_min=10,
+            eligible_wc_ids=[work_center.id],
+        )
+        problem = ScheduleProblem(
+            states=[state_a, state_b],
+            orders=orders,
+            operations=[op_a, op_b],
+            work_centers=[work_center],
+            setup_matrix=[
+                SetupEntry(
+                    work_center_id=work_center.id,
+                    from_state_id=state_a.id,
+                    to_state_id=state_b.id,
+                    setup_minutes=5,
+                )
+            ],
+            planning_horizon_start=HORIZON_START,
+            planning_horizon_end=HORIZON_END,
+        )
+        assignments = [
+            Assignment(
+                operation_id=op_a.id,
+                work_center_id=work_center.id,
+                start_time=HORIZON_START,
+                end_time=HORIZON_START + timedelta(minutes=10),
+            ),
+            Assignment(
+                operation_id=op_b.id,
+                work_center_id=work_center.id,
+                start_time=HORIZON_START + timedelta(minutes=15),
+                end_time=HORIZON_START + timedelta(minutes=25),
+            ),
+        ]
+
+        critical_ops, critical_duration = find_critical_path(
+            problem,
+            assignments,
+            {op.id: op for op in problem.operations},
+        )
+
+        assert critical_ops == [op_a.id, op_b.id]
+        assert critical_duration == 25.0
+
+    def test_machine_slot_search_uses_existing_gap(self) -> None:
+        state_a = State(id=uuid4(), code="STATE-A", label="State A")
+        state_b = State(id=uuid4(), code="STATE-B", label="State B")
+        work_center = WorkCenter(id=uuid4(), code="WC-1", capability_group="machining")
+        existing_a_id = uuid4()
+        existing_c_id = uuid4()
+
+        start_time, insert_index = find_earliest_machine_slot(
+            [
+                (0.0, 10.0, state_a.id, existing_a_id),
+                (30.0, 40.0, state_a.id, existing_c_id),
+            ],
+            earliest_start=HORIZON_START + timedelta(minutes=12),
+            duration=timedelta(minutes=8),
+            operation_state_id=state_b.id,
+            work_center_id=work_center.id,
+            setup_lookup={
+                (work_center.id, state_a.id, state_b.id): timedelta(minutes=2),
+                (work_center.id, state_b.id, state_a.id): timedelta(minutes=2),
+            },
+            horizon_start=HORIZON_START,
+        )
+
+        assert start_time == HORIZON_START + timedelta(minutes=12)
+        assert insert_index == 1
 
 
 # ---------------------------------------------------------------------------

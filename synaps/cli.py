@@ -10,20 +10,38 @@ from typing import Literal
 
 from synaps import solve_schedule
 from synaps.contracts import (
-    RepairRequest,
-    SolveRequest,
     execute_repair_request,
     execute_solve_request,
+    parse_repair_request_json,
+    parse_solve_request_json,
     write_contract_schemas,
 )
-from synaps.model import ScheduleProblem, ScheduleResult
+from synaps.model import ScheduleProblem, ScheduleResult, normalize_schedule_problem_data
 from synaps.replay import build_runtime_replay_artifact, write_replay_artifact
 from synaps.solvers.registry import available_solver_configs
 from synaps.solvers.router import SolveRegime, SolverRoutingContext
 
 
 def _load_problem(path: Path) -> ScheduleProblem:
-    return ScheduleProblem.model_validate_json(path.read_text(encoding="utf-8"))
+    raw_problem = json.loads(path.read_text(encoding="utf-8"))
+    return ScheduleProblem.model_validate(normalize_schedule_problem_data(raw_problem))
+
+
+def _load_json_source(source: str) -> str:
+    if source == "-":
+        return sys.stdin.read()
+    return Path(source).read_text(encoding="utf-8")
+
+
+def _write_json_output(payload: object, output_file: Path | None) -> None:
+    rendered = json.dumps(payload, indent=2)
+    if output_file is not None:
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text(rendered + "\n", encoding="utf-8")
+        return
+
+    sys.stdout.write(rendered)
+    sys.stdout.write("\n")
 
 
 def _write_runtime_replay(
@@ -90,16 +108,29 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Directory where runtime replay artifacts should be written",
     )
+    solve_parser.add_argument(
+        "--output-file",
+        type=Path,
+        help="Optional path where the JSON result should be written instead of stdout",
+    )
 
     solve_request_parser = subparsers.add_parser(
         "solve-request",
         help="Execute a stable solve request JSON contract",
     )
-    solve_request_parser.add_argument("request", type=Path, help="Path to a SolveRequest JSON file")
+    solve_request_parser.add_argument(
+        "request",
+        help="Path to a SolveRequest JSON file, or '-' to read the request from stdin",
+    )
     solve_request_parser.add_argument(
         "--replay-output-dir",
         type=Path,
         help="Directory where runtime replay artifacts should be written",
+    )
+    solve_request_parser.add_argument(
+        "--output-file",
+        type=Path,
+        help="Optional path where the JSON response should be written instead of stdout",
     )
 
     repair_request_parser = subparsers.add_parser(
@@ -108,13 +139,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     repair_request_parser.add_argument(
         "request",
-        type=Path,
-        help="Path to a RepairRequest JSON file",
+        help="Path to a RepairRequest JSON file, or '-' to read the request from stdin",
     )
     repair_request_parser.add_argument(
         "--replay-output-dir",
         type=Path,
         help="Directory where runtime replay artifacts should be written",
+    )
+    repair_request_parser.add_argument(
+        "--output-file",
+        type=Path,
+        help="Optional path where the JSON response should be written instead of stdout",
     )
 
     schema_parser = subparsers.add_parser(
@@ -167,13 +202,13 @@ def main(argv: list[str] | None = None) -> int:
             solver_config=args.solver_config,
             stem_parts=(args.instance.stem, args.solver_config or "AUTO", "runtime-solve"),
         )
-        json.dump(result.model_dump(mode="json"), sys.stdout, indent=2)
-        sys.stdout.write("\n")
+        _write_json_output(result.model_dump(mode="json"), args.output_file)
         return 0
 
     elif args.command == "solve-request":
-        solve_request = SolveRequest.model_validate_json(args.request.read_text(encoding="utf-8"))
+        solve_request = parse_solve_request_json(_load_json_source(args.request))
         solve_response = execute_solve_request(solve_request)
+        request_stem = "stdin" if args.request == "-" else Path(args.request).stem
         _write_runtime_replay(
             output_dir=args.replay_output_dir,
             artifact_kind="runtime-solve",
@@ -192,18 +227,18 @@ def main(argv: list[str] | None = None) -> int:
             request_id=solve_request.request_id,
             solver_config=solve_request.solver_config,
             stem_parts=(
-                solve_request.request_id or args.request.stem,
+                solve_request.request_id or request_stem,
                 solve_request.solver_config or "AUTO",
                 "runtime-solve",
             ),
         )
-        json.dump(solve_response.model_dump(mode="json"), sys.stdout, indent=2)
-        sys.stdout.write("\n")
+        _write_json_output(solve_response.model_dump(mode="json"), args.output_file)
         return 0
 
     elif args.command == "repair-request":
-        repair_request = RepairRequest.model_validate_json(args.request.read_text(encoding="utf-8"))
+        repair_request = parse_repair_request_json(_load_json_source(args.request))
         repair_response = execute_repair_request(repair_request)
+        request_stem = "stdin" if args.request == "-" else Path(args.request).stem
         _write_runtime_replay(
             output_dir=args.replay_output_dir,
             artifact_kind="runtime-repair",
@@ -221,13 +256,12 @@ def main(argv: list[str] | None = None) -> int:
             request_id=repair_request.request_id,
             solver_config="INCREMENTAL_REPAIR",
             stem_parts=(
-                repair_request.request_id or args.request.stem,
+                repair_request.request_id or request_stem,
                 "INCREMENTAL_REPAIR",
                 "runtime-repair",
             ),
         )
-        json.dump(repair_response.model_dump(mode="json"), sys.stdout, indent=2)
-        sys.stdout.write("\n")
+        _write_json_output(repair_response.model_dump(mode="json"), args.output_file)
         return 0
 
     elif args.command == "write-contract-schemas":

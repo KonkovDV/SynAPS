@@ -20,7 +20,6 @@ Academic basis:
 
 from __future__ import annotations
 
-import heapq
 import os
 import time
 from collections import defaultdict
@@ -549,10 +548,10 @@ def _solve_precedence_aware_master(
                 if key not in var_index:
                     continue
                 wc = wc_by_id.get(cut_wc)
-                op = ops_by_id.get(op_id)
-                if wc is None or op is None:
+                operation = ops_by_id.get(op_id)
+                if wc is None or operation is None:
                     continue
-                p = max(1.0, op.base_duration_min / wc.speed_factor)
+                p = max(1.0, operation.base_duration_min / wc.speed_factor)
                 total_p += p
                 cut_indices.append(var_index[key])
                 cut_coeffs.append(-p)
@@ -581,10 +580,10 @@ def _solve_precedence_aware_master(
                 if key not in var_index:
                     continue
                 wc = wc_by_id.get(sc_wc)
-                op = ops_by_id.get(op_id)
-                if wc is None or op is None:
+                operation = ops_by_id.get(op_id)
+                if wc is None or operation is None:
                     continue
-                p = max(1.0, op.base_duration_min / wc.speed_factor)
+                p = max(1.0, operation.base_duration_min / wc.speed_factor)
                 total_p += p
                 sc_indices.append(var_index[key])
                 sc_coeffs.append(-p)
@@ -609,10 +608,10 @@ def _solve_precedence_aware_master(
                 if key not in var_index:
                     continue
                 wc = wc_by_id.get(cp_wc)
-                op = ops_by_id.get(op_id)
-                if wc is None or op is None:
+                operation = ops_by_id.get(op_id)
+                if wc is None or operation is None:
                     continue
-                p = max(1.0, op.base_duration_min / wc.speed_factor)
+                p = max(1.0, operation.base_duration_min / wc.speed_factor)
                 total_cp += p
                 cp_indices.append(var_index[key])
                 cp_coeffs.append(-p)
@@ -875,6 +874,71 @@ def _solve_subproblems_sequential(
     return all_assignments, overall_makespan
 
 
+def _assignment_sequence_key(assignment: Assignment) -> tuple[UUID, UUID | None]:
+    return assignment.work_center_id, assignment.lane_id
+
+
+def _find_earliest_machine_slot(
+    timeline: list[tuple[float, float, UUID, UUID]],
+    *,
+    earliest_start: Any,
+    duration: timedelta,
+    operation_state_id: UUID,
+    work_center_id: UUID,
+    setup_lookup: dict[tuple[UUID, UUID, UUID], timedelta],
+    horizon_start: Any,
+) -> tuple[Any, int]:
+    """Return the earliest feasible machine slot and insertion index."""
+
+    candidate_start = earliest_start
+    if not timeline:
+        return candidate_start, 0
+
+    for index, (start_offset, end_offset, next_state_id, _next_op_id) in enumerate(timeline):
+        next_start = horizon_start + timedelta(minutes=start_offset)
+        candidate_end = candidate_start + duration
+        setup_to_next = setup_lookup.get(
+            (work_center_id, operation_state_id, next_state_id),
+            timedelta(0),
+        )
+        if candidate_end + setup_to_next <= next_start:
+            return candidate_start, index
+
+        previous_end = horizon_start + timedelta(minutes=end_offset)
+        setup_from_previous = setup_lookup.get(
+            (work_center_id, next_state_id, operation_state_id),
+            timedelta(0),
+        )
+        available_after_previous = previous_end + setup_from_previous
+        if available_after_previous > candidate_start:
+            candidate_start = available_after_previous
+
+    return candidate_start, len(timeline)
+
+
+def find_earliest_machine_slot(
+    timeline: list[tuple[float, float, UUID, UUID]],
+    *,
+    earliest_start: Any,
+    duration: timedelta,
+    operation_state_id: UUID,
+    work_center_id: UUID,
+    setup_lookup: dict[tuple[UUID, UUID, UUID], timedelta],
+    horizon_start: Any,
+) -> tuple[Any, int]:
+    """Public wrapper for earliest-gap insertion on one machine lane."""
+
+    return _find_earliest_machine_slot(
+        timeline,
+        earliest_start=earliest_start,
+        duration=duration,
+        operation_state_id=operation_state_id,
+        work_center_id=work_center_id,
+        setup_lookup=setup_lookup,
+        horizon_start=horizon_start,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Measure 5: Accelerated Post-Assembly (O(N log N))
 # ---------------------------------------------------------------------------
@@ -931,11 +995,12 @@ def _topological_post_assembly(
                 queue.append(succ)
 
     # Build per-machine timeline (sorted by start time)
-    # Use a dict to quickly find the previous op on each machine
-    machine_last_end: dict[UUID, tuple[timedelta, UUID]] = {}
     # Track which ops have been "placed" with their final times
-    # machine → sorted list of (end_time, state_id, op_id)
-    machine_timeline: dict[UUID, list[tuple[float, UUID, UUID]]] = defaultdict(list)
+    # machine/lane → sorted list of (start_offset, end_offset, state_id, op_id)
+    machine_timeline: dict[
+        tuple[UUID, UUID | None],
+        list[tuple[float, float, UUID, UUID]],
+    ] = defaultdict(list)
 
     horizon_start = problem.planning_horizon_start
 
@@ -945,8 +1010,8 @@ def _topological_post_assembly(
         if a is None:
             continue
 
-        op = ops_by_id.get(op_id)
-        if op is None:
+        operation = ops_by_id.get(op_id)
+        if operation is None:
             continue
 
         wc_id = a.work_center_id
@@ -954,33 +1019,42 @@ def _topological_post_assembly(
 
         # Precedence constraint: must start after predecessor ends
         earliest_start = a.start_time
-        if op.predecessor_op_id is not None:
-            pred_a = assignment_by_op.get(op.predecessor_op_id)
+        if operation.predecessor_op_id is not None:
+            pred_a = assignment_by_op.get(operation.predecessor_op_id)
             if pred_a is not None and pred_a.end_time > earliest_start:
                 earliest_start = pred_a.end_time
 
         # Machine constraint: must start after previous op + setup
-        timeline = machine_timeline[wc_id]
-        if timeline:
-            # Last placed op on this machine
-            prev_end_offset, prev_state_id, _prev_op_id = timeline[-1]
-            prev_end = horizon_start + timedelta(minutes=prev_end_offset)
-            required_setup = setup_lookup.get(
-                (wc_id, prev_state_id, op.state_id),
-                timedelta(0),
-            )
-            machine_earliest = prev_end + required_setup
-            if machine_earliest > earliest_start:
-                earliest_start = machine_earliest
+        timeline = machine_timeline[_assignment_sequence_key(a)]
+        earliest_start, insert_index = _find_earliest_machine_slot(
+            timeline,
+            earliest_start=earliest_start,
+            duration=duration,
+            operation_state_id=operation.state_id,
+            work_center_id=wc_id,
+            setup_lookup=setup_lookup,
+            horizon_start=horizon_start,
+        )
 
         # Place the operation
         a.start_time = earliest_start
         a.end_time = earliest_start + duration
 
+        start_offset = (a.start_time - horizon_start).total_seconds() / 60.0
         end_offset = (a.end_time - horizon_start).total_seconds() / 60.0
-        timeline.append((end_offset, op.state_id, op_id))
+        timeline.insert(insert_index, (start_offset, end_offset, operation.state_id, op_id))
 
     return assignments
+
+
+def topological_post_assembly(
+    problem: ScheduleProblem,
+    assignments: list[Assignment],
+    ops_by_id: dict[UUID, Operation],
+) -> list[Assignment] | None:
+    """Public wrapper for post-assembly timing repair."""
+
+    return _topological_post_assembly(problem, assignments, ops_by_id)
 
 
 # ---------------------------------------------------------------------------
@@ -1144,11 +1218,11 @@ def _generate_all_cuts(
         )
 
     # 2. Setup-cost cuts per machine
-    assignments_by_machine: dict[UUID, list[Assignment]] = defaultdict(list)
+    assignments_by_machine: dict[tuple[UUID, UUID | None], list[Assignment]] = defaultdict(list)
     for a in sub_assignments:
-        assignments_by_machine[a.work_center_id].append(a)
+        assignments_by_machine[_assignment_sequence_key(a)].append(a)
 
-    for wc_id, m_assignments in assignments_by_machine.items():
+    for (wc_id, _lane_id), m_assignments in assignments_by_machine.items():
         if len(m_assignments) < 2:
             continue
         sorted_a = sorted(m_assignments, key=lambda x: x.start_time)
@@ -1200,64 +1274,114 @@ def _generate_all_cuts(
 
     # 4. Critical-path cut (Naderi & Roshanaei 2022)
     # Find the longest path in the schedule DAG (critical path)
-    critical_ops = _find_critical_path(
-        problem, sub_assignments, ops_by_id, wc_by_id, horizon_start,
+    critical_ops, cp_duration = _find_critical_path(
+        problem,
+        sub_assignments,
+        ops_by_id,
     )
-    if critical_ops and len(critical_ops) >= 2:
-        # Critical path duration = sum of processing + setup along the path
-        cp_duration = 0.0
-        assignment_by_op = {a.operation_id: a for a in sub_assignments}
-        for op_id in critical_ops:
-            a = assignment_by_op.get(op_id)
-            if a is None:
-                continue
-            cp_duration += (a.end_time - a.start_time).total_seconds() / 60.0
-        if cp_duration > 0:
-            benders_cuts.append(
-                _BendersCut(
-                    assignment_map=dict(assignment_map),
-                    kind="critical_path",
-                    rhs=cp_duration,
-                    bottleneck_ops=set(critical_ops),
-                )
+    if critical_ops and len(critical_ops) >= 2 and cp_duration > 0:
+        benders_cuts.append(
+            _BendersCut(
+                assignment_map=dict(assignment_map),
+                kind="critical_path",
+                rhs=cp_duration,
+                bottleneck_ops=set(critical_ops),
             )
+        )
 
 
 def _find_critical_path(
     problem: ScheduleProblem,
     assignments: list[Assignment],
     ops_by_id: dict[UUID, Operation],
-    wc_by_id: dict[UUID, WorkCenter],
-    horizon_start: Any,
-) -> list[UUID]:
-    """Find the critical path — the longest chain in the schedule.
+) -> tuple[list[UUID], float]:
+    """Find the longest realized path over precedence and machine-sequence arcs."""
 
-    Uses backward pass from the operation with latest end time.
-    """
-    assignment_by_op = {a.operation_id: a for a in assignments}
-
-    # Find the operation with the latest end time
     if not assignments:
-        return []
+        return [], 0.0
 
-    latest_a = max(assignments, key=lambda a: a.end_time)
-    latest_op_id = latest_a.operation_id
+    assignment_by_op = {assignment.operation_id: assignment for assignment in assignments}
+    setup_lookup = {
+        (entry.work_center_id, entry.from_state_id, entry.to_state_id): float(entry.setup_minutes)
+        for entry in problem.setup_matrix
+    }
+    predecessors: dict[UUID, list[tuple[UUID, float]]] = defaultdict(list)
 
-    # Backward trace through predecessors
+    for operation in problem.operations:
+        if (
+            operation.predecessor_op_id is not None
+            and operation.id in assignment_by_op
+            and operation.predecessor_op_id in assignment_by_op
+        ):
+            predecessors[operation.id].append((operation.predecessor_op_id, 0.0))
+
+    assignments_by_sequence: dict[tuple[UUID, UUID | None], list[Assignment]] = defaultdict(list)
+    for assignment in assignments:
+        assignments_by_sequence[_assignment_sequence_key(assignment)].append(assignment)
+
+    for (work_center_id, _lane_id), sequence_assignments in assignments_by_sequence.items():
+        sorted_assignments = sorted(
+            sequence_assignments,
+            key=lambda assignment: assignment.start_time,
+        )
+        for previous_assignment, current_assignment in zip(
+            sorted_assignments,
+            sorted_assignments[1:],
+            strict=False,
+        ):
+            previous_operation = ops_by_id.get(previous_assignment.operation_id)
+            current_operation = ops_by_id.get(current_assignment.operation_id)
+            if previous_operation is None or current_operation is None:
+                continue
+            setup_duration = setup_lookup.get(
+                (work_center_id, previous_operation.state_id, current_operation.state_id),
+                0.0,
+            )
+            predecessors[current_assignment.operation_id].append(
+                (previous_assignment.operation_id, setup_duration)
+            )
+
+    longest_duration: dict[UUID, float] = {}
+    predecessor_choice: dict[UUID, UUID | None] = {}
+
+    for assignment in sorted(assignments, key=lambda item: (item.end_time, item.start_time)):
+        node_duration = (assignment.end_time - assignment.start_time).total_seconds() / 60.0
+        best_duration = node_duration
+        best_predecessor: UUID | None = None
+
+        for predecessor_op_id, edge_duration in predecessors.get(assignment.operation_id, []):
+            prior_duration = longest_duration.get(predecessor_op_id)
+            if prior_duration is None:
+                continue
+            candidate_duration = prior_duration + edge_duration + node_duration
+            if candidate_duration > best_duration:
+                best_duration = candidate_duration
+                best_predecessor = predecessor_op_id
+
+        longest_duration[assignment.operation_id] = best_duration
+        predecessor_choice[assignment.operation_id] = best_predecessor
+
+    latest_op_id = max(longest_duration, key=lambda op_id: longest_duration[op_id])
     path: list[UUID] = []
-    current = latest_op_id
-
+    current: UUID | None = latest_op_id
     visited: set[UUID] = set()
     while current is not None and current not in visited:
         visited.add(current)
         path.append(current)
-        op = ops_by_id.get(current)
-        if op is None:
-            break
-        current = op.predecessor_op_id
+        current = predecessor_choice.get(current)
 
     path.reverse()
-    return path
+    return path, longest_duration[latest_op_id]
+
+
+def find_critical_path(
+    problem: ScheduleProblem,
+    assignments: list[Assignment],
+    ops_by_id: dict[UUID, Operation],
+) -> tuple[list[UUID], float]:
+    """Public wrapper for the realized schedule critical-path computation."""
+
+    return _find_critical_path(problem, assignments, ops_by_id)
 
 
 # ---------------------------------------------------------------------------
@@ -1283,13 +1407,13 @@ def _compute_objective(
         for e in problem.setup_matrix
     }
 
-    by_machine: dict[UUID, list[Assignment]] = defaultdict(list)
+    by_machine: dict[tuple[UUID, UUID | None], list[Assignment]] = defaultdict(list)
     for a in assignments:
-        by_machine[a.work_center_id].append(a)
+        by_machine[_assignment_sequence_key(a)].append(a)
 
     total_setup = 0.0
     total_material = 0.0
-    for wc_id, m_a in by_machine.items():
+    for (wc_id, _lane_id), m_a in by_machine.items():
         sorted_a = sorted(m_a, key=lambda x: x.start_time)
         for i in range(1, len(sorted_a)):
             prev_op = ops_by_id.get(sorted_a[i - 1].operation_id)

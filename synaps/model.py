@@ -86,6 +86,58 @@ class OperationAuxRequirement(BaseModel):
     quantity_needed: int = 1
 
 
+def normalize_schedule_problem_data(data: object) -> object:
+    """Return a normalized copy of raw ScheduleProblem-like payload data.
+
+    This keeps precedence-chain autofill as an explicit import/ingest step so
+    file and contract boundaries can normalize external JSON before it reaches
+    the core model.
+    """
+
+    if not isinstance(data, dict):
+        return data
+
+    raw_operations = data.get("operations")
+    if not isinstance(raw_operations, list):
+        return data
+
+    normalized = dict(data)
+    normalized_operations: list[Any] = []
+    operations_by_order: dict[Any, list[dict[str, Any]]] = {}
+    changed = False
+
+    for raw_operation in raw_operations:
+        if not isinstance(raw_operation, dict):
+            normalized_operations.append(raw_operation)
+            continue
+
+        operation = dict(raw_operation)
+        normalized_operations.append(operation)
+        operations_by_order.setdefault(operation.get("order_id"), []).append(operation)
+
+    for order_operations in operations_by_order.values():
+        try:
+            sorted_operations = sorted(
+                order_operations,
+                key=lambda item: int(item.get("seq_in_order", 0)),
+            )
+        except (TypeError, ValueError):
+            continue
+
+        previous_operation_id: Any = None
+        for operation in sorted_operations:
+            if previous_operation_id is not None and operation.get("predecessor_op_id") is None:
+                operation["predecessor_op_id"] = previous_operation_id
+                changed = True
+            previous_operation_id = operation.get("id")
+
+    if changed:
+        normalized["operations"] = normalized_operations
+        return normalized
+
+    return data
+
+
 # ---------- Scheduling problem & result ----------
 
 
@@ -299,6 +351,42 @@ class SolverStatus(StrEnum):
     ERROR = "error"
 
 
+class SolverErrorCategory(StrEnum):
+    """Structured error taxonomy for solver failures.
+
+    Each category maps to a recovery hint that downstream systems can use
+    to decide whether to retry, fall back, or escalate.
+    """
+
+    NONE = "none"
+    TIMEOUT_PARTIAL = "timeout_partial"
+    TIMEOUT_NO_SOLUTION = "timeout_no_solution"
+    INFEASIBLE_OVERCONSTRAINED = "infeasible_overconstrained"
+    INFEASIBLE_PRECEDENCE_CYCLE = "infeasible_precedence_cycle"
+    INFEASIBLE_NO_ELIGIBLE_WC = "infeasible_no_eligible_wc"
+    MASTER_INFEASIBLE = "master_infeasible"
+    SUBPROBLEM_INFEASIBLE = "subproblem_infeasible"
+    CONSTRUCTIVE_FAILURE = "constructive_failure"
+    INTERNAL_ERROR = "internal_error"
+
+    @property
+    def recovery_hint(self) -> str:
+        """Suggest recovery action for this error category."""
+        hints: dict[SolverErrorCategory, str] = {
+            SolverErrorCategory.NONE: "no error",
+            SolverErrorCategory.TIMEOUT_PARTIAL: "increase time_limit_s or accept current feasible solution",
+            SolverErrorCategory.TIMEOUT_NO_SOLUTION: "increase time_limit_s, relax constraints, or try a faster solver config",
+            SolverErrorCategory.INFEASIBLE_OVERCONSTRAINED: "relax due dates, add work centers, or reduce operation count",
+            SolverErrorCategory.INFEASIBLE_PRECEDENCE_CYCLE: "check operation predecessor_op_id references for cycles",
+            SolverErrorCategory.INFEASIBLE_NO_ELIGIBLE_WC: "verify eligible_wc_ids are populated for all operations",
+            SolverErrorCategory.MASTER_INFEASIBLE: "LBBD master assignment has no feasible solution; relax constraints",
+            SolverErrorCategory.SUBPROBLEM_INFEASIBLE: "LBBD subproblem sequencing failed; try larger clusters or more iterations",
+            SolverErrorCategory.CONSTRUCTIVE_FAILURE: "greedy dispatch found no feasible slot; check planning horizon or eligibility",
+            SolverErrorCategory.INTERNAL_ERROR: "unexpected solver error; check logs and report",
+        }
+        return hints.get(self, "unknown error category")
+
+
 class Assignment(BaseModel):
     """One operation → machine assignment in the result."""
 
@@ -308,6 +396,7 @@ class Assignment(BaseModel):
     end_time: datetime
     setup_minutes: int = 0
     aux_resource_ids: list[UUID] = Field(default_factory=list)
+    lane_id: UUID | None = None
 
 
 class ObjectiveValues(BaseModel):
@@ -329,4 +418,5 @@ class ScheduleResult(BaseModel):
     objective: ObjectiveValues = Field(default_factory=ObjectiveValues)
     duration_ms: int = 0
     random_seed: int | None = None
+    error_category: SolverErrorCategory = SolverErrorCategory.NONE
     metadata: dict[str, Any] = Field(default_factory=dict)

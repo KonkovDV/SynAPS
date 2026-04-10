@@ -739,6 +739,7 @@ class CpSatSolver(BaseSolver):
         )
         if virtual_to_original:
             for assignment in assignments:
+                assignment.lane_id = assignment.work_center_id
                 assignment.work_center_id = virtual_to_original.get(
                     assignment.work_center_id,
                     assignment.work_center_id,

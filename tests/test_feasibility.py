@@ -138,6 +138,93 @@ class TestFeasibilityChecker:
         assert len(setup_violations) == 1
         assert setup_violations[0].work_center_id == wc_1
 
+    def test_detects_parallel_setup_violation_without_explicit_lane_ids(self) -> None:
+        checker = FeasibilityChecker()
+        horizon_end = HORIZON_START + timedelta(hours=2)
+
+        state_a = State(id=uuid4(), code="STATE-A")
+        state_b = State(id=uuid4(), code="STATE-B")
+        work_center = WorkCenter(
+            id=uuid4(),
+            code="WC-PAR-SDST",
+            capability_group="machining",
+            max_parallel=2,
+        )
+
+        orders = [
+            Order(id=uuid4(), external_ref=f"ORD-{index}", due_date=horizon_end)
+            for index in range(3)
+        ]
+        operations = [
+            Operation(
+                id=uuid4(),
+                order_id=orders[0].id,
+                seq_in_order=0,
+                state_id=state_a.id,
+                base_duration_min=10,
+                eligible_wc_ids=[work_center.id],
+            ),
+            Operation(
+                id=uuid4(),
+                order_id=orders[1].id,
+                seq_in_order=0,
+                state_id=state_b.id,
+                base_duration_min=10,
+                eligible_wc_ids=[work_center.id],
+            ),
+            Operation(
+                id=uuid4(),
+                order_id=orders[2].id,
+                seq_in_order=0,
+                state_id=state_b.id,
+                base_duration_min=10,
+                eligible_wc_ids=[work_center.id],
+            ),
+        ]
+
+        problem = ScheduleProblem(
+            states=[state_a, state_b],
+            orders=orders,
+            operations=operations,
+            work_centers=[work_center],
+            setup_matrix=[
+                SetupEntry(
+                    work_center_id=work_center.id,
+                    from_state_id=state_a.id,
+                    to_state_id=state_b.id,
+                    setup_minutes=5,
+                )
+            ],
+            planning_horizon_start=HORIZON_START,
+            planning_horizon_end=horizon_end,
+        )
+
+        assignments = [
+            Assignment(
+                operation_id=operations[0].id,
+                work_center_id=work_center.id,
+                start_time=HORIZON_START,
+                end_time=HORIZON_START + timedelta(minutes=10),
+            ),
+            Assignment(
+                operation_id=operations[1].id,
+                work_center_id=work_center.id,
+                start_time=HORIZON_START + timedelta(minutes=10),
+                end_time=HORIZON_START + timedelta(minutes=20),
+            ),
+            Assignment(
+                operation_id=operations[2].id,
+                work_center_id=work_center.id,
+                start_time=HORIZON_START + timedelta(minutes=10),
+                end_time=HORIZON_START + timedelta(minutes=20),
+            ),
+        ]
+
+        violations = checker.check(problem, assignments)
+        setup_violations = [v for v in violations if v.kind == "SETUP_GAP_VIOLATION"]
+        assert len(setup_violations) == 1
+        assert setup_violations[0].work_center_id == work_center.id
+
     def test_detects_auxiliary_resource_pool_violation(
         self, simple_problem: ScheduleProblem
     ) -> None:

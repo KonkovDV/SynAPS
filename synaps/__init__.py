@@ -1,6 +1,7 @@
 # SynAPS — Universal Advanced Planning & Scheduling Solver
 """
-MO-FJSP-SDST-ARC solver portfolio (MO-FJSP-SDST-ML-ARC is the target label when advisory ML layers are added):
+MO-FJSP-SDST-ARC solver portfolio
+(MO-FJSP-SDST-ML-ARC is the target label when advisory ML layers are added):
   - GreedyDispatch (ATCS-based, < 200 ms)
   - CpSatSolver (OR-Tools CP-SAT, time-boxed)
   - LbbdSolver (HiGHS master + CP-SAT sub, iterative Benders cuts)

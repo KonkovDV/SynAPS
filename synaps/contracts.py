@@ -8,7 +8,12 @@ from uuid import UUID  # noqa: TC003
 
 from pydantic import BaseModel, Field
 
-from synaps.model import Assignment, ScheduleProblem, ScheduleResult  # noqa: TC001
+from synaps.model import (  # noqa: TC001
+    Assignment,
+    ScheduleProblem,
+    ScheduleResult,
+    normalize_schedule_problem_data,
+)
 from synaps.portfolio import repair_schedule, solve_schedule
 from synaps.solvers.router import SolveRegime, SolverRoutingContext
 
@@ -89,6 +94,33 @@ class RepairResponse(BaseModel):
     result: ScheduleResult
 
 
+def _normalize_contract_payload(payload: object) -> object:
+    if not isinstance(payload, dict):
+        return payload
+    if "problem" not in payload:
+        return payload
+
+    normalized_problem = normalize_schedule_problem_data(payload["problem"])
+    if normalized_problem is payload["problem"]:
+        return payload
+
+    normalized = dict(payload)
+    normalized["problem"] = normalized_problem
+    return normalized
+
+
+def parse_solve_request_json(payload: str) -> SolveRequest:
+    """Parse and normalize a SolveRequest JSON payload."""
+
+    return SolveRequest.model_validate(_normalize_contract_payload(json.loads(payload)))
+
+
+def parse_repair_request_json(payload: str) -> RepairRequest:
+    """Parse and normalize a RepairRequest JSON payload."""
+
+    return RepairRequest.model_validate(_normalize_contract_payload(json.loads(payload)))
+
+
 def execute_solve_request(request: SolveRequest) -> SolveResponse:
     """Execute a stable solve contract against the SynAPS portfolio API."""
 
@@ -141,6 +173,8 @@ def write_contract_schemas(output_dir: Path) -> list[Path]:
 
 __all__ = [
     "CONTRACT_VERSION",
+    "parse_repair_request_json",
+    "parse_solve_request_json",
     "RepairRequest",
     "RepairResponse",
     "RoutingContextContract",

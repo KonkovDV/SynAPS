@@ -115,6 +115,8 @@ class FeasibilityChecker:
         for a in assignments:
             by_machine.setdefault(a.work_center_id, []).append(a)
 
+        setup_window_start_by_op: dict[Any, Any] = {}
+
         for wc_id, machine_assignments in by_machine.items():
             work_center = work_centers_by_id.get(wc_id)
             max_parallel = work_center.max_parallel if work_center is not None else 1
@@ -144,35 +146,163 @@ class FeasibilityChecker:
                             )
                         )
                         break
+                explicit_lane_metadata = all(
+                    assignment.lane_id is not None for assignment in machine_assignments
+                )
+                lane_sequences: list[list[Assignment]] = []
+                if explicit_lane_metadata:
+                    assignments_by_lane: dict[Any, list[Assignment]] = {}
+                    for assignment in machine_assignments:
+                        assignments_by_lane.setdefault(assignment.lane_id, []).append(assignment)
+                    if len(assignments_by_lane) > max_parallel:
+                        violations.append(
+                            FeasibilityViolation(
+                                "MACHINE_CAPACITY_VIOLATION",
+                                (
+                                    f"Machine {wc_id} exposes {len(assignments_by_lane)} lanes, "
+                                    f"exceeding max_parallel={max_parallel}."
+                                ),
+                                work_center_id=wc_id,
+                            )
+                        )
+                    lane_sequences = list(assignments_by_lane.values())
+                else:
+                    for assignment in sorted(
+                        machine_assignments,
+                        key=lambda item: (item.start_time, item.end_time),
+                    ):
+                        current_op = ops_by_id.get(assignment.operation_id)
+                        if current_op is None:
+                            continue
+
+                        chosen_lane_index: int | None = None
+                        chosen_available_at = None
+                        for lane_index, lane_assignments in enumerate(lane_sequences):
+                            lane_previous_assignment = lane_assignments[-1]
+                            previous_op = ops_by_id.get(lane_previous_assignment.operation_id)
+                            if previous_op is None:
+                                continue
+                            required_setup = setup_lookup.get(
+                                (wc_id, previous_op.state_id, current_op.state_id),
+                                0,
+                            )
+                            available_at = lane_previous_assignment.end_time + timedelta(
+                                minutes=required_setup
+                            )
+                            if available_at <= assignment.start_time and (
+                                chosen_available_at is None or available_at > chosen_available_at
+                            ):
+                                chosen_lane_index = lane_index
+                                chosen_available_at = available_at
+
+                        if chosen_lane_index is None:
+                            if len(lane_sequences) < max_parallel:
+                                lane_sequences.append([assignment])
+                                continue
+                            violations.append(
+                                FeasibilityViolation(
+                                    "SETUP_GAP_VIOLATION",
+                                    (
+                                        f"Machine {wc_id} cannot place operation "
+                                        f"{assignment.operation_id} within max_parallel="
+                                        f"{max_parallel} while respecting setup gaps."
+                                    ),
+                                    operation_id=assignment.operation_id,
+                                    work_center_id=wc_id,
+                                )
+                            )
+                            break
+
+                        lane_sequences[chosen_lane_index].append(assignment)
+
+                for lane_assignments in lane_sequences:
+                    sorted_assignments = sorted(lane_assignments, key=lambda item: item.start_time)
+                    previous_assignment: Assignment | None = None
+                    for assignment in sorted_assignments:
+                        if previous_assignment is None:
+                            setup_window_start_by_op[assignment.operation_id] = (
+                                assignment.start_time
+                            )
+                            previous_assignment = assignment
+                            continue
+
+                        if previous_assignment.end_time > assignment.start_time:
+                            violations.append(
+                                FeasibilityViolation(
+                                    "MACHINE_OVERLAP",
+                                    "Overlap on machine "
+                                    f"{wc_id}: {previous_assignment.operation_id} ends after "
+                                    f"{assignment.operation_id} starts.",
+                                    work_center_id=wc_id,
+                                )
+                            )
+                            previous_assignment = assignment
+                            continue
+
+                        previous_op = ops_by_id.get(previous_assignment.operation_id)
+                        current_op = ops_by_id.get(assignment.operation_id)
+                        required_setup = 0
+                        if previous_op is not None and current_op is not None:
+                            required_setup = setup_lookup.get(
+                                (wc_id, previous_op.state_id, current_op.state_id),
+                                0,
+                            )
+
+                        actual_gap_minutes = (
+                            assignment.start_time - previous_assignment.end_time
+                        ).total_seconds() / 60.0
+                        if actual_gap_minutes < required_setup:
+                            violations.append(
+                                FeasibilityViolation(
+                                    "SETUP_GAP_VIOLATION",
+                                    (
+                                        f"Machine {wc_id} requires {required_setup} minutes of "
+                                        f"setup between {previous_assignment.operation_id} and "
+                                        f"{assignment.operation_id}, but only "
+                                        f"{actual_gap_minutes:.1f} minutes are available."
+                                    ),
+                                    operation_id=assignment.operation_id,
+                                    work_center_id=wc_id,
+                                )
+                            )
+
+                        setup_window_start_by_op[assignment.operation_id] = (
+                            assignment.start_time - timedelta(minutes=required_setup)
+                        )
+                        previous_assignment = assignment
                 continue
 
-            sorted_a = sorted(machine_assignments, key=lambda x: x.start_time)
-            for i in range(len(sorted_a) - 1):
-                current = sorted_a[i]
-                following = sorted_a[i + 1]
+            sorted_assignments = sorted(machine_assignments, key=lambda item: item.start_time)
+            serial_previous_assignment: Assignment | None = None
+            for assignment in sorted_assignments:
+                if serial_previous_assignment is None:
+                    setup_window_start_by_op[assignment.operation_id] = assignment.start_time
+                    serial_previous_assignment = assignment
+                    continue
 
-                if current.end_time > following.start_time:
+                if serial_previous_assignment.end_time > assignment.start_time:
                     violations.append(
                         FeasibilityViolation(
                             "MACHINE_OVERLAP",
                             "Overlap on machine "
-                            f"{wc_id}: {current.operation_id} ends after "
-                            f"{following.operation_id} starts.",
+                            f"{wc_id}: {serial_previous_assignment.operation_id} ends after "
+                            f"{assignment.operation_id} starts.",
                             work_center_id=wc_id,
                         )
                     )
+                    serial_previous_assignment = assignment
                     continue
 
-                current_op = ops_by_id.get(current.operation_id)
-                following_op = ops_by_id.get(following.operation_id)
-                if current_op is None or following_op is None:
-                    continue
-
-                required_setup = setup_lookup.get(
-                    (wc_id, current_op.state_id, following_op.state_id), 0
-                )
+                previous_op = ops_by_id.get(serial_previous_assignment.operation_id)
+                current_op = ops_by_id.get(assignment.operation_id)
+                required_setup = 0
+                if previous_op is not None and current_op is not None:
+                    required_setup = setup_lookup.get(
+                        (wc_id, previous_op.state_id, current_op.state_id),
+                        0,
+                    )
                 actual_gap_minutes = (
-                    following.start_time - current.end_time
+                    assignment.start_time - serial_previous_assignment.end_time
                 ).total_seconds() / 60.0
                 if actual_gap_minutes < required_setup:
                     violations.append(
@@ -181,36 +311,19 @@ class FeasibilityChecker:
                             (
                                 f"Machine {wc_id} requires {required_setup} minutes of "
                                 "setup between "
-                                f"{current.operation_id} and {following.operation_id}, but only "
-                                f"{actual_gap_minutes:.1f} minutes are available."
+                                f"{serial_previous_assignment.operation_id} and "
+                                f"{assignment.operation_id}, "
+                                f"but only {actual_gap_minutes:.1f} minutes are available."
                             ),
-                            operation_id=following.operation_id,
+                            operation_id=assignment.operation_id,
                             work_center_id=wc_id,
                         )
                     )
 
-        setup_window_start_by_op: dict[Any, Any] = {}
-        for wc_id, machine_assignments in by_machine.items():
-            sorted_assignments = sorted(
-                machine_assignments, key=lambda assignment: assignment.start_time
-            )
-            previous_assignment: Assignment | None = None
-            for assignment in sorted_assignments:
-                if previous_assignment is None:
-                    setup_window_start_by_op[assignment.operation_id] = assignment.start_time
-                else:
-                    previous_op = ops_by_id.get(previous_assignment.operation_id)
-                    current_op = ops_by_id.get(assignment.operation_id)
-                    required_setup = 0
-                    if previous_op is not None and current_op is not None:
-                        required_setup = setup_lookup.get(
-                            (wc_id, previous_op.state_id, current_op.state_id),
-                            0,
-                        )
-                    setup_window_start_by_op[assignment.operation_id] = (
-                        assignment.start_time - timedelta(minutes=required_setup)
-                    )
-                previous_assignment = assignment
+                setup_window_start_by_op[assignment.operation_id] = (
+                    assignment.start_time - timedelta(minutes=required_setup)
+                )
+                serial_previous_assignment = assignment
 
         # 5. Auxiliary resource pools
         for resource_id, resource in resources_by_id.items():

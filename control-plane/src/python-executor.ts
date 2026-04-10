@@ -1,12 +1,9 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn } from "node:child_process";
 
 import { resolveRuntimePaths, type SynapsRuntimePaths } from "./paths";
-
-const execFileAsync = promisify(execFile);
 
 export interface SynapsContractExecutor {
   executeSolveRequest(payload: object): Promise<unknown>;
@@ -29,26 +26,60 @@ async function executePythonContract(
   payload: object,
 ): Promise<unknown> {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "synaps-bff-"));
-  const requestPath = path.join(tempDir, `${subcommand}.json`);
+  const responsePath = path.join(tempDir, `${subcommand}.response.json`);
 
   try {
-    await fs.writeFile(requestPath, JSON.stringify(payload, null, 2), "utf-8");
-    const { stdout, stderr } = await execFileAsync(
-      paths.pythonExecutable,
-      ["-m", "synaps", subcommand, requestPath],
-      {
-        cwd: paths.repoRoot,
-        env: process.env,
-        maxBuffer: 10 * 1024 * 1024,
-      },
-    );
+    const { stdout, stderr, exitCode } = await new Promise<{
+      stdout: string;
+      stderr: string;
+      exitCode: number;
+    }>((resolve, reject) => {
+      const child = spawn(
+        paths.pythonExecutable,
+        ["-m", "synaps", subcommand, "-", "--output-file", responsePath],
+        {
+          cwd: paths.repoRoot,
+          env: process.env,
+          stdio: ["pipe", "pipe", "pipe"],
+        },
+      );
+
+      let stdout = "";
+      let stderr = "";
+
+      child.stdout?.setEncoding("utf-8");
+      child.stdout?.on("data", (chunk: string) => {
+        stdout += chunk;
+      });
+
+      child.stderr?.setEncoding("utf-8");
+      child.stderr?.on("data", (chunk: string) => {
+        stderr += chunk;
+      });
+
+      child.on("error", reject);
+      child.on("close", (code) => {
+        resolve({ stdout, stderr, exitCode: code ?? -1 });
+      });
+
+      child.stdin?.end(JSON.stringify(payload), "utf-8");
+    });
+
+    if (exitCode !== 0) {
+      throw new SynapsPythonBridgeError(
+        `Python bridge failed for ${subcommand} with exit code ${exitCode}`,
+        stderr || stdout,
+      );
+    }
+
+    const responseText = await fs.readFile(responsePath, "utf-8");
 
     try {
-      return JSON.parse(stdout) as unknown;
+      return JSON.parse(responseText) as unknown;
     } catch (parseError) {
       throw new SynapsPythonBridgeError(
         `Python bridge returned non-JSON payload for ${subcommand}: ${String(parseError)}`,
-        stderr,
+        stderr || responseText,
       );
     }
   } catch (error) {

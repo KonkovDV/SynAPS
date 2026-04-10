@@ -48,3 +48,31 @@ def test_build_problem_profile_treats_material_only_transitions_as_sequence_depe
 
     assert profile.setup_nonzero_entry_count == 1
     assert profile.has_nonzero_setups is True
+
+
+def test_build_problem_profile_computes_precedence_depth() -> None:
+    # make_simple_problem(n_orders=2, ops_per_order=2) creates chains of length 2
+    problem = make_simple_problem(n_orders=1, ops_per_order=4)
+
+    profile = build_problem_profile(problem)
+
+    # 4 ops in a single chain → depth = 4
+    assert profile.precedence_depth == 4
+
+
+def test_build_problem_profile_computes_resource_contention() -> None:
+    problem = make_simple_problem(n_orders=3, ops_per_order=2)
+
+    profile = build_problem_profile(problem)
+
+    # 6 ops, each eligible for 2 WCs → each WC sees 6 ops → contention = 6.0
+    assert profile.resource_contention == 6.0
+
+
+def test_build_problem_profile_precedence_depth_single_op_per_order() -> None:
+    # No predecessors → each op is a root → depth = 1
+    problem = make_simple_problem(n_orders=3, ops_per_order=1)
+
+    profile = build_problem_profile(problem)
+
+    assert profile.precedence_depth == 1

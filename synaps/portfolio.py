@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from synaps.logging import get_logger
 from synaps.problem_profile import build_problem_profile
 from synaps.solvers.incremental_repair import IncrementalRepair
 from synaps.solvers.registry import create_solver
@@ -25,6 +26,8 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from synaps.model import Assignment, ScheduleProblem, ScheduleResult
+
+_log = get_logger("synaps.portfolio")
 
 
 class PortfolioValidationError(RuntimeError):
@@ -141,7 +144,25 @@ def solve_schedule(
         routing_reason = "explicit solver_config override"
         routed = False
 
+    _log.info(
+        "solve_started",
+        solver_config=selected_solver_config,
+        routed=routed,
+        regime=ctx.regime,
+        op_count=profile.operation_count,
+        size_band=profile.size_band,
+    )
+
     result = solver.solve(problem, **_merge_kwargs(default_kwargs, solve_kwargs))
+
+    _log.info(
+        "solve_completed",
+        solver_config=selected_solver_config,
+        status=result.status.value,
+        duration_ms=result.duration_ms,
+        assignment_count=len(result.assignments),
+    )
+
     verification_details: dict[str, object] = {"problem_profile": profile.as_dict()}
     if verify_feasibility:
         verification = verify_schedule_result(problem, result)
@@ -192,6 +213,14 @@ def repair_schedule(
             disrupted_op_ids,
             regime=regime,
         )
+
+    _log.info(
+        "repair_started",
+        regime=regime,
+        disrupted_count=len(set(disrupted_op_ids)),
+        radius=applied_radius,
+        op_count=profile.operation_count,
+    )
 
     result = solver.solve(
         problem,

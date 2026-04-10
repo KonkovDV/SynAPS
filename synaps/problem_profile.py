@@ -29,6 +29,8 @@ class ProblemProfile:
     has_aux_constraints: bool
     has_nonzero_setups: bool
     size_band: str
+    precedence_depth: int
+    resource_contention: float
 
     def as_dict(self) -> dict[str, int | float | bool | str]:
         return asdict(self)
@@ -88,6 +90,36 @@ def build_problem_profile(problem: ScheduleProblem) -> ProblemProfile:
         setup_nonzero_entry_count / possible_setup_slots if possible_setup_slots else 0.0
     )
 
+    # Precedence depth: longest chain in the precedence DAG (BFS from roots).
+    successors: dict[object, list[object]] = {}
+    roots: list[object] = []
+    for operation in problem.operations:
+        if operation.predecessor_op_id is not None:
+            successors.setdefault(operation.predecessor_op_id, []).append(operation.id)
+        else:
+            roots.append(operation.id)
+    depth = 0
+    frontier = list(roots)
+    while frontier:
+        depth += 1
+        next_frontier: list[object] = []
+        for node in frontier:
+            next_frontier.extend(successors.get(node, []))
+        frontier = next_frontier
+    precedence_depth = depth
+
+    # Resource contention: avg operations per eligible work center (higher = more contention).
+    ops_per_wc: dict[object, int] = {}
+    for operation in problem.operations:
+        targets = operation.eligible_wc_ids if operation.eligible_wc_ids else [
+            wc.id for wc in problem.work_centers
+        ]
+        for wc_id in targets:
+            ops_per_wc[wc_id] = ops_per_wc.get(wc_id, 0) + 1
+    resource_contention = (
+        sum(ops_per_wc.values()) / len(ops_per_wc) if ops_per_wc else 0.0
+    )
+
     return ProblemProfile(
         state_count=state_count,
         order_count=order_count,
@@ -105,6 +137,8 @@ def build_problem_profile(problem: ScheduleProblem) -> ProblemProfile:
         has_aux_constraints=bool(problem.auxiliary_resources or problem.aux_requirements),
         has_nonzero_setups=setup_nonzero_entry_count > 0,
         size_band=_size_band(operation_count),
+        precedence_depth=precedence_depth,
+        resource_contention=resource_contention,
     )
 
 

@@ -82,3 +82,67 @@ ci(release): add trusted publishing workflow
 ## License
 
 By contributing, you agree that your contributions will be licensed under the MIT License.
+
+## Architecture Decision Records
+
+Key architectural decisions are recorded below for contributor context.
+
+### ADR-001: Deterministic Solver Portfolio over Single Algorithm
+
+**Status**: Accepted
+
+**Context**: No single scheduling algorithm dominates all instance sizes.
+CP-SAT is optimal for small instances but struggles on 500+ operations.
+LBBD decomposes well but adds overhead on small problems. Greedy ATCS
+gives instant answers with ~30% quality loss.
+
+**Decision**: Maintain a portfolio of solvers behind a deterministic router.
+The router selects based on measurable instance characteristics
+(`ProblemProfile`) and operational regime (`SolveRegime`). Each routing
+decision includes a human-readable `reason` string.
+
+**Consequences**: Adding a new solver requires one class + one registry
+entry. The router must be extended when the new solver has a unique
+sweet spot. All solvers share `ScheduleProblem` / `ScheduleResult`.
+
+### ADR-002: FeasibilityChecker as Independent Gate
+
+**Status**: Accepted
+
+**Context**: Solver bugs can produce infeasible schedules that appear valid.
+Trusting solver output without verification is unsafe for production.
+
+**Decision**: `FeasibilityChecker` verifies all constraints independently
+of which solver produced the result. It runs after every solve in `portfolio.py`.
+
+**Consequences**: A solver that produces an infeasible schedule is caught
+before the result leaves the portfolio API.
+
+### ADR-003: Contract-First Integration
+
+**Status**: Accepted
+
+**Context**: The solver kernel is Python. Production systems are often
+TypeScript or other languages. A stable JSON contract layer enables
+polyglot integration.
+
+**Decision**: `contracts.py` defines Pydantic models that serialize to
+JSON Schema. `control-plane/` implements a Fastify HTTP API that validates
+against these schemas.
+
+**Consequences**: Python kernel and TypeScript control plane evolve
+independently. Schema changes require updating `CONTRACT_VERSION`.
+
+### ADR-004: Modular Monolith by Design
+
+**Status**: Accepted
+
+**Context**: Microservice decomposition adds operational overhead. SynAPS
+is maintained by a small team. Premature decomposition would slow development.
+
+**Decision**: All solver logic lives in a single Python package with clear
+module boundaries. Service extraction happens only when production evidence
+justifies it.
+
+**Consequences**: Simpler deployment and debugging. Module boundaries are
+maintained via `BaseSolver` protocol and `contracts.py`.

@@ -66,6 +66,9 @@ def route_solver_config(
     wc_count = profile.work_center_count
     has_aux_constraints = profile.has_aux_constraints
     has_nonzero_setups = profile.has_nonzero_setups
+    setup_density = profile.nonzero_setup_density
+    resource_contention = profile.resource_contention
+    precedence_depth = profile.precedence_depth
 
     if ctx.preferred_max_latency_s is not None and ctx.preferred_max_latency_s <= 1:
         return SolverRoutingDecision(
@@ -194,7 +197,21 @@ def route_solver_config(
             reason="small nominal instance fits the low-latency exact portfolio member",
         )
 
+    # Dense setups or deep precedence chains benefit from the longer CP-SAT
+    # budget even at moderate sizes — propagation exploits the structure.
+    setup_heavy = setup_density > 0.3
+    deep_chains = precedence_depth > 6
+
     if op_count <= 120 and (has_nonzero_setups or has_aux_constraints or wc_count <= 20):
+        if (setup_heavy or deep_chains) and op_count > 60:
+            return SolverRoutingDecision(
+                solver_config="CPSAT-120",
+                reason=(
+                    "medium nominal instance with dense setups "
+                    f"(density={setup_density:.2f}) or deep precedence chains "
+                    f"(depth={precedence_depth}) benefits from extended CP-SAT budget"
+                ),
+            )
         return SolverRoutingDecision(
             solver_config="CPSAT-30",
             reason=(
@@ -203,7 +220,20 @@ def route_solver_config(
             ),
         )
 
+    # High resource contention means machines are shared heavily — decomposition
+    # with smaller clusters reduces subproblem complexity.
+    contention_heavy = resource_contention > 15.0
+
     if op_count <= 500:
+        if contention_heavy and op_count > 300:
+            return SolverRoutingDecision(
+                solver_config="LBBD-10",
+                reason=(
+                    "larger nominal instance with high resource contention "
+                    f"(avg {resource_contention:.1f} ops/wc) benefits from "
+                    "decomposition with more Benders iterations"
+                ),
+            )
         return SolverRoutingDecision(
             solver_config="LBBD-10",
             reason=(

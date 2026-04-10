@@ -98,6 +98,20 @@ def test_create_solver_supports_academic_epsilon_profile() -> None:
     assert solve_kwargs["max_makespan_ratio"] == 1.10
 
 
+def test_route_solver_prefers_extended_cpsat_for_medium_dense_setup_instances() -> None:
+    """Medium instances (61-120 ops) with dense setups should use CPSAT-120."""
+    # Create a problem with enough ops and dense setup matrix
+    # (high nonzero_setup_density from 4 nonzero entries / small setup_slots)
+    problem = make_simple_problem(n_orders=18, ops_per_order=4)
+
+    decision = route_solver_config(problem)
+
+    # With 72 ops, 2 states, 2 WCs: setup_density is high (4 entries / 8 slots = 0.5)
+    # and ops > 60 → should escalate to CPSAT-120 due to dense setups
+    assert decision.solver_config == "CPSAT-120"
+    assert "dense setups" in decision.reason or "deep precedence" in decision.reason
+
+
 def test_create_solver_supports_tardiness_epsilon_profile() -> None:
     solver, solve_kwargs = create_solver("CPSAT-EPS-TARD-110")
 

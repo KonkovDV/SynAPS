@@ -15,6 +15,7 @@ from synaps.model import (
     SolverStatus,
     State,
     WorkCenter,
+    normalize_schedule_problem_data,
 )
 
 
@@ -172,6 +173,82 @@ class TestDomainModel:
         assert problem.operations[0].predecessor_op_id is None
         assert problem.operations[1].predecessor_op_id == op_1.id
         assert problem.operations[2].predecessor_op_id == op_2.id
+
+    def test_normalize_problem_data_autofills_predecessor_chain_without_mutating(self) -> None:
+        order_id = uuid4()
+        state_id = uuid4()
+        work_center_id = uuid4()
+
+        payload = {
+            "states": [{"id": state_id, "code": "A", "label": ""}],
+            "orders": [
+                {
+                    "id": order_id,
+                    "external_ref": "ORD-CHAIN",
+                    "due_date": datetime(2026, 6, 2, tzinfo=UTC),
+                    "priority": 500,
+                    "quantity": 1.0,
+                    "unit": "pcs",
+                    "domain_attributes": {},
+                }
+            ],
+            "operations": [
+                {
+                    "id": uuid4(),
+                    "order_id": order_id,
+                    "seq_in_order": 0,
+                    "state_id": state_id,
+                    "base_duration_min": 30,
+                    "eligible_wc_ids": [work_center_id],
+                    "predecessor_op_id": None,
+                    "domain_attributes": {},
+                },
+                {
+                    "id": uuid4(),
+                    "order_id": order_id,
+                    "seq_in_order": 1,
+                    "state_id": state_id,
+                    "base_duration_min": 30,
+                    "eligible_wc_ids": [work_center_id],
+                    "predecessor_op_id": None,
+                    "domain_attributes": {},
+                },
+                {
+                    "id": uuid4(),
+                    "order_id": order_id,
+                    "seq_in_order": 2,
+                    "state_id": state_id,
+                    "base_duration_min": 30,
+                    "eligible_wc_ids": [work_center_id],
+                    "predecessor_op_id": None,
+                    "domain_attributes": {},
+                },
+            ],
+            "work_centers": [
+                {
+                    "id": work_center_id,
+                    "code": "WC-1",
+                    "capability_group": "mill",
+                    "speed_factor": 1.0,
+                    "max_parallel": 1,
+                    "domain_attributes": {},
+                }
+            ],
+            "setup_matrix": [],
+            "planning_horizon_start": datetime(2026, 6, 1, tzinfo=UTC),
+            "planning_horizon_end": datetime(2026, 6, 3, tzinfo=UTC),
+        }
+
+        normalized = normalize_schedule_problem_data(payload)
+
+        assert payload["operations"][1]["predecessor_op_id"] is None
+        assert payload["operations"][2]["predecessor_op_id"] is None
+        assert normalized["operations"][1]["predecessor_op_id"] == payload["operations"][0]["id"]
+        assert normalized["operations"][2]["predecessor_op_id"] == payload["operations"][1]["id"]
+
+        problem = ScheduleProblem.model_validate(normalized)
+        assert problem.operations[1].predecessor_op_id == problem.operations[0].id
+        assert problem.operations[2].predecessor_op_id == problem.operations[1].id
 
     def test_schedule_problem_rejects_conflicting_same_order_predecessor_chain(self) -> None:
         horizon_start = datetime(2026, 6, 1, tzinfo=UTC)

@@ -201,6 +201,7 @@ def test_parallel_machine_with_sdst_uses_virtualization_and_maps_back() -> None:
     assert {assignment.work_center_id for assignment in result.assignments} == {
         original_work_center.id
     }
+    assert all(assignment.lane_id is not None for assignment in result.assignments)
 
     violations = FeasibilityChecker().check(problem, result.assignments)
     assert violations == []
