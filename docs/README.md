@@ -47,6 +47,9 @@ Speculative blueprint narratives are no longer part of the active public researc
 ## Audit Reports
 
 - [ACADEMIC_TECHNICAL_REPORT_2026_04.md](audit/ACADEMIC_TECHNICAL_REPORT_2026_04.md) — comprehensive academic-level audit: formal problem classification, solver portfolio analysis, competitive positioning, and actionable recommendations.
+- [SYNAPS_ACADEMIC_AUDIT_COMPREHENSIVE_RU.md](audit/SYNAPS_ACADEMIC_AUDIT_COMPREHENSIVE_RU.md) — architecture audit: incremental repair, feasibility checker, ML advisory, target OSS/OSH stack (RU).
+- [SYNAPS_CRITICAL_GAPS_AND_OPTIMIZATIONS_RU.md](audit/SYNAPS_CRITICAL_GAPS_AND_OPTIMIZATIONS_RU.md) — 5 architectural gaps with academic refs and optimization roadmap (RU). Gap #1 (LBBD parallelism) already closed.
+- [SYNAPS_VS_INFIMUM_MOSKABEL_STRATEGY_RU.md](audit/SYNAPS_VS_INFIMUM_MOSKABEL_STRATEGY_RU.md) — SynAPS vs APS Infimum: algorithmic comparison for cable manufacturing (RU).
 
 ## Validation and Evidence
 

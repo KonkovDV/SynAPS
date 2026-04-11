@@ -47,6 +47,9 @@ Language: [EN](README.md) | **RU**
 ## Аудиторские отчёты
 
 - [ACADEMIC_TECHNICAL_REPORT_2026_04.md](audit/ACADEMIC_TECHNICAL_REPORT_2026_04.md) — академический технический аудит: формальная классификация задачи, анализ solver-портфолио, конкурентное позиционирование, рекомендации.
+- [SYNAPS_ACADEMIC_AUDIT_COMPREHENSIVE_RU.md](audit/SYNAPS_ACADEMIC_AUDIT_COMPREHENSIVE_RU.md) — аудит архитектуры: incremental repair, feasibility checker, ML advisory, целевой OSS/OSH-стек.
+- [SYNAPS_CRITICAL_GAPS_AND_OPTIMIZATIONS_RU.md](audit/SYNAPS_CRITICAL_GAPS_AND_OPTIMIZATIONS_RU.md) — 5 архитектурных узких мест с академическими ссылками и планом усиления. Gap #1 (параллелизм LBBD) уже закрыт.
+- [SYNAPS_VS_INFIMUM_MOSKABEL_STRATEGY_RU.md](audit/SYNAPS_VS_INFIMUM_MOSKABEL_STRATEGY_RU.md) — SynAPS vs APS Infimum: алгоритмическое сравнение для кабельного производства.
 
 ## Проверка и доказательная база
 
