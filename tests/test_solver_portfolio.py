@@ -19,6 +19,8 @@ def test_available_solver_configs_matches_public_portfolio() -> None:
     assert available_solver_configs() == [
         "GREED",
         "GREED-K1-3",
+        "BEAM-3",
+        "BEAM-5",
         "CPSAT-10",
         "CPSAT-30",
         "CPSAT-120",

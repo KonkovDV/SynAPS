@@ -5,12 +5,19 @@ Decomposes the scheduling problem into:
     Subproblems (CP-SAT per machine cluster): sequences operations with exact SDST + ARC.
 
 Benders cuts tighten the master's capacity estimate iteratively until convergence.
+
+Features:
+    - Greedy ATCS warm-start: seeds initial upper bound from GreedyDispatch (toggle via use_greedy_warm_start).
+    - Parallel subproblem execution via ProcessPoolExecutor for O(K) speedup (toggle via parallel_subproblems).
+    - Four families of Benders cuts: nogood, capacity, setup_cost, load_balance.
 """
 
 from __future__ import annotations
 
+import os
 import time
 from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -54,6 +61,9 @@ class LbbdSolver(BaseSolver):
         sub_time_limit_s: int = max(1, time_limit_s // max(max_iterations, 1))
         gap_threshold: float = float(kwargs.get("gap_threshold", 0.01))
         setup_relaxation: bool = bool(kwargs.get("setup_relaxation", True))
+        use_greedy_warm_start: bool = bool(kwargs.get("use_greedy_warm_start", True))
+        parallel_subproblems: bool = bool(kwargs.get("parallel_subproblems", True))
+        num_workers: int = int(kwargs.get("num_workers", min(4, os.cpu_count() or 2)))
 
         # Precompute lookups
         wc_by_id = {wc.id: wc for wc in problem.work_centers}
@@ -93,6 +103,25 @@ class LbbdSolver(BaseSolver):
                 positive_setups = [setup for setup in work_center_setups if setup > 0]
                 min_setup_by_wc[work_center.id] = min(positive_setups) if positive_setups else 0.0
 
+        # --- Greedy warm start: use GreedyDispatch to seed initial UB ---
+        greedy_warm_start_used = False
+        if use_greedy_warm_start:
+            from synaps.solvers.greedy_dispatch import GreedyDispatch
+
+            greedy = GreedyDispatch()
+            greedy_result = greedy.solve(problem)
+            if greedy_result.status == SolverStatus.FEASIBLE and greedy_result.assignments:
+                greedy_makespan = greedy_result.objective.makespan_minutes
+                if greedy_makespan < best_ub:
+                    best_ub = greedy_makespan
+                    best_assignments = list(greedy_result.assignments)
+                    best_objective = greedy_result.objective
+                    greedy_warm_start_used = True
+                # Seed the master warm start from greedy assignment
+                prev_assignment_map = {
+                    a.operation_id: a.work_center_id for a in greedy_result.assignments
+                }
+
         for iteration in range(1, max_iterations + 1):
             elapsed = time.monotonic() - t0
             if elapsed >= time_limit_s:
@@ -123,16 +152,31 @@ class LbbdSolver(BaseSolver):
             prev_assignment_map = assignment_map
 
             # --- Subproblems (one CP-SAT per machine cluster) ---
-            sub_assignments, sub_makespan = _solve_subproblems(
-                problem,
-                assignment_map,
-                aux_links,
-                wc_by_id,
-                ops_by_id,
-                orders_by_id,
-                sub_time_limit_s,
-                random_seed,
-            )
+            clusters = _cluster_machines(assignment_map, aux_links)
+            if parallel_subproblems and len(clusters) > 3:
+                sub_result = _solve_subproblems_parallel(
+                    problem,
+                    assignment_map,
+                    clusters,
+                    wc_by_id,
+                    ops_by_id,
+                    orders_by_id,
+                    sub_time_limit_s,
+                    random_seed,
+                    num_workers=num_workers,
+                )
+            else:
+                sub_result = _solve_subproblems(
+                    problem,
+                    assignment_map,
+                    aux_links,
+                    wc_by_id,
+                    ops_by_id,
+                    orders_by_id,
+                    sub_time_limit_s,
+                    random_seed,
+                )
+            sub_assignments, sub_makespan = sub_result
 
             if sub_assignments is None:
                 # Subproblem infeasible for this assignment → add nogood cut
@@ -290,6 +334,8 @@ class LbbdSolver(BaseSolver):
                 "gap_threshold": gap_threshold,
                 "setup_relaxation": setup_relaxation,
                 "master_warm_start_iterations": master_warm_start_iterations,
+                "greedy_warm_start_used": greedy_warm_start_used,
+                "parallel_subproblems": parallel_subproblems,
                 "cut_pool": {
                     "size": len(benders_cuts),
                     "kinds": cut_kinds,
@@ -966,3 +1012,121 @@ def _compute_objective(
         total_material_loss=total_material,
         total_tardiness_minutes=total_tardiness,
     )
+
+
+# ---------------------------------------------------------------------------
+# Parallel subproblem execution (ProcessPoolExecutor)
+# ---------------------------------------------------------------------------
+
+
+def _solve_single_cluster_worker(
+    problem_dict: dict[str, Any],
+    cluster_wc_ids: list[str],
+    assignment_items: list[tuple[str, str]],
+    sub_time_limit_s: int,
+    random_seed: int,
+) -> dict[str, Any] | None:
+    """Solve one cluster's CP-SAT subproblem in a worker process.
+
+    Accepts JSON-serializable arguments to work with ProcessPoolExecutor.
+    Returns a dict with 'assignments' (list of dicts) and 'makespan' (float),
+    or None if the subproblem is infeasible.
+    """
+    from uuid import UUID
+
+    problem = ScheduleProblem.model_validate(problem_dict)
+    cluster_wcs = {UUID(w) for w in cluster_wc_ids}
+    assignment_map = {UUID(k): UUID(v) for k, v in assignment_items}
+
+    wc_by_id = {wc.id: wc for wc in problem.work_centers}
+    ops_by_id = {op.id: op for op in problem.operations}
+    orders_by_id = {o.id: o for o in problem.orders}
+
+    cluster_op_ids = {
+        op_id for op_id, wc_id in assignment_map.items() if wc_id in cluster_wcs
+    }
+    cluster_ops = [ops_by_id[oid] for oid in cluster_op_ids if oid in ops_by_id]
+    if not cluster_ops:
+        return {"assignments": [], "makespan": 0.0}
+
+    sub_problem = _build_subproblem(
+        problem, cluster_ops, cluster_wcs, cluster_op_ids,
+        assignment_map, wc_by_id, ops_by_id, orders_by_id,
+    )
+
+    cpsat = CpSatSolver()
+    result = cpsat.solve(sub_problem, time_limit_s=sub_time_limit_s, random_seed=random_seed, num_workers=4)
+
+    if result.status in (SolverStatus.INFEASIBLE, SolverStatus.ERROR):
+        return None
+    if result.status == SolverStatus.TIMEOUT and not result.assignments:
+        return None
+
+    cluster_assignments = [a for a in result.assignments if a.operation_id in cluster_op_ids]
+    horizon_start = problem.planning_horizon_start
+    cluster_makespan = (
+        max((a.end_time - horizon_start).total_seconds() / 60.0 for a in cluster_assignments)
+        if cluster_assignments
+        else 0.0
+    )
+
+    return {
+        "assignments": [a.model_dump(mode="json") for a in cluster_assignments],
+        "makespan": cluster_makespan,
+    }
+
+
+def _solve_subproblems_parallel(
+    problem: ScheduleProblem,
+    assignment_map: dict[UUID, UUID],
+    clusters: list[set[UUID]],
+    wc_by_id: dict[UUID, WorkCenter],
+    ops_by_id: dict[UUID, Operation],
+    orders_by_id: dict[UUID, Order],
+    sub_time_limit_s: int,
+    random_seed: int,
+    *,
+    num_workers: int = 4,
+) -> tuple[list[Assignment] | None, float]:
+    """Solve CP-SAT subproblems in parallel via ProcessPoolExecutor.
+
+    Provides O(K) speedup proportional to the number of machine clusters K,
+    removing the GIL bottleneck from the sequential Benders loop.
+    Falls back to sequential for ≤3 clusters to avoid multiprocessing overhead.
+    """
+    problem_dict = problem.model_dump(mode="json")
+    assignment_items = [(str(k), str(v)) for k, v in assignment_map.items()]
+
+    all_assignments: list[Assignment] = []
+    overall_makespan = 0.0
+    effective_workers = min(num_workers, len(clusters))
+
+    with ProcessPoolExecutor(max_workers=effective_workers) as pool:
+        futures = {}
+        for cluster_wcs in clusters:
+            wc_list = [str(w) for w in cluster_wcs]
+            future = pool.submit(
+                _solve_single_cluster_worker,
+                problem_dict,
+                wc_list,
+                assignment_items,
+                sub_time_limit_s,
+                random_seed,
+            )
+            futures[future] = cluster_wcs
+
+        for future in as_completed(futures):
+            result = future.result()
+            if result is None:
+                return None, 0.0
+            for a_dict in result["assignments"]:
+                all_assignments.append(Assignment.model_validate(a_dict))
+            overall_makespan = max(overall_makespan, result["makespan"])
+
+    # Completeness check
+    assigned_ops = {a.operation_id for a in all_assignments}
+    all_ops = {op.id for op in problem.operations}
+    if assigned_ops != all_ops:
+        return None, 0.0
+
+    return all_assignments, overall_makespan

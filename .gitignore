@@ -39,6 +39,9 @@ venv/
 env/
 .python-version
 
+# Habr drafts (private)
+docs/habr/
+
 # Benchmark outputs
 benchmark/results/
 .benchmarks/

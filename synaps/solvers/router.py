@@ -71,6 +71,15 @@ def route_solver_config(
     precedence_depth = profile.precedence_depth
 
     if ctx.preferred_max_latency_s is not None and ctx.preferred_max_latency_s <= 1:
+        # Beam search produces better SDST solutions within the latency budget
+        if has_nonzero_setups and setup_density > 0.2 and op_count <= 60:
+            return SolverRoutingDecision(
+                solver_config="BEAM-3",
+                reason=(
+                    f"latency budget <=1s with dense setups (density={setup_density:.2f}) "
+                    "benefits from beam search over single-trajectory greedy"
+                ),
+            )
         return SolverRoutingDecision(
             solver_config="GREED",
             reason="latency budget <= 1s, so the constructive heuristic is the only safe choice",

@@ -249,3 +249,49 @@ class TestLbbdSolver:
         assert set(sub_ops) == {op_1.id, op_2.id, op_3.id}
         assert sub_ops[op_2.id].predecessor_op_id == op_1.id
         assert sub_ops[op_3.id].predecessor_op_id == op_2.id
+
+
+class TestLbbdGreedyWarmStart:
+    """Tests for the greedy warm-start and parallel subproblem features."""
+
+    def test_greedy_warm_start_produces_feasible(self, simple_problem: ScheduleProblem) -> None:
+        solver = LbbdSolver()
+        result = solver.solve(
+            simple_problem, max_iterations=3, time_limit_s=30, use_greedy_warm_start=True,
+        )
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert result.metadata.get("greedy_warm_start_used") is True
+
+    def test_greedy_warm_start_disabled(self, simple_problem: ScheduleProblem) -> None:
+        solver = LbbdSolver()
+        result = solver.solve(
+            simple_problem, max_iterations=3, time_limit_s=30, use_greedy_warm_start=False,
+        )
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert result.metadata.get("greedy_warm_start_used") is False
+
+    def test_warm_start_quality_at_least_as_good(self, simple_problem: ScheduleProblem) -> None:
+        solver = LbbdSolver()
+        result_warm = solver.solve(
+            simple_problem, max_iterations=5, time_limit_s=30, use_greedy_warm_start=True,
+        )
+        result_cold = solver.solve(
+            simple_problem, max_iterations=5, time_limit_s=30, use_greedy_warm_start=False,
+        )
+        # Warm start should find at least as good a solution
+        assert result_warm.objective.makespan_minutes <= result_cold.objective.makespan_minutes * 1.01
+
+    def test_parallel_subproblems_flag_in_metadata(self, simple_problem: ScheduleProblem) -> None:
+        solver = LbbdSolver()
+        result = solver.solve(
+            simple_problem, max_iterations=3, time_limit_s=30, parallel_subproblems=True,
+        )
+        assert result.metadata.get("parallel_subproblems") is True
+
+    def test_sequential_subproblems_still_works(self, simple_problem: ScheduleProblem) -> None:
+        solver = LbbdSolver()
+        result = solver.solve(
+            simple_problem, max_iterations=3, time_limit_s=30, parallel_subproblems=False,
+        )
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert result.metadata.get("parallel_subproblems") is False

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from synaps.solvers.cpsat_solver import CpSatSolver
-from synaps.solvers.greedy_dispatch import GreedyDispatch
+from synaps.solvers.greedy_dispatch import BeamSearchDispatch, GreedyDispatch
 from synaps.solvers.lbbd_hd_solver import LbbdHdSolver
 from synaps.solvers.lbbd_solver import LbbdSolver
 from synaps.solvers.pareto_slice_solver import ParetoSliceCpSatSolver
@@ -37,6 +37,14 @@ def _build_greed_default() -> BaseSolver:
 
 def _build_greed_k1_3() -> BaseSolver:
     return GreedyDispatch(k1=3.0)
+
+
+def _build_beam_3() -> BaseSolver:
+    return BeamSearchDispatch(beam_width=3)
+
+
+def _build_beam_5() -> BaseSolver:
+    return BeamSearchDispatch(beam_width=5)
 
 
 def _build_cpsat() -> BaseSolver:
@@ -65,6 +73,16 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
         factory=_build_greed_k1_3,
         solve_kwargs={},
         description="Greedy ATCS constructive heuristic with extended tardiness look-ahead",
+    ),
+    "BEAM-3": SolverRegistration(
+        factory=_build_beam_3,
+        solve_kwargs={},
+        description="Filtered Beam Search (width=3) ATCS dispatch for improved SDST solutions",
+    ),
+    "BEAM-5": SolverRegistration(
+        factory=_build_beam_5,
+        solve_kwargs={},
+        description="Filtered Beam Search (width=5) ATCS dispatch for complex SDST matrices",
     ),
     "CPSAT-10": SolverRegistration(
         factory=_build_cpsat,

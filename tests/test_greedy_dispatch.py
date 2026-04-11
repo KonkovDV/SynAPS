@@ -368,3 +368,68 @@ class TestGreedyDispatch:
             )
 
         assert "first operation" in str(exc_info.value)
+
+
+class TestBeamSearchDispatch:
+    """Tests for BeamSearchDispatch — filtered beam search extension."""
+
+    def test_produces_feasible_result(self, simple_problem: ScheduleProblem) -> None:
+        from synaps.solvers.greedy_dispatch import BeamSearchDispatch
+
+        solver = BeamSearchDispatch(beam_width=3)
+        result = solver.solve(simple_problem)
+
+        assert result.status == SolverStatus.FEASIBLE
+        assert result.solver_name == "beam_search"
+
+    def test_all_operations_assigned(self, simple_problem: ScheduleProblem) -> None:
+        from synaps.solvers.greedy_dispatch import BeamSearchDispatch
+
+        solver = BeamSearchDispatch(beam_width=3)
+        result = solver.solve(simple_problem)
+
+        assigned_ops = {a.operation_id for a in result.assignments}
+        expected_ops = {op.id for op in simple_problem.operations}
+        assert assigned_ops == expected_ops
+
+    def test_passes_feasibility_checker(self, simple_problem: ScheduleProblem) -> None:
+        from synaps.solvers.greedy_dispatch import BeamSearchDispatch
+
+        solver = BeamSearchDispatch(beam_width=3)
+        result = solver.solve(simple_problem)
+
+        checker = FeasibilityChecker()
+        violations = checker.check(simple_problem, result.assignments)
+        assert violations == [], f"Violations found: {violations}"
+
+    def test_beam_width_in_metadata(self, simple_problem: ScheduleProblem) -> None:
+        from synaps.solvers.greedy_dispatch import BeamSearchDispatch
+
+        solver = BeamSearchDispatch(beam_width=5)
+        result = solver.solve(simple_problem)
+        assert result.metadata["beam_width"] == 5
+
+    def test_beam_width_1_equals_greedy(self, simple_problem: ScheduleProblem) -> None:
+        from synaps.solvers.greedy_dispatch import BeamSearchDispatch
+
+        beam1 = BeamSearchDispatch(beam_width=1)
+        result_beam = beam1.solve(simple_problem)
+
+        greedy = GreedyDispatch()
+        result_greedy = greedy.solve(simple_problem)
+
+        # With width=1, beam search degenerates to greedy — makespan should be equal
+        assert abs(result_beam.objective.makespan_minutes - result_greedy.objective.makespan_minutes) < 0.1
+
+    def test_respects_precedence(self, simple_problem: ScheduleProblem) -> None:
+        from synaps.solvers.greedy_dispatch import BeamSearchDispatch
+
+        solver = BeamSearchDispatch(beam_width=3)
+        result = solver.solve(simple_problem)
+
+        assignment_map = {a.operation_id: a for a in result.assignments}
+        for op in simple_problem.operations:
+            if op.predecessor_op_id and op.predecessor_op_id in assignment_map:
+                pred = assignment_map[op.predecessor_op_id]
+                cur = assignment_map[op.id]
+                assert cur.start_time >= pred.end_time
