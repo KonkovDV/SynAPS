@@ -8,7 +8,7 @@ Language: [EN](README.md) | **RU**
 
 ## Быстрые маршруты
 
-1. Начните с [../README_RU.md](../README_RU.md), чтобы увидеть границы репозитория и команды быстрого старта.
+1. Начните с [../README.md](../README.md), чтобы увидеть границы репозитория и команды быстрого старта.
 2. Переходите к [../benchmark/README_RU.md](../benchmark/README_RU.md), если нужна воспроизводимая проверка решателей.
 3. Переходите к [../control-plane/README_RU.md](../control-plane/README_RU.md), если нужна сетевая граница TypeScript-слоя.
 
@@ -55,7 +55,7 @@ Language: [EN](README.md) | **RU**
 - [../control-plane/README.md](../control-plane/README.md)
 - [../control-plane/README_RU.md](../control-plane/README_RU.md)
 - [../README.md](../README.md)
-- [../README_RU.md](../README_RU.md)
+- [../README.md](../README.md)
 - [PUBLIC_GITHUB_POST_PUSH_CHECKLIST.md](PUBLIC_GITHUB_POST_PUSH_CHECKLIST.md)
 - [../CONTRIBUTING.md](../CONTRIBUTING.md)
 - [../SECURITY.md](../SECURITY.md)

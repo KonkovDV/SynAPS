@@ -55,7 +55,6 @@ Speculative blueprint narratives are no longer part of the active public researc
 - [control-plane/README.md](../control-plane/README.md)
 - [control-plane/README_RU.md](../control-plane/README_RU.md)
 - [README.md](../README.md)
-- [README_RU.md](../README_RU.md)
 - [PUBLIC_GITHUB_POST_PUSH_CHECKLIST.md](PUBLIC_GITHUB_POST_PUSH_CHECKLIST.md)
 - [CONTRIBUTING.md](../CONTRIBUTING.md)
 - [SECURITY.md](../SECURITY.md)

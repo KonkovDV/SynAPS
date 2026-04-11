@@ -1,127 +1,222 @@
 ﻿# SynAPS
 
-Deterministic-first scheduling and resource-orchestration engine for MO-FJSP-SDST-ARC planning problems (the extended MO-FJSP-SDST-ML-ARC label applies when advisory ML layers are added above the deterministic kernel).
+Детерминированный движок планирования производства для задач класса MO-FJSP-SDST-ARC.
 
-Language: **EN** | [RU](README_RU.md)
+Language: [EN](#synaps-in-english) | **RU**
 
-## Status
+---
 
-SynAPS is a public research and engineering repository.
+## Зачем это
 
-The repository currently contains a Python scheduling core, canonical schema surfaces, a benchmark harness, and validation tooling. It does **not** yet claim full production deployment, cyber-physical plant integration, or the entire "Aleph" target architecture as implemented software.
+Осенью в МИСиС я слушал кейс MOSITLAB для Москабельмета: 50 000 операций, 100 рабочих центров, 700 000 вариантов переналадок. Пять целевых функций, которые грызутся между собой. Результат внедрения - 27 дней экономии, ~1.2 млрд рублей в год. Архитектура: жадная эвристика, нейросетевое ядро, жадная эвристика. Работает. Но нейросеть - черный ящик. Она скажет "ставь заказ 4817 на станок 23", а почему - не скажет.
 
-### Solver Portfolio (8 components, 4 315 LOC)
+Я написал SynAPS - движок, где каждое решение можно вскрыть и ткнуть пальцем: *вот почему*. Восемь детерминированных решателей. Независимый валидатор после каждого вызова. Невыполнимое расписание не выходит из движка.
 
-| Component | Source | LOC | Algorithm | Quality Guarantee |
-|-----------|--------|-----|-----------|-------------------|
-| **CP-SAT Exact** | `cpsat_solver.py` | 772 | Circuit + NoOverlap + Cumulative (SDST, ARC) | Proven optimal on small-medium instances |
-| **LBBD** | `lbbd_solver.py` | 969 | HiGHS MIP master + CP-SAT subproblems + 4 Benders cut families | Gap-bounded convergence |
-| **LBBD-HD** | `lbbd_hd_solver.py` | 1 324 | Parallel subproblems + ARC-aware partitioning + topological post-assembly | Industrial scale (50K+ operations) |
-| **Greedy ATCS** | `greedy_dispatch.py` | 296 | Log-space ATCS index (Lee, Bhaskaran & Pinedo 1997) | Feasible schedule in < 1 s |
-| **Pareto Slice** | `pareto_slice_solver.py` | 104 | Two-stage ε-constraint (Haimes 1971, Mavrotas 2009) | Pareto-efficient near baseline |
-| **Incremental Repair** | `incremental_repair.py` | 318 | Neighbourhood radius + greedy fallback + micro-CP-SAT | < 5% nervousness |
-| **Portfolio Router** | `router.py` | 252 | Deterministic regime×size decision tree | Same input → same solver |
-| **FeasibilityChecker** | `feasibility_checker.py` | 280 | 7-class independent event-sweep validator | No solver bypasses verification |
+Коммерческие APS (Siemens Opcenter, DELMIA Ortems, Asprova) решают задачу за закрытым кодом. SynAPS - open source.
 
-Additional surfaces: Graph Partitioning (271 LOC), Solver Registry with 13 profiles (210 LOC), Pydantic data model (333 LOC), TypeScript control-plane BFF (674 LOC). Test suite: 175 tests across 26 modules (5 553 LOC).
+## Статус
 
-### Implemented today
+Код работает, тесты проходят, бенчмарки воспроизводятся. На живом заводе **не тестировалось**. Зазор между текущим портфелем решателей и полной целевой архитектурой документирован честно.
 
-- Exact CP-SAT scheduling paths with sequence-dependent setup handling, auxiliary resources across setup and processing windows, and exact `max_parallel` handling through cumulative constraints or virtual disjunctive lanes when any sequence-dependent transition cost (setup, material loss, or energy) requires lane-level ordering.
-- Greedy dispatch with queue-local log-space ATCS scoring, explicit material-loss penalties, and bounded incremental repair heuristics with accurate tardiness and material-loss accounting.
-- First-class epsilon-constrained CP-SAT profiles for setup-vs-makespan (`CPSAT-EPS-SETUP-110`), tardiness-vs-makespan (`CPSAT-EPS-TARD-110`), and material-loss-vs-makespan (`CPSAT-EPS-MATERIAL-110`) trade-off studies.
-- Logic-Based Benders Decomposition (LBBD) solver with HiGHS master, CP-SAT subproblems, bottleneck capacity cuts, setup-cost cuts, load-balance cuts (Hooker 2007, §7.3), master warm-start support, and post-assembly cross-cluster precedence/setup enforcement.
-- Property-based test suite (Hypothesis) validating structural invariants across random problem instances.
-- Cross-solver consistency tests ensuring all solvers satisfy the same feasibility, precedence, and objective-sign contracts.
-- Benchmark regression tests with pinned quality bounds as CI guardrails.
-- Horizon-bound validation in the feasibility checker.
-- Pydantic-based canonical data model for the current solver surfaces.
-- Reproducible benchmark harness with three instance tiers (tiny, medium, medium-stress) under [benchmark/README.md](benchmark/README.md).
-- Repository validation via `pytest`, targeted `ruff` checks, and package build metadata.
+## Портфель решателей
 
-### Target blueprint
+8 решателей, 4 610 строк кода решателей. Всего `synaps/`: 7 846 строк.
 
-The longer-form architecture material describes the intended next layers of the system, including:
+| Решатель | Алгоритм | Когда нужен |
+|----------|----------|-------------|
+| **CP-SAT Exact** | Circuit + NoOverlap + Cumulative через OR-Tools 9.10 | Малые/средние, доказуемый оптимум |
+| **LBBD** | HiGHS MIP мастер + CP-SAT подзадачи + 4 семейства отсечений Бендерса | Средние/крупные, сходимость по gap |
+| **LBBD-HD** | Параллельные подзадачи + ARC-aware разбиение + топологическая сборка | Тысячи операций |
+| **Greedy ATCS** | Логарифмический ATCS-индекс (Lee, Bhaskaran & Pinedo 1997) | Допустимое расписание за < 1 с |
+| **Pareto Slice** | Двухэтапный epsilon-constraint (Haimes 1971, Mavrotas 2009) | Сравнение альтернатив |
+| **Incremental Repair** | Заморозка + окрестностный re-dispatch + micro-CP-SAT | Ремонт на лету, < 5% нервозности |
+| **Portfolio Router** | Детерминированное дерево режим x размер + опциональный ML advisory | Один вход - один решатель |
+| **FeasibilityChecker** | 7 классов, независимый event-sweep валидатор | После каждого solve(), не доверяет никому |
 
-- event-sourced orchestration and anti-corruption boundaries;
-- hardware-aware hot paths such as Rust or PyO3 bridges;
-- larger-instance decomposition strategies such as LBBD;
-- advisory ML or LLM layers with explicit verification guardrails.
+Дополнительно: графовое разбиение, реестр решателей с 13 отраслевыми пресетами, Pydantic-модель, профилировщик задач, ресурсные ограничители, инструментация метрик, ML advisory-слой, версионированные JSON-контракты, TypeScript control-plane BFF.
 
-Those items are roadmap and research direction unless they are explicitly backed by current code and benchmarks in this repository.
+**Тесты:** 218 тестов в 29 модулях (6 172 строки тестового кода).
 
-## Claim Boundaries
+## Чем SynAPS отличается
 
-Read this repository as an engineering surface first.
+**Детерминированное ядро.** CP-SAT и LBBD дают доказуемые границы. Роутер - дерево решений, не обученная модель. Один вход дает один выбор решателя и одно расписание.
 
-- The root repository does not claim that hardware pinning, zero-copy IPC, event sourcing, GNN cuts, or LLM explanation layers are implemented here today.
-- Public publication of this repository does not imply production readiness, regulated deployment readiness, or plant-integration certification.
-- Partner or diligence materials are supporting context, not the sole technical source of truth.
+**Независимая валидация.** FeasibilityChecker проверяет 7 классов ограничений на каждом решении: полнота, допустимость станков, прецеденты, ёмкость, зазоры переналадок, вспомогательные ресурсы (включая setup-интервалы - исправление "ghost setup"), горизонт. Он не знает, какой решатель работал.
 
-## Quick Start
+**Прозрачная маршрутизация.** Роутер логирует решение и причину текстом. Оператор может перекрыть. Плановик может проверить.
+
+**Setup-aware с первого дня.** Переналадки, зависящие от последовательности, потери материала и энергозатраты - полноценные граждане модели, а не заплатка сверху.
+
+**Любой завод.** Кабель, сталь, фармацевтика, автопром, пищевка, PCB - заполняете матрицу переналадок и поехали.
+
+## Быстрый старт
 
 ```bash
 git clone https://github.com/KonkovDV/SynAPS.git
 cd SynAPS
 python -m pip install -e ".[dev]"
 
-# Routed portfolio solve with JSON output
+# Расчет через portfolio router
 python -m synaps solve benchmark/instances/tiny_3x3.json
 
-# Export the TypeScript ↔ Python runtime contract schemas
-python -m synaps write-contract-schemas --output-dir schema/contracts
-
-# Start the minimal TypeScript control-plane BFF
-cd control-plane
-npm install
-npm run dev
-
+# Тесты
 pytest tests/ -v
+
+# Линтинг
 ruff check synaps tests benchmark --select F,E9
 
+# Сравнение решателей на бенчмарке
 python -m benchmark.run_benchmark benchmark/instances/tiny_3x3.json \
   --solvers GREED CPSAT-30 --compare
 ```
 
-To build a distributable package locally:
+## Математика коротко
+
+CP-SAT формулировка: `AddCircuit` для гамильтоновой последовательности на каждом станке (вместо квадратичных дизъюнкций), `AddCumulative` для пулов вспомогательных ресурсов с явными demands на setup-интервалы, скаляризованная многокритериальная целевая.
+
+LBBD разрезает задачу: HiGHS MIP мастер раздает операции по станкам, CP-SAT подзадачи секвенируют внутри кластеров. Четыре семейства отсечений: nogood, bottleneck capacity, setup-cost, load-balance (Hooker 2007).
+
+Greedy ATCS работает в log-пространстве, чтобы не тонуть в underflow на тяжелохвостых распределениях переналадок.
+
+## Что реализовано, а что нет
+
+### Реализовано (в этом репо, протестировано)
+
+- 8 решателей с детерминированной маршрутизацией
+- CP-SAT с SDST, ARC, max_parallel
+- LBBD и LBBD-HD с 4 семействами отсечений и параллельными подзадачами
+- Greedy ATCS с log-пространством и штрафом за потери материала
+- epsilon-constraint профили для trade-off по setup/tardiness/material-loss
+- Incremental repair с настраиваемым порогом нервозности
+- 7-классная валидация допустимости после каждого solve
+- Профилировщик задач (ProblemProfile)
+- Ресурсные ограничители (timeout, memory limits)
+- Структурированная инструментация с подключаемыми коллекторами
+- Версионированные JSON-контракты для TypeScript-интеграции
+- ML advisory-слой с эвристическим предиктором и хуком в роутере
+- 13 отраслевых пресетов (металлургия, кабель, фарма, авто, пищевка, PCB...)
+- Property-based тесты через Hypothesis
+- Cross-solver consistency тесты
+- Benchmark harness с регрессионными границами
+
+### Не реализовано (roadmap)
+
+- Event sourcing / CQRS
+- Rust hot-path через PyO3 (шов есть, модуля нет)
+- GNN-отсечения Бендерса (плейсхолдер в ml_advisory.py)
+- LLM-пояснения для оператора
+- Квантовый бэкенд
+- NUMA pinning
+- Промышленное развертывание на живом заводе
+
+## Карта репозитория
+
+| Путь | Что |
+|------|-----|
+| `synaps/solvers/` | Портфель решателей |
+| `synaps/model.py` | Pydantic-модель данных |
+| `synaps/ml_advisory.py` | ML advisory-слой |
+| `synaps/guards.py` | Ресурсные ограничители |
+| `synaps/instrumentation.py` | Сбор метрик |
+| `synaps/contracts.py` | Версионированные JSON-контракты |
+| `synaps/problem_profile.py` | Профилировщик задач |
+| `benchmark/` | Воспроизводимый benchmark harness |
+| `tests/` | 218 тестов, 29 модулей |
+| `schema/contracts/` | JSON Schema для TypeScript |
+| `control-plane/` | Минимальный TypeScript BFF |
+| `docs/` | Архитектура, домены, исследования |
+
+## Зависимости
+
+| Пакет | Зачем | Лицензия |
+|-------|-------|----------|
+| OR-Tools 9.10 | CP-SAT солвер (C++ ядро) | Apache-2.0 |
+| HiGHS 1.7+ | MIP солвер для LBBD мастера | MIT |
+| Pydantic v2 | Модель данных и валидация | MIT |
+| Hypothesis | Property-based тесты | MPL-2.0 |
+
+Нет TensorFlow, PyTorch, NumPy, pandas. Ядро - чистая оптимизация, не ML.
+
+## Границы заявлений
+
+- Репозиторий не заявляет промышленную готовность, регуляторную готовность или сертифицированную интеграцию.
+- Портфель решателей тестируется на синтетических бенчмарках (tiny/medium/medium-stress), не на данных живого завода.
+- LOC и количество тестов измеряются автоматически и могут меняться между коммитами.
+
+## Литература
+
+- Pinedo M.L. (2016). *Scheduling: Theory, Algorithms, and Systems*, 4th ed.
+- Allahverdi A. et al. (2008). A survey of scheduling problems with setup times or costs. *EJOR* 187(3).
+- Lee Y.H., Bhaskaran K., Pinedo M. (1997). A heuristic to minimize total weighted tardiness with sequence-dependent setups. *IIE Transactions* 29(1).
+- Hooker J.N., Ottosson G. (2003). Logic-Based Benders Decomposition. *Math. Programming* 96.
+- Hooker J.N. (2007). *Integrated Methods for Optimization*, 2nd ed.
+- Mavrotas G. (2009). Effective implementation of the epsilon-constraint method. *AMC* 213(2).
+
+## Ссылки
+
+- [Архитектура](docs/architecture/01_OVERVIEW.md) | [Бенчмарки](benchmark/README.md) | [Contributing](CONTRIBUTING.md) | [Security](SECURITY.md) | [Support](SUPPORT.md)
+
+---
+
+<a id="synaps-in-english"></a>
+
+# SynAPS in English
+
+Deterministic-first scheduling engine for MO-FJSP-SDST-ARC planning problems.
+
+## The problem
+
+A cable factory: 50,000 operations, 100 work centers, 700,000 setup transitions. Five conflicting objectives. Commercial APS systems solve this behind closed code. Neural networks solve it without explanations. SynAPS solves it with eight deterministic solvers, an independent feasibility validator, and zero black boxes.
+
+## Status
+
+Code runs, tests pass, benchmarks reproduce. **Not tested on a live factory.** The gap between the current solver portfolio and the full target architecture is documented honestly.
+
+## Solver portfolio
+
+8 solvers, 4,610 LOC of solver code. 7,846 LOC total in `synaps/`. 218 tests across 29 modules.
+
+| Solver | Algorithm | Use case |
+|--------|-----------|----------|
+| CP-SAT Exact | Circuit + NoOverlap + Cumulative (OR-Tools 9.10) | Small/medium, provable optimality |
+| LBBD | HiGHS MIP master + CP-SAT subproblems + 4 Benders cut families | Medium/large, gap-bounded |
+| LBBD-HD | Parallel subproblems + ARC-aware partitioning | Thousands of operations |
+| Greedy ATCS | Log-space ATCS (Lee, Bhaskaran & Pinedo 1997) | Feasible in < 1 s |
+| Pareto Slice | Epsilon-constraint (Mavrotas 2009) | Trade-off comparison |
+| Incremental Repair | Neighbourhood freeze + micro-CP-SAT | Live rescheduling |
+| Portfolio Router | Deterministic tree + optional ML advisory | Same input, same solver |
+| FeasibilityChecker | 7-class event-sweep | After every solve |
+
+Additional: graph partitioning, 13 industry presets, Pydantic data model, problem profiler, resource guards, instrumentation, ML advisory layer, versioned JSON contracts, TypeScript control-plane BFF.
+
+## Quick start
 
 ```bash
-python -m build
-twine check dist/*
+git clone https://github.com/KonkovDV/SynAPS.git
+cd SynAPS
+python -m pip install -e ".[dev]"
+python -m synaps solve benchmark/instances/tiny_3x3.json
+pytest tests/ -v
 ```
 
-## Repository Map
+## What's implemented vs. planned
 
-- [docs/README.md](docs/README.md): architecture, domain, evolution, and research navigation.
-- [docs/README_RU.md](docs/README_RU.md): Russian router for the technical documentation surfaces.
-- [docs/PUBLIC_GITHUB_POST_PUSH_CHECKLIST.md](docs/PUBLIC_GITHUB_POST_PUSH_CHECKLIST.md): manual GitHub setup after the first public push.
-- [benchmark/README.md](benchmark/README.md): reproducible solver benchmarking.
-- [benchmark/README_RU.md](benchmark/README_RU.md): Russian benchmark guide.
-- `python -m synaps solve <instance.json>`: high-level routed solver execution with JSON output.
-- [`schema/contracts/`](schema/contracts/README.md): stable JSON request/response contract for future TypeScript control-plane integration.
-- [`control-plane/`](control-plane/README.md): minimal TypeScript BFF proving the network-facing control-plane boundary.
-- [`control-plane/README_RU.md`](control-plane/README_RU.md): Russian guide for the TypeScript control-plane boundary.
-- [CONTRIBUTING.md](CONTRIBUTING.md): contribution workflow and validation expectations.
-- [SUPPORT.md](SUPPORT.md): supported public support channels.
-- [SECURITY.md](SECURITY.md): vulnerability reporting path.
+**Implemented:** 8-solver portfolio, SDST/ARC/max_parallel in CP-SAT, LBBD with 4 cut families, greedy ATCS in log-space, epsilon-constraint profiles, incremental repair, feasibility validation, problem profiler, resource guards, instrumentation, versioned contracts, ML advisory layer, 13 industry presets, property-based and cross-solver tests.
 
-## Architecture and Research Notes
+**Roadmap:** event sourcing, Rust/PyO3 hot-path, GNN Benders cuts, LLM explanations, quantum backend, NUMA pinning, live factory deployment.
 
-The repository includes a compact public architecture route for readers who want broader technical context without speculative side branches:
+## Dependencies
 
-- [docs/architecture/01_OVERVIEW.md](docs/architecture/01_OVERVIEW.md)
-- [docs/architecture/02_CANONICAL_FORM.md](docs/architecture/02_CANONICAL_FORM.md)
-- [docs/architecture/03_SOLVER_PORTFOLIO.md](docs/architecture/03_SOLVER_PORTFOLIO.md)
-- [research/SYNAPS_OSS_STACK_2026.md](research/SYNAPS_OSS_STACK_2026.md)
+OR-Tools 9.10 (Apache-2.0), HiGHS 1.7+ (MIT), Pydantic v2 (MIT), Hypothesis (MPL-2.0). No TensorFlow, PyTorch, NumPy, or pandas.
 
-These documents are useful for understanding direction, but the current implementation boundary is defined by the code, tests, benchmark harness, and packaging surfaces in this repository.
+## References
 
-## Roadmap Themes
+Pinedo (2016), Allahverdi et al. (2008), Lee-Bhaskaran-Pinedo (1997), Hooker-Ottosson (2003), Hooker (2007), Mavrotas (2009).
 
-- Strengthen decomposition and scaling paths beyond the current LBBD baseline (dual-based cut generation, GNN-guided cuts).
-- Introduce explicit orchestration boundaries instead of keeping all scheduling state in a single solver-centric layer.
-- Extend the epsilon-constrained portfolio with material-loss and multi-objective Pareto front enumeration.
-- Add safer publication and supply-chain surfaces for releases, dependency updates, and security scanning.
-- Keep research-grade claims bounded by measurable evidence.
+## Links
 
-The public GitHub route intentionally excludes the local-only partner pack.
+[Architecture](docs/architecture/01_OVERVIEW.md) | [Benchmarks](benchmark/README.md) | [Contributing](CONTRIBUTING.md) | [Security](SECURITY.md) | [Support](SUPPORT.md)
+
+## License
+
+MIT
