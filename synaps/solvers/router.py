@@ -264,12 +264,47 @@ def select_solver(
     problem: ScheduleProblem,
     *,
     context: SolverRoutingContext | None = None,
+    advisory_predictor: object | None = None,
+    advisory_confidence_threshold: float = 0.6,
 ) -> tuple[BaseSolver, dict[str, object], SolverRoutingDecision]:
-    """Route and instantiate a solver in one step."""
+    """Route and instantiate a solver in one step.
 
-    decision = route_solver_config(problem, context=context)
-    solver, solve_kwargs = create_solver(decision.solver_config)
-    return solver, solve_kwargs, decision
+    When *advisory_predictor* is provided (a ``RuntimePredictor`` instance),
+    its recommendation is used if its confidence exceeds the threshold.
+    Otherwise, the deterministic router decision applies.
+    """
+
+    deterministic = route_solver_config(problem, context=context)
+
+    # Try ML advisory if a predictor is provided
+    if advisory_predictor is not None:
+        try:
+            from synaps.ml_advisory import RuntimePredictor, encode_problem_features
+            from synaps.problem_profile import build_problem_profile as _build_profile
+
+            if isinstance(advisory_predictor, RuntimePredictor):
+                profile = _build_profile(problem)
+                features = encode_problem_features(problem, profile)
+                advisory = advisory_predictor.predict(features)
+
+                if advisory.confidence >= advisory_confidence_threshold:
+                    try:
+                        solver, solve_kwargs = create_solver(advisory.recommended_solver)
+                        return solver, solve_kwargs, SolverRoutingDecision(
+                            solver_config=advisory.recommended_solver,
+                            reason=(
+                                f"ML advisory (model={advisory.model_version}, "
+                                f"confidence={advisory.confidence:.2f}) overrode "
+                                f"deterministic choice ({deterministic.solver_config})"
+                            ),
+                        )
+                    except KeyError:
+                        pass  # advisory recommended unknown config — fall through
+        except ImportError:
+            pass  # ml_advisory module not available — use deterministic
+
+    solver, solve_kwargs = create_solver(deterministic.solver_config)
+    return solver, solve_kwargs, deterministic
 
 
 __all__ = [
