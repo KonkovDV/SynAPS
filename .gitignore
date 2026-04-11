@@ -41,6 +41,7 @@ env/
 
 # Habr drafts (private)
 docs/habr/
+habr-article-*.md
 
 # Benchmark outputs
 benchmark/results/
