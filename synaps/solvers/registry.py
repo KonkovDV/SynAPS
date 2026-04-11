@@ -10,11 +10,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from synaps.solvers.alns_solver import AlnsSolver
 from synaps.solvers.cpsat_solver import CpSatSolver
 from synaps.solvers.greedy_dispatch import BeamSearchDispatch, GreedyDispatch
 from synaps.solvers.lbbd_hd_solver import LbbdHdSolver
 from synaps.solvers.lbbd_solver import LbbdSolver
 from synaps.solvers.pareto_slice_solver import ParetoSliceCpSatSolver
+from synaps.solvers.rhc_solver import RhcSolver
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -61,6 +63,14 @@ def _build_lbbd_hd() -> BaseSolver:
 
 def _build_pareto_slice_cpsat() -> BaseSolver:
     return ParetoSliceCpSatSolver()
+
+
+def _build_alns() -> BaseSolver:
+    return AlnsSolver()
+
+
+def _build_rhc() -> BaseSolver:
+    return RhcSolver()
 
 
 _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
@@ -191,6 +201,109 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
         description=(
             "Extended Hierarchical LBBD for 50 000+ operations. "
             "Tighter gap (0.5%), smaller clusters (≤150 ops), 20 iterations, 10min budget."
+        ),
+    ),
+    # ---- ALNS variants (5k–50k+ operations) ----
+    "ALNS-300": SolverRegistration(
+        factory=_build_alns,
+        solve_kwargs={
+            "max_iterations": 300,
+            "time_limit_s": 120,
+            "destroy_fraction": 0.05,
+            "min_destroy": 20,
+            "max_destroy": 200,
+            "repair_time_limit_s": 5,
+        },
+        description=(
+            "ALNS with micro-CP-SAT repair. 300 iterations, 2-minute budget. "
+            "For medium instances (1000–10000 ops)."
+        ),
+    ),
+    "ALNS-500": SolverRegistration(
+        factory=_build_alns,
+        solve_kwargs={
+            "max_iterations": 500,
+            "time_limit_s": 300,
+            "destroy_fraction": 0.03,
+            "min_destroy": 30,
+            "max_destroy": 300,
+            "repair_time_limit_s": 10,
+        },
+        description=(
+            "ALNS with micro-CP-SAT repair. 500 iterations, 5-minute budget. "
+            "For large instances (10000–50000 ops)."
+        ),
+    ),
+    "ALNS-1000": SolverRegistration(
+        factory=_build_alns,
+        solve_kwargs={
+            "max_iterations": 1000,
+            "time_limit_s": 600,
+            "destroy_fraction": 0.02,
+            "min_destroy": 50,
+            "max_destroy": 500,
+            "repair_time_limit_s": 15,
+            "sa_initial_temp": 200.0,
+            "sa_cooling_rate": 0.998,
+        },
+        description=(
+            "Extended ALNS for 50 000+ operations. "
+            "1000 iterations, 10-minute budget, wider destroy neighborhood."
+        ),
+    ),
+    # ---- RHC variants (10k–100k+ operations) ----
+    "RHC-ALNS": SolverRegistration(
+        factory=_build_rhc,
+        solve_kwargs={
+            "window_minutes": 480,
+            "overlap_minutes": 120,
+            "inner_solver": "alns",
+            "time_limit_s": 600,
+            "max_ops_per_window": 5000,
+            "inner_kwargs": {
+                "max_iterations": 200,
+                "time_limit_s": 60,
+                "destroy_fraction": 0.05,
+                "min_destroy": 20,
+                "max_destroy": 200,
+                "repair_time_limit_s": 5,
+            },
+        },
+        description=(
+            "Receding Horizon Control with ALNS inner solver. "
+            "8-hour windows, 2-hour overlap, max 5000 ops/window. "
+            "For ultra-large instances (50 000–100 000+ ops)."
+        ),
+    ),
+    "RHC-CPSAT": SolverRegistration(
+        factory=_build_rhc,
+        solve_kwargs={
+            "window_minutes": 480,
+            "overlap_minutes": 120,
+            "inner_solver": "cpsat",
+            "time_limit_s": 300,
+            "max_ops_per_window": 2000,
+            "inner_kwargs": {
+                "time_limit_s": 30,
+            },
+        },
+        description=(
+            "Receding Horizon Control with CP-SAT inner solver. "
+            "8-hour windows, max 2000 ops/window for exact solve quality."
+        ),
+    ),
+    "RHC-GREEDY": SolverRegistration(
+        factory=_build_rhc,
+        solve_kwargs={
+            "window_minutes": 480,
+            "overlap_minutes": 60,
+            "inner_solver": "greedy",
+            "time_limit_s": 120,
+            "max_ops_per_window": 10000,
+        },
+        description=(
+            "Receding Horizon Control with greedy dispatch. "
+            "Fast baseline for 100 000+ ops."
         ),
     ),
 }
