@@ -16,6 +16,8 @@ the CP-SAT / ALNS sweet spot (≤5000 ops per window).
 
 from __future__ import annotations
 
+from collections import deque
+from heapq import nsmallest
 import logging
 import time
 from datetime import timedelta
@@ -24,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 from synaps.model import (
     Assignment,
     ObjectiveValues,
+    Operation,
     ScheduleProblem,
     ScheduleResult,
     SolverStatus,
@@ -84,6 +87,8 @@ class RhcSolver(BaseSolver):
         # Build inner solver
         inner_solver = self._make_inner_solver(inner_solver_name)
 
+        preprocess_t0 = time.monotonic()
+
         # Compute "earliest possible start" for each operation based on precedence depth
         op_earliest: dict[UUID, float] = {}
         self._compute_earliest_starts(problem, op_earliest)
@@ -93,15 +98,50 @@ class RhcSolver(BaseSolver):
         for order in problem.orders:
             order_due_offsets[order.id] = (order.due_date - horizon_start).total_seconds() / 60.0
 
+        op_positions = {op.id: index for index, op in enumerate(problem.operations)}
+        ops_sorted_by_earliest = sorted(
+            problem.operations,
+            key=lambda op: (
+                op_earliest.get(op.id, 0.0),
+                order_due_offsets.get(op.order_id, horizon_minutes),
+                op.seq_in_order,
+            ),
+        )
+        ops_sorted_by_due = sorted(
+            problem.operations,
+            key=lambda op: (
+                order_due_offsets.get(op.order_id, horizon_minutes),
+                op.seq_in_order,
+                op_earliest.get(op.id, 0.0),
+            ),
+        )
+        preprocessing_ms = int((time.monotonic() - preprocess_t0) * 1000)
+
         # Sliding windows
         committed_assignments: list[Assignment] = []
+        committed_assignment_by_op: dict[UUID, Assignment] = {}
         committed_op_ids: set[UUID] = set()
         window_start_offset = 0.0
         window_count = 0
+        earliest_cursor = 0
+        due_cursor = 0
+        earliest_candidate_ids: set[UUID] = set()
+        due_candidate_ids: set[UUID] = set()
+        peak_window_candidate_count = 0
+        due_pressure_selected_ids: set[UUID] = set()
+        earliest_frontier_advances = 0
+        due_frontier_advances = 0
+        time_limit_reached = False
+        fallback_repair_attempted = False
+        fallback_repair_skipped = False
+        fallback_repair_time_limited = False
+
+        def global_time_exceeded() -> bool:
+            return (time.monotonic() - t0) > time_limit_s
 
         while window_start_offset < horizon_minutes:
-            elapsed = time.monotonic() - t0
-            if elapsed > time_limit_s:
+            if global_time_exceeded():
+                time_limit_reached = True
                 logger.warning("RHC time limit reached at window %d", window_count)
                 break
 
@@ -109,57 +149,78 @@ class RhcSolver(BaseSolver):
             window_end_offset = min(window_end_offset, horizon_minutes)
             window_count += 1
 
-            # Select operations for this window:
-            # - Not yet committed
-            # - Earliest start falls within [window_start, window_end) OR
-            # - Due date falls within this window
-            window_ops = []
-            for op in problem.operations:
-                if op.id in committed_op_ids:
-                    continue
-                earliest = op_earliest.get(op.id, 0.0)
-                due = order_due_offsets.get(op.order_id, horizon_minutes)
-                # Include if the op's earliest start or due date is in this window
-                if earliest < window_end_offset:
-                    window_ops.append(op)
+            while earliest_cursor < len(ops_sorted_by_earliest):
+                op = ops_sorted_by_earliest[earliest_cursor]
+                if op_earliest.get(op.id, 0.0) >= window_end_offset:
+                    break
+                earliest_candidate_ids.add(op.id)
+                earliest_cursor += 1
+                earliest_frontier_advances += 1
 
-            if not window_ops:
+            while due_cursor < len(ops_sorted_by_due):
+                op = ops_sorted_by_due[due_cursor]
+                if order_due_offsets.get(op.order_id, horizon_minutes) >= window_end_offset:
+                    break
+                due_candidate_ids.add(op.id)
+                due_cursor += 1
+                due_frontier_advances += 1
+
+            window_candidate_ids = {
+                op_id
+                for op_id in (earliest_candidate_ids | due_candidate_ids)
+                if op_id not in committed_op_ids
+            }
+            peak_window_candidate_count = max(
+                peak_window_candidate_count,
+                len(window_candidate_ids),
+            )
+
+            if not window_candidate_ids:
                 window_start_offset += window_minutes
                 continue
 
             # Cap at max_ops_per_window (prioritize by due date, then precedence)
-            if len(window_ops) > max_ops_per_window:
-                window_ops.sort(
+            if len(window_candidate_ids) > max_ops_per_window:
+                window_ops = nsmallest(
+                    max_ops_per_window,
+                    (ops_by_id[op_id] for op_id in window_candidate_ids),
                     key=lambda op: (
                         order_due_offsets.get(op.order_id, horizon_minutes),
                         op.seq_in_order,
+                        op_earliest.get(op.id, 0.0),
+                    ),
+                )
+            else:
+                window_ops = sorted(
+                    (ops_by_id[op_id] for op_id in window_candidate_ids),
+                    key=lambda op: (
+                        order_due_offsets.get(op.order_id, horizon_minutes),
+                        op.seq_in_order,
+                        op_earliest.get(op.id, 0.0),
                     )
                 )
-                window_ops = window_ops[:max_ops_per_window]
 
-            window_op_ids = {op.id for op in window_ops}
+            due_pressure_selected_ids.update(
+                {
+                    op.id
+                    for op in window_ops
+                    if op.id in due_candidate_ids and op.id not in earliest_candidate_ids
+                }
+            )
 
-            # Also include any predecessor that hasn't been committed yet
-            extra_predecessors = []
-            for op in window_ops:
-                if op.predecessor_op_id and op.predecessor_op_id not in committed_op_ids:
-                    if op.predecessor_op_id not in window_op_ids:
-                        pred = ops_by_id.get(op.predecessor_op_id)
-                        if pred:
-                            extra_predecessors.append(pred)
-                            window_op_ids.add(pred.id)
-            window_ops.extend(extra_predecessors)
+            window_op_ids = self._expand_predecessor_closure(
+                {op.id for op in window_ops},
+                ops_by_id,
+                committed_op_ids,
+            )
 
             # Clear predecessor links that point to committed (frozen) operations
             # so the sub-problem passes Pydantic validation
-            from copy import deepcopy
-
             clean_window_ops = []
-            for op in window_ops:
+            for op_id in sorted(window_op_ids, key=op_positions.__getitem__):
+                op = ops_by_id[op_id]
                 if op.predecessor_op_id and op.predecessor_op_id not in window_op_ids:
-                    op_copy = deepcopy(op)
-                    op_copy.predecessor_op_id = None
-                    clean_window_ops.append(op_copy)
+                    clean_window_ops.append(op.model_copy(update={"predecessor_op_id": None}))
                 else:
                     clean_window_ops.append(op)
 
@@ -168,149 +229,273 @@ class RhcSolver(BaseSolver):
                 window_count, window_start_offset, window_end_offset, len(clean_window_ops),
             )
 
-            # Solve the window by greedy dispatch on its operations, building
-            # on top of already-committed assignments.
-            scheduled_so_far = list(committed_assignments)
-            ops_by_order = {op.order_id: orders_by_id.get(op.order_id) for op in window_ops}
-            ready_pool = list(clean_window_ops)
-            window_scheduled_ids: set[UUID] = set()
+            # ------ Attempt inner solver on the window sub-problem ------
+            window_solved_via_inner = False
+            commit_boundary = window_start_offset + window_minutes
 
-            # Sort by priority desc, then seq asc for deterministic ordering
-            ready_pool.sort(
-                key=lambda op: (
-                    -(orders_by_id[op.order_id].priority if op.order_id in orders_by_id else 0),
-                    op.seq_in_order,
-                ),
-            )
+            if inner_solver_name != "greedy":
+                try:
+                    # Build a sub-problem for just this window's operations
+                    window_order_ids = {op.order_id for op in clean_window_ops}
+                    sub_problem = ScheduleProblem(
+                        states=problem.states,
+                        orders=[o for o in problem.orders if o.id in window_order_ids],
+                        operations=clean_window_ops,
+                        work_centers=problem.work_centers,
+                        setup_matrix=problem.setup_matrix,
+                        auxiliary_resources=problem.auxiliary_resources,
+                        aux_requirements=[
+                            r for r in problem.aux_requirements
+                            if r.operation_id in window_op_ids
+                        ],
+                        planning_horizon_start=problem.planning_horizon_start,
+                        planning_horizon_end=problem.planning_horizon_end,
+                    )
 
-            max_inner_iters = len(ready_pool) * 3
-            inner_iter = 0
-            while ready_pool and inner_iter < max_inner_iters:
-                inner_iter += 1
-                placed_any = False
-                for op in list(ready_pool):
-                    # Check predecessor constraint
-                    if op.predecessor_op_id:
-                        if (
+                    # Compute remaining time budget for this window
+                    remaining_time = max(10.0, time_limit_s - (time.monotonic() - t0))
+                    per_window_limit = min(remaining_time * 0.8, 60.0)
+
+                    inner_result = inner_solver.solve(
+                        sub_problem,
+                        time_limit_s=per_window_limit,
+                        **inner_kwargs,
+                    )
+
+                    if (
+                        inner_result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+                        and inner_result.assignments
+                    ):
+                        # Map inner solver assignments into committed set
+                        committed_now = 0
+                        for a in inner_result.assignments:
+                            if a.operation_id not in committed_op_ids:
+                                start_offset = (
+                                    (a.start_time - horizon_start).total_seconds() / 60.0
+                                )
+                                if (
+                                    start_offset < commit_boundary
+                                    or window_end_offset >= horizon_minutes
+                                ):
+                                    committed_assignments.append(a)
+                                    committed_assignment_by_op[a.operation_id] = a
+                                    committed_op_ids.add(a.operation_id)
+                                    committed_now += 1
+                        window_start_offset += window_minutes
+                        window_solved_via_inner = True
+                        logger.info(
+                            "RHC window %d solved by %s inner solver "
+                            "(%d ops committed)",
+                            window_count,
+                            inner_solver_name,
+                            committed_now,
+                        )
+                except Exception:
+                    logger.warning(
+                        "RHC window %d: inner solver '%s' failed, falling back to greedy",
+                        window_count, inner_solver_name,
+                        exc_info=True,
+                    )
+
+            # ------ Fallback: greedy dispatch (original behavior) ------
+            if not window_solved_via_inner:
+                # Solve the window by greedy dispatch on its operations, building
+                # on top of already-committed assignments.
+                scheduled_so_far = list(committed_assignments)
+                scheduled_by_op = dict(committed_assignment_by_op)
+                ready_pool = list(clean_window_ops)
+                window_scheduled_ids: set[UUID] = set()
+
+                # Sort by priority desc, then seq asc for deterministic ordering
+                ready_pool.sort(
+                    key=lambda op: (
+                        -(orders_by_id[op.order_id].priority if op.order_id in orders_by_id else 0),
+                        op.seq_in_order,
+                    ),
+                )
+
+                max_inner_iters = len(ready_pool) * 3
+                inner_iter = 0
+                while ready_pool and inner_iter < max_inner_iters:
+                    if global_time_exceeded():
+                        time_limit_reached = True
+                        logger.warning(
+                            "RHC time limit reached during window %d greedy scheduling",
+                            window_count,
+                        )
+                        break
+                    inner_iter += 1
+                    placed_any = False
+                    for op in list(ready_pool):
+                        if global_time_exceeded():
+                            time_limit_reached = True
+                            logger.warning(
+                                "RHC time limit reached during window %d greedy scheduling",
+                                window_count,
+                            )
+                            break
+                        # Check predecessor constraint
+                        if op.predecessor_op_id and (
                             op.predecessor_op_id not in committed_op_ids
                             and op.predecessor_op_id not in window_scheduled_ids
                         ):
                             continue  # predecessor not yet scheduled
 
-                    # Find predecessor end time
-                    pred_end = 0.0
-                    if op.predecessor_op_id:
-                        for a in scheduled_so_far:
-                            if a.operation_id == op.predecessor_op_id:
-                                pred_end = (a.end_time - horizon_start).total_seconds() / 60.0
-                                break
+                        # Find predecessor end time
+                        pred_end = 0.0
+                        if op.predecessor_op_id:
+                            pred_assignment = scheduled_by_op.get(op.predecessor_op_id)
+                            if pred_assignment is not None:
+                                pred_end = (
+                                    pred_assignment.end_time - horizon_start
+                                ).total_seconds() / 60.0
 
-                    eligible = (
-                        op.eligible_wc_ids
-                        if op.eligible_wc_ids
-                        else [wc.id for wc in problem.work_centers]
-                    )
-
-                    best_slot = None
-                    best_wc = None
-                    for wc_id in eligible:
-                        slot = find_earliest_feasible_slot(
-                            dispatch_context, scheduled_so_far, op, wc_id, pred_end,
+                        eligible = (
+                            op.eligible_wc_ids
+                            if op.eligible_wc_ids
+                            else [wc.id for wc in problem.work_centers]
                         )
-                        if slot is None:
-                            continue
-                        if best_slot is None or slot.end_offset < best_slot.end_offset:
-                            best_slot = slot
-                            best_wc = wc_id
 
-                    if best_slot and best_wc:
-                        assignment = Assignment(
-                            operation_id=op.id,
-                            work_center_id=best_wc,
-                            start_time=horizon_start + timedelta(minutes=best_slot.start_offset),
-                            end_time=horizon_start + timedelta(minutes=best_slot.end_offset),
-                            setup_minutes=best_slot.setup_minutes,
-                            aux_resource_ids=best_slot.aux_resource_ids,
-                        )
-                        scheduled_so_far.append(assignment)
-                        window_scheduled_ids.add(op.id)
-                        ready_pool.remove(op)
-                        placed_any = True
+                        best_slot = None
+                        best_wc = None
+                        for wc_id in eligible:
+                            slot = find_earliest_feasible_slot(
+                                dispatch_context, scheduled_so_far, op, wc_id, pred_end,
+                            )
+                            if slot is None:
+                                continue
+                            if best_slot is None or slot.end_offset < best_slot.end_offset:
+                                best_slot = slot
+                                best_wc = wc_id
 
-                if not placed_any:
-                    break  # no progress possible
+                        if best_slot and best_wc:
+                            start = horizon_start + timedelta(
+                                minutes=best_slot.start_offset,
+                            )
+                            end = horizon_start + timedelta(
+                                minutes=best_slot.end_offset,
+                            )
+                            assignment = Assignment(
+                                operation_id=op.id,
+                                work_center_id=best_wc,
+                                start_time=start,
+                                end_time=end,
+                                setup_minutes=best_slot.setup_minutes,
+                                aux_resource_ids=best_slot.aux_resource_ids,
+                            )
+                            scheduled_so_far.append(assignment)
+                            scheduled_by_op[op.id] = assignment
+                            window_scheduled_ids.add(op.id)
+                            ready_pool.remove(op)
+                            placed_any = True
 
-            # Commit assignments from this window
-            commit_boundary = window_start_offset + window_minutes
-            for a in scheduled_so_far:
-                if a.operation_id in committed_op_ids:
-                    continue
-                if a.operation_id not in window_scheduled_ids:
-                    continue
-                start_offset = (a.start_time - horizon_start).total_seconds() / 60.0
-                # Commit if starts before the overlap boundary, or if it's the last window
-                if start_offset < commit_boundary or window_end_offset >= horizon_minutes:
-                    committed_assignments.append(a)
-                    committed_op_ids.add(a.operation_id)
+                    if time_limit_reached or not placed_any:
+                        break  # no progress possible
 
-            window_start_offset += window_minutes
+                # Commit assignments from this window
+                for a in scheduled_so_far:
+                    if a.operation_id in committed_op_ids:
+                        continue
+                    if a.operation_id not in window_scheduled_ids:
+                        continue
+                    start_offset = (a.start_time - horizon_start).total_seconds() / 60.0
+                    # Commit if starts before the overlap boundary, or if it's the last window
+                    if start_offset < commit_boundary or window_end_offset >= horizon_minutes:
+                        committed_assignments.append(a)
+                        committed_assignment_by_op[a.operation_id] = a
+                        committed_op_ids.add(a.operation_id)
+
+                window_start_offset += window_minutes
+                if time_limit_reached:
+                    break
 
         # ------- Handle any remaining unscheduled operations -------
         unscheduled_ids = {op.id for op in problem.operations} - committed_op_ids
         if unscheduled_ids:
-            logger.warning(
-                "RHC: %d operations unscheduled after all windows; "
-                "running fallback greedy repair",
-                len(unscheduled_ids),
-            )
-            remaining_ops = [op for op in problem.operations if op.id in unscheduled_ids]
-            remaining_ops.sort(key=lambda op: op.seq_in_order)
-            fallback_iters = len(remaining_ops) * 3
-            fi = 0
-            while remaining_ops and fi < fallback_iters:
-                fi += 1
-                placed = False
-                for op in list(remaining_ops):
-                    if op.predecessor_op_id and op.predecessor_op_id not in committed_op_ids:
-                        continue
-                    pred_end = 0.0
-                    if op.predecessor_op_id:
-                        for a in committed_assignments:
-                            if a.operation_id == op.predecessor_op_id:
-                                pred_end = (a.end_time - horizon_start).total_seconds() / 60.0
-                                break
-                    eligible = (
-                        op.eligible_wc_ids
-                        if op.eligible_wc_ids
-                        else [wc.id for wc in problem.work_centers]
-                    )
-                    best_slot = None
-                    best_wc = None
-                    for wc_id in eligible:
-                        slot = find_earliest_feasible_slot(
-                            dispatch_context, committed_assignments, op, wc_id, pred_end,
+            if time_limit_reached or global_time_exceeded():
+                fallback_repair_skipped = True
+                logger.warning(
+                    "RHC: %d operations unscheduled after all windows; "
+                    "skipping fallback greedy repair because the global time limit is exhausted",
+                    len(unscheduled_ids),
+                )
+            else:
+                fallback_repair_attempted = True
+                logger.warning(
+                    "RHC: %d operations unscheduled after all windows; "
+                    "running fallback greedy repair",
+                    len(unscheduled_ids),
+                )
+                remaining_ops = [op for op in problem.operations if op.id in unscheduled_ids]
+                remaining_ops.sort(key=lambda op: op.seq_in_order)
+                fallback_iters = len(remaining_ops) * 3
+                fi = 0
+                while remaining_ops and fi < fallback_iters:
+                    if global_time_exceeded():
+                        time_limit_reached = True
+                        fallback_repair_time_limited = True
+                        logger.warning(
+                            "RHC fallback greedy repair stopped because the global time limit is exhausted"
                         )
-                        if slot is None:
-                            continue
-                        if best_slot is None or slot.end_offset < best_slot.end_offset:
-                            best_slot = slot
-                            best_wc = wc_id
-                    if best_slot and best_wc:
-                        committed_assignments.append(
-                            Assignment(
-                                operation_id=op.id,
-                                work_center_id=best_wc,
-                                start_time=horizon_start + timedelta(minutes=best_slot.start_offset),
-                                end_time=horizon_start + timedelta(minutes=best_slot.end_offset),
-                                setup_minutes=best_slot.setup_minutes,
-                                aux_resource_ids=best_slot.aux_resource_ids,
+                        break
+                    fi += 1
+                    placed = False
+                    for op in list(remaining_ops):
+                        if global_time_exceeded():
+                            time_limit_reached = True
+                            fallback_repair_time_limited = True
+                            logger.warning(
+                                "RHC fallback greedy repair stopped because the global time limit is exhausted"
                             )
+                            break
+                        if op.predecessor_op_id and op.predecessor_op_id not in committed_op_ids:
+                            continue
+                        pred_end = 0.0
+                        if op.predecessor_op_id:
+                            pred_assignment = committed_assignment_by_op.get(op.predecessor_op_id)
+                            if pred_assignment is not None:
+                                pred_end = (
+                                    pred_assignment.end_time - horizon_start
+                                ).total_seconds() / 60.0
+                        eligible = (
+                            op.eligible_wc_ids
+                            if op.eligible_wc_ids
+                            else [wc.id for wc in problem.work_centers]
                         )
-                        committed_op_ids.add(op.id)
-                        remaining_ops.remove(op)
-                        placed = True
-                if not placed:
-                    break
+                        best_slot = None
+                        best_wc = None
+                        for wc_id in eligible:
+                            slot = find_earliest_feasible_slot(
+                                dispatch_context, committed_assignments, op, wc_id, pred_end,
+                            )
+                            if slot is None:
+                                continue
+                            if best_slot is None or slot.end_offset < best_slot.end_offset:
+                                best_slot = slot
+                                best_wc = wc_id
+                        if best_slot and best_wc:
+                            start = horizon_start + timedelta(
+                                minutes=best_slot.start_offset,
+                            )
+                            end = horizon_start + timedelta(
+                                minutes=best_slot.end_offset,
+                            )
+                            committed_assignments.append(
+                                Assignment(
+                                    operation_id=op.id,
+                                    work_center_id=best_wc,
+                                    start_time=start,
+                                    end_time=end,
+                                    setup_minutes=best_slot.setup_minutes,
+                                    aux_resource_ids=best_slot.aux_resource_ids,
+                                )
+                            )
+                            committed_assignment_by_op[op.id] = committed_assignments[-1]
+                            committed_op_ids.add(op.id)
+                            remaining_ops.remove(op)
+                            placed = True
+                    if time_limit_reached or not placed:
+                        break
 
         # ------- Final objective evaluation -------
         recompute_assignment_setups(committed_assignments, dispatch_context)
@@ -321,7 +506,15 @@ class RhcSolver(BaseSolver):
                 solver_name=self.name,
                 status=SolverStatus.ERROR,
                 duration_ms=elapsed_ms,
-                metadata={"error": "no assignments produced", "windows": window_count},
+                metadata={
+                    "error": "no assignments produced",
+                    "windows": window_count,
+                    "time_limit_reached": time_limit_reached,
+                    "fallback_repair_attempted": fallback_repair_attempted,
+                    "fallback_repair_skipped": fallback_repair_skipped,
+                    "fallback_repair_time_limited": fallback_repair_time_limited,
+                    "ops_unscheduled": len(problem.operations),
+                },
             )
 
         # Evaluate
@@ -349,6 +542,16 @@ class RhcSolver(BaseSolver):
                 "ops_scheduled": scheduled_count,
                 "ops_total": total_ops,
                 "inner_solver": inner_solver_name,
+                "preprocessing_ms": preprocessing_ms,
+                "peak_window_candidate_count": peak_window_candidate_count,
+                "due_pressure_selected_ops": len(due_pressure_selected_ids),
+                "earliest_frontier_advances": earliest_frontier_advances,
+                "due_frontier_advances": due_frontier_advances,
+                "time_limit_reached": time_limit_reached,
+                "fallback_repair_attempted": fallback_repair_attempted,
+                "fallback_repair_skipped": fallback_repair_skipped,
+                "fallback_repair_time_limited": fallback_repair_time_limited,
+                "ops_unscheduled": total_ops - scheduled_count,
             },
         )
 
@@ -379,30 +582,53 @@ class RhcSolver(BaseSolver):
         """Compute earliest possible start offset for each operation
         based on cumulative processing times through the precedence chain."""
         ops_by_id = {op.id: op for op in problem.operations}
-        wc_by_id = {wc.id: wc for wc in problem.work_centers}
 
-        # Topological processing
+        indegree = {op.id: 0 for op in problem.operations}
         successors: dict[UUID, list[UUID]] = {}
         for op in problem.operations:
             if op.predecessor_op_id:
                 successors.setdefault(op.predecessor_op_id, []).append(op.id)
+                indegree[op.id] += 1
 
-        # BFS from roots
-        queue = []
+        queue: deque[UUID] = deque()
         for op in problem.operations:
-            if op.predecessor_op_id is None:
+            if indegree[op.id] == 0:
                 result[op.id] = 0.0
                 queue.append(op.id)
 
         while queue:
-            current_id = queue.pop(0)
+            current_id = queue.popleft()
             current_op = ops_by_id[current_id]
             current_end = result.get(current_id, 0.0) + current_op.base_duration_min
             for succ_id in successors.get(current_id, []):
                 existing = result.get(succ_id, 0.0)
                 if current_end > existing:
                     result[succ_id] = current_end
-                queue.append(succ_id)
+                indegree[succ_id] -= 1
+                if indegree[succ_id] == 0:
+                    queue.append(succ_id)
+
+    @staticmethod
+    def _expand_predecessor_closure(
+        seed_op_ids: set[UUID],
+        ops_by_id: dict[UUID, Operation],
+        committed_op_ids: set[UUID],
+    ) -> set[UUID]:
+        """Return the transitive unresolved predecessor closure for a window seed set."""
+
+        expanded = set(seed_op_ids)
+        stack = list(seed_op_ids)
+        while stack:
+            current_id = stack.pop()
+            current_op = ops_by_id.get(current_id)
+            if current_op is None or current_op.predecessor_op_id is None:
+                continue
+            predecessor_id = current_op.predecessor_op_id
+            if predecessor_id in committed_op_ids or predecessor_id in expanded:
+                continue
+            expanded.add(predecessor_id)
+            stack.append(predecessor_id)
+        return expanded
 
     @staticmethod
     def _evaluate_final(
@@ -416,7 +642,7 @@ class RhcSolver(BaseSolver):
 
         horizon_start = problem.planning_horizon_start
         ops_by_id = {op.id: op for op in problem.operations}
-        orders_by_id = {o.id: o for o in problem.orders}
+        {o.id: o for o in problem.orders}
 
         makespan = max(
             (a.end_time - horizon_start).total_seconds() / 60.0 for a in assignments

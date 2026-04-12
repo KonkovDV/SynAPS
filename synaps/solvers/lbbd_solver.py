@@ -7,9 +7,12 @@ Decomposes the scheduling problem into:
 Benders cuts tighten the master's capacity estimate iteratively until convergence.
 
 Features:
-    - Greedy ATCS warm-start: seeds initial upper bound from GreedyDispatch (toggle via use_greedy_warm_start).
-    - Parallel subproblem execution via ProcessPoolExecutor for O(K) speedup (toggle via parallel_subproblems).
-    - Four families of Benders cuts: nogood, capacity, setup_cost, load_balance.
+    - Greedy ATCS warm-start: seeds initial upper bound from
+      GreedyDispatch (toggle via use_greedy_warm_start).
+    - Parallel subproblem execution via ProcessPoolExecutor for
+      O(K) speedup (toggle via parallel_subproblems).
+    - Four families of Benders cuts: nogood, capacity,
+      setup_cost, load_balance.
 """
 
 from __future__ import annotations
@@ -318,6 +321,12 @@ class LbbdSolver(BaseSolver):
         for cut in benders_cuts:
             cut_kinds[cut.kind] = cut_kinds.get(cut.kind, 0) + 1
 
+        # Cap reported lower bound: in LBBD the master relaxation with
+        # heuristic cuts (load_balance) can push lb above best_ub,
+        # signaling convergence. Report min(lb, best_ub) so consumers
+        # always see lb <= ub.
+        reported_lb = min(lb, best_ub) if best_ub < float("inf") else lb
+
         return ScheduleResult(
             solver_name=self.name,
             status=status,
@@ -327,9 +336,9 @@ class LbbdSolver(BaseSolver):
             random_seed=random_seed,
             metadata={
                 "iterations": len(iteration_log),
-                "lower_bound": lb,
+                "lower_bound": reported_lb,
                 "upper_bound": best_ub,
-                "gap": (best_ub - lb) / max(best_ub, 1e-9) if best_ub < float("inf") else None,
+                "gap": (best_ub - reported_lb) / max(best_ub, 1e-9) if best_ub < float("inf") else None,
                 "iteration_log": iteration_log,
                 "gap_threshold": gap_threshold,
                 "setup_relaxation": setup_relaxation,
@@ -1055,7 +1064,12 @@ def _solve_single_cluster_worker(
     )
 
     cpsat = CpSatSolver()
-    result = cpsat.solve(sub_problem, time_limit_s=sub_time_limit_s, random_seed=random_seed, num_workers=4)
+    result = cpsat.solve(
+        sub_problem,
+        time_limit_s=sub_time_limit_s,
+        random_seed=random_seed,
+        num_workers=4,
+    )
 
     if result.status in (SolverStatus.INFEASIBLE, SolverStatus.ERROR):
         return None

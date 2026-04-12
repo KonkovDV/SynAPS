@@ -9,7 +9,6 @@ Output goes to stdout as structured JSON lines for downstream analysis.
 from __future__ import annotations
 
 import json
-import sys
 import time
 
 from synaps.benchmarks.instance_generator import generate_large_instance
@@ -51,9 +50,7 @@ def run_benchmark(
         solver = BeamSearchDispatch(beam_width=3)
     elif solver_name == "alns":
         solver = AlnsSolver()
-    elif solver_name == "rhc-alns":
-        solver = RhcSolver()
-    elif solver_name == "rhc-greedy":
+    elif solver_name == "rhc-alns" or solver_name == "rhc-greedy":
         solver = RhcSolver()
     else:
         raise ValueError(f"Unknown solver: {solver_name}")
@@ -63,7 +60,9 @@ def run_benchmark(
     solve_ms = int((time.monotonic() - t_solve) * 1000)
 
     # Verify
+    t_verify = time.monotonic()
     verification = verify_schedule_result(problem, result)
+    verify_ms = int((time.monotonic() - t_verify) * 1000)
 
     return {
         "n_ops": n_ops,
@@ -80,6 +79,7 @@ def run_benchmark(
         "assigned_ops": len(result.assignments),
         "solve_ms": solve_ms,
         "gen_ms": gen_ms,
+        "verify_ms": verify_ms,
         "sdst_memory_bytes": sdst.memory_bytes(),
         "metadata": result.metadata,
     }
@@ -102,7 +102,10 @@ BENCHMARK_SUITE = [
     }},
 
     # 10K — ALNS + RHC
-    {"n_ops": 10000, "n_machines": 50, "n_states": 15, "solver_name": "greedy", "solver_kwargs": {}},
+    {
+        "n_ops": 10000, "n_machines": 50, "n_states": 15,
+        "solver_name": "greedy", "solver_kwargs": {},
+    },
     {"n_ops": 10000, "n_machines": 50, "n_states": 15, "solver_name": "alns", "solver_kwargs": {
         "max_iterations": 300, "time_limit_s": 120, "repair_time_limit_s": 5,
         "min_destroy": 30, "max_destroy": 200,
@@ -114,12 +117,19 @@ BENCHMARK_SUITE = [
     }},
 
     # 50K — RHC-ALNS is the primary path
-    {"n_ops": 50000, "n_machines": 100, "n_states": 20, "solver_name": "greedy", "solver_kwargs": {}},
-    {"n_ops": 50000, "n_machines": 100, "n_states": 20, "solver_name": "rhc-greedy", "solver_kwargs": {
+    {
+        "n_ops": 50000, "n_machines": 100, "n_states": 20,
+        "solver_name": "greedy", "solver_kwargs": {},
+    },
+    {
+        "n_ops": 50000, "n_machines": 100, "n_states": 20,
+        "solver_name": "rhc-greedy", "solver_kwargs": {
         "window_minutes": 480, "overlap_minutes": 60, "inner_solver": "greedy",
         "time_limit_s": 120, "max_ops_per_window": 10000,
     }},
-    {"n_ops": 50000, "n_machines": 100, "n_states": 20, "solver_name": "rhc-alns", "solver_kwargs": {
+    {
+        "n_ops": 50000, "n_machines": 100, "n_states": 20,
+        "solver_name": "rhc-alns", "solver_kwargs": {
         "window_minutes": 480, "overlap_minutes": 120, "inner_solver": "alns",
         "time_limit_s": 300, "max_ops_per_window": 5000,
         "inner_kwargs": {
@@ -140,7 +150,11 @@ def main() -> None:
     for i, config in enumerate(BENCHMARK_SUITE):
         n_ops = config["n_ops"]
         solver = config["solver_name"]
-        print(f"\n[{i + 1}/{len(BENCHMARK_SUITE)}] {solver} @ {n_ops:,} ops ... ", end="", flush=True)
+        print(
+            f"\n[{i + 1}/{len(BENCHMARK_SUITE)}] "
+            f"{solver} @ {n_ops:,} ops ... ",
+            end="", flush=True,
+        )
 
         try:
             result = run_benchmark(**config)

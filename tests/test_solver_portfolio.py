@@ -32,6 +32,12 @@ def test_available_solver_configs_matches_public_portfolio() -> None:
         "LBBD-5-HD",
         "LBBD-10-HD",
         "LBBD-20-HD",
+        "ALNS-300",
+        "ALNS-500",
+        "ALNS-1000",
+        "RHC-ALNS",
+        "RHC-CPSAT",
+        "RHC-GREEDY",
     ]
 
 
@@ -152,3 +158,81 @@ def test_route_solver_treats_material_only_transitions_as_setup_sensitive() -> N
     )
 
     assert decision.solver_config == "CPSAT-EPS-SETUP-110"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ALNS / RHC routing tests
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def test_route_solver_alns_300_for_5k_ops_with_latency_budget() -> None:
+    """5K-op instance with >120s latency should route to ALNS-300."""
+    problem = make_simple_problem(n_orders=1250, ops_per_order=4)
+
+    decision = route_solver_config(
+        problem,
+        context=SolverRoutingContext(
+            regime=SolveRegime.NOMINAL,
+            preferred_max_latency_s=180,
+        ),
+    )
+
+    assert decision.solver_config == "ALNS-300"
+    assert "ALNS" in decision.reason
+
+
+def test_route_solver_alns_500_for_20k_ops_with_latency_budget() -> None:
+    """20K-op instance with >300s latency should route to ALNS-500."""
+    problem = make_simple_problem(n_orders=5000, ops_per_order=4)
+
+    decision = route_solver_config(
+        problem,
+        context=SolverRoutingContext(
+            regime=SolveRegime.NOMINAL,
+            preferred_max_latency_s=600,
+        ),
+    )
+
+    assert decision.solver_config == "ALNS-500"
+    assert "ALNS" in decision.reason
+
+
+def test_route_solver_rhc_alns_for_60k_ops_with_latency_budget() -> None:
+    """60K-op instance with >600s latency should route to RHC-ALNS."""
+    problem = make_simple_problem(n_orders=15000, ops_per_order=4)
+
+    decision = route_solver_config(
+        problem,
+        context=SolverRoutingContext(
+            regime=SolveRegime.NOMINAL,
+            preferred_max_latency_s=900,
+        ),
+    )
+
+    assert decision.solver_config == "RHC-ALNS"
+    assert "Receding Horizon" in decision.reason
+
+
+def test_route_solver_lbbd_for_large_ops_without_latency_budget() -> None:
+    """Large instance without explicit latency budget should still route to LBBD-HD."""
+    problem = make_simple_problem(n_orders=2500, ops_per_order=4)
+
+    decision = route_solver_config(problem)
+
+    assert decision.solver_config == "LBBD-10-HD"
+
+
+def test_route_solver_exact_required_bypasses_alns() -> None:
+    """Exact requirement should skip ALNS even with generous latency budget."""
+    problem = make_simple_problem(n_orders=1250, ops_per_order=4)
+
+    decision = route_solver_config(
+        problem,
+        context=SolverRoutingContext(
+            exact_required=True,
+            preferred_max_latency_s=600,
+        ),
+    )
+
+    # exact_required should route to LBBD, not ALNS
+    assert "LBBD" in decision.solver_config

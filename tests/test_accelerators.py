@@ -62,3 +62,59 @@ def test_compute_atcs_log_score_uses_native_backend_when_available(
     assert calls["args"] == (1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0)
     assert status["native_available"] is True
     assert status["atcs_log_score_backend"] == "native"
+
+
+def test_resource_capacity_window_matches_python_reference() -> None:
+    feasible = accelerators.resource_capacity_window_is_feasible(
+        window_starts=[0.0, 18.0],
+        window_ends=[15.0, 36.0],
+        window_quantities=[1, 1],
+        candidate_start=15.0,
+        candidate_end=18.0,
+        requested_quantity=1,
+        pool_size=1,
+    )
+
+    infeasible = accelerators.resource_capacity_window_is_feasible(
+        window_starts=[0.0, 18.0],
+        window_ends=[15.0, 36.0],
+        window_quantities=[1, 1],
+        candidate_start=10.0,
+        candidate_end=20.0,
+        requested_quantity=1,
+        pool_size=1,
+    )
+
+    assert feasible is True
+    assert infeasible is False
+
+
+def test_resource_capacity_window_uses_native_backend_when_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: dict[str, tuple[object, ...]] = {}
+
+    def fake_native(*args: object) -> bool:
+        calls["args"] = args
+        return True
+
+    monkeypatch.setattr(
+        accelerators,
+        "_native_resource_capacity_window_is_feasible",
+        fake_native,
+    )
+
+    result = accelerators.resource_capacity_window_is_feasible(
+        window_starts=[0.0],
+        window_ends=[5.0],
+        window_quantities=[1],
+        candidate_start=5.0,
+        candidate_end=10.0,
+        requested_quantity=1,
+        pool_size=1,
+    )
+    status = accelerators.get_acceleration_status()
+
+    assert result is True
+    assert calls["args"] == ([0.0], [5.0], [1], 5.0, 10.0, 1, 1)
+    assert status["resource_capacity_backend"] == "native"

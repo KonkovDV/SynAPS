@@ -17,7 +17,6 @@ from uuid import uuid4
 import pytest
 
 from synaps.model import (
-    ObjectiveValues,
     Operation,
     Order,
     ScheduleProblem,
@@ -27,7 +26,6 @@ from synaps.model import (
     WorkCenter,
 )
 from synaps.solvers.sdst_matrix import SdstMatrix
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Fixtures
@@ -55,12 +53,30 @@ def _make_3state_problem(n_orders: int = 10, ops_per_order: int = 3) -> Schedule
         WorkCenter(id=WC2, code="M2", capability_group="grp", speed_factor=1.2),
     ]
     setup_matrix = [
-        SetupEntry(work_center_id=WC1, from_state_id=SA, to_state_id=SB, setup_minutes=10, material_loss=1.0),
-        SetupEntry(work_center_id=WC1, from_state_id=SB, to_state_id=SA, setup_minutes=15, material_loss=2.0),
-        SetupEntry(work_center_id=WC1, from_state_id=SA, to_state_id=SC, setup_minutes=20, material_loss=0.5),
-        SetupEntry(work_center_id=WC1, from_state_id=SC, to_state_id=SA, setup_minutes=12, material_loss=0.8),
-        SetupEntry(work_center_id=WC1, from_state_id=SB, to_state_id=SC, setup_minutes=8, material_loss=1.5),
-        SetupEntry(work_center_id=WC1, from_state_id=SC, to_state_id=SB, setup_minutes=18, material_loss=3.0),
+        SetupEntry(
+            work_center_id=WC1, from_state_id=SA, to_state_id=SB,
+            setup_minutes=10, material_loss=1.0,
+        ),
+        SetupEntry(
+            work_center_id=WC1, from_state_id=SB, to_state_id=SA,
+            setup_minutes=15, material_loss=2.0,
+        ),
+        SetupEntry(
+            work_center_id=WC1, from_state_id=SA, to_state_id=SC,
+            setup_minutes=20, material_loss=0.5,
+        ),
+        SetupEntry(
+            work_center_id=WC1, from_state_id=SC, to_state_id=SA,
+            setup_minutes=12, material_loss=0.8,
+        ),
+        SetupEntry(
+            work_center_id=WC1, from_state_id=SB, to_state_id=SC,
+            setup_minutes=8, material_loss=1.5,
+        ),
+        SetupEntry(
+            work_center_id=WC1, from_state_id=SC, to_state_id=SB,
+            setup_minutes=18, material_loss=3.0,
+        ),
         SetupEntry(work_center_id=WC2, from_state_id=SA, to_state_id=SB, setup_minutes=8),
         SetupEntry(work_center_id=WC2, from_state_id=SB, to_state_id=SA, setup_minutes=12),
         SetupEntry(work_center_id=WC2, from_state_id=SA, to_state_id=SC, setup_minutes=15),
@@ -107,6 +123,117 @@ def _make_3state_problem(n_orders: int = 10, ops_per_order: int = 3) -> Schedule
         setup_matrix=setup_matrix,
         planning_horizon_start=HORIZON_START,
         planning_horizon_end=HORIZON_END,
+    )
+
+
+def _make_due_pressure_chain_problem() -> ScheduleProblem:
+    """Build a chain where due-date pressure should pull deep successors into the first RHC window."""
+    state_id = uuid4()
+    work_center_id = uuid4()
+    order_id = uuid4()
+
+    op1_id = uuid4()
+    op2_id = uuid4()
+    op3_id = uuid4()
+
+    return ScheduleProblem(
+        states=[State(id=state_id, code="DUE", label="Due Pressure")],
+        orders=[
+            Order(
+                id=order_id,
+                external_ref="DUE-0001",
+                due_date=HORIZON_START + timedelta(minutes=60),
+                priority=1_000,
+            )
+        ],
+        operations=[
+            Operation(
+                id=op1_id,
+                order_id=order_id,
+                seq_in_order=0,
+                state_id=state_id,
+                base_duration_min=180,
+                eligible_wc_ids=[work_center_id],
+                predecessor_op_id=None,
+            ),
+            Operation(
+                id=op2_id,
+                order_id=order_id,
+                seq_in_order=1,
+                state_id=state_id,
+                base_duration_min=180,
+                eligible_wc_ids=[work_center_id],
+                predecessor_op_id=op1_id,
+            ),
+            Operation(
+                id=op3_id,
+                order_id=order_id,
+                seq_in_order=2,
+                state_id=state_id,
+                base_duration_min=15,
+                eligible_wc_ids=[work_center_id],
+                predecessor_op_id=op2_id,
+            ),
+        ],
+        work_centers=[
+            WorkCenter(
+                id=work_center_id,
+                code="DUE-M1",
+                capability_group="due",
+                speed_factor=1.0,
+            )
+        ],
+        setup_matrix=[],
+        planning_horizon_start=HORIZON_START,
+        planning_horizon_end=HORIZON_START + timedelta(hours=24),
+    )
+
+
+def _make_long_chain_problem(n_ops: int) -> ScheduleProblem:
+    """Build a single-order precedence chain for RHC preprocessing timing guards."""
+    state_id = uuid4()
+    work_center_id = uuid4()
+    order_id = uuid4()
+    operations: list[Operation] = []
+    predecessor_op_id = None
+
+    for seq in range(n_ops):
+        op_id = uuid4()
+        operations.append(
+            Operation(
+                id=op_id,
+                order_id=order_id,
+                seq_in_order=seq,
+                state_id=state_id,
+                base_duration_min=10,
+                eligible_wc_ids=[work_center_id],
+                predecessor_op_id=predecessor_op_id,
+            )
+        )
+        predecessor_op_id = op_id
+
+    return ScheduleProblem(
+        states=[State(id=state_id, code="CHAIN", label="Chain")],
+        orders=[
+            Order(
+                id=order_id,
+                external_ref=f"CHAIN-{n_ops}",
+                due_date=HORIZON_START + timedelta(days=30),
+                priority=100,
+            )
+        ],
+        operations=operations,
+        work_centers=[
+            WorkCenter(
+                id=work_center_id,
+                code="CHAIN-M1",
+                capability_group="chain",
+                speed_factor=1.0,
+            )
+        ],
+        setup_matrix=[],
+        planning_horizon_start=HORIZON_START,
+        planning_horizon_end=HORIZON_START + timedelta(days=60),
     )
 
 
@@ -216,7 +343,10 @@ class TestAlnsSolver:
         # ALNS should produce at least as good a makespan (or very close)
         assert alns_result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
         # Allow 10% tolerance — ALNS may not beat greedy on tiny instances
-        assert alns_result.objective.makespan_minutes <= greedy_result.objective.makespan_minutes * 1.1
+        assert (
+            alns_result.objective.makespan_minutes
+            <= greedy_result.objective.makespan_minutes * 1.1
+        )
 
     def test_alns_metadata_correct(self) -> None:
         """ALNS result should contain the expected metadata fields."""
@@ -254,6 +384,43 @@ class TestAlnsSolver:
 
 
 class TestRhcSolver:
+    def test_rhc_earliest_start_preprocessing_scales_better_than_quadratic(self) -> None:
+        """RHC preprocessing should stay near-linear enough to catch quadratic regressions."""
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        small_problem = _make_long_chain_problem(2_000)
+        large_problem = _make_long_chain_problem(4_000)
+
+        def measure(problem: ScheduleProblem) -> float:
+            timings: list[float] = []
+            for _ in range(3):
+                result: dict = {}
+                t0 = time.monotonic()
+                RhcSolver._compute_earliest_starts(problem, result)
+                timings.append(time.monotonic() - t0)
+            return min(timings)
+
+        small_elapsed = measure(small_problem)
+        large_elapsed = measure(large_problem)
+
+        assert large_elapsed / max(small_elapsed, 1e-6) < 3.5
+
+    def test_rhc_expand_predecessor_closure_includes_transitive_chain(self) -> None:
+        """RHC must include the full unresolved predecessor chain, not just one hop."""
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_due_pressure_chain_problem()
+        ops_by_id = {op.id: op for op in problem.operations}
+        terminal_op = max(problem.operations, key=lambda op: op.seq_in_order)
+
+        expanded = RhcSolver._expand_predecessor_closure(
+            {terminal_op.id},
+            ops_by_id,
+            committed_op_ids=set(),
+        )
+
+        assert expanded == {op.id for op in problem.operations}
+
     def test_rhc_schedules_all_operations(self) -> None:
         """RHC must schedule all operations across windows."""
         from synaps.solvers.rhc_solver import RhcSolver
@@ -308,6 +475,66 @@ class TestRhcSolver:
         )
         assert "windows_solved" in result.metadata
         assert result.metadata["windows_solved"] >= 1
+
+    def test_rhc_metadata_tracks_due_pressure_and_candidate_peak(self) -> None:
+        """RHC should expose scaling metadata for candidate-pool pressure and due-date pulls."""
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_due_pressure_chain_problem()
+        solver = RhcSolver()
+        result = solver.solve(
+            problem,
+            window_minutes=120,
+            overlap_minutes=30,
+            inner_solver="greedy",
+            time_limit_s=30,
+            max_ops_per_window=10,
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert result.metadata["preprocessing_ms"] >= 0
+        assert result.metadata["peak_window_candidate_count"] >= 1
+        assert result.metadata["due_pressure_selected_ops"] > 0
+        assert result.metadata["earliest_frontier_advances"] <= len(problem.operations)
+        assert result.metadata["due_frontier_advances"] <= len(problem.operations)
+
+    def test_rhc_skips_global_fallback_after_time_limit_exhaustion(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """RHC should stop cleanly once the global time budget is exhausted."""
+        import synaps.solvers.rhc_solver as rhc_module
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_due_pressure_chain_problem()
+
+        time_marks = iter([0.0, 0.0, 0.0, 1.0, 1.0, 1.0])
+
+        def fake_monotonic() -> float:
+            try:
+                return next(time_marks)
+            except StopIteration:
+                return 1.0
+
+        def fail_if_slot_search_runs(*args: object, **kwargs: object) -> None:
+            raise AssertionError("fallback slot search should be skipped after time limit exhaustion")
+
+        monkeypatch.setattr(rhc_module.time, "monotonic", fake_monotonic)
+        monkeypatch.setattr(rhc_module, "find_earliest_feasible_slot", fail_if_slot_search_runs)
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=60,
+            overlap_minutes=0,
+            inner_solver="greedy",
+            time_limit_s=0.5,
+            max_ops_per_window=10,
+        )
+
+        assert result.status == SolverStatus.ERROR
+        assert result.metadata["time_limit_reached"] is True
+        assert result.metadata["fallback_repair_attempted"] is False
+        assert result.metadata["fallback_repair_skipped"] is True
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -413,3 +640,132 @@ class TestCrossSolverParity:
         assert "RHC-ALNS" in configs
         assert "RHC-CPSAT" in configs
         assert "RHC-GREEDY" in configs
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 6. RHC inner solver integration tests (BUG-2 regression)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestRhcInnerSolver:
+    """Verify that RHC actually delegates to the named inner solver."""
+
+    def test_rhc_with_alns_inner_produces_feasible_result(self) -> None:
+        """RHC-ALNS must produce a feasible schedule using ALNS per window."""
+        from synaps.solvers.rhc_solver import RhcSolver
+        from synaps.validation import verify_schedule_result
+
+        problem = _make_3state_problem(n_orders=8, ops_per_order=2)
+        solver = RhcSolver()
+        result = solver.solve(
+            problem,
+            window_minutes=360,
+            overlap_minutes=60,
+            inner_solver="alns",
+            time_limit_s=60,
+            max_ops_per_window=100,
+            inner_kwargs={
+                "max_iterations": 30,
+                "time_limit_s": 15,
+                "destroy_fraction": 0.2,
+                "min_destroy": 2,
+                "max_destroy": 8,
+                "repair_time_limit_s": 3,
+            },
+        )
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert len(result.assignments) == len(problem.operations)
+        assert result.metadata["inner_solver"] == "alns"
+
+        verification = verify_schedule_result(problem, result)
+        assert verification.feasible, f"Violations: {verification.violations}"
+
+    def test_rhc_with_cpsat_inner_produces_feasible_result(self) -> None:
+        """RHC-CPSAT must delegate to CP-SAT per window."""
+        from synaps.solvers.rhc_solver import RhcSolver
+        from synaps.validation import verify_schedule_result
+
+        problem = _make_3state_problem(n_orders=4, ops_per_order=2)
+        solver = RhcSolver()
+        result = solver.solve(
+            problem,
+            window_minutes=480,
+            overlap_minutes=60,
+            inner_solver="cpsat",
+            time_limit_s=30,
+            max_ops_per_window=50,
+            inner_kwargs={"time_limit_s": 10},
+        )
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert len(result.assignments) == len(problem.operations)
+        assert result.metadata["inner_solver"] == "cpsat"
+
+        verification = verify_schedule_result(problem, result)
+        assert verification.feasible, f"Violations: {verification.violations}"
+
+    def test_rhc_greedy_fallback_still_works(self) -> None:
+        """When inner_solver='greedy', RHC should still schedule via greedy dispatch."""
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_3state_problem(n_orders=6, ops_per_order=2)
+        solver = RhcSolver()
+        result = solver.solve(
+            problem,
+            window_minutes=360,
+            overlap_minutes=60,
+            inner_solver="greedy",
+            time_limit_s=15,
+        )
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert len(result.assignments) == len(problem.operations)
+        assert result.metadata["inner_solver"] == "greedy"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 7. ALNS CP-SAT repair integration tests (BUG-3 regression)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestAlnsCpsatRepair:
+    """Verify that ALNS uses CP-SAT repair when use_cpsat_repair=True."""
+
+    def test_alns_cpsat_repair_produces_feasible_result(self) -> None:
+        """ALNS with use_cpsat_repair=True must exercise CP-SAT repair path."""
+        from synaps.solvers.alns_solver import AlnsSolver
+        from synaps.validation import verify_schedule_result
+
+        problem = _make_3state_problem(n_orders=5, ops_per_order=2)
+        solver = AlnsSolver()
+        result = solver.solve(
+            problem,
+            max_iterations=50,
+            time_limit_s=30,
+            destroy_fraction=0.2,
+            min_destroy=2,
+            max_destroy=5,
+            repair_time_limit_s=5,
+            use_cpsat_repair=True,
+        )
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert len(result.assignments) == len(problem.operations)
+        # CP-SAT repair should have been used at least once
+        assert result.metadata["cpsat_repairs"] > 0
+
+        verification = verify_schedule_result(problem, result)
+        assert verification.feasible, f"Violations: {verification.violations}"
+
+    def test_alns_greedy_only_repair_has_zero_cpsat_repairs(self) -> None:
+        """ALNS with use_cpsat_repair=False should only use greedy repair."""
+        from synaps.solvers.alns_solver import AlnsSolver
+
+        problem = _make_3state_problem(n_orders=5, ops_per_order=2)
+        solver = AlnsSolver()
+        result = solver.solve(
+            problem,
+            max_iterations=30,
+            time_limit_s=15,
+            use_cpsat_repair=False,
+        )
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert result.metadata["cpsat_repairs"] == 0
+        assert result.metadata["greedy_repairs"] > 0

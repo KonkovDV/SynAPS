@@ -21,6 +21,11 @@ python -m benchmark.study_routing_boundary --presets medium large --seeds 1 2 3
 python -m benchmark.study_solver_scaling --presets medium large --seeds 1 2 3 \
   --solvers GREED CPSAT-30 LBBD-10 AUTO
 
+# Run the dedicated 50K large-instance RHC study and write artifacts under benchmark/
+python -m benchmark.study_rhc_50k --preset industrial-50k --seeds 1 \
+  --solvers RHC-GREEDY RHC-ALNS \
+  --write-dir benchmark/studies/2026-04-12-rhc-50k
+
 # Routed portfolio mode (router chooses the concrete solver)
 python -m benchmark.run_benchmark benchmark/instances/tiny_3x3.json --solvers AUTO
 
@@ -208,6 +213,43 @@ python -m benchmark.study_solver_scaling \
 ```
 
 The report keeps per-instance comparison records and emits `summary_by_preset`, which makes it straightforward to answer questions like “does `AUTO` collapse into `LBBD-10` on large generated instances?” and “what is the runtime trade-off between GREED and exact/decomposition profiles on the same preset family?”.
+
+## Dedicated 50K RHC Study
+
+`benchmark.study_rhc_50k` is the reproducible large-instance study for the current `RHC-GREEDY` and `RHC-ALNS` path.
+
+It does four things in one command:
+
+1. materializes a deterministic `industrial-50k` benchmark instance per requested seed;
+2. runs the public benchmark harness with `RHC-GREEDY` and `RHC-ALNS`;
+3. preserves per-instance records, solver metadata, and verification timing;
+4. writes a JSON artifact under the chosen `benchmark/` directory so README and audit claims can point to a stable evidence surface.
+
+Example:
+
+```bash
+python -m benchmark.study_rhc_50k \
+  --preset industrial-50k \
+  --seeds 1 \
+  --solvers RHC-GREEDY RHC-ALNS \
+  --write-dir benchmark/studies/2026-04-12-rhc-50k
+```
+
+The study writes materialized instances under `instances/` and a top-level `rhc_50k_study.json` artifact with aggregated wall-clock, verification time, makespan, setup totals, and RHC-specific metadata such as preprocessing time and candidate-pool pressure.
+
+### Current artifact
+
+The current materialized artifact is [studies/2026-04-12-rhc-50k/rhc_50k_study.json](studies/2026-04-12-rhc-50k/rhc_50k_study.json).
+
+It is useful because it preserves the current limit instead of hiding it:
+
+- `RHC-GREEDY` stops after `120.087s` with `887` committed assignments.
+- `RHC-ALNS` stops after `300.184s` with `944` committed assignments.
+- both runs hit the global time budget in the first window
+- both runs report `status=error` and `feasible=false`
+- peak candidate-pool pressure reaches `49,931` and `49,993`
+
+So the public 50K path is real and reproducible, but it is currently a profiling surface for `RHC` window admission pressure rather than a solved industrial benchmark.
 
 ## Instances
 

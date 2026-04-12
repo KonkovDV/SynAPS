@@ -8,8 +8,8 @@ import pytest
 
 from synaps.contracts import (
     CONTRACT_VERSION,
-    ContractVersionError,
     SUPPORTED_CONTRACT_VERSIONS,
+    ContractVersionError,
     check_contract_version,
 )
 from synaps.guards import (
@@ -19,7 +19,6 @@ from synaps.guards import (
     timeout_to_error_result,
 )
 from synaps.instrumentation import (
-    MetricsCollector,
     MetricsStore,
     clear_collectors,
     get_metrics_store,
@@ -30,7 +29,6 @@ from synaps.instrumentation import (
 )
 from synaps.model import SolverErrorCategory, SolverStatus
 from tests.conftest import make_simple_problem
-
 
 # ── Instrumentation tests ──
 

@@ -251,6 +251,39 @@ def route_solver_config(
             ),
         )
 
+    # ---- ALNS / RHC routing for large NOMINAL instances ----
+    # When the latency budget is generous, ALNS/RHC offer better anytime
+    # behavior than LBBD-HD for non-exact solves.
+    latency = ctx.preferred_max_latency_s
+
+    if not ctx.exact_required and latency is not None:
+        if op_count <= 10_000 and latency > 120:
+            return SolverRoutingDecision(
+                solver_config="ALNS-300",
+                reason=(
+                    f"nominal instance ({op_count} ops) with generous latency budget "
+                    f"(>{latency}s) benefits from ALNS metaheuristic with "
+                    "adaptive destroy/repair over rigid decomposition"
+                ),
+            )
+        if op_count <= 50_000 and latency > 300:
+            return SolverRoutingDecision(
+                solver_config="ALNS-500",
+                reason=(
+                    f"large nominal instance ({op_count} ops) with 5+ minute budget "
+                    "benefits from extended ALNS (500 iterations, micro-CP-SAT repair)"
+                ),
+            )
+        if op_count > 50_000 and latency > 600:
+            return SolverRoutingDecision(
+                solver_config="RHC-ALNS",
+                reason=(
+                    f"ultra-large nominal instance ({op_count} ops) with 10+ minute budget "
+                    "benefits from Receding Horizon Control with ALNS inner solver "
+                    "(temporal decomposition into ≤5000 ops/window)"
+                ),
+            )
+
     if op_count <= 50_000:
         return SolverRoutingDecision(
             solver_config="LBBD-10-HD",

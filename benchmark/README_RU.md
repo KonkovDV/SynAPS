@@ -21,6 +21,11 @@ python -m benchmark.study_routing_boundary --presets medium large --seeds 1 2 3
 python -m benchmark.study_solver_scaling --presets medium large --seeds 1 2 3 \
   --solvers GREED CPSAT-30 LBBD-10 AUTO
 
+# Запустить отдельное 50K-исследование для large-instance пути RHC
+python -m benchmark.study_rhc_50k --preset industrial-50k --seeds 1 \
+  --solvers RHC-GREEDY RHC-ALNS \
+  --write-dir benchmark/studies/2026-04-12-rhc-50k
+
 # Автоматический выбор solver-а
 python -m benchmark.run_benchmark benchmark/instances/tiny_3x3.json --solvers AUTO
 
@@ -203,6 +208,43 @@ python -m benchmark.study_solver_scaling \
 ```
 
 В отчёте сохраняются per-instance comparison records и агрегат `summary_by_preset`, который позволяет без ручного разбора ответить на вопросы вида: «схлопывается ли `AUTO` в `LBBD-10` на large generated instances?» и «какой runtime/quality trade-off получается между `GREED` и exact/decomposition profiles на одном и том же семействе preset-ов?`.
+
+## Отдельное 50K-исследование для RHC
+
+`benchmark.study_rhc_50k` - это воспроизводимый benchmark-path для текущей large-instance пары `RHC-GREEDY` и `RHC-ALNS`.
+
+Одна команда делает четыре вещи:
+
+1. материализует детерминированный `industrial-50k` инстанс для каждого seed;
+2. прогоняет публичный benchmark harness с `RHC-GREEDY` и `RHC-ALNS`;
+3. сохраняет per-instance records, solver metadata и время верификации;
+4. пишет JSON-артефакт в выбранную директорию под `benchmark/`, чтобы README и audit-утверждения ссылались на устойчивую evidence surface.
+
+Пример:
+
+```bash
+python -m benchmark.study_rhc_50k \
+  --preset industrial-50k \
+  --seeds 1 \
+  --solvers RHC-GREEDY RHC-ALNS \
+  --write-dir benchmark/studies/2026-04-12-rhc-50k
+```
+
+Study пишет materialized instances в `instances/` и верхнеуровневый артефакт `rhc_50k_study.json` с агрегатами по wall-clock, verification time, makespan, total setup и RHC-specific metadata вроде `preprocessing_ms` и давления candidate-pool.
+
+### Текущий артефакт
+
+Текущий материализованный артефакт лежит в [studies/2026-04-12-rhc-50k/rhc_50k_study.json](studies/2026-04-12-rhc-50k/rhc_50k_study.json).
+
+Его ценность в том, что он сохраняет реальную текущую границу, а не прячет её:
+
+- `RHC-GREEDY` останавливается через `120.087s` и успевает зафиксировать `887` назначений.
+- `RHC-ALNS` останавливается через `300.184s` и успевает зафиксировать `944` назначения.
+- оба прогона упираются в глобальный time budget уже в первом окне
+- оба прогона заканчиваются с `status=error` и `feasible=false`
+- давление candidate-pool доходит до `49 931` и `49 993`
+
+Поэтому публичный 50K path реален и воспроизводим, но пока он работает как profiling surface для `RHC` window admission pressure, а не как закрытый промышленный benchmark.
 
 ## Примеры входных данных
 

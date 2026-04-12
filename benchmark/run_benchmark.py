@@ -99,7 +99,9 @@ def _run_single(
 
     assert last_result is not None
     obj = last_result.objective
+    verify_t0 = time.perf_counter()
     verification = verify_schedule_result(problem, last_result)
+    verification_time_ms = int((time.perf_counter() - verify_t0) * 1000)
 
     meta = last_result.metadata or {}
     portfolio_metadata = meta.get("portfolio", {})
@@ -129,6 +131,7 @@ def _run_single(
         "wall_time_s_mean": round(statistics.mean(wall_times), 4),
         "wall_time_s_min": round(min(wall_times), 4),
         "wall_time_s_max": round(max(wall_times), 4),
+        "verification_time_ms": verification_time_ms,
     }
     if runs > 1:
         statistics_block["wall_time_s_median"] = round(statistics.median(wall_times), 4)
@@ -168,6 +171,7 @@ def _run_single(
         "results": results_block,
         "verification": verification_block,
         "statistics": statistics_block,
+        "solver_metadata": meta,
     }
     if include_replay or replay_output_dir is not None:
         replay_artifact = build_benchmark_replay_artifact(

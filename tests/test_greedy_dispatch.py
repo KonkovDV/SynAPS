@@ -418,8 +418,14 @@ class TestBeamSearchDispatch:
         greedy = GreedyDispatch()
         result_greedy = greedy.solve(simple_problem)
 
-        # With width=1, beam search degenerates to greedy — makespan should be equal
-        assert abs(result_beam.objective.makespan_minutes - result_greedy.objective.makespan_minutes) < 0.1
+        # With width=1, beam search degenerates to greedy
+        assert (
+            abs(
+                result_beam.objective.makespan_minutes
+                - result_greedy.objective.makespan_minutes
+            )
+            < 0.1
+        )
 
     def test_respects_precedence(self, simple_problem: ScheduleProblem) -> None:
         from synaps.solvers.greedy_dispatch import BeamSearchDispatch

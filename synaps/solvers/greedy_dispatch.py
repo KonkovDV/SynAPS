@@ -8,7 +8,6 @@ Includes:
 
 from __future__ import annotations
 
-import copy
 import time
 from datetime import timedelta
 from typing import Any
@@ -348,7 +347,10 @@ class BeamSearchDispatch(BaseSolver):
         total_ops = len(problem.operations)
 
         for _step in range(total_ops):
-            candidates: list[tuple[float, list[Assignment], set[Any], dict[Any, float], list[Any]]] = []
+            candidates: list[
+                tuple[float, list[Assignment], set[Any],
+                      dict[Any, float], list[Any]]
+            ] = []
 
             for assignments, scheduled_ops, op_end_offsets, remaining in beams:
                 if not remaining:
@@ -413,7 +415,11 @@ class BeamSearchDispatch(BaseSolver):
                     local_setup_scale_by_wc[wc_id] = max(
                         sum(nonzero) / max(len(nonzero), 1), 1.0,
                     )
-                global_mat = [r["slot"].material_loss for r in candidate_records if r["slot"].material_loss > 0]
+                global_mat = [
+                    r["slot"].material_loss
+                    for r in candidate_records
+                    if r["slot"].material_loss > 0
+                ]
                 material_scale = max(sum(global_mat) / max(len(global_mat), 1), 1.0)
 
                 # Score all candidates and keep top-B
@@ -465,7 +471,10 @@ class BeamSearchDispatch(BaseSolver):
                     new_scheduled.add(best_op.id)
                     new_remaining = [op for op in remaining if op.id != best_op.id]
 
-                    candidates.append((score, new_assignments, new_scheduled, new_offsets, new_remaining))
+                    candidates.append(
+                        (score, new_assignments, new_scheduled,
+                         new_offsets, new_remaining),
+                    )
 
             if not candidates:
                 break
@@ -478,7 +487,7 @@ class BeamSearchDispatch(BaseSolver):
 
         # Select best completed beam by makespan
         best_result: tuple[list[Assignment], float] | None = None
-        for assignments, scheduled_ops, op_end_offsets, remaining in beams:
+        for assignments, _scheduled, _offsets, _rem in beams:
             if len(assignments) != total_ops:
                 continue
             makespan = max(
@@ -504,8 +513,10 @@ class BeamSearchDispatch(BaseSolver):
         for wc_id, machine_assignments in assignments_by_machine.items():
             machine_assignments.sort(key=lambda a: a.start_time)
             for idx in range(1, len(machine_assignments)):
-                prev_state = dispatch_context.ops_by_id[machine_assignments[idx - 1].operation_id].state_id
-                curr_state = dispatch_context.ops_by_id[machine_assignments[idx].operation_id].state_id
+                prev_op_id = machine_assignments[idx - 1].operation_id
+                curr_op_id = machine_assignments[idx].operation_id
+                prev_state = dispatch_context.ops_by_id[prev_op_id].state_id
+                curr_state = dispatch_context.ops_by_id[curr_op_id].state_id
                 total_material_loss += dispatch_context.material_loss.get(
                     (wc_id, prev_state, curr_state), 0.0,
                 )

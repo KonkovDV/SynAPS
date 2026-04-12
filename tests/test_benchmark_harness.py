@@ -53,6 +53,8 @@ def test_run_benchmark_reports_extended_result_fields(
     assert "wall_time_s_mean" in stats
     assert "wall_time_s_min" in stats
     assert "wall_time_s_max" in stats
+    assert "verification_time_ms" in stats
+    assert "solver_metadata" in report
 
 
 def test_run_benchmark_compare_mode_returns_multiple_solver_reports(
@@ -75,3 +77,25 @@ def test_run_benchmark_compare_mode_returns_multiple_solver_reports(
         "GREED",
         "CPSAT-EPS-MATERIAL-110",
     }
+
+
+def test_rhc_50k_study_writes_report(
+    tmp_path: Path,
+) -> None:
+    from benchmark.study_rhc_50k import study_rhc_50k
+
+    artifact_dir = tmp_path / "artifact"
+    report = study_rhc_50k(
+        preset_name="tiny",
+        seeds=[1],
+        solver_names=["GREED"],
+        runs=1,
+        write_dir=artifact_dir,
+    )
+
+    report_path = artifact_dir / "rhc_50k_study.json"
+    assert report["study_kind"] == "rhc-50k"
+    assert report["preset_name"] == "tiny"
+    assert report["requested_solver_names"] == ["GREED"]
+    assert report_path.exists()
+    assert report["summary_by_solver"]["GREED"]["instance_count"] == 1

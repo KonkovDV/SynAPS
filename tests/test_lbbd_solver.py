@@ -279,7 +279,10 @@ class TestLbbdGreedyWarmStart:
             simple_problem, max_iterations=5, time_limit_s=30, use_greedy_warm_start=False,
         )
         # Warm start should find at least as good a solution
-        assert result_warm.objective.makespan_minutes <= result_cold.objective.makespan_minutes * 1.01
+        assert (
+            result_warm.objective.makespan_minutes
+            <= result_cold.objective.makespan_minutes * 1.01
+        )
 
     def test_parallel_subproblems_flag_in_metadata(self, simple_problem: ScheduleProblem) -> None:
         solver = LbbdSolver()

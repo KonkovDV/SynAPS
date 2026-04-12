@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from synaps.accelerators import resource_capacity_window_is_feasible
+
 if TYPE_CHECKING:
     from datetime import datetime
     from uuid import UUID
@@ -133,7 +135,7 @@ def _assignment_setup_window_starts(
 
 def _resource_is_feasible(
     context: DispatchContext,
-    scheduled_assignments: list[Assignment],
+    resource_windows_by_resource: dict[UUID, list[tuple[float, float, int]]],
     operation_id: UUID,
     start_offset: float,
     end_offset: float,
@@ -141,45 +143,54 @@ def _resource_is_feasible(
 ) -> bool:
     requirements = context.requirements_by_op.get(operation_id, [])
     candidate_window_start = start_offset - setup_minutes
-    setup_window_starts = _assignment_setup_window_starts(context, scheduled_assignments)
 
     for requirement in requirements:
         resource = context.resources_by_id.get(requirement.aux_resource_id)
         if resource is None:
             continue
-
-        active_demand = 0
-        events: list[tuple[float, int]] = []
-        for assignment in scheduled_assignments:
-            for other_requirement in context.requirements_by_op.get(assignment.operation_id, []):
-                if other_requirement.aux_resource_id != requirement.aux_resource_id:
-                    continue
-
-                other_start = setup_window_starts.get(
-                    assignment.operation_id,
-                    _offset_minutes(context, assignment, end=False),
-                )
-                other_end = _offset_minutes(context, assignment, end=True)
-                if other_start >= end_offset or other_end <= candidate_window_start:
-                    continue
-
-                if other_start <= candidate_window_start < other_end:
-                    active_demand += other_requirement.quantity_needed
-                else:
-                    events.append((other_start, other_requirement.quantity_needed))
-
-                if candidate_window_start < other_end < end_offset:
-                    events.append((other_end, -other_requirement.quantity_needed))
-
-        if active_demand + requirement.quantity_needed > resource.pool_size:
+        resource_windows = resource_windows_by_resource.get(requirement.aux_resource_id, [])
+        if not resource_capacity_window_is_feasible(
+            window_starts=[window[0] for window in resource_windows],
+            window_ends=[window[1] for window in resource_windows],
+            window_quantities=[window[2] for window in resource_windows],
+            candidate_start=candidate_window_start,
+            candidate_end=end_offset,
+            requested_quantity=requirement.quantity_needed,
+            pool_size=resource.pool_size,
+        ):
             return False
 
-        for _, delta in sorted(events, key=lambda item: (item[0], 0 if item[1] < 0 else 1)):
-            active_demand += delta
-            if active_demand + requirement.quantity_needed > resource.pool_size:
-                return False
-
     return True
+
+
+def _resource_windows_by_resource(
+    context: DispatchContext,
+    scheduled_assignments: list[Assignment],
+    setup_window_starts: dict[Any, float],
+    required_resource_ids: set[UUID],
+) -> dict[UUID, list[tuple[float, float, int]]]:
+    resource_windows: dict[UUID, list[tuple[float, float, int]]] = {
+        resource_id: [] for resource_id in required_resource_ids
+    }
+
+    for assignment in scheduled_assignments:
+        assignment_requirements = context.requirements_by_op.get(assignment.operation_id, [])
+        if not assignment_requirements:
+            continue
+
+        start_offset = setup_window_starts.get(
+            assignment.operation_id,
+            _offset_minutes(context, assignment, end=False),
+        )
+        end_offset = _offset_minutes(context, assignment, end=True)
+        for requirement in assignment_requirements:
+            if requirement.aux_resource_id not in required_resource_ids:
+                continue
+            resource_windows.setdefault(requirement.aux_resource_id, []).append(
+                (start_offset, end_offset, requirement.quantity_needed)
+            )
+
+    return resource_windows
 
 
 def _candidate_starts(
@@ -224,6 +235,14 @@ def find_earliest_feasible_slot(
         requirement.aux_resource_id
         for requirement in context.requirements_by_op.get(operation.id, [])
     ]
+    required_resource_ids = set(aux_resource_ids)
+    setup_window_starts = _assignment_setup_window_starts(context, scheduled_assignments)
+    resource_windows_by_resource = _resource_windows_by_resource(
+        context,
+        scheduled_assignments,
+        setup_window_starts,
+        required_resource_ids,
+    )
 
     machine_assignments = sorted(
         [
@@ -280,7 +299,7 @@ def find_earliest_feasible_slot(
                 continue
             if _resource_is_feasible(
                 context,
-                scheduled_assignments,
+                resource_windows_by_resource,
                 operation.id,
                 candidate_start,
                 end_offset,

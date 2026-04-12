@@ -13,7 +13,6 @@ Academic basis:
 
 from __future__ import annotations
 
-import copy
 import logging
 import math
 import random
@@ -56,7 +55,7 @@ def _evaluate_objective(
 
     horizon_start = problem.planning_horizon_start
     ops_by_id = {op.id: op for op in problem.operations}
-    orders_by_id = {o.id: o for o in problem.orders}
+    {o.id: o for o in problem.orders}
 
     # Makespan
     makespan = max(
@@ -192,7 +191,7 @@ def _destroy_related(
     if not assignments:
         return set()
 
-    assignment_by_op: dict[UUID, Assignment] = {a.operation_id: a for a in assignments}
+    {a.operation_id: a for a in assignments}
     ops_by_id = {op.id: op for op in problem.operations}
 
     # Pick random seed
@@ -275,6 +274,8 @@ def _repair_cpsat(
     frozen_assignments: list[Assignment],
     destroyed_op_ids: set[UUID],
     time_limit_s: int = 10,
+    ops_by_id: dict[UUID, Any] | None = None,
+    op_positions: dict[UUID, int] | None = None,
 ) -> list[Assignment] | None:
     """Repair by solving a sub-problem with CP-SAT over the destroyed operations.
 
@@ -283,11 +284,12 @@ def _repair_cpsat(
 
     Returns new assignments for the destroyed ops, or None if infeasible.
     """
-    from copy import deepcopy
-
     from synaps.solvers.cpsat_solver import CpSatSolver
 
-    ops_by_id = {op.id: op for op in problem.operations}
+    if ops_by_id is None:
+        ops_by_id = {op.id: op for op in problem.operations}
+    if op_positions is None:
+        op_positions = {op.id: index for index, op in enumerate(problem.operations)}
 
     # Gather operations to re-schedule
     needed_ids = set(destroyed_op_ids)
@@ -301,14 +303,11 @@ def _repair_cpsat(
     # (i.e., frozen/already scheduled), clear the predecessor reference since
     # the predecessor constraint is already satisfied by the frozen assignment.
     sub_operations = []
-    for op in problem.operations:
-        if op.id not in needed_ids:
-            continue
+    for op_id in sorted(needed_ids, key=op_positions.__getitem__):
+        op = ops_by_id[op_id]
         if op.predecessor_op_id and op.predecessor_op_id not in needed_ids:
             # Predecessor is frozen — break the link for the sub-problem
-            op_copy = deepcopy(op)
-            op_copy.predecessor_op_id = None
-            sub_operations.append(op_copy)
+            sub_operations.append(op.model_copy(update={"predecessor_op_id": None}))
         else:
             sub_operations.append(op)
 
@@ -364,6 +363,60 @@ def _repair_greedy(
         return None
 
     return [a for a in result.assignments if a.operation_id in destroyed_op_ids]
+
+
+# ---------------------------------------------------------------------------
+# Machine overlap check (guard for CP-SAT repair sub-problem gaps)
+# ---------------------------------------------------------------------------
+
+def _has_machine_overlap(assignments: list[Assignment]) -> bool:
+    """Return True if any two assignments overlap on the same machine."""
+    by_machine: dict[Any, list[Assignment]] = {}
+    for a in assignments:
+        by_machine.setdefault(a.work_center_id, []).append(a)
+    for mc_assigns in by_machine.values():
+        mc_assigns.sort(key=lambda x: x.start_time)
+        for i in range(1, len(mc_assigns)):
+            if mc_assigns[i].start_time < mc_assigns[i - 1].end_time:
+                return True
+    return False
+
+
+def _violates_frozen_precedence(
+    repaired_assignments: list[Assignment],
+    frozen_assignments_by_op: dict[UUID, Assignment],
+    ops_by_id: dict[UUID, Any],
+) -> bool:
+    """Return True when a repaired operation starts before its frozen predecessor ends."""
+
+    repaired_ids = {assignment.operation_id for assignment in repaired_assignments}
+    for assignment in repaired_assignments:
+        operation = ops_by_id.get(assignment.operation_id)
+        if operation is None or operation.predecessor_op_id is None:
+            continue
+        if operation.predecessor_op_id in repaired_ids:
+            continue
+        frozen_predecessor = frozen_assignments_by_op.get(operation.predecessor_op_id)
+        if frozen_predecessor is not None and assignment.start_time < frozen_predecessor.end_time:
+            return True
+    return False
+
+
+def _has_precedence_violation(
+    assignments: list[Assignment],
+    ops_by_id: dict[UUID, Any],
+) -> bool:
+    """Return True when any assignment starts before its predecessor ends."""
+
+    assignments_by_op = {assignment.operation_id: assignment for assignment in assignments}
+    for assignment in assignments:
+        operation = ops_by_id.get(assignment.operation_id)
+        if operation is None or operation.predecessor_op_id is None:
+            continue
+        predecessor_assignment = assignments_by_op.get(operation.predecessor_op_id)
+        if predecessor_assignment is not None and assignment.start_time < predecessor_assignment.end_time:
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -438,6 +491,12 @@ class AlnsSolver(BaseSolver):
 
         rng = random.Random(seed)
         n_ops = len(problem.operations)
+        ops_by_id = {op.id: op for op in problem.operations}
+        op_positions = {op.id: index for index, op in enumerate(problem.operations)}
+        successors_by_op: dict[UUID, list[UUID]] = {}
+        for op in problem.operations:
+            if op.predecessor_op_id is not None:
+                successors_by_op.setdefault(op.predecessor_op_id, []).append(op.id)
         sdst = SdstMatrix.from_problem(problem)
         checker = FeasibilityChecker()
         dispatch_context = build_dispatch_context(problem)
@@ -464,6 +523,7 @@ class AlnsSolver(BaseSolver):
         current_assignments = list(initial_result.assignments)
         current_obj = _evaluate_objective(problem, current_assignments, sdst)
         current_cost = _objective_cost(current_obj, objective_weights)
+        initial_cost = current_cost
 
         best_assignments = list(current_assignments)
         best_obj = current_obj
@@ -528,10 +588,9 @@ class AlnsSolver(BaseSolver):
 
             # Ensure precedence consistency: if an op is destroyed, include
             # its successors that depend on it (within 1 hop)
-            ops_by_id = {op.id: op for op in problem.operations}
-            for op in problem.operations:
-                if op.predecessor_op_id in destroyed_ids and op.id not in destroyed_ids:
-                    destroyed_ids.add(op.id)
+            for op_id in list(destroyed_ids):
+                for successor_id in successors_by_op.get(op_id, []):
+                    destroyed_ids.add(successor_id)
 
             # Cap at max_destroy
             if len(destroyed_ids) > max_destroy:
@@ -541,16 +600,46 @@ class AlnsSolver(BaseSolver):
 
             # Frozen assignments (everything not destroyed)
             frozen = [a for a in current_assignments if a.operation_id not in destroyed_ids]
+            frozen_by_op = {assignment.operation_id: assignment for assignment in frozen}
 
-            # Repair — primary: IncrementalRepair (accounts for frozen schedule)
-            # Falls back to greedy dispatch if IncrementalRepair fails
+            # Repair — primary depends on use_cpsat_repair flag
+            # CP-SAT repair (Laborie & Godard 2007) when enabled, greedy fallback otherwise
             new_assignments: list[Assignment] | None = None
             repair_used = "none"
 
-            new_assignments = _repair_greedy(problem, frozen, destroyed_ids)
-            if new_assignments is not None:
-                repair_used = "greedy"
-                greedy_repairs += 1
+            if use_cpsat_repair:
+                cpsat_result = _repair_cpsat(
+                    problem,
+                    frozen,
+                    destroyed_ids,
+                    time_limit_s=repair_time_limit_s,
+                    ops_by_id=ops_by_id,
+                    op_positions=op_positions,
+                )
+                if cpsat_result is not None:
+                    # Quick machine-overlap check against frozen assignments:
+                    # CP-SAT sub-problem doesn't see frozen timelines, so verify
+                    # no returned assignment overlaps a frozen one on the same machine.
+                    test_candidate = frozen + cpsat_result
+                    if (
+                        not _has_machine_overlap(test_candidate)
+                        and not _violates_frozen_precedence(cpsat_result, frozen_by_op, ops_by_id)
+                    ):
+                        new_assignments = cpsat_result
+                        repair_used = "cpsat"
+                        cpsat_repairs += 1
+
+            if new_assignments is None:
+                greedy_result = _repair_greedy(problem, frozen, destroyed_ids)
+                if greedy_result is not None:
+                    test_candidate = frozen + greedy_result
+                    if (
+                        not _has_machine_overlap(test_candidate)
+                        and not _violates_frozen_precedence(greedy_result, frozen_by_op, ops_by_id)
+                    ):
+                        new_assignments = greedy_result
+                        repair_used = "greedy"
+                        greedy_repairs += 1
 
             if new_assignments is None:
                 continue  # repair failed, discard this iteration
@@ -561,6 +650,9 @@ class AlnsSolver(BaseSolver):
             # Quick feasibility sanity check (only check completeness)
             candidate_op_ids = {a.operation_id for a in candidate}
             if len(candidate_op_ids) != n_ops:
+                feasibility_failures += 1
+                continue
+            if _has_precedence_violation(candidate, ops_by_id):
                 feasibility_failures += 1
                 continue
 
@@ -653,10 +745,10 @@ class AlnsSolver(BaseSolver):
                     for i, (name, _) in enumerate(DESTROY_OPERATORS)
                 },
                 "sdst_matrix_bytes": sdst.memory_bytes(),
-                "initial_cost": round(current_cost, 2),
+                "initial_cost": round(initial_cost, 2),
                 "final_cost": round(final_cost, 2),
                 "improvement_pct": round(
-                    (1 - final_cost / max(current_cost, 1e-9)) * 100, 2
+                    (1 - final_cost / max(initial_cost, 1e-9)) * 100, 2
                 ),
             },
         )
