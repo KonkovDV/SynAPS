@@ -22,6 +22,7 @@ from synaps.model import (
 )
 from synaps.solvers import BaseSolver
 from synaps.solvers._dispatch_support import (
+    MachineIndex,
     build_dispatch_context,
     find_earliest_feasible_slot,
     recompute_assignment_setups,
@@ -70,6 +71,7 @@ class GreedyDispatch(BaseSolver):
         scheduled_ops: set[Any] = set()
         op_end_offsets: dict[Any, float] = {}
         assignments: list[Assignment] = []
+        machine_idx = MachineIndex(dispatch_context)
 
         while remaining:
             # Filter to ready operations (predecessor scheduled or none)
@@ -126,6 +128,7 @@ class GreedyDispatch(BaseSolver):
                         op,
                         wc_id,
                         pred_end,
+                        machine_index=machine_idx,
                     )
                     if slot is None:
                         continue
@@ -226,16 +229,16 @@ class GreedyDispatch(BaseSolver):
             speed = work_center.speed_factor if work_center is not None else 1.0
             end_offset = best_slot.end_offset
 
-            assignments.append(
-                Assignment(
-                    operation_id=best_op.id,
-                    work_center_id=best_wc_id,
-                    start_time=horizon_start + timedelta(minutes=best_slot.start_offset),
-                    end_time=horizon_start + timedelta(minutes=end_offset),
-                    setup_minutes=best_slot.setup_minutes,
-                    aux_resource_ids=best_slot.aux_resource_ids,
-                )
+            new_assignment = Assignment(
+                operation_id=best_op.id,
+                work_center_id=best_wc_id,
+                start_time=horizon_start + timedelta(minutes=best_slot.start_offset),
+                end_time=horizon_start + timedelta(minutes=end_offset),
+                setup_minutes=best_slot.setup_minutes,
+                aux_resource_ids=best_slot.aux_resource_ids,
             )
+            assignments.append(new_assignment)
+            machine_idx.add(new_assignment)
 
             op_end_offsets[best_op.id] = end_offset
             scheduled_ops.add(best_op.id)
@@ -353,6 +356,10 @@ class BeamSearchDispatch(BaseSolver):
             ] = []
 
             for assignments, scheduled_ops, op_end_offsets, remaining in beams:
+                machine_idx = MachineIndex(dispatch_context)
+                for assignment in assignments:
+                    machine_idx.add(assignment)
+
                 if not remaining:
                     # Beam already complete — preserve with neutral score
                     candidates.append((0.0, assignments, scheduled_ops, op_end_offsets, remaining))
@@ -384,7 +391,12 @@ class BeamSearchDispatch(BaseSolver):
                     )
                     for wc_id in eligible:
                         slot = find_earliest_feasible_slot(
-                            dispatch_context, assignments, op, wc_id, pred_end,
+                            dispatch_context,
+                            assignments,
+                            op,
+                            wc_id,
+                            pred_end,
+                            machine_index=machine_idx,
                         )
                         if slot is None:
                             continue

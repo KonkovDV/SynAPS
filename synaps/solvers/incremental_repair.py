@@ -16,6 +16,7 @@ from synaps.model import (
 )
 from synaps.solvers import BaseSolver
 from synaps.solvers._dispatch_support import (
+    MachineIndex,
     build_dispatch_context,
     find_earliest_feasible_slot,
     recompute_assignment_setups,
@@ -136,6 +137,10 @@ class IncrementalRepair(BaseSolver):
 
         repaired: list[Assignment] = []
         scheduled_ids: set[Any] = {a.operation_id for a in frozen}
+        scheduled_by_op: dict[Any, Assignment] = {assignment.operation_id: assignment for assignment in frozen}
+        machine_idx = MachineIndex(dispatch_context)
+        for assignment in frozen:
+            machine_idx.add(assignment)
         # Sort by descending priority first (higher priority = more urgent),
         # then by sequence within order for stable tie-breaking.
         remaining_repair = sorted(
@@ -174,12 +179,11 @@ class IncrementalRepair(BaseSolver):
             for operation in ready:
                 predecessor_end = 0.0
                 if operation.predecessor_op_id is not None:
-                    for assignment in scheduled_assignments:
-                        if assignment.operation_id == operation.predecessor_op_id:
-                            predecessor_end = (
-                                assignment.end_time - horizon_start
-                            ).total_seconds() / 60.0
-                            break
+                    predecessor_assignment = scheduled_by_op.get(operation.predecessor_op_id)
+                    if predecessor_assignment is not None:
+                        predecessor_end = (
+                            predecessor_assignment.end_time - horizon_start
+                        ).total_seconds() / 60.0
 
                 eligible = (
                     operation.eligible_wc_ids
@@ -193,6 +197,7 @@ class IncrementalRepair(BaseSolver):
                         operation,
                         work_center_id,
                         predecessor_end,
+                        machine_index=machine_idx,
                     )
                     if slot is None:
                         continue
@@ -246,6 +251,8 @@ class IncrementalRepair(BaseSolver):
                     aux_resource_ids=slot.aux_resource_ids,
                 )
             )
+            scheduled_by_op[operation.id] = repaired[-1]
+            machine_idx.add(repaired[-1])
             scheduled_ids.add(operation.id)
             remaining_repair.remove(operation)
 

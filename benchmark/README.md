@@ -232,24 +232,23 @@ python -m benchmark.study_rhc_50k \
   --preset industrial-50k \
   --seeds 1 \
   --solvers RHC-GREEDY RHC-ALNS \
-  --write-dir benchmark/studies/2026-04-12-rhc-50k
+  --write-dir benchmark/studies/2026-04-13-rhc-50k-machine-index
 ```
 
 The study writes materialized instances under `instances/` and a top-level `rhc_50k_study.json` artifact with aggregated wall-clock, verification time, makespan, setup totals, and RHC-specific metadata such as preprocessing time and candidate-pool pressure.
 
 ### Current artifact
 
-The current materialized artifact is [studies/2026-04-12-rhc-50k/rhc_50k_study.json](studies/2026-04-12-rhc-50k/rhc_50k_study.json).
+The current materialized artifact is [studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json](studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json).
 
 It is useful because it preserves the current limit instead of hiding it:
 
-- `RHC-GREEDY` stops after `120.087s` with `887` committed assignments.
-- `RHC-ALNS` stops after `300.184s` with `944` committed assignments.
-- both runs hit the global time budget in the first window
+- `RHC-GREEDY` stops after `120.115s` with `6959` committed assignments across `11` solved windows.
+- `RHC-ALNS` stops after `366.23s` with `1078` committed assignments across `3` solved windows.
 - both runs report `status=error` and `feasible=false`
-- peak candidate-pool pressure reaches `49,931` and `49,993`
+- peak candidate-pool pressure still reaches `49,931` and `49,993`
 
-So the public 50K path is real and reproducible, but it is currently a profiling surface for `RHC` window admission pressure rather than a solved industrial benchmark.
+So the public 50K path is real and reproducible, and the latest optimization pass materially improved greedy throughput. It is still a profiling surface rather than a solved industrial benchmark, and the current bottleneck has shifted toward inner-solver throughput on the `RHC-ALNS` path.
 
 ## Instances
 

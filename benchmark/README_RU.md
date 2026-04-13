@@ -227,24 +227,23 @@ python -m benchmark.study_rhc_50k \
   --preset industrial-50k \
   --seeds 1 \
   --solvers RHC-GREEDY RHC-ALNS \
-  --write-dir benchmark/studies/2026-04-12-rhc-50k
+  --write-dir benchmark/studies/2026-04-13-rhc-50k-machine-index
 ```
 
 Study пишет materialized instances в `instances/` и верхнеуровневый артефакт `rhc_50k_study.json` с агрегатами по wall-clock, verification time, makespan, total setup и RHC-specific metadata вроде `preprocessing_ms` и давления candidate-pool.
 
 ### Текущий артефакт
 
-Текущий материализованный артефакт лежит в [studies/2026-04-12-rhc-50k/rhc_50k_study.json](studies/2026-04-12-rhc-50k/rhc_50k_study.json).
+Текущий материализованный артефакт лежит в [studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json](studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json).
 
 Его ценность в том, что он сохраняет реальную текущую границу, а не прячет её:
 
-- `RHC-GREEDY` останавливается через `120.087s` и успевает зафиксировать `887` назначений.
-- `RHC-ALNS` останавливается через `300.184s` и успевает зафиксировать `944` назначения.
-- оба прогона упираются в глобальный time budget уже в первом окне
+- `RHC-GREEDY` останавливается через `120.115s` и успевает зафиксировать `6959` назначений за `11` окон.
+- `RHC-ALNS` останавливается через `366.23s` и успевает зафиксировать `1078` назначений за `3` окна.
 - оба прогона заканчиваются с `status=error` и `feasible=false`
-- давление candidate-pool доходит до `49 931` и `49 993`
+- давление candidate-pool всё ещё доходит до `49 931` и `49 993`
 
-Поэтому публичный 50K path реален и воспроизводим, но пока он работает как profiling surface для `RHC` window admission pressure, а не как закрытый промышленный benchmark.
+Поэтому публичный 50K path реален и воспроизводим, а последний optimization pass заметно усилил greedy throughput. Но это всё ещё profiling surface, а не закрытый промышленный benchmark; текущее узкое место сильнее сместилось в throughput внутреннего solver-path у `RHC-ALNS`.
 
 ## Примеры входных данных
 

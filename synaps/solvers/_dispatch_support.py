@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -30,6 +31,88 @@ class DispatchContext:
     material_loss: dict[tuple[UUID, UUID, UUID], float]
     requirements_by_op: dict[UUID, list[OperationAuxRequirement]]
     resources_by_id: dict[UUID, AuxiliaryResource]
+
+
+class MachineIndex:
+    """Incremental per-machine sorted assignment index with lazy caching.
+
+    Avoids O(A) filter+sort on every ``find_earliest_feasible_slot`` call
+    by maintaining per-machine buckets via ``bisect.insort``.  Derived data
+    (setup-window starts, resource-capacity windows) is computed lazily and
+    invalidated on each ``add()``.
+    """
+
+    __slots__ = (
+        "_context",
+        "_by_machine",
+        "_all",
+        "_setup_window_starts",
+        "_resource_windows_cache",
+    )
+
+    def __init__(self, context: DispatchContext) -> None:
+        self._context = context
+        self._by_machine: dict[Any, list[Assignment]] = {}
+        self._all: list[Assignment] = []
+        self._setup_window_starts: dict[Any, float] | None = None
+        self._resource_windows_cache: dict[frozenset[Any], dict[Any, list[tuple[float, float, int]]]] = {}
+
+    # -- mutators ---------------------------------------------------------
+
+    def add(self, assignment: Assignment) -> None:
+        bucket = self._by_machine.setdefault(assignment.work_center_id, [])
+        bisect.insort(bucket, assignment, key=lambda a: a.start_time)
+        self._all.append(assignment)
+        self._setup_window_starts = None
+        self._resource_windows_cache.clear()
+
+    # -- queries ----------------------------------------------------------
+
+    def get_machine_assignments(self, work_center_id: Any) -> list[Assignment]:
+        return self._by_machine.get(work_center_id, [])
+
+    @property
+    def all_assignments(self) -> list[Assignment]:
+        return self._all
+
+    def get_setup_window_starts(self) -> dict[Any, float]:
+        if self._setup_window_starts is None:
+            self._setup_window_starts = self._compute_setup_window_starts()
+        return self._setup_window_starts
+
+    def get_resource_windows(
+        self, required_resource_ids: set[Any],
+    ) -> dict[Any, list[tuple[float, float, int]]]:
+        key = frozenset(required_resource_ids)
+        if key not in self._resource_windows_cache:
+            self._resource_windows_cache[key] = _resource_windows_by_resource(
+                self._context,
+                self._all,
+                self.get_setup_window_starts(),
+                required_resource_ids,
+            )
+        return self._resource_windows_cache[key]
+
+    # -- internal ---------------------------------------------------------
+
+    def _compute_setup_window_starts(self) -> dict[Any, float]:
+        ctx = self._context
+        result: dict[Any, float] = {}
+        for machine_assignments in self._by_machine.values():
+            previous: Assignment | None = None
+            for assignment in machine_assignments:
+                start_offset = _offset_minutes(ctx, assignment, end=False)
+                if previous is None:
+                    result[assignment.operation_id] = start_offset
+                else:
+                    prev_state = ctx.ops_by_id[previous.operation_id].state_id
+                    cur_state = ctx.ops_by_id[assignment.operation_id].state_id
+                    setup_before = ctx.setup_minutes.get(
+                        (assignment.work_center_id, prev_state, cur_state), 0,
+                    )
+                    result[assignment.operation_id] = start_offset - setup_before
+                previous = assignment
+        return result
 
 
 @dataclass(frozen=True)
@@ -200,6 +283,7 @@ def _candidate_starts(
     gap_start: float,
     latest_start: float,
     setup_minutes: int,
+    resource_windows_by_resource: dict[UUID, list[tuple[float, float, int]]] | None = None,
 ) -> list[float]:
     starts = {gap_start}
     required_resource_ids = {
@@ -208,6 +292,14 @@ def _candidate_starts(
     }
     if not required_resource_ids:
         return [gap_start]
+
+    if resource_windows_by_resource is not None:
+        for resource_windows in resource_windows_by_resource.values():
+            for _other_start, other_end, _quantity in resource_windows:
+                release_offset = other_end + setup_minutes
+                if gap_start <= release_offset <= latest_start:
+                    starts.add(release_offset)
+        return sorted(starts)
 
     for assignment in scheduled_assignments:
         for requirement in context.requirements_by_op.get(assignment.operation_id, []):
@@ -227,6 +319,7 @@ def find_earliest_feasible_slot(
     operation: Operation,
     work_center_id: UUID,
     earliest_start: float,
+    machine_index: MachineIndex | None = None,
 ) -> SlotCandidate | None:
     work_center = context.wc_by_id.get(work_center_id)
     speed_factor = work_center.speed_factor if work_center is not None else 1.0
@@ -236,22 +329,27 @@ def find_earliest_feasible_slot(
         for requirement in context.requirements_by_op.get(operation.id, [])
     ]
     required_resource_ids = set(aux_resource_ids)
-    setup_window_starts = _assignment_setup_window_starts(context, scheduled_assignments)
-    resource_windows_by_resource = _resource_windows_by_resource(
-        context,
-        scheduled_assignments,
-        setup_window_starts,
-        required_resource_ids,
-    )
 
-    machine_assignments = sorted(
-        [
-            assignment
-            for assignment in scheduled_assignments
-            if assignment.work_center_id == work_center_id
-        ],
-        key=lambda assignment: assignment.start_time,
-    )
+    if machine_index is not None:
+        setup_window_starts = machine_index.get_setup_window_starts()
+        resource_windows_by_resource = machine_index.get_resource_windows(required_resource_ids)
+        machine_assignments = machine_index.get_machine_assignments(work_center_id)
+    else:
+        setup_window_starts = _assignment_setup_window_starts(context, scheduled_assignments)
+        resource_windows_by_resource = _resource_windows_by_resource(
+            context,
+            scheduled_assignments,
+            setup_window_starts,
+            required_resource_ids,
+        )
+        machine_assignments = sorted(
+            [
+                assignment
+                for assignment in scheduled_assignments
+                if assignment.work_center_id == work_center_id
+            ],
+            key=lambda assignment: assignment.start_time,
+        )
 
     def evaluate_gap(
         previous: Assignment | None, following: Assignment | None
@@ -293,6 +391,7 @@ def find_earliest_feasible_slot(
             gap_start,
             latest_start,
             setup_before,
+            resource_windows_by_resource=resource_windows_by_resource,
         ):
             end_offset = candidate_start + duration
             if candidate_start < gap_start - 1e-9 or candidate_start > latest_start + 1e-9:

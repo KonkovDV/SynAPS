@@ -31,7 +31,7 @@ SynAPS targets a real and difficult scheduling class, but the evidence boundary 
 | Exact layer | Strongest current evidence is still on small and medium instances. `CP-SAT` and `LBBD` are the exact or near-exact layer with explicit lower-bound or gap semantics. |
 | Large-instance layer | `ALNS`, `RHC`, and `LBBD-HD` are the current path for synthetic 5K-50K studies. They target feasibility, runtime, and bottleneck discovery, not proof of optimality. |
 | Validation | Every feasible or optimal result is checked by an independent `FeasibilityChecker` covering completeness, eligibility, precedence, machine capacity, setup gaps, auxiliary resources, and horizon bounds. |
-| Dedicated 50K path | A reproducible 50K study exists under [benchmark/study_rhc_50k.py](benchmark/study_rhc_50k.py). The current materialized artifact is [benchmark/studies/2026-04-12-rhc-50k/rhc_50k_study.json](benchmark/studies/2026-04-12-rhc-50k/rhc_50k_study.json). |
+| Dedicated 50K path | A reproducible 50K study exists under [benchmark/study_rhc_50k.py](benchmark/study_rhc_50k.py). The current materialized artifact is [benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json](benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json). |
 | Factory deployment | No live-factory deployment claim is made in this repository. |
 
 If you need the documentation router, start from [docs/README.md](docs/README.md). If you need the publication draft, use [docs/habr/synaps-open-source-habr-v3.md](docs/habr/synaps-open-source-habr-v3.md).
@@ -40,15 +40,15 @@ If you need the documentation router, start from [docs/README.md](docs/README.md
 
 The repository now has a stable 50K evidence surface, and the useful part is that it shows the current limit plainly.
 
-The artifact at [benchmark/studies/2026-04-12-rhc-50k/rhc_50k_study.json](benchmark/studies/2026-04-12-rhc-50k/rhc_50k_study.json) records one deterministic `industrial-50k` run for `RHC-GREEDY` and `RHC-ALNS`.
+The artifact at [benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json](benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json) records the current deterministic `industrial-50k` run for `RHC-GREEDY` and `RHC-ALNS` after the window-cap and indexed slot-search changes.
 
-- `RHC-GREEDY` stopped after `120.087s` with `887` committed assignments.
-- `RHC-ALNS` stopped after `300.184s` with `944` committed assignments.
+- `RHC-GREEDY` stops after `120.115s` with `6959` committed assignments across `11` solved windows.
+- `RHC-ALNS` stops after `366.23s` with `1078` committed assignments across `3` solved windows.
 - both runs exited with `status=error` and `feasible=false`
-- both runs saturated the first window, with peak candidate counts of `49,931` and `49,993`
-- both runs skipped global fallback repair after the time budget was exhausted, so the artifact now preserves the real bottleneck instead of hiding it behind an unbounded cleanup pass
+- both runs still carry near-full earliest-frontier pressure, with peak candidate counts of `49,931` and `49,993`
+- both runs skip global fallback repair after the time budget is exhausted, so the artifact preserves the real bottleneck instead of hiding it behind an unbounded cleanup pass
 
-That means SynAPS already has a dedicated 50K profiling path, but the current `industrial-50k` preset is not yet a solved full-scale benchmark. The next bottleneck is window admission pressure inside `RHC`, not feasibility checking.
+That means SynAPS already has a dedicated 50K profiling path, and the latest changes materially improved throughput on the greedy path. The preset is still not a solved full-scale benchmark, but the bottleneck has moved from pure window admission into inner-solver throughput, especially on the `RHC-ALNS` path.
 
 ## Solver Portfolio
 
@@ -90,7 +90,7 @@ python -m benchmark.study_rhc_50k \
   --preset industrial-50k \
   --seeds 1 \
   --solvers RHC-GREEDY RHC-ALNS \
-  --write-dir benchmark/studies/2026-04-12-rhc-50k
+  --write-dir benchmark/studies/2026-04-13-rhc-50k-machine-index
 ```
 
 Run the Python test suite:
@@ -117,9 +117,10 @@ Implemented:
 - dedicated 50K study command and materialized artifact surface
 - optional native acceleration seams for hot-path scoring and capacity checks
 
-Current bottleneck:
+Current bottlenecks:
 
-- the first `RHC` window on the current `industrial-50k` preset admits almost the full candidate set, so the 50K path is currently a profiling surface for window-admission pressure rather than a closed industrial solve
+- earliest-frontier pressure is still too broad on the current `industrial-50k` preset, even after the dynamic window cap
+- `RHC-GREEDY` improved materially, but `RHC-ALNS` still spends too much time inside the inner large-neighborhood path to make the 50K route competitive
 
 Not claimed here:
 

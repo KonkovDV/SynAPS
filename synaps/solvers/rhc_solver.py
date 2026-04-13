@@ -33,6 +33,7 @@ from synaps.model import (
 )
 from synaps.solvers import BaseSolver
 from synaps.solvers._dispatch_support import (
+    MachineIndex,
     build_dispatch_context,
     find_earliest_feasible_slot,
     recompute_assignment_setups,
@@ -316,6 +317,9 @@ class RhcSolver(BaseSolver):
                 # on top of already-committed assignments.
                 scheduled_so_far = list(committed_assignments)
                 scheduled_by_op = dict(committed_assignment_by_op)
+                machine_idx = MachineIndex(dispatch_context)
+                for assignment in scheduled_so_far:
+                    machine_idx.add(assignment)
                 ready_pool = list(clean_window_ops)
                 window_scheduled_ids: set[UUID] = set()
 
@@ -373,7 +377,12 @@ class RhcSolver(BaseSolver):
                         best_wc = None
                         for wc_id in eligible:
                             slot = find_earliest_feasible_slot(
-                                dispatch_context, scheduled_so_far, op, wc_id, pred_end,
+                                dispatch_context,
+                                scheduled_so_far,
+                                op,
+                                wc_id,
+                                pred_end,
+                                machine_index=machine_idx,
                             )
                             if slot is None:
                                 continue
@@ -398,6 +407,7 @@ class RhcSolver(BaseSolver):
                             )
                             scheduled_so_far.append(assignment)
                             scheduled_by_op[op.id] = assignment
+                            machine_idx.add(assignment)
                             window_scheduled_ids.add(op.id)
                             ready_pool.remove(op)
                             placed_any = True
@@ -441,6 +451,9 @@ class RhcSolver(BaseSolver):
                 )
                 remaining_ops = [op for op in problem.operations if op.id in unscheduled_ids]
                 remaining_ops.sort(key=lambda op: op.seq_in_order)
+                repair_machine_idx = MachineIndex(dispatch_context)
+                for assignment in committed_assignments:
+                    repair_machine_idx.add(assignment)
                 fallback_iters = len(remaining_ops) * 3
                 fi = 0
                 while remaining_ops and fi < fallback_iters:
@@ -479,7 +492,12 @@ class RhcSolver(BaseSolver):
                         best_wc = None
                         for wc_id in eligible:
                             slot = find_earliest_feasible_slot(
-                                dispatch_context, committed_assignments, op, wc_id, pred_end,
+                                dispatch_context,
+                                committed_assignments,
+                                op,
+                                wc_id,
+                                pred_end,
+                                machine_index=repair_machine_idx,
                             )
                             if slot is None:
                                 continue
@@ -503,6 +521,7 @@ class RhcSolver(BaseSolver):
                                     aux_resource_ids=best_slot.aux_resource_ids,
                                 )
                             )
+                            repair_machine_idx.add(committed_assignments[-1])
                             committed_assignment_by_op[op.id] = committed_assignments[-1]
                             committed_op_ids.add(op.id)
                             remaining_ops.remove(op)

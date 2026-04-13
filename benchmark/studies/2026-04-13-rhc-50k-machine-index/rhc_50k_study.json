@@ -1,0 +1,147 @@
+{
+  "study_kind": "rhc-50k",
+  "preset_name": "industrial-50k",
+  "requested_solver_names": [
+    "RHC-GREEDY",
+    "RHC-ALNS"
+  ],
+  "runs": 1,
+  "records": [
+    {
+      "preset_name": "industrial-50k",
+      "seed": 1,
+      "problem_profile": {
+        "operation_count": 50000,
+        "work_center_count": 100,
+        "state_count": 20,
+        "size_band": "mega"
+      },
+      "comparisons": [
+        {
+          "solver_config": "RHC-GREEDY",
+          "selected_solver_config": "RHC-GREEDY",
+          "results": {
+            "status": "error",
+            "feasible": false,
+            "solver_name": "rhc-greedy",
+            "makespan_minutes": 5077.55,
+            "total_setup_minutes": 18671.0,
+            "total_tardiness_minutes": 0.0,
+            "total_material_loss": 2569.38,
+            "assignments": 6959
+          },
+          "verification": {
+            "feasible": false,
+            "violation_count": 0
+          },
+          "statistics": {
+            "runs": 1,
+            "wall_time_s_mean": 120.115,
+            "wall_time_s_min": 120.115,
+            "wall_time_s_max": 120.115,
+            "generation_time_ms": 714,
+            "verification_time_ms": 0
+          },
+          "solver_metadata": {
+            "windows_solved": 11,
+            "ops_scheduled": 6959,
+            "ops_total": 50000,
+            "inner_solver": "greedy",
+            "preprocessing_ms": 238,
+            "peak_window_candidate_count": 49931,
+            "due_pressure_selected_ops": 0,
+            "earliest_frontier_advances": 50000,
+            "due_frontier_advances": 0,
+            "effective_window_operation_cap": 1040,
+            "window_load_factor": 1.25,
+            "time_limit_reached": true,
+            "fallback_repair_attempted": false,
+            "fallback_repair_skipped": true,
+            "fallback_repair_time_limited": false,
+            "ops_unscheduled": 43041
+          },
+          "benchmark_config": {
+            "n_ops": 50000,
+            "n_machines": 100,
+            "n_states": 20,
+            "sdst_memory_bytes": 480000
+          }
+        },
+        {
+          "solver_config": "RHC-ALNS",
+          "selected_solver_config": "RHC-ALNS",
+          "results": {
+            "status": "error",
+            "feasible": false,
+            "solver_name": "rhc-alns",
+            "makespan_minutes": 1515.04,
+            "total_setup_minutes": 10852.0,
+            "total_tardiness_minutes": 0.0,
+            "total_material_loss": 834.85,
+            "assignments": 1078
+          },
+          "verification": {
+            "feasible": false,
+            "violation_count": 0
+          },
+          "statistics": {
+            "runs": 1,
+            "wall_time_s_mean": 366.23,
+            "wall_time_s_min": 366.23,
+            "wall_time_s_max": 366.23,
+            "generation_time_ms": 1678,
+            "verification_time_ms": 0
+          },
+          "solver_metadata": {
+            "windows_solved": 3,
+            "ops_scheduled": 1078,
+            "ops_total": 50000,
+            "inner_solver": "alns",
+            "preprocessing_ms": 332,
+            "peak_window_candidate_count": 49993,
+            "due_pressure_selected_ops": 0,
+            "earliest_frontier_advances": 50000,
+            "due_frontier_advances": 0,
+            "effective_window_operation_cap": 1156,
+            "window_load_factor": 1.25,
+            "time_limit_reached": true,
+            "fallback_repair_attempted": false,
+            "fallback_repair_skipped": true,
+            "fallback_repair_time_limited": false,
+            "ops_unscheduled": 48922
+          },
+          "benchmark_config": {
+            "n_ops": 50000,
+            "n_machines": 100,
+            "n_states": 20,
+            "sdst_memory_bytes": 480000
+          }
+        }
+      ]
+    }
+  ],
+  "summary_by_solver": {
+    "RHC-GREEDY": {
+      "instance_count": 1,
+      "mean_wall_time_s": 120.115,
+      "mean_verification_time_ms": 0,
+      "mean_makespan_minutes": 5077.55,
+      "mean_total_setup_minutes": 18671.0,
+      "feasibility_rate": 0.0,
+      "mean_preprocessing_ms": 238.0,
+      "mean_peak_window_candidate_count": 49931.0,
+      "mean_due_pressure_selected_ops": 0.0
+    },
+    "RHC-ALNS": {
+      "instance_count": 1,
+      "mean_wall_time_s": 366.23,
+      "mean_verification_time_ms": 0,
+      "mean_makespan_minutes": 1515.04,
+      "mean_total_setup_minutes": 10852.0,
+      "feasibility_rate": 0.0,
+      "mean_preprocessing_ms": 332.0,
+      "mean_peak_window_candidate_count": 49993.0,
+      "mean_due_pressure_selected_ops": 0.0
+    }
+  }
+}

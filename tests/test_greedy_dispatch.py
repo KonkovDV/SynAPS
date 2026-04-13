@@ -18,10 +18,19 @@ from synaps.model import (
     WorkCenter,
 )
 from synaps.solvers.feasibility_checker import FeasibilityChecker
-from synaps.solvers.greedy_dispatch import GreedyDispatch
+from synaps.solvers.greedy_dispatch import BeamSearchDispatch, GreedyDispatch
 
 
 class TestGreedyDispatch:
+    def test_beam_search_produces_feasible_result(self, simple_problem: ScheduleProblem) -> None:
+        solver = BeamSearchDispatch(beam_width=3)
+        result = solver.solve(simple_problem)
+
+        assert result.status == SolverStatus.FEASIBLE
+        checker = FeasibilityChecker()
+        violations = checker.check(simple_problem, result.assignments)
+        assert violations == [], f"Violations found: {violations}"
+
     def test_produces_feasible_result(self, simple_problem: ScheduleProblem) -> None:
         solver = GreedyDispatch()
         result = solver.solve(simple_problem)
