@@ -278,7 +278,7 @@ def build_benchmark_replay_artifact(
         statistics={
             key: value
             for key, value in statistics.items()
-            if isinstance(value, (int, float, bool)) or value is None
+            if isinstance(value, int | float | bool) or value is None
         },
         problem_profile=problem_profile,
         routing=ReplayRoutingSnapshot(

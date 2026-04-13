@@ -45,7 +45,7 @@ The **Solver Router** selects one standalone solver configuration based on opera
 
 | Regime | Trigger | Solver Chain | Latency | Quality |
 |--------|---------|-------------|---------|---------|
-| **NOMINAL** | Default planning cycle | `CPSAT-10`, `CPSAT-30`, `LBBD-10`, `LBBD-10-HD`, or `LBBD-20-HD` depending on size and constraints | 10–600 s | exact-first |
+| **NOMINAL** | Default planning cycle | `CPSAT-10`→`CPSAT-30`→`LBBD-10`→`ALNS-300`→`ALNS-500`→`RHC-ALNS`→`LBBD-HD` depending on size, latency budget, and constraints | 10–600 s | exact-first, metaheuristic for large instances |
 | **RUSH_ORDER** | Priority order injection | `CPSAT-10` for small windows, otherwise `GREED`; repair API handles schedule-aware patching | < 1–10 s | bounded |
 | **BREAKDOWN** | Machine failure event | `CPSAT-10` for small windows, otherwise `GREED`; repair API handles local repair | < 1–10 s | bounded |
 | **MATERIAL_SHORTAGE** | Inventory alarm | `CPSAT-30`, `LBBD-5`, or `LBBD-10-HD` | 30–300 s | exact on constrained subproblems |
@@ -77,14 +77,16 @@ These are **measured line counts**, not estimates.
 | **Total Solver Core** | | **4 315** | |
 | **Total with Support** | | **5 803** | |
 
-### 2.2. Solver Registry — 13 Pre-Configured Profiles
+### 2.2. Solver Registry — 21 Pre-Configured Profiles
 
-The `SolverRegistry` (`registry.py`, 210 LOC) provides named profiles used by the Portfolio Router:
+The `SolverRegistry` (`registry.py`) provides named profiles used by the Portfolio Router:
 
 | Profile | Solver Class | Time Limit | Iterations | Use Case |
 |---------|-------------|------------|------------|----------|
 | `GREED` | GreedyDispatch | — | — | Instant constructive plan ($< 1$ s) |
 | `GREED-K1-3` | GreedyDispatch | — | — | Constructive heuristic with longer tardiness look-ahead |
+| `BEAM-3` | BeamSearchDispatch | — | width=3 | Filtered beam search for SDST-sensitive instances |
+| `BEAM-5` | BeamSearchDispatch | — | width=5 | Extended beam search for complex SDST matrices |
 | `CPSAT-10` | CpSatSolver | 10 s | — | Small instances ($\leq 20$ ops) |
 | `CPSAT-30` | CpSatSolver | 30 s | — | Medium instances ($\leq 120$ ops) |
 | `CPSAT-120` | CpSatSolver | 120 s | — | Long-budget exact |
@@ -96,6 +98,12 @@ The `SolverRegistry` (`registry.py`, 210 LOC) provides named profiles used by th
 | `LBBD-5-HD` | LbbdHdSolver | 120 s | 5 | Industrial ($\leq 50$K ops) |
 | `LBBD-10-HD` | LbbdHdSolver | 300 s | 10 | Large factory |
 | `LBBD-20-HD` | LbbdHdSolver | 600 s | 20 | Extreme (50K+ ops) |
+| `ALNS-300` | AlnsSolver | 120 s | 300 | Metaheuristic for 1K–10K ops |
+| `ALNS-500` | AlnsSolver | 300 s | 500 | Metaheuristic for 10K–50K ops |
+| `ALNS-1000` | AlnsSolver | 600 s | 1000 | Extended ALNS for 50K+ ops |
+| `RHC-ALNS` | RhcSolver (ALNS inner) | 600 s | 8h windows | Temporal decomposition for 50K–100K+ ops |
+| `RHC-CPSAT` | RhcSolver (CP-SAT inner) | 300 s | 8h windows | Temporal decomposition with exact per-window solve |
+| `RHC-GREEDY` | RhcSolver (Greedy inner) | 120 s | 8h windows | Fast temporal decomposition baseline for 100K+ ops |
 
 ### 2.3. Portfolio Router — Deterministic Solver Selection Logic
 
@@ -122,11 +130,14 @@ Default (NOMINAL):
     If N ≤ 20                      → CPSAT-10
     If N ≤ 120                     → CPSAT-30
     If N ≤ 500                     → LBBD-10
+    If latency > 120s and N ≤ 10K  → ALNS-300
+    If latency > 300s and N ≤ 50K  → ALNS-500
+    If latency > 600s and N > 50K  → RHC-ALNS
     If N ≤ 50K                     → LBBD-10-HD
     Else                           → LBBD-20-HD
 ```
 
-The router is **deterministic** — same inputs always produce the same solver choice. No ML, no randomness.
+The router is **deterministic** — same inputs always produce the same solver choice. No ML, no randomness. ALNS/RHC routes are only activated when the latency budget is generous and `exact_required` is not set; otherwise LBBD-HD remains the default large-scale path.
 
 
 ## 3. Logic-Based Benders Decomposition (LBBD)

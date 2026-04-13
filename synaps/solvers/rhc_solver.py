@@ -72,8 +72,11 @@ class RhcSolver(BaseSolver):
         overlap_minutes: int = int(kwargs.get("overlap_minutes", 120))
         inner_solver_name: str = str(kwargs.get("inner_solver", "alns"))
         inner_kwargs: dict[str, Any] = dict(kwargs.get("inner_kwargs", {}))
+        # Prevent double-passing time_limit_s to inner solver (RHC computes its own per-window budget).
+        inner_kwargs.pop("time_limit_s", None)
         time_limit_s: float = float(kwargs.get("time_limit_s", 600))
         max_ops_per_window: int = int(kwargs.get("max_ops_per_window", 5000))
+        window_load_factor: float = float(kwargs.get("window_load_factor", 1.25))
 
         ops_by_id = {op.id: op for op in problem.operations}
         orders_by_id = {o.id: o for o in problem.orders}
@@ -116,6 +119,16 @@ class RhcSolver(BaseSolver):
             ),
         )
         preprocessing_ms = int((time.monotonic() - preprocess_t0) * 1000)
+        effective_window_op_cap = max_ops_per_window
+        if len(problem.operations) > max_ops_per_window:
+            effective_window_op_cap = min(
+                max_ops_per_window,
+                self._estimate_window_operation_cap(
+                    problem,
+                    window_span_minutes=window_minutes + overlap_minutes,
+                    window_load_factor=window_load_factor,
+                ),
+            )
 
         # Sliding windows
         committed_assignments: list[Assignment] = []
@@ -179,10 +192,10 @@ class RhcSolver(BaseSolver):
                 window_start_offset += window_minutes
                 continue
 
-            # Cap at max_ops_per_window (prioritize by due date, then precedence)
-            if len(window_candidate_ids) > max_ops_per_window:
+            # Cap the window by configured budget and estimated machine throughput.
+            if len(window_candidate_ids) > effective_window_op_cap:
                 window_ops = nsmallest(
-                    max_ops_per_window,
+                    effective_window_op_cap,
                     (ops_by_id[op_id] for op_id in window_candidate_ids),
                     key=lambda op: (
                         order_due_offsets.get(op.order_id, horizon_minutes),
@@ -547,6 +560,8 @@ class RhcSolver(BaseSolver):
                 "due_pressure_selected_ops": len(due_pressure_selected_ids),
                 "earliest_frontier_advances": earliest_frontier_advances,
                 "due_frontier_advances": due_frontier_advances,
+                "effective_window_operation_cap": effective_window_op_cap,
+                "window_load_factor": window_load_factor,
                 "time_limit_reached": time_limit_reached,
                 "fallback_repair_attempted": fallback_repair_attempted,
                 "fallback_repair_skipped": fallback_repair_skipped,
@@ -629,6 +644,27 @@ class RhcSolver(BaseSolver):
             expanded.add(predecessor_id)
             stack.append(predecessor_id)
         return expanded
+
+    @staticmethod
+    def _estimate_window_operation_cap(
+        problem: ScheduleProblem,
+        *,
+        window_span_minutes: int,
+        window_load_factor: float,
+    ) -> int:
+        """Estimate a throughput-aware operation budget for one RHC window."""
+
+        if not problem.operations or not problem.work_centers:
+            return 1
+
+        total_duration = sum(op.base_duration_min for op in problem.operations)
+        average_duration = total_duration / max(len(problem.operations), 1)
+        if average_duration <= 0:
+            return 1
+
+        machine_capacity_minutes = window_span_minutes * len(problem.work_centers)
+        estimated_cap = int((machine_capacity_minutes / average_duration) * window_load_factor)
+        return max(1, estimated_cap)
 
     @staticmethod
     def _evaluate_final(

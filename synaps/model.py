@@ -374,15 +374,38 @@ class SolverErrorCategory(StrEnum):
         """Suggest recovery action for this error category."""
         hints: dict[SolverErrorCategory, str] = {
             SolverErrorCategory.NONE: "no error",
-            SolverErrorCategory.TIMEOUT_PARTIAL: "increase time_limit_s or accept current feasible solution",
-            SolverErrorCategory.TIMEOUT_NO_SOLUTION: "increase time_limit_s, relax constraints, or try a faster solver config",
-            SolverErrorCategory.INFEASIBLE_OVERCONSTRAINED: "relax due dates, add work centers, or reduce operation count",
-            SolverErrorCategory.INFEASIBLE_PRECEDENCE_CYCLE: "check operation predecessor_op_id references for cycles",
-            SolverErrorCategory.INFEASIBLE_NO_ELIGIBLE_WC: "verify eligible_wc_ids are populated for all operations",
-            SolverErrorCategory.MASTER_INFEASIBLE: "LBBD master assignment has no feasible solution; relax constraints",
-            SolverErrorCategory.SUBPROBLEM_INFEASIBLE: "LBBD subproblem sequencing failed; try larger clusters or more iterations",
-            SolverErrorCategory.CONSTRUCTIVE_FAILURE: "greedy dispatch found no feasible slot; check planning horizon or eligibility",
-            SolverErrorCategory.INTERNAL_ERROR: "unexpected solver error; check logs and report",
+            SolverErrorCategory.TIMEOUT_PARTIAL: (
+                "increase time_limit_s or accept current feasible solution"
+            ),
+            SolverErrorCategory.TIMEOUT_NO_SOLUTION: (
+                "increase time_limit_s, relax constraints, "
+                "or try a faster solver config"
+            ),
+            SolverErrorCategory.INFEASIBLE_OVERCONSTRAINED: (
+                "relax due dates, add work centers, "
+                "or reduce operation count"
+            ),
+            SolverErrorCategory.INFEASIBLE_PRECEDENCE_CYCLE: (
+                "check operation predecessor_op_id references for cycles"
+            ),
+            SolverErrorCategory.INFEASIBLE_NO_ELIGIBLE_WC: (
+                "verify eligible_wc_ids are populated for all operations"
+            ),
+            SolverErrorCategory.MASTER_INFEASIBLE: (
+                "LBBD master assignment has no feasible solution; "
+                "relax constraints"
+            ),
+            SolverErrorCategory.SUBPROBLEM_INFEASIBLE: (
+                "LBBD subproblem sequencing failed; "
+                "try larger clusters or more iterations"
+            ),
+            SolverErrorCategory.CONSTRUCTIVE_FAILURE: (
+                "greedy dispatch found no feasible slot; "
+                "check planning horizon or eligibility"
+            ),
+            SolverErrorCategory.INTERNAL_ERROR: (
+                "unexpected solver error; check logs and report"
+            ),
         }
         return hints.get(self, "unknown error category")
 

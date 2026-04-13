@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import random
 from datetime import datetime, timedelta
-from typing import Optional
 from uuid import uuid4
 
 from synaps.model import (
@@ -41,7 +40,7 @@ def generate_large_instance(
     duration_range: tuple[int, int] = (5, 120),
     setup_range: tuple[int, int] = (2, 30),
     material_loss_range: tuple[float, float] = (0.0, 5.0),
-    seed: Optional[int] = None,
+    seed: int | None = None,
 ) -> ScheduleProblem:
     """Generate a large FJSP-SDST instance for benchmarking.
 

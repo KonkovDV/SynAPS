@@ -102,10 +102,7 @@ def encode_problem_features(
 
     # Flexibility: avg fraction of eligible WCs per operation (1.0 = fully flexible)
     wc_count = profile.work_center_count
-    if wc_count > 0 and ops:
-        flexibility = profile.avg_eligible_work_centers / wc_count
-    else:
-        flexibility = 1.0
+    flexibility = profile.avg_eligible_work_centers / wc_count if wc_count > 0 and ops else 1.0
 
     # SDST ratio: fraction of setup entries with non-zero cost
     sdst_ratio = (

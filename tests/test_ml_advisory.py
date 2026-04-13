@@ -11,11 +11,9 @@ from synaps.ml_advisory import (
 )
 from synaps.problem_profile import build_problem_profile
 from synaps.solvers.router import (
-    SolverRoutingContext,
     select_solver,
 )
 from tests.conftest import make_simple_problem
-
 
 # ── Feature encoding ──
 

@@ -384,6 +384,20 @@ class TestAlnsSolver:
 
 
 class TestRhcSolver:
+    def test_rhc_estimate_window_operation_cap_uses_machine_capacity(self) -> None:
+        """RHC should derive a window budget from machine-time capacity and mean duration."""
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_3state_problem(n_orders=10, ops_per_order=3)
+
+        cap = RhcSolver._estimate_window_operation_cap(
+            problem,
+            window_span_minutes=300,
+            window_load_factor=1.5,
+        )
+
+        assert cap == 30
+
     def test_rhc_earliest_start_preprocessing_scales_better_than_quadratic(self) -> None:
         """RHC preprocessing should stay near-linear enough to catch quadratic regressions."""
         from synaps.solvers.rhc_solver import RhcSolver
@@ -497,6 +511,8 @@ class TestRhcSolver:
         assert result.metadata["due_pressure_selected_ops"] > 0
         assert result.metadata["earliest_frontier_advances"] <= len(problem.operations)
         assert result.metadata["due_frontier_advances"] <= len(problem.operations)
+        assert result.metadata["effective_window_operation_cap"] >= 1
+        assert result.metadata["window_load_factor"] >= 1.0
 
     def test_rhc_skips_global_fallback_after_time_limit_exhaustion(
         self,
@@ -719,6 +735,32 @@ class TestRhcInnerSolver:
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
         assert len(result.assignments) == len(problem.operations)
         assert result.metadata["inner_solver"] == "greedy"
+
+    def test_rhc_inner_kwargs_time_limit_no_duplicate_kwarg(self) -> None:
+        """Regression: inner_kwargs containing time_limit_s must not cause TypeError.
+
+        Before the fix, RHC passed time_limit_s= explicitly AND via **inner_kwargs,
+        resulting in 'got multiple values for keyword argument time_limit_s'.
+        """
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_3state_problem(n_orders=4, ops_per_order=2)
+        solver = RhcSolver()
+        # This must NOT raise TypeError
+        result = solver.solve(
+            problem,
+            window_minutes=480,
+            overlap_minutes=60,
+            inner_solver="alns",
+            time_limit_s=30,
+            inner_kwargs={
+                "time_limit_s": 999,  # would collide without the pop() guard
+                "max_iterations": 10,
+            },
+        )
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL, SolverStatus.ERROR)
+        # The key invariant: solver ran without TypeError
+        assert result.metadata["inner_solver"] == "alns"
 
 
 # ═══════════════════════════════════════════════════════════════════════════

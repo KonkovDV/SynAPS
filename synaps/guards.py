@@ -14,7 +14,6 @@ Usage::
 from __future__ import annotations
 
 import os
-import signal
 import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -63,7 +62,7 @@ def _get_rss_mb() -> int | None:
             import ctypes
             import ctypes.wintypes
 
-            class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+            class PROCESS_MEMORY_COUNTERS(ctypes.Structure):  # noqa: N801
                 _fields_ = [
                     ("cb", ctypes.wintypes.DWORD),
                     ("PageFaultCount", ctypes.wintypes.DWORD),
