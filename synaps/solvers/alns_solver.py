@@ -265,6 +265,58 @@ DESTROY_OPERATORS = [
 ]
 
 
+def _expand_successor_closure(
+    destroyed_op_ids: set[UUID],
+    successors_by_op: dict[UUID, list[UUID]],
+) -> set[UUID]:
+    """Return the transitive successor closure of the destroyed set."""
+
+    expanded = set(destroyed_op_ids)
+    frontier = list(destroyed_op_ids)
+    while frontier:
+        op_id = frontier.pop()
+        for successor_id in successors_by_op.get(op_id, []):
+            if successor_id not in expanded:
+                expanded.add(successor_id)
+                frontier.append(successor_id)
+    return expanded
+
+
+def _cap_destroy_set_preserving_successor_closure(
+    destroyed_op_ids: set[UUID],
+    ops_by_id: dict[UUID, Any],
+    successors_by_op: dict[UUID, list[UUID]],
+    max_destroy: int,
+    rng: random.Random,
+) -> set[UUID]:
+    """Shrink a destroyed set while preserving successor closure.
+
+    To avoid frozen successors depending on repaired predecessors, the kept set
+    must remain successor-closed. We therefore remove roots, not leaves: if an
+    operation leaves the destroyed set, its successors may stay destroyed and
+    simply treat the predecessor as frozen.
+    """
+
+    capped = set(destroyed_op_ids)
+    while len(capped) > max_destroy:
+        roots = [
+            op_id
+            for op_id in capped
+            if (ops_by_id.get(op_id) is None)
+            or (ops_by_id[op_id].predecessor_op_id not in capped)
+        ]
+        if not roots:
+            break
+        capped.discard(rng.choice(roots))
+
+    if len(capped) > max_destroy:
+        destroyed_list = list(capped)
+        rng.shuffle(destroyed_list)
+        capped = set(destroyed_list[:max_destroy])
+
+    return capped
+
+
 # ---------------------------------------------------------------------------
 # Repair via CP-SAT (Laborie & Godard 2007: LNS + CP)
 # ---------------------------------------------------------------------------
@@ -489,6 +541,9 @@ class AlnsSolver(BaseSolver):
         seed: int = int(kwargs.get("random_seed", 42))
         initial_beam_op_limit: int = int(kwargs.get("initial_beam_op_limit", 60))
         use_cpsat_repair: bool = bool(kwargs.get("use_cpsat_repair", True))
+        cpsat_max_destroy_ops: int = int(
+            kwargs.get("cpsat_max_destroy_ops", min(20, max_destroy))
+        )
         objective_weights: dict[str, float] = dict(
             kwargs.get(
                 "objective_weights",
@@ -565,6 +620,7 @@ class AlnsSolver(BaseSolver):
         improvements = 0
         cpsat_repair_attempts = 0
         cpsat_repairs = 0
+        cpsat_repair_skips_large_destroy = 0
         greedy_repair_attempts = 0
         greedy_repairs = 0
         cpsat_repair_ms_total = 0
@@ -615,39 +671,17 @@ class AlnsSolver(BaseSolver):
                 if not destroyed_ids:
                     continue
 
-                # Ensure precedence consistency: transitively include all
-                # downstream successors so that no frozen successor can
-                # violate precedence after repair repositions earlier ops.
-                prev_size = 0
-                while len(destroyed_ids) > prev_size:
-                    prev_size = len(destroyed_ids)
-                    for op_id in list(destroyed_ids):
-                        for successor_id in successors_by_op.get(op_id, []):
-                            destroyed_ids.add(successor_id)
-
-                # Cap at max_destroy, removing chain-leaf ops first to
-                # preserve precedence consistency.
-                if len(destroyed_ids) > max_destroy:
-                    has_destroyed_succ: set[UUID] = set()
-                    for op_id in destroyed_ids:
-                        op = ops_by_id.get(op_id)
-                        if op and op.predecessor_op_id in destroyed_ids:
-                            has_destroyed_succ.add(op.predecessor_op_id)
-                    leaves = [oid for oid in destroyed_ids if oid not in has_destroyed_succ]
-                    rng.shuffle(leaves)
-                    while len(destroyed_ids) > max_destroy and leaves:
-                        leaf = leaves.pop()
-                        destroyed_ids.discard(leaf)
-                        op = ops_by_id.get(leaf)
-                        if op and op.predecessor_op_id in destroyed_ids:
-                            pred = op.predecessor_op_id
-                            if not any(s in destroyed_ids for s in successors_by_op.get(pred, [])):
-                                leaves.append(pred)
-                    # Final safety cap if chain-aware removal wasn't enough
-                    if len(destroyed_ids) > max_destroy:
-                        destroyed_list = list(destroyed_ids)
-                        rng.shuffle(destroyed_list)
-                        destroyed_ids = set(destroyed_list[:max_destroy])
+                destroyed_ids = _expand_successor_closure(
+                    destroyed_ids,
+                    successors_by_op,
+                )
+                destroyed_ids = _cap_destroy_set_preserving_successor_closure(
+                    destroyed_ids,
+                    ops_by_id,
+                    successors_by_op,
+                    max_destroy,
+                    rng,
+                )
 
                 # Frozen assignments (everything not destroyed)
                 frozen = [a for a in current_assignments if a.operation_id not in destroyed_ids]
@@ -658,7 +692,7 @@ class AlnsSolver(BaseSolver):
                 new_assignments: list[Assignment] | None = None
                 repair_used = "none"
 
-                if use_cpsat_repair:
+                if use_cpsat_repair and len(destroyed_ids) <= cpsat_max_destroy_ops:
                     cpsat_repair_attempts += 1
                     cpsat_repair_t0 = time.monotonic()
                     cpsat_result = _repair_cpsat(
@@ -682,6 +716,8 @@ class AlnsSolver(BaseSolver):
                             new_assignments = cpsat_result
                             repair_used = "cpsat"
                             cpsat_repairs += 1
+                elif use_cpsat_repair:
+                    cpsat_repair_skips_large_destroy += 1
 
                 if new_assignments is None:
                     greedy_repair_attempts += 1
@@ -793,10 +829,12 @@ class AlnsSolver(BaseSolver):
                 "improvements": improvements,
                 "cpsat_repair_attempts": cpsat_repair_attempts,
                 "cpsat_repairs": cpsat_repairs,
+                "cpsat_repair_skips_large_destroy": cpsat_repair_skips_large_destroy,
                 "greedy_repair_attempts": greedy_repair_attempts,
                 "greedy_repairs": greedy_repairs,
                 "initial_solver": initial_solver_name,
                 "initial_beam_op_limit": initial_beam_op_limit,
+                "cpsat_max_destroy_ops": cpsat_max_destroy_ops,
                 "initial_solution_ms": initial_solution_ms,
                 "time_limit_exhausted_before_search": time_limit_exhausted_before_search,
                 "cpsat_repair_ms_total": cpsat_repair_ms_total,

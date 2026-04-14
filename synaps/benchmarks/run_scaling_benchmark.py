@@ -133,8 +133,11 @@ BENCHMARK_SUITE = [
         "window_minutes": 480, "overlap_minutes": 120, "inner_solver": "alns",
         "time_limit_s": 300, "max_ops_per_window": 5000,
         "inner_kwargs": {
-            "max_iterations": 100, "time_limit_s": 45,
-            "repair_time_limit_s": 5, "min_destroy": 20, "max_destroy": 200,
+            "max_iterations": 100,
+            "destroy_fraction": 0.03,
+            "min_destroy": 10,
+            "max_destroy": 40,
+            "use_cpsat_repair": False,
         },
     }},
 ]

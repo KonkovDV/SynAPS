@@ -98,6 +98,14 @@ def test_create_solver_supports_greedy_variant() -> None:
     assert solve_kwargs == {}
 
 
+def test_create_solver_rhc_alns_defaults_to_greedy_only_inner_repair() -> None:
+    solver, solve_kwargs = create_solver("RHC-ALNS")
+
+    assert solver.name == "rhc"
+    assert solve_kwargs["inner_solver"] == "alns"
+    assert solve_kwargs["inner_kwargs"]["use_cpsat_repair"] is False
+
+
 def test_create_solver_supports_academic_epsilon_profile() -> None:
     solver, solve_kwargs = create_solver("CPSAT-EPS-SETUP-110")
 

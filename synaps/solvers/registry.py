@@ -261,17 +261,17 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
             "time_limit_s": 600,
             "max_ops_per_window": 5000,
             "inner_kwargs": {
-                "max_iterations": 200,
-                "time_limit_s": 60,
-                "destroy_fraction": 0.05,
-                "min_destroy": 20,
-                "max_destroy": 200,
-                "repair_time_limit_s": 5,
+                "max_iterations": 100,
+                "destroy_fraction": 0.03,
+                "min_destroy": 10,
+                "max_destroy": 40,
+                "use_cpsat_repair": False,
             },
         },
         description=(
             "Receding Horizon Control with ALNS inner solver. "
-            "8-hour windows, 2-hour overlap, max 5000 ops/window. "
+            "8-hour windows, 2-hour overlap, max 5000 ops/window, "
+            "small destroy neighborhoods and greedy-only inner repair. "
             "For ultra-large instances (50 000–100 000+ ops)."
         ),
     ),

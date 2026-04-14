@@ -363,6 +363,8 @@ class TestAlnsSolver:
         assert "iterations_completed" in result.metadata
         assert "cpsat_repair_attempts" in result.metadata
         assert "cpsat_repairs" in result.metadata
+        assert "cpsat_repair_skips_large_destroy" in result.metadata
+        assert "cpsat_max_destroy_ops" in result.metadata
         assert "greedy_repair_attempts" in result.metadata
         assert "initial_beam_op_limit" in result.metadata
         assert "initial_solution_ms" in result.metadata
@@ -373,6 +375,39 @@ class TestAlnsSolver:
         assert "sdst_matrix_bytes" in result.metadata
         assert result.metadata["cpsat_repair_attempts"] >= result.metadata["cpsat_repairs"]
         assert result.metadata["greedy_repair_attempts"] >= result.metadata["greedy_repairs"]
+
+    def test_alns_skips_cpsat_for_large_destroy_neighbourhood(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """ALNS should skip CP-SAT repair when the destroyed set exceeds the micro-solve cap."""
+        from synaps.solvers.alns_solver import AlnsSolver
+
+        problem = _make_3state_problem(n_orders=5, ops_per_order=2)
+
+        def fail_if_called(self, problem, **kwargs):
+            raise AssertionError("CP-SAT repair should have been skipped for large destroy sets")
+
+        monkeypatch.setattr(
+            "synaps.solvers.cpsat_solver.CpSatSolver.solve",
+            fail_if_called,
+        )
+
+        result = AlnsSolver().solve(
+            problem,
+            max_iterations=10,
+            time_limit_s=10,
+            destroy_fraction=0.2,
+            min_destroy=2,
+            max_destroy=5,
+            cpsat_max_destroy_ops=1,
+            use_cpsat_repair=True,
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert result.metadata["cpsat_repair_attempts"] == 0
+        assert result.metadata["cpsat_repair_skips_large_destroy"] > 0
+        assert result.metadata["greedy_repairs"] > 0
 
     def test_alns_uses_greedy_initial_solution_for_large_instances(self) -> None:
         """ALNS should avoid beam search as the initial seed on large instances."""
@@ -502,6 +537,37 @@ class TestRhcSolver:
         )
 
         assert expanded == {op.id for op in problem.operations}
+
+    def test_alns_cap_destroy_set_preserves_successor_closure(self) -> None:
+        """ALNS destroy capping must not leave frozen successors behind repaired predecessors."""
+        import random
+
+        import synaps.solvers.alns_solver as alns_module
+
+        problem = _make_due_pressure_chain_problem()
+        ops_by_id = {op.id: op for op in problem.operations}
+        successors_by_op: dict = {}
+        for op in problem.operations:
+            if op.predecessor_op_id is not None:
+                successors_by_op.setdefault(op.predecessor_op_id, []).append(op.id)
+
+        terminal_op = max(problem.operations, key=lambda op: op.seq_in_order)
+        expanded = alns_module._expand_successor_closure({problem.operations[0].id}, successors_by_op)
+        assert expanded == {op.id for op in problem.operations}
+
+        capped = alns_module._cap_destroy_set_preserving_successor_closure(
+            expanded,
+            ops_by_id,
+            successors_by_op,
+            max_destroy=2,
+            rng=random.Random(1),
+        )
+
+        assert len(capped) == 2
+        assert terminal_op.id in capped
+        for op_id in capped:
+            for successor_id in successors_by_op.get(op_id, []):
+                assert successor_id in capped
 
     def test_rhc_schedules_all_operations(self) -> None:
         """RHC must schedule all operations across windows."""
@@ -766,8 +832,17 @@ class TestRhcInnerSolver:
         assert first_window["inner_status"] in {"feasible", "optimal"}
         assert first_window["initial_solver"] in {"beam", "greedy"}
         assert "iterations_completed" in first_window
+        assert "cpsat_repair_skips_large_destroy" in first_window
+        assert "cpsat_max_destroy_ops" in first_window
+        assert "cpsat_repair_attempts" in first_window
         assert "greedy_repairs" in first_window
+        assert "greedy_repair_attempts" in first_window
+        assert "cpsat_repair_ms_total" in first_window
+        assert "greedy_repair_ms_total" in first_window
+        assert "time_limit_exhausted_before_search" in first_window
         assert "feasibility_failures" in first_window
+        assert first_window["cpsat_repair_attempts"] >= first_window["cpsat_repairs"]
+        assert first_window["greedy_repair_attempts"] >= first_window["greedy_repairs"]
 
         verification = verify_schedule_result(problem, result)
         assert verification.feasible, f"Violations: {verification.violations}"

@@ -311,11 +311,20 @@ class RhcSolver(BaseSolver):
                                 for k in (
                                     "iterations_completed",
                                     "improvements",
+                                    "cpsat_repair_skips_large_destroy",
+                                    "cpsat_max_destroy_ops",
+                                    "cpsat_repair_attempts",
                                     "cpsat_repairs",
+                                    "greedy_repair_attempts",
                                     "greedy_repairs",
+                                    "cpsat_repair_ms_total",
+                                    "greedy_repair_ms_total",
+                                    "cpsat_repair_ms_mean",
+                                    "greedy_repair_ms_mean",
                                     "feasibility_failures",
                                     "initial_solution_ms",
                                     "initial_solver",
+                                    "time_limit_exhausted_before_search",
                                 )
                                 if k in (inner_result.metadata or {})
                             }),
