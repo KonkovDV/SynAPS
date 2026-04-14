@@ -1,0 +1,171 @@
+{
+  "study_kind": "rhc-50k",
+  "preset_name": "industrial-50k",
+  "requested_solver_names": [
+    "RHC-ALNS"
+  ],
+  "runs": 1,
+  "records": [
+    {
+      "preset_name": "industrial-50k",
+      "seed": 1,
+      "problem_profile": {
+        "operation_count": 50000,
+        "work_center_count": 100,
+        "state_count": 20,
+        "size_band": "mega"
+      },
+      "comparisons": [
+        {
+          "solver_config": "RHC-ALNS",
+          "selected_solver_config": "RHC-ALNS",
+          "results": {
+            "status": "error",
+            "feasible": false,
+            "solver_name": "rhc-alns",
+            "makespan_minutes": 2957.67,
+            "total_setup_minutes": 37086.0,
+            "total_tardiness_minutes": 0.0,
+            "total_material_loss": 2865.71,
+            "assignments": 3022
+          },
+          "verification": {
+            "feasible": false,
+            "violation_count": 0
+          },
+          "statistics": {
+            "runs": 1,
+            "wall_time_s_mean": 320.882,
+            "wall_time_s_min": 320.882,
+            "wall_time_s_max": 320.882,
+            "generation_time_ms": 711,
+            "verification_time_ms": 0
+          },
+          "solver_metadata": {
+            "windows_solved": 6,
+            "ops_scheduled": 3022,
+            "ops_total": 50000,
+            "inner_solver": "alns",
+            "preprocessing_ms": 207,
+            "peak_window_candidate_count": 49993,
+            "due_pressure_selected_ops": 0,
+            "earliest_frontier_advances": 50000,
+            "due_frontier_advances": 0,
+            "effective_window_operation_cap": 1156,
+            "window_load_factor": 1.25,
+            "time_limit_reached": true,
+            "fallback_repair_attempted": false,
+            "fallback_repair_skipped": true,
+            "fallback_repair_time_limited": false,
+            "ops_unscheduled": 46978,
+            "inner_window_summaries": [
+              {
+                "window": 1,
+                "ops_committed": 239,
+                "ops_in_window": 1156,
+                "inner_status": "feasible",
+                "inner_duration_ms": 60453,
+                "iterations_completed": 6,
+                "improvements": 0,
+                "cpsat_repairs": 0,
+                "greedy_repairs": 6,
+                "feasibility_failures": 0,
+                "initial_solution_ms": 16833,
+                "initial_solver": "greedy"
+              },
+              {
+                "window": 2,
+                "ops_committed": 372,
+                "ops_in_window": 1156,
+                "inner_status": "feasible",
+                "inner_duration_ms": 61537,
+                "iterations_completed": 6,
+                "improvements": 0,
+                "cpsat_repairs": 0,
+                "greedy_repairs": 6,
+                "feasibility_failures": 0,
+                "initial_solution_ms": 18953,
+                "initial_solver": "greedy"
+              },
+              {
+                "window": 3,
+                "ops_committed": 460,
+                "ops_in_window": 1156,
+                "inner_status": "feasible",
+                "inner_duration_ms": 60250,
+                "iterations_completed": 6,
+                "improvements": 0,
+                "cpsat_repairs": 0,
+                "greedy_repairs": 6,
+                "feasibility_failures": 0,
+                "initial_solution_ms": 19126,
+                "initial_solver": "greedy"
+              },
+              {
+                "window": 4,
+                "ops_committed": 548,
+                "ops_in_window": 1156,
+                "inner_status": "feasible",
+                "inner_duration_ms": 60981,
+                "iterations_completed": 6,
+                "improvements": 0,
+                "cpsat_repairs": 0,
+                "greedy_repairs": 6,
+                "feasibility_failures": 0,
+                "initial_solution_ms": 20429,
+                "initial_solver": "greedy"
+              },
+              {
+                "window": 5,
+                "ops_committed": 632,
+                "ops_in_window": 1156,
+                "inner_status": "feasible",
+                "inner_duration_ms": 46584,
+                "iterations_completed": 1,
+                "improvements": 0,
+                "cpsat_repairs": 0,
+                "greedy_repairs": 1,
+                "feasibility_failures": 0,
+                "initial_solution_ms": 36511,
+                "initial_solver": "greedy"
+              },
+              {
+                "window": 6,
+                "ops_committed": 771,
+                "ops_in_window": 1156,
+                "inner_status": "feasible",
+                "inner_duration_ms": 30110,
+                "iterations_completed": 0,
+                "improvements": 0,
+                "cpsat_repairs": 0,
+                "greedy_repairs": 0,
+                "feasibility_failures": 0,
+                "initial_solution_ms": 30046,
+                "initial_solver": "greedy"
+              }
+            ]
+          },
+          "benchmark_config": {
+            "n_ops": 50000,
+            "n_machines": 100,
+            "n_states": 20,
+            "sdst_memory_bytes": 480000
+          }
+        }
+      ]
+    }
+  ],
+  "summary_by_solver": {
+    "RHC-ALNS": {
+      "instance_count": 1,
+      "mean_wall_time_s": 320.882,
+      "mean_verification_time_ms": 0,
+      "mean_makespan_minutes": 2957.67,
+      "mean_total_setup_minutes": 37086.0,
+      "feasibility_rate": 0.0,
+      "mean_preprocessing_ms": 207.0,
+      "mean_peak_window_candidate_count": 49993.0,
+      "mean_due_pressure_selected_ops": 0.0
+    }
+  }
+}

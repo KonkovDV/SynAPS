@@ -149,6 +149,7 @@ class RhcSolver(BaseSolver):
         fallback_repair_attempted = False
         fallback_repair_skipped = False
         fallback_repair_time_limited = False
+        inner_window_summaries: list[dict[str, Any]] = []
 
         def global_time_exceeded() -> bool:
             return (time.monotonic() - t0) > time_limit_s
@@ -297,6 +298,28 @@ class RhcSolver(BaseSolver):
                                     committed_now += 1
                         window_start_offset += window_minutes
                         window_solved_via_inner = True
+                        inner_window_summaries.append({
+                            "window": window_count,
+                            "ops_committed": committed_now,
+                            "ops_in_window": len(clean_window_ops),
+                            "inner_status": inner_result.status.value
+                            if hasattr(inner_result.status, "value")
+                            else str(inner_result.status),
+                            "inner_duration_ms": inner_result.duration_ms,
+                            **({
+                                k: inner_result.metadata[k]
+                                for k in (
+                                    "iterations_completed",
+                                    "improvements",
+                                    "cpsat_repairs",
+                                    "greedy_repairs",
+                                    "feasibility_failures",
+                                    "initial_solution_ms",
+                                    "initial_solver",
+                                )
+                                if k in (inner_result.metadata or {})
+                            }),
+                        })
                         logger.info(
                             "RHC window %d solved by %s inner solver "
                             "(%d ops committed)",
@@ -586,6 +609,7 @@ class RhcSolver(BaseSolver):
                 "fallback_repair_skipped": fallback_repair_skipped,
                 "fallback_repair_time_limited": fallback_repair_time_limited,
                 "ops_unscheduled": total_ops - scheduled_count,
+                "inner_window_summaries": inner_window_summaries,
             },
         )
 

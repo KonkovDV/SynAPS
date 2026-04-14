@@ -361,9 +361,77 @@ class TestAlnsSolver:
             repair_time_limit_s=3,
         )
         assert "iterations_completed" in result.metadata
+        assert "cpsat_repair_attempts" in result.metadata
         assert "cpsat_repairs" in result.metadata
+        assert "greedy_repair_attempts" in result.metadata
+        assert "initial_beam_op_limit" in result.metadata
+        assert "initial_solution_ms" in result.metadata
+        assert "time_limit_exhausted_before_search" in result.metadata
+        assert "cpsat_repair_ms_total" in result.metadata
+        assert "greedy_repair_ms_total" in result.metadata
         assert "destroy_operators" in result.metadata
         assert "sdst_matrix_bytes" in result.metadata
+        assert result.metadata["cpsat_repair_attempts"] >= result.metadata["cpsat_repairs"]
+        assert result.metadata["greedy_repair_attempts"] >= result.metadata["greedy_repairs"]
+
+    def test_alns_uses_greedy_initial_solution_for_large_instances(self) -> None:
+        """ALNS should avoid beam search as the initial seed on large instances."""
+        from synaps.solvers.alns_solver import AlnsSolver
+
+        problem = _make_3state_problem(n_orders=31, ops_per_order=2)
+        solver = AlnsSolver()
+
+        result = solver.solve(
+            problem,
+            max_iterations=1,
+            time_limit_s=5,
+            repair_time_limit_s=1,
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert result.metadata["initial_solver"] == "greedy"
+        assert result.metadata["initial_beam_op_limit"] == 60
+
+    def test_alns_reports_zero_iterations_when_budget_exhausts_before_search(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """ALNS should report zero iterations if the time budget is exhausted in phase 1."""
+        import synaps.solvers.alns_solver as alns_module
+        from synaps.solvers.greedy_dispatch import GreedyDispatch
+
+        problem = _make_3state_problem(n_orders=2, ops_per_order=2)
+        seed_result = GreedyDispatch().solve(problem)
+
+        def fake_beam_solve(self, problem, **kwargs):
+            return seed_result
+
+        monotonic_marks = iter([0.0, 0.0, 10.0, 10.0, 10.0])
+
+        def fake_monotonic() -> float:
+            try:
+                return next(monotonic_marks)
+            except StopIteration:
+                return 10.0
+
+        monkeypatch.setattr(
+            "synaps.solvers.greedy_dispatch.BeamSearchDispatch.solve",
+            fake_beam_solve,
+        )
+        monkeypatch.setattr(alns_module.time, "monotonic", fake_monotonic)
+
+        result = alns_module.AlnsSolver().solve(
+            problem,
+            max_iterations=10,
+            time_limit_s=5,
+            initial_beam_op_limit=100,
+        )
+
+        assert result.metadata["initial_solver"] == "beam"
+        assert result.metadata["time_limit_exhausted_before_search"] is True
+        assert result.metadata["iterations_completed"] == 0
+        assert result.metadata["cpsat_repair_attempts"] == 0
+        assert result.metadata["greedy_repair_attempts"] == 0
 
     def test_alns_deterministic_with_seed(self) -> None:
         """Same seed should produce identical results."""
@@ -692,6 +760,14 @@ class TestRhcInnerSolver:
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
         assert len(result.assignments) == len(problem.operations)
         assert result.metadata["inner_solver"] == "alns"
+        assert "inner_window_summaries" in result.metadata
+        assert result.metadata["inner_window_summaries"]
+        first_window = result.metadata["inner_window_summaries"][0]
+        assert first_window["inner_status"] in {"feasible", "optimal"}
+        assert first_window["initial_solver"] in {"beam", "greedy"}
+        assert "iterations_completed" in first_window
+        assert "greedy_repairs" in first_window
+        assert "feasibility_failures" in first_window
 
         verification = verify_schedule_result(problem, result)
         assert verification.feasible, f"Violations: {verification.violations}"
@@ -770,6 +846,77 @@ class TestRhcInnerSolver:
 
 class TestAlnsCpsatRepair:
     """Verify that ALNS uses CP-SAT repair when use_cpsat_repair=True."""
+
+    def test_repair_cpsat_timeout_without_assignments_returns_none(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Regression: CP-SAT timeout with no assignments must not count as a repair."""
+        from types import SimpleNamespace
+
+        import synaps.solvers.alns_solver as alns_module
+
+        problem = _make_3state_problem(n_orders=3, ops_per_order=2)
+        destroyed_op_ids = {problem.operations[0].id, problem.operations[1].id}
+
+        def fake_cpsat_solve(self, sub_problem, **kwargs):
+            return SimpleNamespace(status=SolverStatus.TIMEOUT, assignments=[])
+
+        monkeypatch.setattr(
+            "synaps.solvers.cpsat_solver.CpSatSolver.solve",
+            fake_cpsat_solve,
+        )
+
+        repaired = alns_module._repair_cpsat(
+            problem,
+            frozen_assignments=[],
+            destroyed_op_ids=destroyed_op_ids,
+        )
+
+        assert repaired is None
+
+    def test_repair_greedy_partial_assignment_returns_none(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Greedy fallback must reject partial repairs instead of emitting incomplete candidates."""
+        from datetime import timedelta
+        from types import SimpleNamespace
+
+        import synaps.solvers.alns_solver as alns_module
+        from synaps.model import Assignment
+
+        problem = _make_3state_problem(n_orders=3, ops_per_order=2)
+        destroyed = {problem.operations[0].id, problem.operations[1].id}
+        horizon_start = problem.planning_horizon_start
+
+        partial_assignment = Assignment(
+            operation_id=problem.operations[0].id,
+            work_center_id=problem.work_centers[0].id,
+            start_time=horizon_start,
+            end_time=horizon_start + timedelta(minutes=10),
+            setup_minutes=0,
+            aux_resource_ids=[],
+        )
+
+        def fake_incremental_repair(self, problem, **kwargs):
+            return SimpleNamespace(
+                status=SolverStatus.FEASIBLE,
+                assignments=[partial_assignment],
+            )
+
+        monkeypatch.setattr(
+            "synaps.solvers.incremental_repair.IncrementalRepair.solve",
+            fake_incremental_repair,
+        )
+
+        repaired = alns_module._repair_greedy(
+            problem,
+            frozen_assignments=[],
+            destroyed_op_ids=destroyed,
+        )
+
+        assert repaired is None
 
     def test_alns_cpsat_repair_produces_feasible_result(self) -> None:
         """ALNS with use_cpsat_repair=True must exercise CP-SAT repair path."""

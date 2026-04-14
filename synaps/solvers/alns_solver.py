@@ -338,10 +338,13 @@ def _repair_cpsat(
         enable_symmetry_breaking=False,
     )
 
-    if result.status in (SolverStatus.INFEASIBLE, SolverStatus.ERROR) and not result.assignments:
+    repaired_assignments = [a for a in result.assignments if a.operation_id in destroyed_op_ids]
+    if result.status not in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL):
+        return None
+    if len(repaired_assignments) != len(destroyed_op_ids):
         return None
 
-    return [a for a in result.assignments if a.operation_id in destroyed_op_ids]
+    return repaired_assignments
 
 
 def _repair_greedy(
@@ -359,10 +362,13 @@ def _repair_greedy(
         disrupted_op_ids=list(destroyed_op_ids),
         radius=0,
     )
-    if result.status in (SolverStatus.ERROR, SolverStatus.INFEASIBLE):
+    repaired_assignments = [a for a in result.assignments if a.operation_id in destroyed_op_ids]
+    if result.status not in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL):
+        return None
+    if len(repaired_assignments) != len(destroyed_op_ids):
         return None
 
-    return [a for a in result.assignments if a.operation_id in destroyed_op_ids]
+    return repaired_assignments
 
 
 # ---------------------------------------------------------------------------
@@ -481,6 +487,7 @@ class AlnsSolver(BaseSolver):
         sa_initial_temp: float = float(kwargs.get("sa_initial_temp", 100.0))
         sa_cooling_rate: float = float(kwargs.get("sa_cooling_rate", 0.995))
         seed: int = int(kwargs.get("random_seed", 42))
+        initial_beam_op_limit: int = int(kwargs.get("initial_beam_op_limit", 60))
         use_cpsat_repair: bool = bool(kwargs.get("use_cpsat_repair", True))
         objective_weights: dict[str, float] = dict(
             kwargs.get(
@@ -501,14 +508,21 @@ class AlnsSolver(BaseSolver):
         checker = FeasibilityChecker()
         dispatch_context = build_dispatch_context(problem)
 
-        # ------- Phase 1: Initial solution via Beam Search -------
+        # ------- Phase 1: Initial solution -------
         from synaps.solvers.greedy_dispatch import BeamSearchDispatch
+        from synaps.solvers.greedy_dispatch import GreedyDispatch
 
-        initial_solver = BeamSearchDispatch(beam_width=3)
-        initial_result = initial_solver.solve(problem)
+        initial_solution_t0 = time.monotonic()
+        if n_ops <= initial_beam_op_limit:
+            initial_solver_name = "beam"
+            initial_result = BeamSearchDispatch(beam_width=3).solve(problem)
+        else:
+            initial_solver_name = "greedy"
+            initial_result = GreedyDispatch().solve(problem)
+
         if not initial_result.assignments or len(initial_result.assignments) != n_ops:
-            # Fall back to greedy
-            from synaps.solvers.greedy_dispatch import GreedyDispatch
+            # Fall back to greedy if beam failed to cover the full instance.
+            initial_solver_name = "greedy"
             initial_result = GreedyDispatch().solve(problem)
             if not initial_result.assignments or len(initial_result.assignments) != n_ops:
                 elapsed_ms = int((time.monotonic() - t0) * 1000)
@@ -518,6 +532,9 @@ class AlnsSolver(BaseSolver):
                     duration_ms=elapsed_ms,
                     metadata={"error": "initial solution generation failed"},
                 )
+
+        initial_solution_ms = int((time.monotonic() - initial_solution_t0) * 1000)
+        time_limit_exhausted_before_search = (time.monotonic() - t0) > time_limit_s
 
         # Current best
         current_assignments = list(initial_result.assignments)
@@ -546,10 +563,14 @@ class AlnsSolver(BaseSolver):
 
         # Tracking
         improvements = 0
+        cpsat_repair_attempts = 0
         cpsat_repairs = 0
+        greedy_repair_attempts = 0
         greedy_repairs = 0
+        cpsat_repair_ms_total = 0
+        greedy_repair_ms_total = 0
         feasibility_failures = 0
-        iteration = 0
+        iterations_completed = 0
 
         logger.info(
             "ALNS starting: %d ops, %d machines, destroy_size=%d, max_iter=%d",
@@ -560,148 +581,184 @@ class AlnsSolver(BaseSolver):
         )
 
         # ------- Phase 3: Main ALNS loop -------
-        for iteration in range(1, max_iterations + 1):
-            elapsed = time.monotonic() - t0
-            if elapsed > time_limit_s:
-                logger.info("ALNS time limit reached at iteration %d", iteration)
-                break
-
-            # Select destroy operator (roulette wheel)
-            total_weight = sum(operator_weights)
-            r = rng.random() * total_weight
-            cumulative = 0.0
-            selected_op_idx = 0
-            for idx, w in enumerate(operator_weights):
-                cumulative += w
-                if cumulative >= r:
-                    selected_op_idx = idx
+        if time_limit_exhausted_before_search:
+            logger.info(
+                "ALNS time limit exhausted during initial solution generation (%d ms)",
+                initial_solution_ms,
+            )
+        else:
+            for iteration in range(1, max_iterations + 1):
+                elapsed = time.monotonic() - t0
+                if elapsed > time_limit_s:
+                    logger.info("ALNS time limit reached at iteration %d", iteration)
                     break
 
-            op_name, destroy_fn = DESTROY_OPERATORS[selected_op_idx]
+                iterations_completed = iteration
 
-            # Destroy
-            destroyed_ids = destroy_fn(
-                current_assignments, problem, sdst, destroy_size, rng,
-            )
-            if not destroyed_ids:
-                continue
+                # Select destroy operator (roulette wheel)
+                total_weight = sum(operator_weights)
+                r = rng.random() * total_weight
+                cumulative = 0.0
+                selected_op_idx = 0
+                for idx, w in enumerate(operator_weights):
+                    cumulative += w
+                    if cumulative >= r:
+                        selected_op_idx = idx
+                        break
 
-            # Ensure precedence consistency: if an op is destroyed, include
-            # its successors that depend on it (within 1 hop)
-            for op_id in list(destroyed_ids):
-                for successor_id in successors_by_op.get(op_id, []):
-                    destroyed_ids.add(successor_id)
+                op_name, destroy_fn = DESTROY_OPERATORS[selected_op_idx]
 
-            # Cap at max_destroy
-            if len(destroyed_ids) > max_destroy:
-                destroyed_list = list(destroyed_ids)
-                rng.shuffle(destroyed_list)
-                destroyed_ids = set(destroyed_list[:max_destroy])
-
-            # Frozen assignments (everything not destroyed)
-            frozen = [a for a in current_assignments if a.operation_id not in destroyed_ids]
-            frozen_by_op = {assignment.operation_id: assignment for assignment in frozen}
-
-            # Repair — primary depends on use_cpsat_repair flag
-            # CP-SAT repair (Laborie & Godard 2007) when enabled, greedy fallback otherwise
-            new_assignments: list[Assignment] | None = None
-            repair_used = "none"
-
-            if use_cpsat_repair:
-                cpsat_result = _repair_cpsat(
-                    problem,
-                    frozen,
-                    destroyed_ids,
-                    time_limit_s=repair_time_limit_s,
-                    ops_by_id=ops_by_id,
-                    op_positions=op_positions,
+                # Destroy
+                destroyed_ids = destroy_fn(
+                    current_assignments, problem, sdst, destroy_size, rng,
                 )
-                if cpsat_result is not None:
-                    # Quick machine-overlap check against frozen assignments:
-                    # CP-SAT sub-problem doesn't see frozen timelines, so verify
-                    # no returned assignment overlaps a frozen one on the same machine.
-                    test_candidate = frozen + cpsat_result
-                    if (
-                        not _has_machine_overlap(test_candidate)
-                        and not _violates_frozen_precedence(cpsat_result, frozen_by_op, ops_by_id)
-                    ):
-                        new_assignments = cpsat_result
-                        repair_used = "cpsat"
-                        cpsat_repairs += 1
+                if not destroyed_ids:
+                    continue
 
-            if new_assignments is None:
-                greedy_result = _repair_greedy(problem, frozen, destroyed_ids)
-                if greedy_result is not None:
-                    test_candidate = frozen + greedy_result
-                    if (
-                        not _has_machine_overlap(test_candidate)
-                        and not _violates_frozen_precedence(greedy_result, frozen_by_op, ops_by_id)
-                    ):
-                        new_assignments = greedy_result
-                        repair_used = "greedy"
-                        greedy_repairs += 1
+                # Ensure precedence consistency: transitively include all
+                # downstream successors so that no frozen successor can
+                # violate precedence after repair repositions earlier ops.
+                prev_size = 0
+                while len(destroyed_ids) > prev_size:
+                    prev_size = len(destroyed_ids)
+                    for op_id in list(destroyed_ids):
+                        for successor_id in successors_by_op.get(op_id, []):
+                            destroyed_ids.add(successor_id)
 
-            if new_assignments is None:
-                continue  # repair failed, discard this iteration
+                # Cap at max_destroy, removing chain-leaf ops first to
+                # preserve precedence consistency.
+                if len(destroyed_ids) > max_destroy:
+                    has_destroyed_succ: set[UUID] = set()
+                    for op_id in destroyed_ids:
+                        op = ops_by_id.get(op_id)
+                        if op and op.predecessor_op_id in destroyed_ids:
+                            has_destroyed_succ.add(op.predecessor_op_id)
+                    leaves = [oid for oid in destroyed_ids if oid not in has_destroyed_succ]
+                    rng.shuffle(leaves)
+                    while len(destroyed_ids) > max_destroy and leaves:
+                        leaf = leaves.pop()
+                        destroyed_ids.discard(leaf)
+                        op = ops_by_id.get(leaf)
+                        if op and op.predecessor_op_id in destroyed_ids:
+                            pred = op.predecessor_op_id
+                            if not any(s in destroyed_ids for s in successors_by_op.get(pred, [])):
+                                leaves.append(pred)
+                    # Final safety cap if chain-aware removal wasn't enough
+                    if len(destroyed_ids) > max_destroy:
+                        destroyed_list = list(destroyed_ids)
+                        rng.shuffle(destroyed_list)
+                        destroyed_ids = set(destroyed_list[:max_destroy])
 
-            # Assemble candidate solution
-            candidate = frozen + new_assignments
+                # Frozen assignments (everything not destroyed)
+                frozen = [a for a in current_assignments if a.operation_id not in destroyed_ids]
+                frozen_by_op = {assignment.operation_id: assignment for assignment in frozen}
 
-            # Quick feasibility sanity check (only check completeness)
-            candidate_op_ids = {a.operation_id for a in candidate}
-            if len(candidate_op_ids) != n_ops:
-                feasibility_failures += 1
-                continue
-            if _has_precedence_violation(candidate, ops_by_id):
-                feasibility_failures += 1
-                continue
+                # Repair — primary depends on use_cpsat_repair flag
+                # CP-SAT repair (Laborie & Godard 2007) when enabled, greedy fallback otherwise
+                new_assignments: list[Assignment] | None = None
+                repair_used = "none"
 
-            # Evaluate
-            candidate_obj = _evaluate_objective(problem, candidate, sdst)
-            candidate_cost = _objective_cost(candidate_obj, objective_weights)
-            delta = candidate_cost - current_cost
+                if use_cpsat_repair:
+                    cpsat_repair_attempts += 1
+                    cpsat_repair_t0 = time.monotonic()
+                    cpsat_result = _repair_cpsat(
+                        problem,
+                        frozen,
+                        destroyed_ids,
+                        time_limit_s=repair_time_limit_s,
+                        ops_by_id=ops_by_id,
+                        op_positions=op_positions,
+                    )
+                    cpsat_repair_ms_total += int((time.monotonic() - cpsat_repair_t0) * 1000)
+                    if cpsat_result is not None:
+                        # Quick machine-overlap check against frozen assignments:
+                        # CP-SAT sub-problem doesn't see frozen timelines, so verify
+                        # no returned assignment overlaps a frozen one on the same machine.
+                        test_candidate = frozen + cpsat_result
+                        if (
+                            not _has_machine_overlap(test_candidate)
+                            and not _violates_frozen_precedence(cpsat_result, frozen_by_op, ops_by_id)
+                        ):
+                            new_assignments = cpsat_result
+                            repair_used = "cpsat"
+                            cpsat_repairs += 1
 
-            # SA acceptance
-            score_reward = 0.0
-            if candidate_cost < best_cost:
-                # New global best
-                best_assignments = list(candidate)
-                best_obj = candidate_obj
-                best_cost = candidate_cost
-                current_assignments = candidate
-                current_obj = candidate_obj
-                current_cost = candidate_cost
-                score_reward = sigma_1
-                improvements += 1
-                logger.debug(
-                    "ALNS iter %d: new best (cost=%.1f, makespan=%.1f, %s destroy, %s repair)",
-                    iteration, best_cost, best_obj.makespan_minutes, op_name, repair_used,
-                )
-            elif _sa_accept(delta, temperature, rng):
-                current_assignments = candidate
-                current_obj = candidate_obj
-                current_cost = candidate_cost
-                score_reward = sigma_2 if delta < 0 else sigma_3
-            # else: reject
+                if new_assignments is None:
+                    greedy_repair_attempts += 1
+                    greedy_repair_t0 = time.monotonic()
+                    greedy_result = _repair_greedy(problem, frozen, destroyed_ids)
+                    greedy_repair_ms_total += int((time.monotonic() - greedy_repair_t0) * 1000)
+                    if greedy_result is not None:
+                        test_candidate = frozen + greedy_result
+                        if (
+                            not _has_machine_overlap(test_candidate)
+                            and not _violates_frozen_precedence(greedy_result, frozen_by_op, ops_by_id)
+                        ):
+                            new_assignments = greedy_result
+                            repair_used = "greedy"
+                            greedy_repairs += 1
 
-            # Update operator scores
-            operator_scores[selected_op_idx] += score_reward
-            operator_attempts[selected_op_idx] += 1
+                if new_assignments is None:
+                    continue  # repair failed, discard this iteration
 
-            # Update operator weights every 50 iterations (Ropke & Pisinger 2006 §4.2)
-            if iteration % 50 == 0:
-                for idx in range(n_operators):
-                    if operator_attempts[idx] > 0:
-                        operator_weights[idx] = max(
-                            0.05,
-                            0.5 * operator_weights[idx]
-                            + 0.5 * (operator_scores[idx] / operator_attempts[idx]),
-                        )
-                operator_scores = [0.0] * n_operators
-                operator_attempts = [1] * n_operators
+                # Assemble candidate solution
+                candidate = frozen + new_assignments
 
-            # Cool down
-            temperature *= sa_cooling_rate
+                # Quick feasibility sanity check (only check completeness)
+                candidate_op_ids = {a.operation_id for a in candidate}
+                if len(candidate_op_ids) != n_ops:
+                    feasibility_failures += 1
+                    continue
+                if _has_precedence_violation(candidate, ops_by_id):
+                    feasibility_failures += 1
+                    continue
+
+                # Evaluate
+                candidate_obj = _evaluate_objective(problem, candidate, sdst)
+                candidate_cost = _objective_cost(candidate_obj, objective_weights)
+                delta = candidate_cost - current_cost
+
+                # SA acceptance
+                score_reward = 0.0
+                if candidate_cost < best_cost:
+                    # New global best
+                    best_assignments = list(candidate)
+                    best_obj = candidate_obj
+                    best_cost = candidate_cost
+                    current_assignments = candidate
+                    current_obj = candidate_obj
+                    current_cost = candidate_cost
+                    score_reward = sigma_1
+                    improvements += 1
+                    logger.debug(
+                        "ALNS iter %d: new best (cost=%.1f, makespan=%.1f, %s destroy, %s repair)",
+                        iteration, best_cost, best_obj.makespan_minutes, op_name, repair_used,
+                    )
+                elif _sa_accept(delta, temperature, rng):
+                    current_assignments = candidate
+                    current_obj = candidate_obj
+                    current_cost = candidate_cost
+                    score_reward = sigma_2 if delta < 0 else sigma_3
+                # else: reject
+
+                # Update operator scores
+                operator_scores[selected_op_idx] += score_reward
+                operator_attempts[selected_op_idx] += 1
+
+                # Update operator weights every 50 iterations (Ropke & Pisinger 2006 §4.2)
+                if iteration % 50 == 0:
+                    for idx in range(n_operators):
+                        if operator_attempts[idx] > 0:
+                            operator_weights[idx] = max(
+                                0.05,
+                                0.5 * operator_weights[idx]
+                                + 0.5 * (operator_scores[idx] / operator_attempts[idx]),
+                            )
+                    operator_scores = [0.0] * n_operators
+                    operator_attempts = [1] * n_operators
+
+                # Cool down
+                temperature *= sa_cooling_rate
 
         # ------- Phase 4: Final validation -------
         # Recompute setups from final sequence
@@ -719,7 +776,7 @@ class AlnsSolver(BaseSolver):
             "ALNS finished: %d iterations, %d improvements, cost=%.1f, "
             "makespan=%.1f min, %d cpsat repairs, %d greedy repairs, "
             "%d feasibility failures, %d violations, %d ms",
-            iteration, improvements, final_cost,
+            iterations_completed, improvements, final_cost,
             final_obj.makespan_minutes, cpsat_repairs, greedy_repairs,
             feasibility_failures, len(violations), elapsed_ms,
         )
@@ -732,10 +789,24 @@ class AlnsSolver(BaseSolver):
             duration_ms=elapsed_ms,
             random_seed=seed,
             metadata={
-                "iterations_completed": iteration,
+                "iterations_completed": iterations_completed,
                 "improvements": improvements,
+                "cpsat_repair_attempts": cpsat_repair_attempts,
                 "cpsat_repairs": cpsat_repairs,
+                "greedy_repair_attempts": greedy_repair_attempts,
                 "greedy_repairs": greedy_repairs,
+                "initial_solver": initial_solver_name,
+                "initial_beam_op_limit": initial_beam_op_limit,
+                "initial_solution_ms": initial_solution_ms,
+                "time_limit_exhausted_before_search": time_limit_exhausted_before_search,
+                "cpsat_repair_ms_total": cpsat_repair_ms_total,
+                "greedy_repair_ms_total": greedy_repair_ms_total,
+                "cpsat_repair_ms_mean": round(cpsat_repair_ms_total / cpsat_repair_attempts, 2)
+                if cpsat_repair_attempts > 0
+                else 0.0,
+                "greedy_repair_ms_mean": round(greedy_repair_ms_total / greedy_repair_attempts, 2)
+                if greedy_repair_attempts > 0
+                else 0.0,
                 "feasibility_failures": feasibility_failures,
                 "final_violations": len(violations),
                 "destroy_operators": {
