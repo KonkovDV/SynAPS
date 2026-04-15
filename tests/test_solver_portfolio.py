@@ -104,6 +104,7 @@ def test_create_solver_rhc_alns_defaults_to_greedy_only_inner_repair() -> None:
     assert solver.name == "rhc"
     assert solve_kwargs["inner_solver"] == "alns"
     assert solve_kwargs["inner_kwargs"]["use_cpsat_repair"] is False
+    assert solve_kwargs["inner_kwargs"]["max_no_improve_iters"] == 30
 
 
 def test_create_solver_supports_academic_epsilon_profile() -> None:

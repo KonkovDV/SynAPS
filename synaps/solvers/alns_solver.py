@@ -272,7 +272,8 @@ def _expand_successor_closure(
     """Return the transitive successor closure of the destroyed set."""
 
     expanded = set(destroyed_op_ids)
-    frontier = list(destroyed_op_ids)
+    # Deterministic frontier order keeps same-seed runs stable across processes.
+    frontier = sorted(destroyed_op_ids, key=str)
     while frontier:
         op_id = frontier.pop()
         for successor_id in successors_by_op.get(op_id, []):
@@ -299,18 +300,21 @@ def _cap_destroy_set_preserving_successor_closure(
 
     capped = set(destroyed_op_ids)
     while len(capped) > max_destroy:
-        roots = [
+        roots = sorted(
+            [
             op_id
             for op_id in capped
             if (ops_by_id.get(op_id) is None)
             or (ops_by_id[op_id].predecessor_op_id not in capped)
-        ]
+            ],
+            key=str,
+        )
         if not roots:
             break
         capped.discard(rng.choice(roots))
 
     if len(capped) > max_destroy:
-        destroyed_list = list(capped)
+        destroyed_list = sorted(capped, key=str)
         rng.shuffle(destroyed_list)
         capped = set(destroyed_list[:max_destroy])
 
@@ -538,6 +542,7 @@ class AlnsSolver(BaseSolver):
         repair_time_limit_s: int = int(kwargs.get("repair_time_limit_s", 10))
         sa_initial_temp: float = float(kwargs.get("sa_initial_temp", 100.0))
         sa_cooling_rate: float = float(kwargs.get("sa_cooling_rate", 0.995))
+        max_no_improve_iters: int = int(kwargs.get("max_no_improve_iters", 0))
         seed: int = int(kwargs.get("random_seed", 42))
         initial_beam_op_limit: int = int(kwargs.get("initial_beam_op_limit", 60))
         use_cpsat_repair: bool = bool(kwargs.get("use_cpsat_repair", True))
@@ -627,6 +632,8 @@ class AlnsSolver(BaseSolver):
         greedy_repair_ms_total = 0
         feasibility_failures = 0
         iterations_completed = 0
+        no_improve_streak = 0
+        no_improve_early_stop = False
 
         logger.info(
             "ALNS starting: %d ops, %d machines, destroy_size=%d, max_iter=%d",
@@ -766,6 +773,7 @@ class AlnsSolver(BaseSolver):
                     current_cost = candidate_cost
                     score_reward = sigma_1
                     improvements += 1
+                    no_improve_streak = 0
                     logger.debug(
                         "ALNS iter %d: new best (cost=%.1f, makespan=%.1f, %s destroy, %s repair)",
                         iteration, best_cost, best_obj.makespan_minutes, op_name, repair_used,
@@ -775,7 +783,13 @@ class AlnsSolver(BaseSolver):
                     current_obj = candidate_obj
                     current_cost = candidate_cost
                     score_reward = sigma_2 if delta < 0 else sigma_3
+                    if delta < 0:
+                        no_improve_streak = 0
+                    else:
+                        no_improve_streak += 1
                 # else: reject
+                else:
+                    no_improve_streak += 1
 
                 # Update operator scores
                 operator_scores[selected_op_idx] += score_reward
@@ -795,6 +809,14 @@ class AlnsSolver(BaseSolver):
 
                 # Cool down
                 temperature *= sa_cooling_rate
+
+                if max_no_improve_iters > 0 and no_improve_streak >= max_no_improve_iters:
+                    no_improve_early_stop = True
+                    logger.info(
+                        "ALNS early stop: no improvements for %d consecutive iterations",
+                        no_improve_streak,
+                    )
+                    break
 
         # ------- Phase 4: Final validation -------
         # Recompute setups from final sequence
@@ -837,6 +859,9 @@ class AlnsSolver(BaseSolver):
                 "cpsat_max_destroy_ops": cpsat_max_destroy_ops,
                 "initial_solution_ms": initial_solution_ms,
                 "time_limit_exhausted_before_search": time_limit_exhausted_before_search,
+                "max_no_improve_iters": max_no_improve_iters,
+                "no_improve_early_stop": no_improve_early_stop,
+                "no_improve_streak_final": no_improve_streak,
                 "cpsat_repair_ms_total": cpsat_repair_ms_total,
                 "greedy_repair_ms_total": greedy_repair_ms_total,
                 "cpsat_repair_ms_mean": round(cpsat_repair_ms_total / cpsat_repair_attempts, 2)

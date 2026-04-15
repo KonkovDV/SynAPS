@@ -151,6 +151,66 @@ class RhcSolver(BaseSolver):
         fallback_repair_time_limited = False
         inner_window_summaries: list[dict[str, Any]] = []
 
+        inner_summary_metadata_keys = (
+            "iterations_completed",
+            "improvements",
+            "cpsat_repair_skips_large_destroy",
+            "cpsat_max_destroy_ops",
+            "cpsat_repair_attempts",
+            "cpsat_repairs",
+            "greedy_repair_attempts",
+            "greedy_repairs",
+            "cpsat_repair_ms_total",
+            "greedy_repair_ms_total",
+            "cpsat_repair_ms_mean",
+            "greedy_repair_ms_mean",
+            "feasibility_failures",
+            "initial_solution_ms",
+            "initial_solver",
+            "time_limit_exhausted_before_search",
+            "final_violations",
+        )
+
+        def append_inner_window_summary(
+            *,
+            window: int,
+            ops_in_window: int,
+            ops_committed: int,
+            resolution_mode: str,
+            inner_result: ScheduleResult | None,
+            fallback_reason: str | None = None,
+            fallback_iterations: int | None = None,
+            exception_message: str | None = None,
+        ) -> None:
+            summary: dict[str, Any] = {
+                "window": window,
+                "ops_committed": ops_committed,
+                "ops_in_window": ops_in_window,
+                "resolution_mode": resolution_mode,
+            }
+            if fallback_reason is not None:
+                summary["fallback_reason"] = fallback_reason
+            if fallback_iterations is not None:
+                summary["fallback_iterations"] = fallback_iterations
+            if exception_message is not None:
+                summary["inner_exception_message"] = exception_message
+
+            if inner_result is None:
+                summary["inner_status"] = "not_run"
+                summary["inner_duration_ms"] = 0
+            else:
+                summary["inner_status"] = (
+                    inner_result.status.value
+                    if hasattr(inner_result.status, "value")
+                    else str(inner_result.status)
+                )
+                summary["inner_duration_ms"] = inner_result.duration_ms
+                for key in inner_summary_metadata_keys:
+                    if key in (inner_result.metadata or {}):
+                        summary[key] = inner_result.metadata[key]
+
+            inner_window_summaries.append(summary)
+
         def global_time_exceeded() -> bool:
             return (time.monotonic() - t0) > time_limit_s
 
@@ -247,6 +307,11 @@ class RhcSolver(BaseSolver):
             # ------ Attempt inner solver on the window sub-problem ------
             window_solved_via_inner = False
             commit_boundary = window_start_offset + window_minutes
+            committed_before_window = len(committed_op_ids)
+            inner_result: ScheduleResult | None = None
+            inner_rejection_reason: str | None = None
+            inner_exception_message: str | None = None
+            fallback_iterations: int | None = None
 
             if inner_solver_name != "greedy":
                 try:
@@ -276,6 +341,7 @@ class RhcSolver(BaseSolver):
                         time_limit_s=per_window_limit,
                         **inner_kwargs,
                     )
+                    assert inner_result is not None
 
                     if (
                         inner_result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
@@ -298,37 +364,13 @@ class RhcSolver(BaseSolver):
                                     committed_now += 1
                         window_start_offset += window_minutes
                         window_solved_via_inner = True
-                        inner_window_summaries.append({
-                            "window": window_count,
-                            "ops_committed": committed_now,
-                            "ops_in_window": len(clean_window_ops),
-                            "inner_status": inner_result.status.value
-                            if hasattr(inner_result.status, "value")
-                            else str(inner_result.status),
-                            "inner_duration_ms": inner_result.duration_ms,
-                            **({
-                                k: inner_result.metadata[k]
-                                for k in (
-                                    "iterations_completed",
-                                    "improvements",
-                                    "cpsat_repair_skips_large_destroy",
-                                    "cpsat_max_destroy_ops",
-                                    "cpsat_repair_attempts",
-                                    "cpsat_repairs",
-                                    "greedy_repair_attempts",
-                                    "greedy_repairs",
-                                    "cpsat_repair_ms_total",
-                                    "greedy_repair_ms_total",
-                                    "cpsat_repair_ms_mean",
-                                    "greedy_repair_ms_mean",
-                                    "feasibility_failures",
-                                    "initial_solution_ms",
-                                    "initial_solver",
-                                    "time_limit_exhausted_before_search",
-                                )
-                                if k in (inner_result.metadata or {})
-                            }),
-                        })
+                        append_inner_window_summary(
+                            window=window_count,
+                            ops_in_window=len(clean_window_ops),
+                            ops_committed=committed_now,
+                            resolution_mode="inner",
+                            inner_result=inner_result,
+                        )
                         logger.info(
                             "RHC window %d solved by %s inner solver "
                             "(%d ops committed)",
@@ -336,7 +378,19 @@ class RhcSolver(BaseSolver):
                             inner_solver_name,
                             committed_now,
                         )
+                    else:
+                        assert inner_result is not None
+                        if inner_result.status not in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL):
+                            inner_rejection_reason = (
+                                f"inner_status_{inner_result.status.value}"
+                                if hasattr(inner_result.status, "value")
+                                else f"inner_status_{inner_result.status}"
+                            )
+                        else:
+                            inner_rejection_reason = "inner_empty_assignments"
                 except Exception:
+                    inner_rejection_reason = "inner_exception"
+                    inner_exception_message = "inner solver raised exception"
                     logger.warning(
                         "RHC window %d: inner solver '%s' failed, falling back to greedy",
                         window_count, inner_solver_name,
@@ -447,6 +501,8 @@ class RhcSolver(BaseSolver):
                     if time_limit_reached or not placed_any:
                         break  # no progress possible
 
+                fallback_iterations = inner_iter
+
                 # Commit assignments from this window
                 for a in scheduled_so_far:
                     if a.operation_id in committed_op_ids:
@@ -459,6 +515,18 @@ class RhcSolver(BaseSolver):
                         committed_assignments.append(a)
                         committed_assignment_by_op[a.operation_id] = a
                         committed_op_ids.add(a.operation_id)
+
+                if inner_solver_name != "greedy":
+                    append_inner_window_summary(
+                        window=window_count,
+                        ops_in_window=len(clean_window_ops),
+                        ops_committed=len(committed_op_ids) - committed_before_window,
+                        resolution_mode="fallback_greedy",
+                        inner_result=inner_result,
+                        fallback_reason=inner_rejection_reason or "inner_not_accepted",
+                        fallback_iterations=fallback_iterations,
+                        exception_message=inner_exception_message,
+                    )
 
                 window_start_offset += window_minutes
                 if time_limit_reached:

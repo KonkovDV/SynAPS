@@ -137,6 +137,7 @@ def _study_industrial_50k(
                     "destroy_fraction": 0.03,
                     "min_destroy": 10,
                     "max_destroy": 40,
+                    "max_no_improve_iters": 30,
                     "use_cpsat_repair": False,
                 },
             },

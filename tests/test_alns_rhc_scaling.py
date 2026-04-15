@@ -468,6 +468,39 @@ class TestAlnsSolver:
         assert result.metadata["cpsat_repair_attempts"] == 0
         assert result.metadata["greedy_repair_attempts"] == 0
 
+    def test_alns_stops_early_on_no_improvement_streak(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """ALNS should honor optional no-improvement early-stop guard."""
+        import synaps.solvers.alns_solver as alns_module
+
+        problem = _make_3state_problem(n_orders=4, ops_per_order=2)
+        original_objective_cost = alns_module._objective_cost
+
+        # Flat objective surface: no candidate can improve the incumbent.
+        monkeypatch.setattr(alns_module, "_objective_cost", lambda obj, weights: 100.0)
+
+        result = alns_module.AlnsSolver().solve(
+            problem,
+            max_iterations=50,
+            time_limit_s=20,
+            destroy_fraction=0.25,
+            min_destroy=2,
+            max_destroy=5,
+            use_cpsat_repair=False,
+            max_no_improve_iters=3,
+        )
+
+        # Restore in-module function so other tests keep normal behavior.
+        monkeypatch.setattr(alns_module, "_objective_cost", original_objective_cost)
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert result.metadata["no_improve_early_stop"] is True
+        assert result.metadata["iterations_completed"] <= 3
+        assert result.metadata["no_improve_streak_final"] >= 3
+        assert result.metadata["max_no_improve_iters"] == 3
+
     def test_alns_deterministic_with_seed(self) -> None:
         """Same seed should produce identical results."""
         from synaps.solvers.alns_solver import AlnsSolver
@@ -886,6 +919,53 @@ class TestRhcInnerSolver:
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
         assert len(result.assignments) == len(problem.operations)
         assert result.metadata["inner_solver"] == "greedy"
+
+    def test_rhc_records_fallback_window_summary_when_inner_solver_is_rejected(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Fallback-greedy windows must still appear in inner_window_summaries."""
+        from synaps.model import ScheduleResult
+        from synaps.solvers.rhc_solver import RhcSolver
+        from synaps.validation import verify_schedule_result
+
+        problem = _make_3state_problem(n_orders=4, ops_per_order=2)
+
+        def fake_alns_solve(self, problem, **kwargs):
+            return ScheduleResult(
+                solver_name="alns",
+                status=SolverStatus.ERROR,
+                assignments=[],
+                duration_ms=5,
+                metadata={"final_violations": 1},
+            )
+
+        monkeypatch.setattr(
+            "synaps.solvers.alns_solver.AlnsSolver.solve",
+            fake_alns_solve,
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=480,
+            overlap_minutes=60,
+            inner_solver="alns",
+            time_limit_s=30,
+            max_ops_per_window=50,
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert result.metadata["inner_window_summaries"]
+        first_window = result.metadata["inner_window_summaries"][0]
+        assert first_window["resolution_mode"] == "fallback_greedy"
+        assert first_window["fallback_reason"] == "inner_status_error"
+        assert first_window["inner_status"] == "error"
+        assert first_window["final_violations"] == 1
+        assert first_window["fallback_iterations"] > 0
+        assert first_window["ops_committed"] > 0
+
+        verification = verify_schedule_result(problem, result)
+        assert verification.feasible, f"Violations: {verification.violations}"
 
     def test_rhc_inner_kwargs_time_limit_no_duplicate_kwarg(self) -> None:
         """Regression: inner_kwargs containing time_limit_s must not cause TypeError.
