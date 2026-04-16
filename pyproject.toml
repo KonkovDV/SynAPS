@@ -47,7 +47,7 @@ dependencies = [
 [project.optional-dependencies]
 ml = [
     "torch>=2.6",
-    "torch-geometric>=2.6",
+    "torch-geometric>=2.7.0",
 ]
 llm = [
     "sglang>=0.4",
