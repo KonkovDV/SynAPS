@@ -43,6 +43,9 @@ env/
 docs/habr/
 habr-article-*.md
 
+# Local markdown dumps moved from repo root
+docs/_extra/
+
 # Benchmark outputs
 benchmark/results/
 .benchmarks/
