@@ -135,10 +135,10 @@ def route_solver_config(
     if ctx.regime is SolveRegime.WHAT_IF:
         if op_count <= 40 and has_nonzero_setups:
             return SolverRoutingDecision(
-                solver_config="CPSAT-EPS-SETUP-110",
+                solver_config="CPSAT-PARETO-SKETCH-SETUP",
                 reason=(
                     "what-if analysis on a small setup-sensitive instance benefits "
-                    "from the Pareto-slice epsilon profile"
+                    "from an adaptive Pareto sketch over multiple epsilon slices"
                 ),
             )
         if op_count <= 120:

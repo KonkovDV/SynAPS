@@ -109,6 +109,21 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
         solve_kwargs={"time_limit_s": 120},
         description="Exact CP-SAT solve with a 120-second time box",
     ),
+    "CPSAT-PARETO-SKETCH-SETUP": SolverRegistration(
+        factory=_build_pareto_slice_cpsat,
+        solve_kwargs={
+            "time_limit_s": 30,
+            "stage1_time_limit_s": 10,
+            "primary_objective": "setup",
+            "max_makespan_ratio": 1.10,
+            "epsilon_grid": [1.02, 1.05, 1.10],
+        },
+        description=(
+            "Adaptive Pareto sketch (setup primary): evaluate multiple epsilon "
+            "makespan envelopes (2%, 5%, 10%) and return the best non-dominated "
+            "slice for scenario analysis"
+        ),
+    ),
     "CPSAT-EPS-SETUP-110": SolverRegistration(
         factory=_build_pareto_slice_cpsat,
         solve_kwargs={

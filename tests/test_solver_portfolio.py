@@ -24,6 +24,7 @@ def test_available_solver_configs_matches_public_portfolio() -> None:
         "CPSAT-10",
         "CPSAT-30",
         "CPSAT-120",
+        "CPSAT-PARETO-SKETCH-SETUP",
         "CPSAT-EPS-SETUP-110",
         "CPSAT-EPS-TARD-110",
         "CPSAT-EPS-MATERIAL-110",
@@ -115,6 +116,14 @@ def test_create_solver_supports_academic_epsilon_profile() -> None:
     assert solve_kwargs["max_makespan_ratio"] == 1.10
 
 
+def test_create_solver_supports_adaptive_pareto_sketch_profile() -> None:
+    solver, solve_kwargs = create_solver("CPSAT-PARETO-SKETCH-SETUP")
+
+    assert solver.name == "cpsat_pareto_slice"
+    assert solve_kwargs["primary_objective"] == "setup"
+    assert solve_kwargs["epsilon_grid"] == [1.02, 1.05, 1.10]
+
+
 def test_route_solver_prefers_extended_cpsat_for_medium_dense_setup_instances() -> None:
     """Medium instances (61-120 ops) with dense setups should use CPSAT-120."""
     # Create a problem with enough ops and dense setup matrix
@@ -147,8 +156,8 @@ def test_route_solver_prefers_epsilon_setup_for_what_if_small_with_setups() -> N
         context=SolverRoutingContext(regime=SolveRegime.WHAT_IF),
     )
 
-    assert decision.solver_config == "CPSAT-EPS-SETUP-110"
-    assert "Pareto-slice" in decision.reason
+    assert decision.solver_config == "CPSAT-PARETO-SKETCH-SETUP"
+    assert "Pareto sketch" in decision.reason
 
 
 def test_route_solver_treats_material_only_transitions_as_setup_sensitive() -> None:
@@ -166,7 +175,7 @@ def test_route_solver_treats_material_only_transitions_as_setup_sensitive() -> N
         context=SolverRoutingContext(regime=SolveRegime.WHAT_IF),
     )
 
-    assert decision.solver_config == "CPSAT-EPS-SETUP-110"
+    assert decision.solver_config == "CPSAT-PARETO-SKETCH-SETUP"
 
 
 # ═══════════════════════════════════════════════════════════════════════════

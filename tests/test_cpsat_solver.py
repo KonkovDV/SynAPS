@@ -18,6 +18,7 @@ from synaps.model import (
 )
 from synaps.solvers.cpsat_solver import CpSatSolver
 from synaps.solvers.feasibility_checker import FeasibilityChecker
+from synaps.solvers.pareto_slice_solver import ParetoSliceCpSatSolver
 
 
 def _make_setup_forced_problem() -> ScheduleProblem:
@@ -448,6 +449,31 @@ def test_cpsat_can_minimise_setup_under_makespan_epsilon() -> None:
 
     checker = FeasibilityChecker()
     assert checker.check(problem, epsilon_result.assignments) == []
+
+
+def test_pareto_slice_solver_supports_adaptive_epsilon_grid_metadata() -> None:
+    problem = _make_setup_tradeoff_problem()
+    solver = ParetoSliceCpSatSolver()
+
+    result = solver.solve(
+        problem,
+        time_limit_s=20,
+        stage1_time_limit_s=5,
+        random_seed=17,
+        primary_objective="setup",
+        max_makespan_ratio=1.10,
+        epsilon_grid=[1.02, 1.05, 1.10],
+    )
+
+    assert result.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
+    assert result.objective.makespan_minutes <= 121
+
+    pareto_meta = result.metadata["pareto_slice"]
+    assert pareto_meta["stage"] == "epsilon_grid"
+    assert pareto_meta["epsilon_grid"] == [1.02, 1.05, 1.1]
+    assert pareto_meta["selected_ratio"] in {1.02, 1.05, 1.1}
+    assert pareto_meta["non_dominated_point_count"] >= 1
+    assert len(pareto_meta["epsilon_points"]) == 3
 
 
 def test_cpsat_virtualizes_parallel_work_centers_for_material_only_transitions() -> None:
