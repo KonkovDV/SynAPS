@@ -58,7 +58,7 @@ class _StructuredLogger:
             (),
             None,
         )
-        record._structured_extra = kwargs  # type: ignore[attr-defined]
+        record._structured_extra = kwargs
         self._logger.handle(record)
 
     def debug(self, event: str, **kwargs: Any) -> None:

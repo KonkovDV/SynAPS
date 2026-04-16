@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import random
 from datetime import datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from synaps.model import (
     Operation,
@@ -86,7 +86,7 @@ def generate_large_instance(
     # -- Setup matrix (SDST entries) --
     setup_matrix: list[SetupEntry] = []
     num_sdst_pairs = int(num_states * num_states * sdst_density)
-    sdst_pairs: set[tuple] = set()
+    sdst_pairs: set[tuple[UUID, UUID, UUID]] = set()
     while len(sdst_pairs) < num_sdst_pairs and len(sdst_pairs) < num_states * num_states:
         from_s = rng.choice(state_ids)
         to_s = rng.choice(state_ids)

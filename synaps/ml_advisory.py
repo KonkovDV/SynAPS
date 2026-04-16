@@ -36,12 +36,15 @@ _log = get_logger("synaps.ml_advisory")
 # ── Lazy torch import ──
 
 _TORCH_AVAILABLE = False
+torch: Any | None
 try:
-    import torch
+    import torch as _torch  # type: ignore[import-not-found]
 
     _TORCH_AVAILABLE = True
 except ImportError:
-    torch = None  # type: ignore[assignment]
+    _torch = None
+
+torch = _torch
 
 
 def torch_available() -> bool:
@@ -87,6 +90,8 @@ class ProblemFeatures:
         """Return a ``torch.Tensor`` of shape ``(1, 9)``; requires PyTorch."""
         if not _TORCH_AVAILABLE:
             raise RuntimeError("torch is required for tensor conversion")
+        if torch is None:
+            raise RuntimeError("torch import failed")
         return torch.tensor([self.as_list()], dtype=torch.float32)
 
 
@@ -167,6 +172,10 @@ class RuntimePredictor:
             _log.warning("model_not_found", path=str(path))
             return cls(model=None, model_version="heuristic")
 
+        if torch is None:
+            _log.warning("torch_import_failed", detail="falling back to heuristic predictor")
+            return cls(model=None, model_version="heuristic")
+
         model = torch.load(model_path, weights_only=True)
         return cls(model=model, model_version=str(model_path.stem))
 
@@ -218,6 +227,9 @@ class RuntimePredictor:
 
     def _predict_with_model(self, features: ProblemFeatures) -> RuntimeAdvisory:
         """Model-based prediction (when a trained GNN is loaded)."""
+        if torch is None:
+            return self._predict_heuristic(features)
+
         tensor = features.to_tensor()
 
         with torch.no_grad():

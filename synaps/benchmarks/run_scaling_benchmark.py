@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import time
+from typing import Any, TypedDict
 
 from synaps.benchmarks.instance_generator import generate_large_instance
 from synaps.solvers.alns_solver import AlnsSolver
@@ -19,14 +20,22 @@ from synaps.solvers.sdst_matrix import SdstMatrix
 from synaps.validation import verify_schedule_result
 
 
+class BenchmarkConfig(TypedDict):
+    n_ops: int
+    n_machines: int
+    n_states: int
+    solver_name: str
+    solver_kwargs: dict[str, Any]
+
+
 def run_benchmark(
     n_ops: int,
     n_machines: int,
     n_states: int,
     solver_name: str,
-    solver_kwargs: dict,
+    solver_kwargs: dict[str, Any],
     seed: int = 42,
-) -> dict:
+) -> dict[str, Any]:
     """Run a single benchmark configuration and return metrics."""
 
     # Generate instance
@@ -44,6 +53,7 @@ def run_benchmark(
     sdst = SdstMatrix.from_problem(problem)
 
     # Solve
+    solver: GreedyDispatch | BeamSearchDispatch | AlnsSolver | RhcSolver
     if solver_name == "greedy":
         solver = GreedyDispatch()
     elif solver_name == "beam-3":
@@ -85,7 +95,7 @@ def run_benchmark(
     }
 
 
-BENCHMARK_SUITE = [
+BENCHMARK_SUITE: list[BenchmarkConfig] = [
     # 1K — all solvers should handle this easily
     {"n_ops": 1000, "n_machines": 20, "n_states": 10, "solver_name": "greedy", "solver_kwargs": {}},
     {"n_ops": 1000, "n_machines": 20, "n_states": 10, "solver_name": "beam-3", "solver_kwargs": {}},
@@ -161,7 +171,13 @@ def main() -> None:
         )
 
         try:
-            result = run_benchmark(**config)
+            result = run_benchmark(
+                n_ops=config["n_ops"],
+                n_machines=config["n_machines"],
+                n_states=config["n_states"],
+                solver_name=config["solver_name"],
+                solver_kwargs=config["solver_kwargs"],
+            )
             results.append(result)
             status = "✓" if result["feasible"] else "✗"
             print(

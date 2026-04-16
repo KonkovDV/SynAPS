@@ -9,7 +9,7 @@ Academic basis: Data-Oriented Design for scheduling hot-paths (Matsuzaki et al.,
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
@@ -149,7 +149,7 @@ class SdstMatrix:
         fi = self.state_id_to_idx.get(from_state)
         if wi is None or fi is None:
             return np.zeros(self.n_states, dtype=np.int32)
-        return self.setup_minutes[wi, fi]
+        return cast("np.ndarray", self.setup_minutes[wi, fi])
 
     def memory_bytes(self) -> int:
         """Total memory footprint of the numpy arrays."""

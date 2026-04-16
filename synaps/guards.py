@@ -78,18 +78,22 @@ def _get_rss_mb() -> int | None:
 
             pmc = PROCESS_MEMORY_COUNTERS()
             pmc.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS)
-            handle = ctypes.windll.kernel32.GetCurrentProcess()  # type: ignore[attr-defined]
-            if ctypes.windll.psapi.GetProcessMemoryInfo(  # type: ignore[attr-defined]
-                handle, ctypes.byref(pmc), pmc.cb
-            ):
-                return pmc.WorkingSetSize // (1024 * 1024)
+            kernel32 = ctypes.windll.kernel32
+            psapi = ctypes.windll.psapi
+            handle = kernel32.GetCurrentProcess()
+            if psapi.GetProcessMemoryInfo(handle, ctypes.byref(pmc), pmc.cb):
+                return int(pmc.WorkingSetSize) // (1024 * 1024)
             return None
         else:
             import resource as _resource
 
-            rusage = _resource.getrusage(_resource.RUSAGE_SELF)
+            getrusage = getattr(_resource, "getrusage", None)
+            rusage_self = getattr(_resource, "RUSAGE_SELF", None)
+            if getrusage is None or rusage_self is None:
+                return None
+            rusage = getrusage(rusage_self)
             # On Linux maxrss is in KB; on macOS it's in bytes.
-            maxrss_kb = rusage.ru_maxrss
+            maxrss_kb = int(getattr(rusage, "ru_maxrss", 0))
             if maxrss_kb > 1_000_000:
                 return maxrss_kb // (1024 * 1024)
             return maxrss_kb // 1024
