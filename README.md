@@ -1,134 +1,214 @@
-﻿# SynAPS
+# SynAPS
 
-Open-source production scheduling engine for MO-FJSP-SDST-ARC workloads: flexible job-shop scheduling with sequence-dependent setup times and auxiliary-resource constraints.
+Deterministic production scheduling engine for MO-FJSP-SDST-ARC workloads.
 
-Language: **EN** | [RU](README_RU.md)
+Language: [EN](#synaps-in-english) | **RU**
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-## What It Contains
+---
 
-SynAPS is a deterministic scheduling stack for cases where a plan has to be inspectable, reproducible, and independently validated.
+## Зачем проект появился
 
-The current repository includes:
+Я делал этот проект с тем же вопросом, который обычно возникает у технолога на реальном производстве:
 
-- exact and decomposition solvers: `CP-SAT`, `LBBD`, `LBBD-HD`, `Pareto Slice`
-- constructive and bounded-repair layers: `Greedy ATCS`, `Beam Search`, `Incremental Repair`
-- large-instance search paths: `ALNS` and `RHC`
-- a named solver registry with 21 public configurations
-- an independent `FeasibilityChecker` that runs after every feasible or optimal solve-path
-- optional native acceleration seams in [synaps/accelerators.py](synaps/accelerators.py), with Python fallback
+"Почему система поставила заказ именно сюда и именно сейчас?"
 
-As of April 2026, the public portfolio exposes 12 solver families through 21 named configurations.
+В коммерческих APS это часто скрыто внутри закрытой логики. В SynAPS целевой принцип другой:
+1. ядро остается детерминированным,
+2. решение проходит независимую валидацию,
+3. причины маршрутизации и деградации можно проверить по артефактам.
 
-## Evidence Boundary
+## Честная рамка заявлений
 
-SynAPS targets a real and difficult scheduling class, but the evidence boundary matters more than the headline.
+Что подтверждается в этом репозитории:
+1. код, тесты и benchmark-контур воспроизводимы локально,
+2. solver-портфель и routing реально работают,
+3. ограничения проверяются отдельным post-solve валидатором.
 
-| Surface | Current claim |
-|---------|---------------|
-| Exact layer | Strongest current evidence is still on small and medium instances. `CP-SAT` and `LBBD` are the exact or near-exact layer with explicit lower-bound or gap semantics. |
-| Large-instance layer | `ALNS`, `RHC`, and `LBBD-HD` are the current path for synthetic 5K-50K studies. They target feasibility, runtime, and bottleneck discovery, not proof of optimality. |
-| Validation | Every feasible or optimal result is checked by an independent `FeasibilityChecker` covering completeness, eligibility, precedence, machine capacity, setup gaps, auxiliary resources, and horizon bounds. |
-| Dedicated 50K path | A reproducible 50K study exists under [benchmark/study_rhc_50k.py](benchmark/study_rhc_50k.py). The current materialized artifact is [benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json](benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json). |
-| Factory deployment | No live-factory deployment claim is made in this repository. |
+Что не заявляется как уже закрытое:
+1. validated live-factory deployment,
+2. стабильное fully feasible решение публичного industrial-50k в текущих открытых лимитах,
+3. готовый production UI плановика,
+4. turnkey ERP/MES интеграция.
 
-If you need the documentation router, start from [docs/README.md](docs/README.md). If you need the publication draft, use [docs/habr/synaps-open-source-habr-v3.md](docs/habr/synaps-open-source-habr-v3.md).
+## Фактчек-срез на 2026-04-16
 
-## Current 50K Result
+Проверено напрямую по состоянию репозитория:
+1. public solver configurations: **22**,
+2. Python test collection: **293 tests collected**,
+3. `requires-python`: **>=3.12**,
+4. core deps в `pyproject.toml`: `ortools`, `highspy`, `pydantic`, `numpy`.
 
-The repository now has a stable 50K evidence surface, and the useful part is that it shows the current limit plainly.
+## Портфель решателей (текущее ядро)
 
-The artifact at [benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json](benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json) records the current deterministic `industrial-50k` run for `RHC-GREEDY` and `RHC-ALNS` after the window-cap and indexed slot-search changes.
+### Exact and decomposition
+1. `CPSAT-10`, `CPSAT-30`, `CPSAT-120`
+2. `LBBD-5`, `LBBD-10`
+3. `LBBD-5-HD`, `LBBD-10-HD`, `LBBD-20-HD`
 
-- `RHC-GREEDY` stops after `120.115s` with `6959` committed assignments across `11` solved windows.
-- `RHC-ALNS` stops after `366.23s` with `1078` committed assignments across `3` solved windows.
-- both runs exited with `status=error` and `feasible=false`
-- both runs still carry near-full earliest-frontier pressure, with peak candidate counts of `49,931` and `49,993`
-- both runs skip global fallback repair after the time budget is exhausted, so the artifact preserves the real bottleneck instead of hiding it behind an unbounded cleanup pass
+### Multi-objective slices
+1. `CPSAT-PARETO-SKETCH-SETUP`
+2. `CPSAT-EPS-SETUP-110`
+3. `CPSAT-EPS-TARD-110`
+4. `CPSAT-EPS-MATERIAL-110`
 
-That means SynAPS already has a dedicated 50K profiling path, and the latest changes materially improved throughput on the greedy path. The preset is still not a solved full-scale benchmark, but the bottleneck has moved from pure window admission into inner-solver throughput, especially on the `RHC-ALNS` path.
+### Constructive and large-scale heuristics
+1. `GREED`, `GREED-K1-3`, `BEAM-3`, `BEAM-5`
+2. `ALNS-300`, `ALNS-500`, `ALNS-1000`
+3. `RHC-ALNS`, `RHC-CPSAT`, `RHC-GREEDY`
 
-## Solver Portfolio
+Независимая проверка ограничений выполняется через `FeasibilityChecker`.
 
-| Layer | Main members | Role |
-|-------|--------------|------|
-| Exact | `CPSAT-10`, `CPSAT-30`, `CPSAT-120` | exact solves on small and medium instances |
-| Decomposition | `LBBD-5`, `LBBD-10`, `LBBD-5-HD`, `LBBD-10-HD`, `LBBD-20-HD` | exact or near-exact decomposition for larger constrained instances |
-| Multi-objective slices | `CPSAT-EPS-SETUP-110`, `CPSAT-EPS-TARD-110`, `CPSAT-EPS-MATERIAL-110` | reproducible epsilon-constraint trade-off runs |
-| Constructive | `GREED`, `GREED-K1-3`, `BEAM-3`, `BEAM-5` | latency-first feasible schedules |
-| Large-instance search | `ALNS-300`, `ALNS-500`, `ALNS-1000`, `RHC-ALNS`, `RHC-CPSAT`, `RHC-GREEDY` | synthetic large-instance exploration and temporal decomposition |
+## Что реально обновлено в апреле 2026
 
-The authoritative registry lives in [synaps/solvers/registry.py](synaps/solvers/registry.py). The routing policy lives in [synaps/solvers/router.py](synaps/solvers/router.py).
+Реализовано в ядре и покрыто тестами:
+1. pressure-adaptive early stop для ALNS,
+2. динамический `max_no_improve_iters` от `due_pressure` и `candidate_pressure`,
+3. передача pressure-контекста из RHC в inner ALNS,
+4. frontier-health метрики в RHC metadata:
+   1. `candidate_pressure_mean|max`,
+   2. `due_pressure_mean`,
+   3. `due_drift_minutes_mean|max`,
+   4. `spillover_count`.
 
-## Quick Start
+Ключевые поверхности:
+1. [synaps/solvers/alns_solver.py](synaps/solvers/alns_solver.py)
+2. [synaps/solvers/rhc_solver.py](synaps/solvers/rhc_solver.py)
+3. [tests/test_alns_rhc_scaling.py](tests/test_alns_rhc_scaling.py)
+4. [docs/audit/SYNAPS_UPDATED_STRATEGIC_RECOMMENDATIONS_2026_04.md](docs/audit/SYNAPS_UPDATED_STRATEGIC_RECOMMENDATIONS_2026_04.md)
+
+## 50K benchmark surface (публичный артефакт)
+
+Канонический артефакт:
+[benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json](benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json)
+
+Сводка по `summary_by_solver`:
+
+| Solver | mean_wall_time_s | feasibility_rate | mean_makespan_minutes | mean_total_setup_minutes | mean_peak_window_candidate_count |
+|---|---:|---:|---:|---:|---:|
+| `RHC-GREEDY` | 120.115 | 0.0 | 5077.55 | 18671.0 | 49931.0 |
+| `RHC-ALNS` | 366.23 | 0.0 | 1515.04 | 10852.0 | 49993.0 |
+
+Это рабочий profiling-контур масштаба 50K, но не финальная quality-граница.
+
+## Дорожная карта
+
+### Now (0-6 weeks)
+1. укрепление pressure-adaptive контура (latency/quality KPI),
+2. epsilon-grid governance для устойчивого multi-objective поведения,
+3. расширение benchmark-корпуса на stress-варианты для RHC-границ.
+
+### Next (6-16 weeks)
+1. RL-driven operator policy в shadow-rollout режиме,
+2. bounded MOALNS archive,
+3. bounded LLM planner/explainer над deterministic kernel.
+
+### Later (16+ weeks)
+1. graph-native RHO accelerator path,
+2. расширенная multi-agent orchestration с state provenance,
+3. hardware-aware optimization lane после подтверждённого bottleneck profiling.
+
+## Быстрый старт
 
 ```bash
 git clone https://github.com/KonkovDV/SynAPS.git
 cd SynAPS
-pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
 ```
 
-Solve a small public instance:
+Базовый solve:
 
 ```bash
 python -m synaps solve benchmark/instances/tiny_3x3.json
 ```
 
-Run a benchmark comparison:
+Сравнение решателей:
 
 ```bash
 python -m benchmark.run_benchmark benchmark/instances/tiny_3x3.json \
   --solvers GREED CPSAT-10 --compare
 ```
 
-Run the dedicated 50K study:
-
-```bash
-python -m benchmark.study_rhc_50k \
-  --preset industrial-50k \
-  --seeds 1 \
-  --solvers RHC-GREEDY RHC-ALNS \
-  --write-dir benchmark/studies/2026-04-13-rhc-50k-machine-index
-```
-
-Run the Python test suite:
+Тесты:
 
 ```bash
 python -m pytest tests -q
 ```
 
-## Repository Map
+## Как проверить ключевые claims локально
 
-- [docs/README.md](docs/README.md) - documentation router
-- [benchmark/README.md](benchmark/README.md) - reproducible benchmark harness
-- [control-plane/README.md](control-plane/README.md) - TypeScript BFF and runtime boundary
-- [docs/audit/ACADEMIC_AUDIT_L6_RESPONSE_2026_04_12.md](docs/audit/ACADEMIC_AUDIT_L6_RESPONSE_2026_04_12.md) - claim-by-claim academic verification pass
-- [docs/habr/synaps-open-source-habr-v3.md](docs/habr/synaps-open-source-habr-v3.md) - current Habr draft
+Количество solver-конфигов:
 
-## Current Status
+```bash
+python -c "from synaps.solvers.registry import available_solver_configs as f; print(len(f()))"
+```
 
-Implemented:
+Количество тестов:
 
-- deterministic solver portfolio with exact, decomposition, constructive, and large-instance layers
-- independent feasibility validation after every feasible or optimal solve-path
-- public benchmark harness and deterministic synthetic instance generation
-- dedicated 50K study command and materialized artifact surface
-- optional native acceleration seams for hot-path scoring and capacity checks
+```bash
+pytest --collect-only -q tests
+```
 
-Current bottlenecks:
+50K summary values:
 
-- earliest-frontier pressure is still too broad on the current `industrial-50k` preset, even after the dynamic window cap
-- `RHC-GREEDY` improved materially, but `RHC-ALNS` still spends too much time inside the inner large-neighborhood path to make the 50K route competitive
+```bash
+python -c "import json, pathlib; obj=json.loads(pathlib.Path('benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json').read_text(encoding='utf-8')); print(obj['summary_by_solver'])"
+```
 
-Not claimed here:
+## Карта репозитория
 
-- live-factory validation
-- turnkey ERP or MES integration
-- a planner-facing production UI
-- a proven feasible full `industrial-50k` schedule under the current public time budgets
-- a mandatory compiled core beyond optional hot-path seams
+1. [docs/README.md](docs/README.md) - documentation router
+2. [benchmark/README.md](benchmark/README.md) - benchmark harness
+3. [control-plane/README.md](control-plane/README.md) - TypeScript BFF boundary
+4. [docs/audit/SYNAPS_UPDATED_STRATEGIC_RECOMMENDATIONS_2026_04.md](docs/audit/SYNAPS_UPDATED_STRATEGIC_RECOMMENDATIONS_2026_04.md) - strategic update
+
+## License
+
+MIT.
+
+---
+
+<a id="synaps-in-english"></a>
+
+# SynAPS in English
+
+Deterministic scheduling engine for MO-FJSP-SDST-ARC with independent feasibility validation.
+
+## Status snapshot (2026-04-16)
+
+Verified from repo state:
+1. 22 public solver configurations,
+2. 293 collected Python tests,
+3. Python requirement is 3.12+,
+4. 50K benchmark surface is reproducible through a public JSON artifact.
+
+## What is implemented now
+
+1. deterministic solver portfolio and deterministic router,
+2. ALNS/RHC pressure-adaptive early-stop baseline,
+3. frontier-health telemetry in RHC metadata,
+4. independent feasibility checks after solve.
+
+## What is not claimed as completed
+
+1. live-factory validated deployment,
+2. stable fully feasible industrial-50k under current public limits,
+3. production planner UI,
+4. turnkey ERP/MES integration.
+
+## Roadmap highlights
+
+1. Next: RL policy shadow rollout, bounded MOALNS archive, bounded LLM planner/explainer.
+2. Later: graph-native RHO acceleration and hardware-aware optimization lane.
+
+## Quick links
+
+1. [Architecture router](docs/README.md)
+2. [Benchmark harness](benchmark/README.md)
+3. [Control-plane boundary](control-plane/README.md)
+4. [Strategic update](docs/audit/SYNAPS_UPDATED_STRATEGIC_RECOMMENDATIONS_2026_04.md)
 
 ## License
 
