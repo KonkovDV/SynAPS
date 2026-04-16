@@ -21,6 +21,7 @@ Usage::
 from __future__ import annotations
 
 import dataclasses
+import importlib
 from typing import TYPE_CHECKING, Any
 
 from synaps.logging import get_logger
@@ -37,15 +38,15 @@ _log = get_logger("synaps.ml_advisory")
 
 _TORCH_AVAILABLE = False
 torch: Any | None
-_torch: Any | None
+_torch_module: Any | None
 try:
-    import torch as _torch
-
-    _TORCH_AVAILABLE = True
+    _torch_module = importlib.import_module("torch")
 except ImportError:
-    _torch = None
+    _torch_module = None
+else:
+    _TORCH_AVAILABLE = True
 
-torch = _torch
+torch = _torch_module
 
 
 def torch_available() -> bool:
