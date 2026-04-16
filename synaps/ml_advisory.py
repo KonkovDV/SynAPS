@@ -37,8 +37,9 @@ _log = get_logger("synaps.ml_advisory")
 
 _TORCH_AVAILABLE = False
 torch: Any | None
+_torch: Any | None
 try:
-    import torch as _torch  # type: ignore[import-not-found]
+    import torch as _torch
 
     _TORCH_AVAILABLE = True
 except ImportError:

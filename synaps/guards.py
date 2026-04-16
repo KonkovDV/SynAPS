@@ -78,8 +78,11 @@ def _get_rss_mb() -> int | None:
 
             pmc = PROCESS_MEMORY_COUNTERS()
             pmc.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS)
-            kernel32 = ctypes.windll.kernel32
-            psapi = ctypes.windll.psapi
+            windll = getattr(ctypes, "windll", None)
+            if windll is None:
+                return None
+            kernel32 = windll.kernel32
+            psapi = windll.psapi
             handle = kernel32.GetCurrentProcess()
             if psapi.GetProcessMemoryInfo(handle, ctypes.byref(pmc), pmc.cb):
                 return int(pmc.WorkingSetSize) // (1024 * 1024)

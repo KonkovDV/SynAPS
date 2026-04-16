@@ -201,13 +201,19 @@ def _lock_manifest_handle(handle: Any) -> None:
         import msvcrt
 
         handle.seek(0)
-        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        locking = getattr(msvcrt, "locking", None)
+        lk_lock = getattr(msvcrt, "LK_LOCK", None)
+        if not callable(locking) or not isinstance(lk_lock, int):
+            raise RuntimeError("msvcrt locking API is unavailable on this platform")
+        locking(handle.fileno(), lk_lock, 1)
         return
 
     import fcntl
 
-    flock = fcntl.flock  # type: ignore[attr-defined]
-    lock_ex = fcntl.LOCK_EX  # type: ignore[attr-defined]
+    flock = getattr(fcntl, "flock", None)
+    lock_ex = getattr(fcntl, "LOCK_EX", None)
+    if not callable(flock) or not isinstance(lock_ex, int):
+        raise RuntimeError("fcntl flock API is unavailable on this platform")
     flock(handle.fileno(), lock_ex)
 
 
@@ -216,13 +222,19 @@ def _unlock_manifest_handle(handle: Any) -> None:
         import msvcrt
 
         handle.seek(0)
-        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        locking = getattr(msvcrt, "locking", None)
+        lk_unlck = getattr(msvcrt, "LK_UNLCK", None)
+        if not callable(locking) or not isinstance(lk_unlck, int):
+            raise RuntimeError("msvcrt locking API is unavailable on this platform")
+        locking(handle.fileno(), lk_unlck, 1)
         return
 
     import fcntl
 
-    flock = fcntl.flock  # type: ignore[attr-defined]
-    lock_un = fcntl.LOCK_UN  # type: ignore[attr-defined]
+    flock = getattr(fcntl, "flock", None)
+    lock_un = getattr(fcntl, "LOCK_UN", None)
+    if not callable(flock) or not isinstance(lock_un, int):
+        raise RuntimeError("fcntl flock API is unavailable on this platform")
     flock(handle.fileno(), lock_un)
 
 
