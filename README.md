@@ -9,106 +9,94 @@ Language: [EN](#synaps-in-english) | **RU**
 
 ---
 
-## Зачем проект появился
+## Зачем это
 
-Я делал этот проект с тем же вопросом, который обычно возникает у технолога на реальном производстве:
+Когда в производстве начинается ручной "пожарный" режим, главный вопрос всегда один:
 
 "Почему система поставила заказ именно сюда и именно сейчас?"
 
-В коммерческих APS это часто скрыто внутри закрытой логики. В SynAPS целевой принцип другой:
-1. ядро остается детерминированным,
-2. решение проходит независимую валидацию,
-3. причины маршрутизации и деградации можно проверить по артефактам.
+SynAPS сделан вокруг этого вопроса. Здесь план строится не как черный ящик, а как проверяемый процесс:
+1. выбор решателя детерминированный,
+2. ограничения проверяются независимым валидатором,
+3. поведение можно разобрать по артефактам, а не по догадкам.
 
-## Честная рамка заявлений
+## Статус
 
-Что подтверждается в этом репозитории:
-1. код, тесты и benchmark-контур воспроизводимы локально,
-2. solver-портфель и routing реально работают,
-3. ограничения проверяются отдельным post-solve валидатором.
+Текущее состояние проекта:
+1. код, тесты и benchmark-контур воспроизводимы,
+2. solver-портфель работает и покрыт тестами,
+3. live-factory валидация в этом репозитории не заявляется.
 
-Что не заявляется как уже закрытое:
-1. validated live-factory deployment,
-2. стабильное fully feasible решение публичного industrial-50k в текущих открытых лимитах,
-3. готовый production UI плановика,
-4. turnkey ERP/MES интеграция.
+## Что сейчас в коде (фактчек 2026-04-16)
 
-## Фактчек-срез на 2026-04-16
+Проверено по репозиторию:
+1. `available_solver_configs()` -> **22** публичных конфигурации,
+2. `pytest --collect-only -q tests` -> **293 tests collected**,
+3. `requires-python` -> **>=3.12**,
+4. core зависимости ядра -> `ortools`, `highspy`, `pydantic`, `numpy`.
 
-Проверено напрямую по состоянию репозитория:
-1. public solver configurations: **22**,
-2. Python test collection: **293 tests collected**,
-3. `requires-python`: **>=3.12**,
-4. core deps в `pyproject.toml`: `ortools`, `highspy`, `pydantic`, `numpy`.
+## Портфель решателей
 
-## Портфель решателей (текущее ядро)
+В `synaps/solvers` сейчас 9 классов решателей (по `class ... (BaseSolver)`):
 
-### Exact and decomposition
-1. `CPSAT-10`, `CPSAT-30`, `CPSAT-120`
-2. `LBBD-5`, `LBBD-10`
-3. `LBBD-5-HD`, `LBBD-10-HD`, `LBBD-20-HD`
+| Компонент | Что делает | Где применяется |
+|---|---|---|
+| `CpSatSolver` | Exact CP-SAT решение | малые и средние постановки |
+| `LbbdSolver` | Logic-Based Benders | средние/крупные постановки |
+| `LbbdHdSolver` | Иерархическая/параллельная декомпозиция | крупные инстансы |
+| `GreedyDispatch` | Быстрый конструктив | low-latency режим |
+| `BeamSearchDispatch` | Улучшенный конструктив (beam) | SDST-чувствительные случаи |
+| `AlnsSolver` | Большие инстансы через LNS | 10k+ сценарии |
+| `RhcSolver` | Рецедирующий горизонт | long-horizon и very-large |
+| `ParetoSliceCpSatSolver` | Epsilon-constraint срезы | multi-objective сравнение |
+| `IncrementalRepair` | Локальный ремонт расписания | change/breakdown/rush сценарии |
 
-### Multi-objective slices
-1. `CPSAT-PARETO-SKETCH-SETUP`
-2. `CPSAT-EPS-SETUP-110`
-3. `CPSAT-EPS-TARD-110`
-4. `CPSAT-EPS-MATERIAL-110`
+Плюс отдельный контур проверки выполнимости: `FeasibilityChecker`.
 
-### Constructive and large-scale heuristics
-1. `GREED`, `GREED-K1-3`, `BEAM-3`, `BEAM-5`
-2. `ALNS-300`, `ALNS-500`, `ALNS-1000`
-3. `RHC-ALNS`, `RHC-CPSAT`, `RHC-GREEDY`
+## 50K benchmark surface
 
-Независимая проверка ограничений выполняется через `FeasibilityChecker`.
-
-## Что реально обновлено в апреле 2026
-
-Реализовано в ядре и покрыто тестами:
-1. pressure-adaptive early stop для ALNS,
-2. динамический `max_no_improve_iters` от `due_pressure` и `candidate_pressure`,
-3. передача pressure-контекста из RHC в inner ALNS,
-4. frontier-health метрики в RHC metadata:
-   1. `candidate_pressure_mean|max`,
-   2. `due_pressure_mean`,
-   3. `due_drift_minutes_mean|max`,
-   4. `spillover_count`.
-
-Ключевые поверхности:
-1. [synaps/solvers/alns_solver.py](synaps/solvers/alns_solver.py)
-2. [synaps/solvers/rhc_solver.py](synaps/solvers/rhc_solver.py)
-3. [tests/test_alns_rhc_scaling.py](tests/test_alns_rhc_scaling.py)
-4. [docs/audit/SYNAPS_UPDATED_STRATEGIC_RECOMMENDATIONS_2026_04.md](docs/audit/SYNAPS_UPDATED_STRATEGIC_RECOMMENDATIONS_2026_04.md)
-
-## 50K benchmark surface (публичный артефакт)
-
-Канонический артефакт:
+Публичный артефакт:
 [benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json](benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json)
 
-Сводка по `summary_by_solver`:
+Сводка `summary_by_solver`:
 
 | Solver | mean_wall_time_s | feasibility_rate | mean_makespan_minutes | mean_total_setup_minutes | mean_peak_window_candidate_count |
 |---|---:|---:|---:|---:|---:|
 | `RHC-GREEDY` | 120.115 | 0.0 | 5077.55 | 18671.0 | 49931.0 |
 | `RHC-ALNS` | 366.23 | 0.0 | 1515.04 | 10852.0 | 49993.0 |
 
-Это рабочий profiling-контур масштаба 50K, но не финальная quality-граница.
+Это рабочий контур профилирования масштаба 50K, но не финальная quality-граница.
 
-## Дорожная карта
+## Что изменилось весной 2026
+
+Реализовано и покрыто тестами:
+1. pressure-adaptive early stop для ALNS,
+2. динамический `max_no_improve_iters` от `due_pressure` и `candidate_pressure`,
+3. передача pressure-контекста из RHC в inner ALNS,
+4. frontier-health метрики в RHC metadata (`candidate_pressure`, `due_drift`, `spillover`).
+
+Основные файлы:
+1. [synaps/solvers/alns_solver.py](synaps/solvers/alns_solver.py)
+2. [synaps/solvers/rhc_solver.py](synaps/solvers/rhc_solver.py)
+3. [tests/test_alns_rhc_scaling.py](tests/test_alns_rhc_scaling.py)
+4. [docs/audit/SYNAPS_UPDATED_STRATEGIC_RECOMMENDATIONS_2026_04.md](docs/audit/SYNAPS_UPDATED_STRATEGIC_RECOMMENDATIONS_2026_04.md)
+
+## Планы
 
 ### Now (0-6 weeks)
-1. укрепление pressure-adaptive контура (latency/quality KPI),
-2. epsilon-grid governance для устойчивого multi-objective поведения,
-3. расширение benchmark-корпуса на stress-варианты для RHC-границ.
+1. стабилизация pressure-adaptive KPI (latency/quality),
+2. epsilon-grid governance для multi-objective профилей,
+3. расширение stress benchmark-корпуса для RHC.
 
 ### Next (6-16 weeks)
-1. RL-driven operator policy в shadow-rollout режиме,
+1. RL-driven operator policy в shadow mode,
 2. bounded MOALNS archive,
 3. bounded LLM planner/explainer над deterministic kernel.
 
 ### Later (16+ weeks)
-1. graph-native RHO accelerator path,
-2. расширенная multi-agent orchestration с state provenance,
-3. hardware-aware optimization lane после подтверждённого bottleneck profiling.
+1. graph-native RHO acceleration,
+2. multi-agent orchestration со строгим state provenance,
+3. hardware-aware optimization lane после подтвержденного bottleneck profiling.
 
 ## Быстрый старт
 
@@ -116,46 +104,38 @@ Language: [EN](#synaps-in-english) | **RU**
 git clone https://github.com/KonkovDV/SynAPS.git
 cd SynAPS
 python -m pip install -e ".[dev]"
-```
 
-Базовый solve:
-
-```bash
+# Базовый solve
 python -m synaps solve benchmark/instances/tiny_3x3.json
-```
 
-Сравнение решателей:
-
-```bash
+# Сравнение решателей
 python -m benchmark.run_benchmark benchmark/instances/tiny_3x3.json \
   --solvers GREED CPSAT-10 --compare
-```
 
-Тесты:
-
-```bash
+# Тесты
 python -m pytest tests -q
 ```
 
-## Как проверить ключевые claims локально
-
-Количество solver-конфигов:
+## Как проверить claims локально
 
 ```bash
+# 22 solver configs
 python -c "from synaps.solvers.registry import available_solver_configs as f; print(len(f()))"
-```
 
-Количество тестов:
-
-```bash
+# 293 tests
 pytest --collect-only -q tests
-```
 
-50K summary values:
-
-```bash
+# 50K summary
 python -c "import json, pathlib; obj=json.loads(pathlib.Path('benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json').read_text(encoding='utf-8')); print(obj['summary_by_solver'])"
 ```
+
+## Границы заявлений
+
+Проект не заявляет в текущей версии:
+1. подтвержденное внедрение на живом заводе,
+2. полностью feasible industrial-50k в текущих публичных лимитах,
+3. production UI плановика,
+4. turnkey ERP/MES интеграцию.
 
 ## Карта репозитория
 
@@ -184,24 +164,29 @@ Verified from repo state:
 3. Python requirement is 3.12+,
 4. 50K benchmark surface is reproducible through a public JSON artifact.
 
-## What is implemented now
+## Why this project exists
 
-1. deterministic solver portfolio and deterministic router,
-2. ALNS/RHC pressure-adaptive early-stop baseline,
-3. frontier-health telemetry in RHC metadata,
-4. independent feasibility checks after solve.
+SynAPS focuses on one practical requirement: planning decisions must be explainable.
+The design is deterministic-first, with independent post-solve feasibility checks and reproducible benchmark artifacts.
 
-## What is not claimed as completed
+## Current implementation
 
-1. live-factory validated deployment,
-2. stable fully feasible industrial-50k under current public limits,
-3. production planner UI,
-4. turnkey ERP/MES integration.
+1. solver portfolio is live and routed deterministically,
+2. ALNS/RHC pressure-adaptive baseline is implemented,
+3. frontier-health telemetry is exposed in RHC metadata,
+4. independent feasibility checks run after solve paths.
 
 ## Roadmap highlights
 
-1. Next: RL policy shadow rollout, bounded MOALNS archive, bounded LLM planner/explainer.
+1. Next: RL operator policy in shadow mode, bounded MOALNS archive, bounded LLM planner/explainer.
 2. Later: graph-native RHO acceleration and hardware-aware optimization lane.
+
+## Current non-claims
+
+1. no validated live-factory deployment claim,
+2. no claim of stable fully feasible industrial-50k under current public limits,
+3. no claim of production planner UI,
+4. no claim of turnkey ERP/MES integration.
 
 ## Quick links
 
