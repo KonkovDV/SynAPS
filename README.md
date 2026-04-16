@@ -25,6 +25,19 @@ Language: [EN](#synaps-in-english) | **RU**
 - Требование Python: **>=3.12** (`pyproject.toml`).
 - Базовые зависимости ядра: `ortools`, `highspy`, `pydantic`, `numpy`.
 
+## 50K benchmark snapshot (industrial-50k)
+
+Канонический артефакт: `benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json`.
+
+Сводка `summary_by_solver`:
+
+| Solver | mean_wall_time_s | feasibility_rate | mean_makespan_minutes | mean_total_setup_minutes | mean_peak_window_candidate_count |
+|---|---:|---:|---:|---:|---:|
+| `RHC-GREEDY` | 120.115 | 0.0 | 5077.55 | 18671.0 | 49931.0 |
+| `RHC-ALNS` | 366.23 | 0.0 | 1515.04 | 10852.0 | 49993.0 |
+
+Это репрезентативный profiling-срез 50K, а не claim о полностью feasible решении в текущем публичном бюджете времени.
+
 ## Портфель решателей
 
 Базовых solver-классов сейчас 9, а публичных конфигураций в реестре - 22.
@@ -45,6 +58,13 @@ Language: [EN](#synaps-in-english) | **RU**
 Дополнительно: графовое разбиение, реестр из 22 публичных конфигураций, Pydantic-модель, профилировщик задач, ресурсные ограничители, инструментация метрик, версионированные JSON-контракты, TypeScript control-plane BFF.
 
 **Тесты:** 293 tests collected (по `pytest --collect-only`).
+
+## Что обновлено весной 2026
+
+- Pressure-adaptive контур ALNS: динамический `max_no_improve_iters` с учетом `due_pressure` и `candidate_pressure`.
+- Прокидывание pressure-контекста из RHC в inner ALNS по каждому окну.
+- Frontier-health telemetry в RHC metadata: `candidate_pressure`, `due_drift_minutes`, `spillover_ops` и агрегаты.
+- Обновленная стратегическая дорожная карта в `docs/audit/SYNAPS_UPDATED_STRATEGIC_RECOMMENDATIONS_2026_04.md`.
 
 ## Чем SynAPS отличается
 
@@ -97,8 +117,8 @@ python -m benchmark.run_benchmark benchmark/instances/tiny_3x3.json \
 
 ### 3. Эвристики для больших масштабов (ALNS и RHC)
 Для индустриальных объемов (50 000+ операций), точные методы работают только как "двигатели" внутри локальных окрестностей.
-- **ALNS (Adaptive Large Neighborhood Search):** Мета-эвристика. Из текущего расписания вырываются куски через 4 `destroy`-оператора (рандомный, worst-tardiness, high-setup, machine-clear). Разрушенная "дыра" чинится через `micro-CP-SAT repair` (поиск оптимального заполнения окна). Критерий принятия нового расписания базируется на Simulated Annealing (SA), чтобы не застрять в локальном оптимуме (Ropke & Pisinger 2006).
-- **RHC (Receding Horizon Control):** Горизонт планирования нарезается на перекрывающиеся окна (1–5 тысяч операций). Окно решается через ALNS или CP-SAT, затем часть расписания "замораживается", и окно сдвигается вправо. Изменения апреля 2026 года ввели *pressure-adaptive early-stop* — динамическое завершение окна в зависимости от плотности оставшегося фронтира (`due_pressure`, `candidate_pressure`), предотвращая избыточное "шлифование" локальных участков, если впереди много срочных задач.
+- **ALNS (Adaptive Large Neighborhood Search):** Мета-эвристика. Из текущего расписания вырываются куски через 4 `destroy`-оператора (`random`, `worst`, `related`, `machine_segment`). Разрушенная "дыра" восстанавливается через greedy-repair, а для малых окрестностей может включаться `micro-CP-SAT repair` (`use_cpsat_repair`, `cpsat_max_destroy_ops`). Критерий принятия нового расписания базируется на Simulated Annealing (SA), чтобы не застрять в локальном оптимуме (Ropke & Pisinger 2006).
+- **RHC (Receding Horizon Control):** Горизонт планирования нарезается на перекрывающиеся окна (по умолчанию `window_minutes=480`, `overlap_minutes=120`) с cap на число операций в окне (типично до 5000). Окно решается через ALNS/CP-SAT/greedy, затем часть расписания "замораживается", и окно сдвигается вправо. Изменения апреля 2026 года ввели *pressure-adaptive early-stop* — динамическое завершение окна в зависимости от плотности оставшегося фронтира (`due_pressure`, `candidate_pressure`), предотвращая избыточное "шлифование" локальных участков, если впереди много срочных задач.
 
 ### 4. Жадное диспетчирование (Greedy-ATCS)
 Для получения допустимого расписания за < 1 сек используется индекс ATCS (Apparent Tardiness Cost with Setups). В SynAPS он модифицирован:
@@ -107,8 +127,8 @@ python -m benchmark.run_benchmark benchmark/instances/tiny_3x3.json \
 
 ### 5. Софт: Архитектура чистого контура и независимая валидация
 - **Моделирование данных:** Строгий `Pydantic v2` в `synaps/model.py`. Ошибка входных данных отваливается на парсинге, а не при сборке графа. Матрицы переходов (`SdstMatrix`) хранятся в эффективных `NumPy`-массивах с $\mathcal{O}(1)$ доступом.
-- **Профилировщик задач:** Перед запуском `ProblemProfile` классифицирует инстанс (есть ли ARC, есть ли setups > 0, какой % hard deadlines). Это отключает ненужные ветви (feature-toggles) в графе решателя.
-- **Control-Plane BFF:** Типизированный TypeScript/FastAPI мост для индустриальных сервисов, изолирующий процесс оптимизации от web-слоя.
+- **Профилировщик задач:** Перед запуском `ProblemProfile` вычисляет профиль признаков (объем, плотность setup-матрицы, наличие non-zero setups, доля hard-deadline заказов, max-parallel профиль), чтобы выбирать подходящий solver-path без лишних вычислений.
+- **Control-Plane BFF:** Типизированный TypeScript/Fastify мост для индустриальных сервисов, изолирующий процесс оптимизации от web-слоя.
 - **Feasibility Checker:** Абсолютный "zero-trust" барьер. Независимый 7-классовый event-sweep алгоритм прочесывает финальное расписание. Если RHC сломал прецедент или ALNS превысил емкость инструмента — расписание маркируется как `feasible = False` вне зависимости от внутренних репортов решателя.
 - **Инструментация:** Подключаемые логгеры метрик собирают телеметрию (глубина фронтира, счетчики отсечений, тайминги) без загрязнения алгоритмического кода.
 
@@ -216,6 +236,26 @@ Code runs, tests pass, benchmarks reproduce. **Not tested on a live factory.** T
 - Python requirement: **>=3.12** (`pyproject.toml`).
 - Core runtime dependencies: `ortools`, `highspy`, `pydantic`, `numpy`.
 
+## 50K benchmark snapshot (industrial-50k)
+
+Canonical artifact: `benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json`.
+
+`summary_by_solver` snapshot:
+
+| Solver | mean_wall_time_s | feasibility_rate | mean_makespan_minutes | mean_total_setup_minutes | mean_peak_window_candidate_count |
+|---|---:|---:|---:|---:|---:|
+| `RHC-GREEDY` | 120.115 | 0.0 | 5077.55 | 18671.0 | 49931.0 |
+| `RHC-ALNS` | 366.23 | 0.0 | 1515.04 | 10852.0 | 49993.0 |
+
+This is a reproducible 50K profiling slice, not a claim of a fully feasible industrial-50k schedule under the current public time budget.
+
+## Spring 2026 updates
+
+- Pressure-adaptive ALNS no-improve control (`due_pressure`, `candidate_pressure`).
+- RHC-to-ALNS pressure context propagation on each window.
+- Frontier-health telemetry in RHC metadata (`candidate_pressure`, `due_drift_minutes`, `spillover_ops`).
+- Updated strategic track in `docs/audit/SYNAPS_UPDATED_STRATEGIC_RECOMMENDATIONS_2026_04.md`.
+
 ## Solver portfolio
 
 9 base solver classes, 22 public registry configurations, and 293 collected tests.
@@ -253,8 +293,8 @@ When CP-SAT crashes against 10,000+ operations, LBBD scales the exact logic:
 
 ### 3. Large-Scale Meta-Heuristics (ALNS and RHC)
 For industrial 50K+ benchmarks, the system relies on advanced meta-heuristics using exact engines as local repair operators:
-- **ALNS (Adaptive Large Neighborhood Search):** The scheduler punches scheduling "holes" via 4 adaptive `destroy` operators (random, worst-tardiness, high-setup, machine-clear), and optimally plugs the gaps using `micro-CP-SAT repair`. A Simulated Annealing (SA) criteria prevents local minimum trapping (Ropke & Pisinger 2006).
-- **RHC (Receding Horizon Control):** Dissects the 50,000 timeline into sliding windows (1k–5k items). A window is solved (via ALNS or CP-SAT), a fraction is committed (frozen), and the window slides right. April 2026 introduced *pressure-adaptive early-stop*: the window's completion budget flexes automatically based on `due_pressure` and `candidate_pressure` metrics extracted from the earliest-frontier unassigned queue.
+- **ALNS (Adaptive Large Neighborhood Search):** The scheduler punches scheduling "holes" via 4 adaptive `destroy` operators (`random`, `worst`, `related`, `machine_segment`). The gap is repaired with greedy repair, and for small neighborhoods an optional `micro-CP-SAT repair` path can be enabled (`use_cpsat_repair`, `cpsat_max_destroy_ops`). Simulated Annealing (SA) acceptance avoids early local-minimum lock-in (Ropke & Pisinger 2006).
+- **RHC (Receding Horizon Control):** Dissects the 50,000 timeline into overlapping windows (defaults: `window_minutes=480`, `overlap_minutes=120`) with operation caps per window (typically up to 5000). A window is solved (ALNS/CP-SAT/greedy), a fraction is committed (frozen), then the window slides right. April 2026 introduced *pressure-adaptive early-stop*: completion budgets adapt to `due_pressure` and `candidate_pressure` from the earliest-frontier queue.
 
 ### 4. Greedy Dispatching (Log-ATCS)
 Securing an admissible schedule in < 1 second utilizes the Apparent Tardiness Cost with Setups (ATCS) index, massively hardened:
@@ -263,7 +303,7 @@ Securing an admissible schedule in < 1 second utilizes the Apparent Tardiness Co
 
 ### 5. Software Architecture & Governance
 - **Data Modeling:** Strict `Pydantic v2` definitions reject invalid domain contracts upfront. Transitional matrices (`SdstMatrix`) reside in memory-contiguous `NumPy` arrays for $O(1)$ solver reads.
-- **Problem Profiler:** On ingest, `ProblemProfile` detects exact features (ARC presence, max_parallel logic, hard deadlining) yielding a bitmask that enables/disables heavy graph segments dynamically.
+- **Problem Profiler:** On ingest, `ProblemProfile` computes a compact feature profile (problem scale, setup density, non-zero setup presence, hard-deadline share, max-parallel profile) used to select the most suitable solver path.
 - **Feasibility Checker:** The definitive zero-trust firewall. Uses a 7-class event-sweep algorithm outside the control of the active solver logic. If RHC or LBBD hallucinates an illegal precedence overlap or ARC violation, the schedule is explicitly flagged `feasible = False`. 
 - **TypeScript Control-Plane BFF:** An enterprise-facing typed bridge that isolates non-deterministic UI/integrator logic from the rigorous Python kernel.
 
