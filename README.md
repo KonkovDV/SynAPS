@@ -79,13 +79,38 @@ python -m benchmark.run_benchmark benchmark/instances/tiny_3x3.json \
   --solvers GREED CPSAT-30 --compare
 ```
 
-## Математика коротко
+## Архитектура, алгоритмы и математика подробно
 
-CP-SAT формулировка: `AddCircuit` для гамильтоновой последовательности на каждом станке (вместо квадратичных дизъюнкций), `AddCumulative` для пулов вспомогательных ресурсов с явными demands на setup-интервалы, скаляризованная многокритериальная целевая.
+За фасадом OpenAPI/TypeScript скрыто глубоко эшелонированное математическое ядро. Задачи класса MO-FJSP-SDST-ARC (Multi-Objective Flexible Job Shop Scheduling with Sequence-Dependent Setup Times and Additional Resource Constraints) NP-трудны даже в базовых вариантах. SynAPS использует гибридный подход.
 
-LBBD разрезает задачу: HiGHS MIP мастер раздает операции по станкам, CP-SAT подзадачи секвенируют внутри кластеров. Четыре семейства отсечений: nogood, bottleneck capacity, setup-cost, load-balance (Hooker 2007).
+### 1. Формулировка CP-SAT (Exact)
+Вместо классической MIP-формулировки с квадратичными или Big-M дизъюнкциями, которые дают слабые нижние оценки (LP-relaxations), SynAPS компилирует задачу в термины интервальных переменных для Constraint Programming (через стэк OR-Tools):
+- **Секвенирование и переналадки (SDST):** Моделируется через графовый контур `AddCircuit`, где узлы — это операции, а веса рёбер — время переналадки. Формулировка гарантирует гамильтонов путь с точным расчётным временем setup-перехода.
+- **Вспомогательные ресурсы (ARC):** Моделируются через глобальное ограничение `AddCumulative`. Demand-профили формируются не только на время обработки, но и на *setup-интервалы*, ликвидируя известный баг "ghost setup" (переналадка без выделения бригады).
+- **Скаляризация целей:** Multi-objective базируется на динамических весах через `Pareto Slice` или линейную агрегацию (makespan, tardiness, setups, material loss, cost).
 
-Greedy ATCS работает в log-пространстве, чтобы не тонуть в underflow на тяжелохвостых распределениях переналадок.
+### 2. Декомпозиция Бендерса (LBBD и LBBD-HD)
+Когда CP-SAT задыхается на 10 000+ операций, активируется Logic-Based Benders Decomposition (LBBD):
+- **Master Problem (MIP на HiGHS):** Решает задачу назначения (assignment), релаксируя точное время. Это чистый MILP, где переменные $y_{ij} \in \{0, 1\}$ отправляют операцию $i$ на машину $j$.
+- **Subproblems (CP-SAT):** Получив жесткое назначение от Master, распадаются на независимые кластеры (машины или ячейки). В `LBBD-HD` подзадачи решаются строго параллельно через `ProcessPoolExecutor`.
+- **Отсечения (Benders Cuts):** Если подзадача не укладывается в заданный Master-этапом `makespan` (или невозможна из-за SDST+ARC), генерируются логические отсечения и возвращаются в Master. Используется 4 семейства отсечений (по Hooker 2007 и Nasirian 2025): *nogood cuts, bottleneck capacity cuts, setup-cost cuts, load-balance cuts*.
+
+### 3. Эвристики для больших масштабов (ALNS и RHC)
+Для индустриальных объемов (50 000+ операций), точные методы работают только как "двигатели" внутри локальных окрестностей.
+- **ALNS (Adaptive Large Neighborhood Search):** Мета-эвристика. Из текущего расписания вырываются куски через 4 `destroy`-оператора (рандомный, worst-tardiness, high-setup, machine-clear). Разрушенная "дыра" чинится через `micro-CP-SAT repair` (поиск оптимального заполнения окна). Критерий принятия нового расписания базируется на Simulated Annealing (SA), чтобы не застрять в локальном оптимуме (Ropke & Pisinger 2006).
+- **RHC (Receding Horizon Control):** Горизонт планирования нарезается на перекрывающиеся окна (1–5 тысяч операций). Окно решается через ALNS или CP-SAT, затем часть расписания "замораживается", и окно сдвигается вправо. Изменения апреля 2026 года ввели *pressure-adaptive early-stop* — динамическое завершение окна в зависимости от плотности оставшегося фронтира (`due_pressure`, `candidate_pressure`), предотвращая избыточное "шлифование" локальных участков, если впереди много срочных задач.
+
+### 4. Жадное диспетчирование (Greedy-ATCS)
+Для получения допустимого расписания за < 1 сек используется индекс ATCS (Apparent Tardiness Cost with Setups). В SynAPS он модифицирован:
+- **Log-space трансформация:** На заводах с тяжелохвостыми распределениями (setup в 2 часа, а обработка 5 секунд) оригинальная экспонента ATCS уходит в `float64 underflow` (становится нулём для многих альтернатив). Логарифмирование индекса спасает ранжирование.
+- **Beam Search:** Настраиваемый расширенный луч (K=3..5) предотвращает фатальную близорукость жадной логики в узких бутылочных горлышках.
+
+### 5. Софт: Архитектура чистого контура и независимая валидация
+- **Моделирование данных:** Строгий `Pydantic v2` в `synaps/model.py`. Ошибка входных данных отваливается на парсинге, а не при сборке графа. Матрицы переходов (`SdstMatrix`) хранятся в эффективных `NumPy`-массивах с $\mathcal{O}(1)$ доступом.
+- **Профилировщик задач:** Перед запуском `ProblemProfile` классифицирует инстанс (есть ли ARC, есть ли setups > 0, какой % hard deadlines). Это отключает ненужные ветви (feature-toggles) в графе решателя.
+- **Control-Plane BFF:** Типизированный TypeScript/FastAPI мост для индустриальных сервисов, изолирующий процесс оптимизации от web-слоя.
+- **Feasibility Checker:** Абсолютный "zero-trust" барьер. Независимый 7-классовый event-sweep алгоритм прочесывает финальное расписание. Если RHC сломал прецедент или ALNS превысил емкость инструмента — расписание маркируется как `feasible = False` вне зависимости от внутренних репортов решателя.
+- **Инструментация:** Подключаемые логгеры метрик собирают телеметрию (глубина фронтира, счетчики отсечений, тайминги) без загрязнения алгоритмического кода.
 
 ## Что реализовано, а что нет
 
@@ -209,6 +234,38 @@ Code runs, tests pass, benchmarks reproduce. **Not tested on a live factory.** T
 | FeasibilityChecker | 7-class event-sweep | After every solve |
 
 Additional: graph partitioning, registry with 22 public configurations, Pydantic data model, problem profiler, resource guards, instrumentation, versioned JSON contracts, TypeScript control-plane BFF.
+
+## Architecture, Algorithms & Mathematics Detailed
+
+Behind the OpenAPI/TypeScript facade lies a deeply layered mathematical core. The MO-FJSP-SDST-ARC problem (Multi-Objective Flexible Job Shop Scheduling with Sequence-Dependent Setup Times and Additional Resource Constraints) is notoriously NP-hard even in pure forms. SynAPS applies a hybrid methodology.
+
+### 1. CP-SAT Formulation (Exact)
+Instead of pure MIP with Big-M disjunctions (yielding weak LP relaxations), SynAPS directly compiles the problem into interval variables within a Constraint Programming paradigm (OR-Tools backend):
+- **Sequencing & SDST:** Modeled using `AddCircuit` on machine-specific graphs to form a Hamiltonian sequence. The edge costs represent exact setup times. 
+- **Additional Resources (ARC):** Modeled with global `AddCumulative` constraints. Resource demands span not just the processing periods, but also *setup intervals*, successfully mitigating the "ghost setup" bug common in simpler solvers (where setups occur without the necessary workforce/tooling allocated).
+- **Multi-Objective Scalarization:** Objectives (makespan, tardiness, setups, material loss) are mapped dynamically via `Pareto Slice` (a 2-stage epsilon-constraint method) or linear aggregation.
+
+### 2. Logic-Based Benders Decomposition (LBBD and LBBD-HD)
+When CP-SAT crashes against 10,000+ operations, LBBD scales the exact logic:
+- **Master Problem (HiGHS MIP):** Performs the assignment of operations to machines without explicit sequencing constraints, providing a robust lower bound.
+- **Subproblems (CP-SAT):** Groups are segmented by machine/cluster and solved to check sequence feasibility. In `LBBD-HD` (High Density), subproblems run strictly in parallel via `ProcessPoolExecutor`.
+- **Benders Cuts:** If a subproblem proves a sequence exceeds the Master's estimated makespan (due to SDST crowding or ARC bottlenecks), analytical logic constraints are generated. SynAPS uses 4 Benders cut families: *nogood, bottleneck capacity, setup-cost, and load-balance cuts* (Nasirian et al. 2025; Hooker 2007).
+
+### 3. Large-Scale Meta-Heuristics (ALNS and RHC)
+For industrial 50K+ benchmarks, the system relies on advanced meta-heuristics using exact engines as local repair operators:
+- **ALNS (Adaptive Large Neighborhood Search):** The scheduler punches scheduling "holes" via 4 adaptive `destroy` operators (random, worst-tardiness, high-setup, machine-clear), and optimally plugs the gaps using `micro-CP-SAT repair`. A Simulated Annealing (SA) criteria prevents local minimum trapping (Ropke & Pisinger 2006).
+- **RHC (Receding Horizon Control):** Dissects the 50,000 timeline into sliding windows (1k–5k items). A window is solved (via ALNS or CP-SAT), a fraction is committed (frozen), and the window slides right. April 2026 introduced *pressure-adaptive early-stop*: the window's completion budget flexes automatically based on `due_pressure` and `candidate_pressure` metrics extracted from the earliest-frontier unassigned queue.
+
+### 4. Greedy Dispatching (Log-ATCS)
+Securing an admissible schedule in < 1 second utilizes the Apparent Tardiness Cost with Setups (ATCS) index, massively hardened:
+- **Log-space ATCS:** Operations with heavy-tailed setup distributions (e.g., 5 seconds processing vs. 2-hour setups) typically trigger deadly `float64 underflow` in raw exponential ATCS formulas. Ranking occurs in log-space entirely removing numerical collapse.
+- **Beam Search:** An adjustable width (K=3..5) node expansion counters the hyper-myopia of naive greedy dispatchers, allowing limited lookahead at critical machine bottlenecks.
+
+### 5. Software Architecture & Governance
+- **Data Modeling:** Strict `Pydantic v2` definitions reject invalid domain contracts upfront. Transitional matrices (`SdstMatrix`) reside in memory-contiguous `NumPy` arrays for $O(1)$ solver reads.
+- **Problem Profiler:** On ingest, `ProblemProfile` detects exact features (ARC presence, max_parallel logic, hard deadlining) yielding a bitmask that enables/disables heavy graph segments dynamically.
+- **Feasibility Checker:** The definitive zero-trust firewall. Uses a 7-class event-sweep algorithm outside the control of the active solver logic. If RHC or LBBD hallucinates an illegal precedence overlap or ARC violation, the schedule is explicitly flagged `feasible = False`. 
+- **TypeScript Control-Plane BFF:** An enterprise-facing typed bridge that isolates non-deterministic UI/integrator logic from the rigorous Python kernel.
 
 ## Quick start
 
