@@ -237,6 +237,51 @@ def _make_long_chain_problem(n_ops: int) -> ScheduleProblem:
     )
 
 
+def _make_tied_window_problem(n_orders: int = 40) -> ScheduleProblem:
+    """Build a tie-heavy window-admission fixture for determinism checks."""
+    state_id = uuid4()
+    wc1_id = uuid4()
+    wc2_id = uuid4()
+    due_date = HORIZON_START + timedelta(hours=12)
+
+    orders: list[Order] = []
+    operations: list[Operation] = []
+    for index in range(n_orders):
+        order_id = uuid4()
+        orders.append(
+            Order(
+                id=order_id,
+                external_ref=f"TIE-{index:04d}",
+                due_date=due_date,
+                priority=500,
+            )
+        )
+        operations.append(
+            Operation(
+                id=uuid4(),
+                order_id=order_id,
+                seq_in_order=0,
+                state_id=state_id,
+                base_duration_min=30,
+                eligible_wc_ids=[wc1_id, wc2_id],
+                predecessor_op_id=None,
+            )
+        )
+
+    return ScheduleProblem(
+        states=[State(id=state_id, code="TIE", label="Tie")],
+        orders=orders,
+        operations=operations,
+        work_centers=[
+            WorkCenter(id=wc1_id, code="TIE-M1", capability_group="tie", speed_factor=1.0),
+            WorkCenter(id=wc2_id, code="TIE-M2", capability_group="tie", speed_factor=1.0),
+        ],
+        setup_matrix=[],
+        planning_horizon_start=HORIZON_START,
+        planning_horizon_end=HORIZON_START + timedelta(days=2),
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 1. SdstMatrix tests
 # ═══════════════════════════════════════════════════════════════════════════
@@ -369,8 +414,15 @@ class TestAlnsSolver:
         assert "initial_beam_op_limit" in result.metadata
         assert "initial_solution_ms" in result.metadata
         assert "time_limit_exhausted_before_search" in result.metadata
+        assert "max_no_improve_base_iters" in result.metadata
+        assert "dynamic_no_improve_enabled" in result.metadata
+        assert "due_pressure" in result.metadata
+        assert "candidate_pressure" in result.metadata
         assert "cpsat_repair_ms_total" in result.metadata
         assert "greedy_repair_ms_total" in result.metadata
+        assert "cpsat_repair_timeouts" in result.metadata
+        assert "greedy_repair_timeouts" in result.metadata
+        assert "repair_rejection_reasons" in result.metadata
         assert "destroy_operators" in result.metadata
         assert "sdst_matrix_bytes" in result.metadata
         assert result.metadata["cpsat_repair_attempts"] >= result.metadata["cpsat_repairs"]
@@ -500,6 +552,67 @@ class TestAlnsSolver:
         assert result.metadata["iterations_completed"] <= 3
         assert result.metadata["no_improve_streak_final"] >= 3
         assert result.metadata["max_no_improve_iters"] == 3
+
+    def test_alns_scales_no_improve_guard_with_pressure(self) -> None:
+        """ALNS should scale no-improve guard when dynamic pressure mode is enabled."""
+        from synaps.solvers.alns_solver import AlnsSolver
+
+        problem = _make_3state_problem(n_orders=3, ops_per_order=2)
+
+        result = AlnsSolver().solve(
+            problem,
+            max_iterations=10,
+            time_limit_s=10,
+            use_cpsat_repair=False,
+            max_no_improve_iters=10,
+            dynamic_no_improve_enabled=True,
+            due_pressure=1.0,
+            candidate_pressure=2.0,
+            no_improve_due_alpha=0.5,
+            no_improve_candidate_beta=0.25,
+            no_improve_min_iters=5,
+            no_improve_max_iters=40,
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert result.metadata["max_no_improve_base_iters"] == 10
+        assert result.metadata["dynamic_no_improve_enabled"] is True
+        assert result.metadata["max_no_improve_iters"] == 20
+        assert result.metadata["due_pressure"] == pytest.approx(1.0)
+        assert result.metadata["candidate_pressure"] == pytest.approx(2.0)
+
+    def test_alns_recovers_when_final_validation_rejects_incumbent(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """ALNS should recover to the initial solution if final incumbent is invalid."""
+        import synaps.solvers.alns_solver as alns_module
+
+        problem = _make_3state_problem(n_orders=3, ops_per_order=2)
+        check_calls = {"count": 0}
+
+        def fake_check(self, problem, assignments):
+            check_calls["count"] += 1
+            if check_calls["count"] == 1:
+                return ["forced_final_violation"]
+            return []
+
+        monkeypatch.setattr(alns_module.FeasibilityChecker, "check", fake_check)
+
+        result = alns_module.AlnsSolver().solve(
+            problem,
+            max_iterations=20,
+            time_limit_s=15,
+            use_cpsat_repair=False,
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert result.metadata["final_violation_recovery_attempted"] is True
+        assert result.metadata["final_violation_recovered"] is True
+        assert result.metadata["final_violation_recovery_source"] == "initial_solution"
+        assert result.metadata["final_violations_before_recovery"] == 1
+        assert result.metadata["final_violations"] == 0
+        assert check_calls["count"] >= 2
 
     def test_alns_deterministic_with_seed(self) -> None:
         """Same seed should produce identical results."""
@@ -657,6 +770,25 @@ class TestRhcSolver:
         assert "windows_solved" in result.metadata
         assert result.metadata["windows_solved"] >= 1
 
+    def test_rhc_respects_max_windows_cap(self) -> None:
+        """RHC should stop after max_windows when the cap is configured."""
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_due_pressure_chain_problem()
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=60,
+            overlap_minutes=0,
+            inner_solver="greedy",
+            time_limit_s=120,
+            max_ops_per_window=10,
+            max_windows=1,
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL, SolverStatus.ERROR)
+        assert result.metadata["max_windows"] == 1
+        assert result.metadata["windows_solved"] == 1
+
     def test_rhc_metadata_tracks_due_pressure_and_candidate_peak(self) -> None:
         """RHC should expose scaling metadata for candidate-pool pressure and due-date pulls."""
         from synaps.solvers.rhc_solver import RhcSolver
@@ -676,10 +808,53 @@ class TestRhcSolver:
         assert result.metadata["preprocessing_ms"] >= 0
         assert result.metadata["peak_window_candidate_count"] >= 1
         assert result.metadata["due_pressure_selected_ops"] > 0
+        assert result.metadata["candidate_pressure_mean"] > 0
+        assert result.metadata["candidate_pressure_max"] > 0
+        assert result.metadata["due_pressure_mean"] >= 0
+        assert result.metadata["due_drift_minutes_mean"] >= 0
+        assert result.metadata["due_drift_minutes_max"] >= 0
+        assert result.metadata["spillover_count"] >= 0
         assert result.metadata["earliest_frontier_advances"] <= len(problem.operations)
         assert result.metadata["due_frontier_advances"] <= len(problem.operations)
         assert result.metadata["effective_window_operation_cap"] >= 1
         assert result.metadata["window_load_factor"] >= 1.0
+
+    def test_rhc_window_cap_selection_is_deterministic_under_ties(self) -> None:
+        """RHC should produce identical schedules under tie-heavy window ranking."""
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_tied_window_problem(n_orders=40)
+
+        def solve_once():
+            return RhcSolver().solve(
+                problem,
+                window_minutes=240,
+                overlap_minutes=0,
+                inner_solver="greedy",
+                time_limit_s=60,
+                max_ops_per_window=10,
+            )
+
+        r1 = solve_once()
+        r2 = solve_once()
+
+        assert r1.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert r2.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert len(r1.assignments) == len(problem.operations)
+        assert len(r2.assignments) == len(problem.operations)
+
+        def signature(result) -> list[tuple[str, str, int, int]]:
+            return sorted(
+                (
+                    str(assignment.operation_id),
+                    str(assignment.work_center_id),
+                    int((assignment.start_time - HORIZON_START).total_seconds() / 60.0),
+                    int((assignment.end_time - HORIZON_START).total_seconds() / 60.0),
+                )
+                for assignment in result.assignments
+            )
+
+        assert signature(r1) == signature(r2)
 
     def test_rhc_skips_global_fallback_after_time_limit_exhaustion(
         self,
@@ -868,17 +1043,65 @@ class TestRhcInnerSolver:
         assert "cpsat_repair_skips_large_destroy" in first_window
         assert "cpsat_max_destroy_ops" in first_window
         assert "cpsat_repair_attempts" in first_window
+        assert "cpsat_repair_timeouts" in first_window
         assert "greedy_repairs" in first_window
         assert "greedy_repair_attempts" in first_window
+        assert "greedy_repair_timeouts" in first_window
         assert "cpsat_repair_ms_total" in first_window
         assert "greedy_repair_ms_total" in first_window
+        assert "repair_rejection_reasons" in first_window
         assert "time_limit_exhausted_before_search" in first_window
+        assert "max_no_improve_iters" in first_window
+        assert "no_improve_early_stop" in first_window
+        assert "no_improve_streak_final" in first_window
         assert "feasibility_failures" in first_window
         assert first_window["cpsat_repair_attempts"] >= first_window["cpsat_repairs"]
         assert first_window["greedy_repair_attempts"] >= first_window["greedy_repairs"]
 
         verification = verify_schedule_result(problem, result)
         assert verification.feasible, f"Violations: {verification.violations}"
+
+    def test_rhc_passes_pressure_context_to_alns_inner(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """RHC should pass pressure context used for dynamic ALNS no-improve scaling."""
+        from synaps.solvers.greedy_dispatch import GreedyDispatch
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_3state_problem(n_orders=5, ops_per_order=2)
+        captured_inner_kwargs: list[dict[str, object]] = []
+
+        def fake_alns_solve(self, problem, **kwargs):
+            captured_inner_kwargs.append(dict(kwargs))
+            return GreedyDispatch().solve(problem)
+
+        monkeypatch.setattr(
+            "synaps.solvers.alns_solver.AlnsSolver.solve",
+            fake_alns_solve,
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=240,
+            overlap_minutes=30,
+            inner_solver="alns",
+            time_limit_s=30,
+            max_ops_per_window=20,
+            inner_kwargs={
+                "max_iterations": 5,
+                "max_no_improve_iters": 7,
+                "use_cpsat_repair": False,
+            },
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert captured_inner_kwargs
+        first_call = captured_inner_kwargs[0]
+        assert first_call["dynamic_no_improve_enabled"] is True
+        assert float(first_call["due_pressure"]) >= 0.0
+        assert float(first_call["candidate_pressure"]) >= 0.0
+        assert first_call["max_no_improve_iters"] == 7
 
     def test_rhc_with_cpsat_inner_produces_feasible_result(self) -> None:
         """RHC-CPSAT must delegate to CP-SAT per window."""
@@ -967,6 +1190,43 @@ class TestRhcInnerSolver:
         verification = verify_schedule_result(problem, result)
         assert verification.feasible, f"Violations: {verification.violations}"
 
+    def test_rhc_skips_inner_alns_when_budget_below_minimum(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """RHC should skip inner ALNS and use fallback greedy when budget is too low."""
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_3state_problem(n_orders=4, ops_per_order=2)
+
+        def fail_if_called(self, problem, **kwargs):
+            raise AssertionError("inner ALNS should be skipped due to low budget")
+
+        monkeypatch.setattr(
+            "synaps.solvers.alns_solver.AlnsSolver.solve",
+            fail_if_called,
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=480,
+            overlap_minutes=60,
+            inner_solver="alns",
+            time_limit_s=30,
+            max_ops_per_window=50,
+            inner_solver_min_budget_s=1000,
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert result.metadata["inner_solver_min_budget_s"] == 1000
+        assert result.metadata["inner_window_summaries"]
+        first_window = result.metadata["inner_window_summaries"][0]
+        assert first_window["resolution_mode"] == "fallback_greedy"
+        assert first_window["fallback_reason"] == "inner_skipped_low_budget"
+        assert first_window["inner_status"] == "not_run"
+        assert first_window["fallback_iterations"] > 0
+        assert first_window["ops_committed"] > 0
+
     def test_rhc_inner_kwargs_time_limit_no_duplicate_kwarg(self) -> None:
         """Regression: inner_kwargs containing time_limit_s must not cause TypeError.
 
@@ -1030,6 +1290,36 @@ class TestAlnsCpsatRepair:
 
         assert repaired is None
 
+    def test_repair_cpsat_timeout_outcome_is_explicit(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Outcome API should classify CP-SAT timeout explicitly."""
+        from types import SimpleNamespace
+
+        import synaps.solvers.alns_solver as alns_module
+
+        problem = _make_3state_problem(n_orders=3, ops_per_order=2)
+        destroyed_op_ids = {problem.operations[0].id, problem.operations[1].id}
+
+        def fake_cpsat_solve(self, sub_problem, **kwargs):
+            return SimpleNamespace(status=SolverStatus.TIMEOUT, assignments=[])
+
+        monkeypatch.setattr(
+            "synaps.solvers.cpsat_solver.CpSatSolver.solve",
+            fake_cpsat_solve,
+        )
+
+        outcome = alns_module._repair_cpsat_outcome(
+            problem,
+            frozen_assignments=[],
+            destroyed_op_ids=destroyed_op_ids,
+        )
+
+        assert outcome.status == alns_module.RepairStatus.TIMEOUT
+        assert outcome.reason == "cpsat_timeout"
+        assert outcome.assignments == ()
+
     def test_repair_greedy_partial_assignment_returns_none(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -1072,6 +1362,170 @@ class TestAlnsCpsatRepair:
         )
 
         assert repaired is None
+
+    def test_repair_greedy_partial_assignment_outcome_is_infeasible(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Outcome API should mark partial greedy repairs as infeasible."""
+        from datetime import timedelta
+        from types import SimpleNamespace
+
+        import synaps.solvers.alns_solver as alns_module
+        from synaps.model import Assignment
+
+        problem = _make_3state_problem(n_orders=3, ops_per_order=2)
+        destroyed = {problem.operations[0].id, problem.operations[1].id}
+        horizon_start = problem.planning_horizon_start
+
+        partial_assignment = Assignment(
+            operation_id=problem.operations[0].id,
+            work_center_id=problem.work_centers[0].id,
+            start_time=horizon_start,
+            end_time=horizon_start + timedelta(minutes=10),
+            setup_minutes=0,
+            aux_resource_ids=[],
+        )
+
+        def fake_incremental_repair(self, problem, **kwargs):
+            return SimpleNamespace(
+                status=SolverStatus.FEASIBLE,
+                assignments=[partial_assignment],
+            )
+
+        monkeypatch.setattr(
+            "synaps.solvers.incremental_repair.IncrementalRepair.solve",
+            fake_incremental_repair,
+        )
+
+        outcome = alns_module._repair_greedy_outcome(
+            problem,
+            frozen_assignments=[],
+            destroyed_op_ids=destroyed,
+        )
+
+        assert outcome.status == alns_module.RepairStatus.INFEASIBLE
+        assert outcome.reason == "partial_assignment"
+        assert outcome.assignments == ()
+
+    def test_repair_greedy_outcome_uses_stable_disrupted_order(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Greedy repair must pass disrupted ids to IncrementalRepair in operation order."""
+        from datetime import timedelta
+        from types import SimpleNamespace
+
+        import synaps.solvers.alns_solver as alns_module
+        from synaps.model import Assignment
+
+        problem = _make_3state_problem(n_orders=2, ops_per_order=3)
+        target_ops = {problem.operations[2].id, problem.operations[0].id, problem.operations[1].id}
+        call_args: dict[str, list] = {}
+        horizon_start = problem.planning_horizon_start
+
+        assignments = [
+            Assignment(
+                operation_id=problem.operations[0].id,
+                work_center_id=problem.work_centers[0].id,
+                start_time=horizon_start,
+                end_time=horizon_start + timedelta(minutes=10),
+                setup_minutes=0,
+                aux_resource_ids=[],
+            ),
+            Assignment(
+                operation_id=problem.operations[1].id,
+                work_center_id=problem.work_centers[0].id,
+                start_time=horizon_start + timedelta(minutes=10),
+                end_time=horizon_start + timedelta(minutes=20),
+                setup_minutes=0,
+                aux_resource_ids=[],
+            ),
+            Assignment(
+                operation_id=problem.operations[2].id,
+                work_center_id=problem.work_centers[0].id,
+                start_time=horizon_start + timedelta(minutes=20),
+                end_time=horizon_start + timedelta(minutes=30),
+                setup_minutes=0,
+                aux_resource_ids=[],
+            ),
+        ]
+
+        def fake_incremental_repair(self, problem, **kwargs):
+            call_args["disrupted_op_ids"] = kwargs["disrupted_op_ids"]
+            return SimpleNamespace(
+                status=SolverStatus.FEASIBLE,
+                assignments=assignments,
+            )
+
+        monkeypatch.setattr(
+            "synaps.solvers.incremental_repair.IncrementalRepair.solve",
+            fake_incremental_repair,
+        )
+
+        outcome = alns_module._repair_greedy_outcome(
+            problem,
+            frozen_assignments=[],
+            destroyed_op_ids=target_ops,
+        )
+
+        assert outcome.status == alns_module.RepairStatus.FEASIBLE
+        expected_order = [problem.operations[0].id, problem.operations[1].id, problem.operations[2].id]
+        assert call_args["disrupted_op_ids"] == expected_order
+
+    def test_repair_cpsat_outcome_sorts_assignments_by_operation_order(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """CP-SAT repair outcome should normalize assignment order by operation positions."""
+        from datetime import timedelta
+        from types import SimpleNamespace
+
+        import synaps.solvers.alns_solver as alns_module
+        from synaps.model import Assignment
+
+        problem = _make_3state_problem(n_orders=2, ops_per_order=2)
+        destroyed_op_ids = {problem.operations[0].id, problem.operations[1].id}
+        horizon_start = problem.planning_horizon_start
+
+        reversed_assignments = [
+            Assignment(
+                operation_id=problem.operations[1].id,
+                work_center_id=problem.work_centers[0].id,
+                start_time=horizon_start + timedelta(minutes=10),
+                end_time=horizon_start + timedelta(minutes=20),
+                setup_minutes=0,
+                aux_resource_ids=[],
+            ),
+            Assignment(
+                operation_id=problem.operations[0].id,
+                work_center_id=problem.work_centers[0].id,
+                start_time=horizon_start,
+                end_time=horizon_start + timedelta(minutes=10),
+                setup_minutes=0,
+                aux_resource_ids=[],
+            ),
+        ]
+
+        def fake_cpsat_solve(self, sub_problem, **kwargs):
+            return SimpleNamespace(status=SolverStatus.FEASIBLE, assignments=reversed_assignments)
+
+        monkeypatch.setattr(
+            "synaps.solvers.cpsat_solver.CpSatSolver.solve",
+            fake_cpsat_solve,
+        )
+
+        outcome = alns_module._repair_cpsat_outcome(
+            problem,
+            frozen_assignments=[],
+            destroyed_op_ids=destroyed_op_ids,
+        )
+
+        assert outcome.status == alns_module.RepairStatus.FEASIBLE
+        assert [assignment.operation_id for assignment in outcome.assignments] == [
+            problem.operations[0].id,
+            problem.operations[1].id,
+        ]
 
     def test_alns_cpsat_repair_produces_feasible_result(self) -> None:
         """ALNS with use_cpsat_repair=True must exercise CP-SAT repair path."""

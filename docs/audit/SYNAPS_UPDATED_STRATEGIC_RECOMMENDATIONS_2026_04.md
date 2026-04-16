@@ -39,6 +39,27 @@ mode: "explanation"
 
 ## 2. Strategic Direction by Horizons
 
+## 2.0 Implementation Status Snapshot (2026-04-16)
+
+В этом обновлении закрыт практический baseline для трека `Now`:
+1. Реализирован динамический `max_no_improve_iters` в ALNS на основе pressure-сигналов.
+2. Реализована передача pressure-контекста из RHC в inner ALNS.
+3. Добавлены frontier-health метрики в metadata RHC (`candidate_pressure`, `spillover`, `due_drift`).
+
+### Runtime knobs (implemented)
+1. `dynamic_no_improve_enabled: bool`
+2. `due_pressure: float`
+3. `candidate_pressure: float`
+4. `no_improve_due_alpha: float`
+5. `no_improve_candidate_beta: float`
+6. `no_improve_min_iters: int`
+7. `no_improve_max_iters: int`
+
+### Observability fields (implemented)
+1. ALNS metadata: `max_no_improve_base_iters`, `max_no_improve_iters`, `due_pressure`, `candidate_pressure`, dynamic scaling coefficients.
+2. RHC metadata: `candidate_pressure_mean|max`, `due_pressure_mean`, `due_drift_minutes_mean|max`, `spillover_count`.
+3. RHC per-window summary: `candidate_pressure`, `due_pressure`, `due_drift_minutes`, `spillover_ops`.
+
 ## 2.1 Now (0-6 weeks)
 
 ### A. ALNS adaptive control without full RL

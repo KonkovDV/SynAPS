@@ -76,8 +76,26 @@ class RhcSolver(BaseSolver):
         # Prevent double-passing time_limit_s to inner solver (RHC computes its own per-window budget).
         inner_kwargs.pop("time_limit_s", None)
         time_limit_s: float = float(kwargs.get("time_limit_s", 600))
+        inner_solver_min_budget_s: float = float(kwargs.get("inner_solver_min_budget_s", 0.0))
         max_ops_per_window: int = int(kwargs.get("max_ops_per_window", 5000))
         window_load_factor: float = float(kwargs.get("window_load_factor", 1.25))
+        max_windows_raw = kwargs.get("max_windows")
+        max_windows: int | None = int(max_windows_raw) if max_windows_raw is not None else None
+        dynamic_no_improve_enabled: bool = bool(
+            kwargs.get("dynamic_no_improve_enabled", True)
+        )
+        no_improve_due_alpha: float = float(kwargs.get("no_improve_due_alpha", 0.6))
+        no_improve_candidate_beta: float = float(
+            kwargs.get("no_improve_candidate_beta", 0.4)
+        )
+        no_improve_min_iters_raw = kwargs.get("no_improve_min_iters")
+        no_improve_min_iters: int | None = (
+            int(no_improve_min_iters_raw) if no_improve_min_iters_raw is not None else None
+        )
+        no_improve_max_iters_raw = kwargs.get("no_improve_max_iters")
+        no_improve_max_iters: int | None = (
+            int(no_improve_max_iters_raw) if no_improve_max_iters_raw is not None else None
+        )
 
         ops_by_id = {op.id: op for op in problem.operations}
         orders_by_id = {o.id: o for o in problem.orders}
@@ -145,6 +163,10 @@ class RhcSolver(BaseSolver):
         due_pressure_selected_ids: set[UUID] = set()
         earliest_frontier_advances = 0
         due_frontier_advances = 0
+        candidate_pressure_values: list[float] = []
+        due_pressure_values: list[float] = []
+        due_drift_minutes_values: list[float] = []
+        spillover_count = 0
         time_limit_reached = False
         fallback_repair_attempted = False
         fallback_repair_skipped = False
@@ -158,16 +180,22 @@ class RhcSolver(BaseSolver):
             "cpsat_max_destroy_ops",
             "cpsat_repair_attempts",
             "cpsat_repairs",
+            "cpsat_repair_timeouts",
             "greedy_repair_attempts",
             "greedy_repairs",
+            "greedy_repair_timeouts",
             "cpsat_repair_ms_total",
             "greedy_repair_ms_total",
             "cpsat_repair_ms_mean",
             "greedy_repair_ms_mean",
+            "repair_rejection_reasons",
             "feasibility_failures",
             "initial_solution_ms",
             "initial_solver",
             "time_limit_exhausted_before_search",
+            "max_no_improve_iters",
+            "no_improve_early_stop",
+            "no_improve_streak_final",
             "final_violations",
         )
 
@@ -178,6 +206,10 @@ class RhcSolver(BaseSolver):
             ops_committed: int,
             resolution_mode: str,
             inner_result: ScheduleResult | None,
+            candidate_pressure: float | None = None,
+            due_pressure: float | None = None,
+            due_drift_minutes: float | None = None,
+            spillover_ops: int | None = None,
             fallback_reason: str | None = None,
             fallback_iterations: int | None = None,
             exception_message: str | None = None,
@@ -188,6 +220,14 @@ class RhcSolver(BaseSolver):
                 "ops_in_window": ops_in_window,
                 "resolution_mode": resolution_mode,
             }
+            if candidate_pressure is not None:
+                summary["candidate_pressure"] = round(candidate_pressure, 4)
+            if due_pressure is not None:
+                summary["due_pressure"] = round(due_pressure, 4)
+            if due_drift_minutes is not None:
+                summary["due_drift_minutes"] = round(due_drift_minutes, 2)
+            if spillover_ops is not None:
+                summary["spillover_ops"] = spillover_ops
             if fallback_reason is not None:
                 summary["fallback_reason"] = fallback_reason
             if fallback_iterations is not None:
@@ -215,6 +255,9 @@ class RhcSolver(BaseSolver):
             return (time.monotonic() - t0) > time_limit_s
 
         while window_start_offset < horizon_minutes:
+            if max_windows is not None and window_count >= max_windows:
+                logger.info("RHC max_windows reached (%d)", max_windows)
+                break
             if global_time_exceeded():
                 time_limit_reached = True
                 logger.warning("RHC time limit reached at window %d", window_count)
@@ -254,34 +297,65 @@ class RhcSolver(BaseSolver):
                 window_start_offset += window_minutes
                 continue
 
+            # Stabilize candidate ordering before ranking so tied keys behave
+            # deterministically across process runs.
+            ordered_window_candidate_ops = [
+                ops_by_id[op_id]
+                for op_id in sorted(window_candidate_ids, key=op_positions.__getitem__)
+            ]
+
             # Cap the window by configured budget and estimated machine throughput.
             if len(window_candidate_ids) > effective_window_op_cap:
                 window_ops = nsmallest(
                     effective_window_op_cap,
-                    (ops_by_id[op_id] for op_id in window_candidate_ids),
+                    ordered_window_candidate_ops,
                     key=lambda op: (
                         order_due_offsets.get(op.order_id, horizon_minutes),
                         op.seq_in_order,
                         op_earliest.get(op.id, 0.0),
+                        op_positions[op.id],
                     ),
                 )
             else:
                 window_ops = sorted(
-                    (ops_by_id[op_id] for op_id in window_candidate_ids),
+                    ordered_window_candidate_ops,
                     key=lambda op: (
                         order_due_offsets.get(op.order_id, horizon_minutes),
                         op.seq_in_order,
                         op_earliest.get(op.id, 0.0),
+                        op_positions[op.id],
                     )
                 )
 
-            due_pressure_selected_ids.update(
-                {
-                    op.id
-                    for op in window_ops
-                    if op.id in due_candidate_ids and op.id not in earliest_candidate_ids
-                }
+            window_candidate_pressure = len(window_candidate_ids) / max(
+                1,
+                effective_window_op_cap,
             )
+            candidate_pressure_values.append(window_candidate_pressure)
+
+            due_only_selected_ids = {
+                op.id
+                for op in window_ops
+                if op.id in due_candidate_ids and op.id not in earliest_candidate_ids
+            }
+            due_pressure_selected_ids.update(due_only_selected_ids)
+            window_due_pressure = len(due_only_selected_ids) / max(1, len(window_ops))
+            due_pressure_values.append(window_due_pressure)
+
+            window_due_drift_minutes = (
+                sum(
+                    max(
+                        0.0,
+                        window_end_offset - order_due_offsets.get(op.order_id, horizon_minutes),
+                    )
+                    for op in window_ops
+                )
+                / max(1, len(window_ops))
+            )
+            due_drift_minutes_values.append(window_due_drift_minutes)
+
+            window_spillover = max(0, len(window_candidate_ids) - len(window_ops))
+            spillover_count += window_spillover
 
             window_op_ids = self._expand_predecessor_closure(
                 {op.id for op in window_ops},
@@ -336,14 +410,42 @@ class RhcSolver(BaseSolver):
                     remaining_time = max(10.0, time_limit_s - (time.monotonic() - t0))
                     per_window_limit = min(remaining_time * 0.8, 60.0)
 
-                    inner_result = inner_solver.solve(
-                        sub_problem,
-                        time_limit_s=per_window_limit,
-                        **inner_kwargs,
-                    )
-                    assert inner_result is not None
-
                     if (
+                        inner_solver_name == "alns"
+                        and per_window_limit < inner_solver_min_budget_s
+                    ):
+                        inner_rejection_reason = "inner_skipped_low_budget"
+                    else:
+                        effective_inner_kwargs = dict(inner_kwargs)
+                        if inner_solver_name == "alns":
+                            effective_inner_kwargs["due_pressure"] = window_due_pressure
+                            effective_inner_kwargs["candidate_pressure"] = (
+                                window_candidate_pressure
+                            )
+                            effective_inner_kwargs["dynamic_no_improve_enabled"] = (
+                                dynamic_no_improve_enabled
+                            )
+                            effective_inner_kwargs["no_improve_due_alpha"] = no_improve_due_alpha
+                            effective_inner_kwargs["no_improve_candidate_beta"] = (
+                                no_improve_candidate_beta
+                            )
+                            if no_improve_min_iters is not None:
+                                effective_inner_kwargs["no_improve_min_iters"] = (
+                                    no_improve_min_iters
+                                )
+                            if no_improve_max_iters is not None:
+                                effective_inner_kwargs["no_improve_max_iters"] = (
+                                    no_improve_max_iters
+                                )
+
+                        inner_result = inner_solver.solve(
+                            sub_problem,
+                            time_limit_s=per_window_limit,
+                            **effective_inner_kwargs,
+                        )
+                        assert inner_result is not None
+
+                    if inner_result is not None and (
                         inner_result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
                         and inner_result.assignments
                     ):
@@ -370,6 +472,10 @@ class RhcSolver(BaseSolver):
                             ops_committed=committed_now,
                             resolution_mode="inner",
                             inner_result=inner_result,
+                            candidate_pressure=window_candidate_pressure,
+                            due_pressure=window_due_pressure,
+                            due_drift_minutes=window_due_drift_minutes,
+                            spillover_ops=window_spillover,
                         )
                         logger.info(
                             "RHC window %d solved by %s inner solver "
@@ -379,8 +485,9 @@ class RhcSolver(BaseSolver):
                             committed_now,
                         )
                     else:
-                        assert inner_result is not None
-                        if inner_result.status not in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL):
+                        if inner_result is None:
+                            inner_rejection_reason = inner_rejection_reason or "inner_not_run"
+                        elif inner_result.status not in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL):
                             inner_rejection_reason = (
                                 f"inner_status_{inner_result.status.value}"
                                 if hasattr(inner_result.status, "value")
@@ -523,6 +630,10 @@ class RhcSolver(BaseSolver):
                         ops_committed=len(committed_op_ids) - committed_before_window,
                         resolution_mode="fallback_greedy",
                         inner_result=inner_result,
+                        candidate_pressure=window_candidate_pressure,
+                        due_pressure=window_due_pressure,
+                        due_drift_minutes=window_due_drift_minutes,
+                        spillover_ops=window_spillover,
                         fallback_reason=inner_rejection_reason or "inner_not_accepted",
                         fallback_iterations=fallback_iterations,
                         exception_message=inner_exception_message,
@@ -677,10 +788,42 @@ class RhcSolver(BaseSolver):
                 "preprocessing_ms": preprocessing_ms,
                 "peak_window_candidate_count": peak_window_candidate_count,
                 "due_pressure_selected_ops": len(due_pressure_selected_ids),
+                "candidate_pressure_mean": round(
+                    sum(candidate_pressure_values) / len(candidate_pressure_values),
+                    4,
+                )
+                if candidate_pressure_values
+                else 0.0,
+                "candidate_pressure_max": round(max(candidate_pressure_values), 4)
+                if candidate_pressure_values
+                else 0.0,
+                "due_pressure_mean": round(
+                    sum(due_pressure_values) / len(due_pressure_values),
+                    4,
+                )
+                if due_pressure_values
+                else 0.0,
+                "due_drift_minutes_mean": round(
+                    sum(due_drift_minutes_values) / len(due_drift_minutes_values),
+                    2,
+                )
+                if due_drift_minutes_values
+                else 0.0,
+                "due_drift_minutes_max": round(max(due_drift_minutes_values), 2)
+                if due_drift_minutes_values
+                else 0.0,
+                "spillover_count": spillover_count,
                 "earliest_frontier_advances": earliest_frontier_advances,
                 "due_frontier_advances": due_frontier_advances,
                 "effective_window_operation_cap": effective_window_op_cap,
                 "window_load_factor": window_load_factor,
+                "dynamic_no_improve_enabled": dynamic_no_improve_enabled,
+                "no_improve_due_alpha": no_improve_due_alpha,
+                "no_improve_candidate_beta": no_improve_candidate_beta,
+                "no_improve_min_iters": no_improve_min_iters,
+                "no_improve_max_iters": no_improve_max_iters,
+                "max_windows": max_windows,
+                "inner_solver_min_budget_s": inner_solver_min_budget_s,
                 "time_limit_reached": time_limit_reached,
                 "fallback_repair_attempted": fallback_repair_attempted,
                 "fallback_repair_skipped": fallback_repair_skipped,

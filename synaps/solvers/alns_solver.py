@@ -13,6 +13,8 @@ Academic basis:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import Enum
 import logging
 import math
 import random
@@ -38,6 +40,23 @@ if TYPE_CHECKING:
     from uuid import UUID
 
 logger = logging.getLogger(__name__)
+
+
+class RepairStatus(str, Enum):
+    """Structured repair status for ALNS repair operators."""
+
+    FEASIBLE = "feasible"
+    TIMEOUT = "timeout"
+    INFEASIBLE = "infeasible"
+
+
+@dataclass(frozen=True)
+class RepairOutcome:
+    """Explicit repair outcome carrying status, payload, and reason."""
+
+    status: RepairStatus
+    assignments: tuple[Assignment, ...]
+    reason: str
 
 
 # ---------------------------------------------------------------------------
@@ -325,20 +344,20 @@ def _cap_destroy_set_preserving_successor_closure(
 # Repair via CP-SAT (Laborie & Godard 2007: LNS + CP)
 # ---------------------------------------------------------------------------
 
-def _repair_cpsat(
+def _repair_cpsat_outcome(
     problem: ScheduleProblem,
     frozen_assignments: list[Assignment],
     destroyed_op_ids: set[UUID],
     time_limit_s: int = 10,
     ops_by_id: dict[UUID, Any] | None = None,
     op_positions: dict[UUID, int] | None = None,
-) -> list[Assignment] | None:
+) -> RepairOutcome:
     """Repair by solving a sub-problem with CP-SAT over the destroyed operations.
 
     Frozen assignments constrain the machine timelines. Only the destroyed
     operations (+ their immediate predecessors if outside the set) are modeled.
 
-    Returns new assignments for the destroyed ops, or None if infeasible.
+    Returns explicit status for success, timeout, or infeasible outcomes.
     """
     from synaps.solvers.cpsat_solver import CpSatSolver
 
@@ -368,7 +387,11 @@ def _repair_cpsat(
             sub_operations.append(op)
 
     if not sub_operations:
-        return None
+        return RepairOutcome(
+            status=RepairStatus.INFEASIBLE,
+            assignments=(),
+            reason="empty_subproblem",
+        )
 
     # Build sub-problem with the relevant operations only
     sub_problem = ScheduleProblem(
@@ -394,13 +417,115 @@ def _repair_cpsat(
         enable_symmetry_breaking=False,
     )
 
-    repaired_assignments = [a for a in result.assignments if a.operation_id in destroyed_op_ids]
+    if result.status == SolverStatus.TIMEOUT:
+        return RepairOutcome(
+            status=RepairStatus.TIMEOUT,
+            assignments=(),
+            reason="cpsat_timeout",
+        )
     if result.status not in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL):
-        return None
-    if len(repaired_assignments) != len(destroyed_op_ids):
-        return None
+        return RepairOutcome(
+            status=RepairStatus.INFEASIBLE,
+            assignments=(),
+            reason=(
+                f"cpsat_status_{result.status.value}"
+                if hasattr(result.status, "value")
+                else f"cpsat_status_{result.status}"
+            ),
+        )
 
-    return repaired_assignments
+    repaired_assignments = [a for a in result.assignments if a.operation_id in destroyed_op_ids]
+    if len(repaired_assignments) != len(destroyed_op_ids):
+        return RepairOutcome(
+            status=RepairStatus.INFEASIBLE,
+            assignments=(),
+            reason="partial_assignment",
+        )
+
+    # Keep assignment order deterministic for downstream destroy operators.
+    repaired_assignments.sort(key=lambda assignment: op_positions[assignment.operation_id])
+
+    return RepairOutcome(
+        status=RepairStatus.FEASIBLE,
+        assignments=tuple(repaired_assignments),
+        reason="ok",
+    )
+
+
+def _repair_cpsat(
+    problem: ScheduleProblem,
+    frozen_assignments: list[Assignment],
+    destroyed_op_ids: set[UUID],
+    time_limit_s: int = 10,
+    ops_by_id: dict[UUID, Any] | None = None,
+    op_positions: dict[UUID, int] | None = None,
+) -> list[Assignment] | None:
+    """Compatibility wrapper preserving legacy Optional[List[Assignment]] API."""
+
+    outcome = _repair_cpsat_outcome(
+        problem,
+        frozen_assignments,
+        destroyed_op_ids,
+        time_limit_s=time_limit_s,
+        ops_by_id=ops_by_id,
+        op_positions=op_positions,
+    )
+    if outcome.status == RepairStatus.FEASIBLE:
+        return list(outcome.assignments)
+    return None
+
+
+def _repair_greedy_outcome(
+    problem: ScheduleProblem,
+    frozen_assignments: list[Assignment],
+    destroyed_op_ids: set[UUID],
+) -> RepairOutcome:
+    """Fallback greedy repair when CP-SAT is too slow for the sub-region."""
+    from synaps.solvers.incremental_repair import IncrementalRepair
+
+    repair_solver = IncrementalRepair()
+    op_positions = {op.id: index for index, op in enumerate(problem.operations)}
+    disrupted_op_ids = sorted(destroyed_op_ids, key=op_positions.__getitem__)
+
+    result = repair_solver.solve(
+        problem,
+        base_assignments=frozen_assignments,
+        disrupted_op_ids=disrupted_op_ids,
+        radius=0,
+    )
+
+    if result.status == SolverStatus.TIMEOUT:
+        return RepairOutcome(
+            status=RepairStatus.TIMEOUT,
+            assignments=(),
+            reason="greedy_timeout",
+        )
+    if result.status not in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL):
+        return RepairOutcome(
+            status=RepairStatus.INFEASIBLE,
+            assignments=(),
+            reason=(
+                f"greedy_status_{result.status.value}"
+                if hasattr(result.status, "value")
+                else f"greedy_status_{result.status}"
+            ),
+        )
+
+    repaired_assignments = [a for a in result.assignments if a.operation_id in destroyed_op_ids]
+    if len(repaired_assignments) != len(destroyed_op_ids):
+        return RepairOutcome(
+            status=RepairStatus.INFEASIBLE,
+            assignments=(),
+            reason="partial_assignment",
+        )
+
+    repaired_assignments.sort(key=lambda assignment: op_positions[assignment.operation_id])
+
+    return RepairOutcome(
+        status=RepairStatus.FEASIBLE,
+        assignments=tuple(repaired_assignments),
+        reason="ok",
+    )
 
 
 def _repair_greedy(
@@ -408,23 +533,12 @@ def _repair_greedy(
     frozen_assignments: list[Assignment],
     destroyed_op_ids: set[UUID],
 ) -> list[Assignment] | None:
-    """Fallback greedy repair when CP-SAT is too slow for the sub-region."""
-    from synaps.solvers.incremental_repair import IncrementalRepair
+    """Compatibility wrapper preserving legacy Optional[List[Assignment]] API."""
 
-    repair_solver = IncrementalRepair()
-    result = repair_solver.solve(
-        problem,
-        base_assignments=frozen_assignments,
-        disrupted_op_ids=list(destroyed_op_ids),
-        radius=0,
-    )
-    repaired_assignments = [a for a in result.assignments if a.operation_id in destroyed_op_ids]
-    if result.status not in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL):
-        return None
-    if len(repaired_assignments) != len(destroyed_op_ids):
-        return None
-
-    return repaired_assignments
+    outcome = _repair_greedy_outcome(problem, frozen_assignments, destroyed_op_ids)
+    if outcome.status == RepairStatus.FEASIBLE:
+        return list(outcome.assignments)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -542,7 +656,33 @@ class AlnsSolver(BaseSolver):
         repair_time_limit_s: int = int(kwargs.get("repair_time_limit_s", 10))
         sa_initial_temp: float = float(kwargs.get("sa_initial_temp", 100.0))
         sa_cooling_rate: float = float(kwargs.get("sa_cooling_rate", 0.995))
-        max_no_improve_iters: int = int(kwargs.get("max_no_improve_iters", 0))
+        max_no_improve_base_iters: int = int(kwargs.get("max_no_improve_iters", 0))
+        dynamic_no_improve_enabled: bool = bool(
+            kwargs.get("dynamic_no_improve_enabled", False)
+        )
+        due_pressure: float = max(0.0, float(kwargs.get("due_pressure", 0.0)))
+        candidate_pressure: float = max(
+            0.0,
+            float(kwargs.get("candidate_pressure", 0.0)),
+        )
+        no_improve_due_alpha: float = float(kwargs.get("no_improve_due_alpha", 0.6))
+        no_improve_candidate_beta: float = float(
+            kwargs.get("no_improve_candidate_beta", 0.4)
+        )
+        no_improve_min_iters: int = int(
+            kwargs.get(
+                "no_improve_min_iters",
+                max(1, max_no_improve_base_iters // 2)
+                if max_no_improve_base_iters > 0
+                else 0,
+            )
+        )
+        no_improve_max_iters: int = int(
+            kwargs.get(
+                "no_improve_max_iters",
+                max_no_improve_base_iters * 4 if max_no_improve_base_iters > 0 else 0,
+            )
+        )
         seed: int = int(kwargs.get("random_seed", 42))
         initial_beam_op_limit: int = int(kwargs.get("initial_beam_op_limit", 60))
         use_cpsat_repair: bool = bool(kwargs.get("use_cpsat_repair", True))
@@ -555,6 +695,23 @@ class AlnsSolver(BaseSolver):
                 {"makespan": 1.0, "setup": 0.3, "material_loss": 0.2, "tardiness": 0.5},
             )
         )
+
+        max_no_improve_iters = max_no_improve_base_iters
+        if dynamic_no_improve_enabled and max_no_improve_base_iters > 0:
+            scaled_no_improve = int(
+                round(
+                    max_no_improve_base_iters
+                    * (
+                        1.0
+                        + no_improve_due_alpha * due_pressure
+                        + no_improve_candidate_beta * candidate_pressure
+                    )
+                )
+            )
+            max_no_improve_iters = min(
+                no_improve_max_iters,
+                max(no_improve_min_iters, scaled_no_improve),
+            )
 
         rng = random.Random(seed)
         n_ops = len(problem.operations)
@@ -626,11 +783,14 @@ class AlnsSolver(BaseSolver):
         cpsat_repair_attempts = 0
         cpsat_repairs = 0
         cpsat_repair_skips_large_destroy = 0
+        cpsat_repair_timeouts = 0
         greedy_repair_attempts = 0
         greedy_repairs = 0
+        greedy_repair_timeouts = 0
         cpsat_repair_ms_total = 0
         greedy_repair_ms_total = 0
         feasibility_failures = 0
+        repair_rejection_reasons: dict[str, int] = {}
         iterations_completed = 0
         no_improve_streak = 0
         no_improve_early_stop = False
@@ -699,10 +859,16 @@ class AlnsSolver(BaseSolver):
                 new_assignments: list[Assignment] | None = None
                 repair_used = "none"
 
+                def record_repair_outcome(outcome: RepairOutcome) -> None:
+                    if outcome.status == RepairStatus.FEASIBLE:
+                        return
+                    reason = outcome.reason or outcome.status.value
+                    repair_rejection_reasons[reason] = repair_rejection_reasons.get(reason, 0) + 1
+
                 if use_cpsat_repair and len(destroyed_ids) <= cpsat_max_destroy_ops:
                     cpsat_repair_attempts += 1
                     cpsat_repair_t0 = time.monotonic()
-                    cpsat_result = _repair_cpsat(
+                    cpsat_outcome = _repair_cpsat_outcome(
                         problem,
                         frozen,
                         destroyed_ids,
@@ -711,7 +877,10 @@ class AlnsSolver(BaseSolver):
                         op_positions=op_positions,
                     )
                     cpsat_repair_ms_total += int((time.monotonic() - cpsat_repair_t0) * 1000)
-                    if cpsat_result is not None:
+                    if cpsat_outcome.status == RepairStatus.TIMEOUT:
+                        cpsat_repair_timeouts += 1
+                    if cpsat_outcome.status == RepairStatus.FEASIBLE:
+                        cpsat_result = list(cpsat_outcome.assignments)
                         # Quick machine-overlap check against frozen assignments:
                         # CP-SAT sub-problem doesn't see frozen timelines, so verify
                         # no returned assignment overlaps a frozen one on the same machine.
@@ -723,15 +892,28 @@ class AlnsSolver(BaseSolver):
                             new_assignments = cpsat_result
                             repair_used = "cpsat"
                             cpsat_repairs += 1
+                        else:
+                            record_repair_outcome(
+                                RepairOutcome(
+                                    status=RepairStatus.INFEASIBLE,
+                                    assignments=(),
+                                    reason="cpsat_conflict_with_frozen",
+                                )
+                            )
+                    else:
+                        record_repair_outcome(cpsat_outcome)
                 elif use_cpsat_repair:
                     cpsat_repair_skips_large_destroy += 1
 
                 if new_assignments is None:
                     greedy_repair_attempts += 1
                     greedy_repair_t0 = time.monotonic()
-                    greedy_result = _repair_greedy(problem, frozen, destroyed_ids)
+                    greedy_outcome = _repair_greedy_outcome(problem, frozen, destroyed_ids)
                     greedy_repair_ms_total += int((time.monotonic() - greedy_repair_t0) * 1000)
-                    if greedy_result is not None:
+                    if greedy_outcome.status == RepairStatus.TIMEOUT:
+                        greedy_repair_timeouts += 1
+                    if greedy_outcome.status == RepairStatus.FEASIBLE:
+                        greedy_result = list(greedy_outcome.assignments)
                         test_candidate = frozen + greedy_result
                         if (
                             not _has_machine_overlap(test_candidate)
@@ -740,6 +922,16 @@ class AlnsSolver(BaseSolver):
                             new_assignments = greedy_result
                             repair_used = "greedy"
                             greedy_repairs += 1
+                        else:
+                            record_repair_outcome(
+                                RepairOutcome(
+                                    status=RepairStatus.INFEASIBLE,
+                                    assignments=(),
+                                    reason="greedy_conflict_with_frozen",
+                                )
+                            )
+                    else:
+                        record_repair_outcome(greedy_outcome)
 
                 if new_assignments is None:
                     continue  # repair failed, discard this iteration
@@ -826,6 +1018,38 @@ class AlnsSolver(BaseSolver):
 
         # Full feasibility check
         violations = checker.check(problem, best_assignments)
+        final_violations_before_recovery = len(violations)
+        final_violation_recovery_attempted = final_violations_before_recovery > 0
+        final_violation_recovered = False
+        final_violation_recovery_source: str | None = None
+
+        if final_violation_recovery_attempted:
+            # Recover to the initial full schedule if the ALNS incumbent is invalid.
+            # This keeps downstream RHC windows from failing due to a rare
+            # end-of-search violation in an otherwise schedulable window.
+            recovered_assignments = list(initial_result.assignments)
+            recompute_assignment_setups(recovered_assignments, dispatch_context)
+            recovered_violations = checker.check(problem, recovered_assignments)
+            if not recovered_violations:
+                logger.warning(
+                    "ALNS final incumbent had %d violations; "
+                    "recovering to initial solution",
+                    final_violations_before_recovery,
+                )
+                best_assignments = recovered_assignments
+                final_obj = _evaluate_objective(problem, best_assignments, sdst)
+                final_cost = _objective_cost(final_obj, objective_weights)
+                violations = recovered_violations
+                final_violation_recovered = True
+                final_violation_recovery_source = "initial_solution"
+            else:
+                logger.warning(
+                    "ALNS final incumbent had %d violations; "
+                    "initial-solution recovery still has %d violations",
+                    final_violations_before_recovery,
+                    len(recovered_violations),
+                )
+
         status = SolverStatus.FEASIBLE if not violations else SolverStatus.ERROR
 
         elapsed_ms = int((time.monotonic() - t0) * 1000)
@@ -852,14 +1076,25 @@ class AlnsSolver(BaseSolver):
                 "cpsat_repair_attempts": cpsat_repair_attempts,
                 "cpsat_repairs": cpsat_repairs,
                 "cpsat_repair_skips_large_destroy": cpsat_repair_skips_large_destroy,
+                "cpsat_repair_timeouts": cpsat_repair_timeouts,
                 "greedy_repair_attempts": greedy_repair_attempts,
                 "greedy_repairs": greedy_repairs,
+                "greedy_repair_timeouts": greedy_repair_timeouts,
+                "repair_rejection_reasons": repair_rejection_reasons,
                 "initial_solver": initial_solver_name,
                 "initial_beam_op_limit": initial_beam_op_limit,
                 "cpsat_max_destroy_ops": cpsat_max_destroy_ops,
                 "initial_solution_ms": initial_solution_ms,
                 "time_limit_exhausted_before_search": time_limit_exhausted_before_search,
                 "max_no_improve_iters": max_no_improve_iters,
+                "max_no_improve_base_iters": max_no_improve_base_iters,
+                "dynamic_no_improve_enabled": dynamic_no_improve_enabled,
+                "due_pressure": round(due_pressure, 4),
+                "candidate_pressure": round(candidate_pressure, 4),
+                "no_improve_due_alpha": no_improve_due_alpha,
+                "no_improve_candidate_beta": no_improve_candidate_beta,
+                "no_improve_min_iters": no_improve_min_iters,
+                "no_improve_max_iters": no_improve_max_iters,
                 "no_improve_early_stop": no_improve_early_stop,
                 "no_improve_streak_final": no_improve_streak,
                 "cpsat_repair_ms_total": cpsat_repair_ms_total,
@@ -871,6 +1106,10 @@ class AlnsSolver(BaseSolver):
                 if greedy_repair_attempts > 0
                 else 0.0,
                 "feasibility_failures": feasibility_failures,
+                "final_violation_recovery_attempted": final_violation_recovery_attempted,
+                "final_violation_recovered": final_violation_recovered,
+                "final_violation_recovery_source": final_violation_recovery_source,
+                "final_violations_before_recovery": final_violations_before_recovery,
                 "final_violations": len(violations),
                 "destroy_operators": {
                     name: {
