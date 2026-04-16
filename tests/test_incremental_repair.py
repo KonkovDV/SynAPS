@@ -60,6 +60,43 @@ class TestIncrementalRepair:
         expected_ops = {op.id for op in simple_problem.operations}
         assert assigned_ops == expected_ops
 
+    def test_repair_is_deterministic_for_same_inputs(self, simple_problem: ScheduleProblem) -> None:
+        """IncrementalRepair should return the same schedule for identical inputs."""
+        greedy = GreedyDispatch()
+        base_result = greedy.solve(simple_problem)
+
+        disrupted = [simple_problem.operations[1].id, simple_problem.operations[0].id]
+        repair = IncrementalRepair()
+
+        r1 = repair.solve(
+            simple_problem,
+            base_assignments=base_result.assignments,
+            disrupted_op_ids=disrupted,
+            radius=3,
+        )
+        r2 = repair.solve(
+            simple_problem,
+            base_assignments=base_result.assignments,
+            disrupted_op_ids=disrupted,
+            radius=3,
+        )
+
+        assert r1.status == SolverStatus.FEASIBLE
+        assert r2.status == SolverStatus.FEASIBLE
+
+        def signature(result: ScheduleResult) -> list[tuple[str, str, int, int]]:
+            return sorted(
+                (
+                    str(assignment.operation_id),
+                    str(assignment.work_center_id),
+                    int((assignment.start_time - HORIZON_START).total_seconds() / 60.0),
+                    int((assignment.end_time - HORIZON_START).total_seconds() / 60.0),
+                )
+                for assignment in result.assignments
+            )
+
+        assert signature(r1) == signature(r2)
+
     def test_repair_runs_fast(self, simple_problem: ScheduleProblem) -> None:
         greedy = GreedyDispatch()
         base_result = greedy.solve(simple_problem)

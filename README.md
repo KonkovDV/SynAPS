@@ -31,12 +31,21 @@ Language: [EN](#synaps-in-english) | **RU**
 
 Сводка `summary_by_solver`:
 
-| Solver | mean_wall_time_s | feasibility_rate | mean_makespan_minutes | mean_total_setup_minutes | mean_peak_window_candidate_count |
+| Solver | mean_wall_time_s | feasibility_rate | mean_peak_window_candidate_count | windows_solved | assignments |
 |---|---:|---:|---:|---:|---:|
-| `RHC-GREEDY` | 120.115 | 0.0 | 5077.55 | 18671.0 | 49931.0 |
-| `RHC-ALNS` | 366.23 | 0.0 | 1515.04 | 10852.0 | 49993.0 |
+| `RHC-GREEDY` | 120.11 | 0.0 | 49 931 | 11 | 6 959 / 50 000 |
+| `RHC-ALNS` | 366.23 | 0.0 | 49 993 | 3 | 1 078 / 50 000 |
 
-Это репрезентативный profiling-срез 50K, а не claim о полностью feasible решении в текущем публичном бюджете времени.
+Это **частичный (не-feasible)** profiling-срез 50K, а не claim о полностью решенной задаче. 
+
+**Почему мы это публикуем?** Как показано в [SynAPS Habr-v3](docs/habr/synaps-open-source-habr-v3.md), если "черный ящик" (нейросеть) ломается, он часто просто выдает плохой план или зависает. "Белый ящик" SynAPS завершается со `status=error` по исчерпанию времени, фиксируя частичный результат и явно показывая узкое место: пиковый пул кандидатов (`peak_window_candidate_count`) остается на уровне 49.9К, и RHC тратит бюджет на попытки назначить задачи из гигантского earliest-frontier. Это позволяет объективно диагностировать проблему и делать следующие шаги (ужесточение работы с early-frontier массой), не гадая.
+
+### Настоящее узкое место
+
+После закрытия проблемы первого окна (динамический limit cap и индексированный slot-search позволили greedy-пути пройти 11 окон и почти 7000 операций), узкое место сдвинулось. Текущая проблема - throughput внутреннего solver-path (`ALNS`) на фоне гигантского earliest-frontier пула. ALNS успевает сделать лишь 1078 назначений за 366 секунд. Следующий фокус:
+1. еще более агрессивно отсекать и приоритезировать массу `earliest-frontier`.
+2. ускорять внутренние операции large-neighborhood, а не только внешний greedy fallback.
+3. усиливать `due-pressure path`.
 
 ## Портфель решателей
 
@@ -61,8 +70,10 @@ Language: [EN](#synaps-in-english) | **RU**
 
 ## Что обновлено весной 2026
 
-- Pressure-adaptive контур ALNS: динамический `max_no_improve_iters` с учетом `due_pressure` и `candidate_pressure`.
+- `RHC` и `ALNS` переведены в публичный runtime contour.
+- Реализован pressure-adaptive контур ALNS: динамический `max_no_improve_iters` с учетом `due_pressure` и `candidate_pressure`.
 - Прокидывание pressure-контекста из RHC в inner ALNS по каждому окну.
+- `RHC` теперь сохраняет частичный прогресс, если исчерпан time budget (fallbacks), явно выдает `status=error`, а не теряет результат в вечном attempt-loop.
 - Frontier-health telemetry в RHC metadata: `candidate_pressure`, `due_drift_minutes`, `spillover_ops` и агрегаты.
 - Обновленная стратегическая дорожная карта в `docs/audit/SYNAPS_UPDATED_STRATEGIC_RECOMMENDATIONS_2026_04.md`.
 
@@ -242,19 +253,28 @@ Canonical artifact: `benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_
 
 `summary_by_solver` snapshot:
 
-| Solver | mean_wall_time_s | feasibility_rate | mean_makespan_minutes | mean_total_setup_minutes | mean_peak_window_candidate_count |
+| Solver | mean_wall_time_s | feasibility_rate | mean_peak_window_candidate | windows_solved | assignments |
 |---|---:|---:|---:|---:|---:|
-| `RHC-GREEDY` | 120.115 | 0.0 | 5077.55 | 18671.0 | 49931.0 |
-| `RHC-ALNS` | 366.23 | 0.0 | 1515.04 | 10852.0 | 49993.0 |
+| `RHC-GREEDY` | 120.11 | 0.0 | 49 931 | 11 | 6 959 / 50 000 |
+| `RHC-ALNS` | 366.23 | 0.0 | 49 993 | 3 | 1 078 / 50 000 |
 
-This is a reproducible 50K profiling slice, not a claim of a fully feasible industrial-50k schedule under the current public time budget.
+This is a reproducible **partial** profiling slice (no full-fledged schedule), demonstrating the deterministic engine hitting an `error=status` time-budget limit. White-box telemetry immediately proves the next bottleneck isn't the first-window admission cap, but a massive dense `earliest-frontier candidate mass` (~49.9k). We publish this un-glamorous, erroring slice purposefully: deterministic tracking enables diagnostic progress on real bottlenecks instead of blinding black-box neural-network timeouts.
+
+### The True Bottleneck
+
+Following our recent elimination of the first-window trap (via dynamic limit capping and indexed slot-searches which boosted greedy progression out of hundreds and into nearly 7000 assignments), the bottleneck has receded directly into internal solver-route bandwidth. ALNS manages only `1078` assignments in 366 seconds against an overwhelming bulk of unassigned candidates. Going forward:
+1. aggressively truncate and prioritize the `earliest-frontier` weight;
+2. dramatically expedite internal large-neighborhood algorithms under dense constraints;
+3. stiffen the `due-pressure path`.
 
 ## Spring 2026 updates
 
-- Pressure-adaptive ALNS no-improve control (`due_pressure`, `candidate_pressure`).
-- RHC-to-ALNS pressure context propagation on each window.
+- `ALNS` and `RHC` models migrated thoroughly to public runtime surface.
+- Fallback saving loops in `RHC` ensure that long-running tasks terminating with `status=error` or timeout correctly serialize partial assignments for bottleneck analysis instead of looping indefinitely.
+- Pressure-adaptive ALNS no-improve controls (`due_pressure`, `candidate_pressure` factors on early termination).
+- RHC-to-ALNS pressure context propagation across active windows.
 - Frontier-health telemetry in RHC metadata (`candidate_pressure`, `due_drift_minutes`, `spillover_ops`).
-- Updated strategic track in `docs/audit/SYNAPS_UPDATED_STRATEGIC_RECOMMENDATIONS_2026_04.md`.
+- Updated strategic track reflecting recent 50k constraints: `docs/audit/SYNAPS_UPDATED_STRATEGIC_RECOMMENDATIONS_2026_04.md`.
 
 ## Solver portfolio
 

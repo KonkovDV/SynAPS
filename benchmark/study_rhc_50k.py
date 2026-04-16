@@ -8,6 +8,7 @@ under `benchmark/` so large-instance evidence is preserved alongside the code.
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 import json
 import statistics
 import sys
@@ -120,7 +121,7 @@ def _study_industrial_50k(
                 "window_minutes": 480,
                 "overlap_minutes": 60,
                 "inner_solver": "greedy",
-                "time_limit_s": 120,
+                "time_limit_s": 600,
                 "max_ops_per_window": 10_000,
             },
         },
@@ -130,7 +131,7 @@ def _study_industrial_50k(
                 "window_minutes": 480,
                 "overlap_minutes": 120,
                 "inner_solver": "alns",
-                "time_limit_s": 300,
+                "time_limit_s": 1200,
                 "max_ops_per_window": 5_000,
                 "inner_kwargs": {
                     "max_iterations": 100,
@@ -151,12 +152,16 @@ def _study_industrial_50k(
         per_seed: list[dict[str, Any]] = []
         for solver_name in solver_names:
             spec = solver_specs[solver_name]
+            solver_kwargs = deepcopy(spec["solver_kwargs"])
+            inner_kwargs = solver_kwargs.get("inner_kwargs")
+            if isinstance(inner_kwargs, dict) and "random_seed" not in inner_kwargs:
+                inner_kwargs["random_seed"] = seed
             raw_result = run_scaling_case(
                 n_ops=50_000,
                 n_machines=100,
                 n_states=20,
                 solver_name=spec["solver_name"],
-                solver_kwargs=spec["solver_kwargs"],
+                solver_kwargs=solver_kwargs,
                 seed=seed,
             )
             comparison = {

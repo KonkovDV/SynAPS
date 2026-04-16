@@ -48,8 +48,9 @@ class IncrementalRepair(BaseSolver):
         from synaps.solvers.cpsat_solver import CpSatSolver
 
         ops_by_id = {operation.id: operation for operation in problem.operations}
+        op_positions = {operation.id: index for index, operation in enumerate(problem.operations)}
         needed_ids = set(remaining_op_ids)
-        for op_id in remaining_op_ids:
+        for op_id in sorted(remaining_op_ids, key=op_positions.__getitem__):
             operation = ops_by_id.get(op_id)
             if operation and operation.predecessor_op_id:
                 needed_ids.add(operation.predecessor_op_id)
@@ -89,11 +90,13 @@ class IncrementalRepair(BaseSolver):
         ):
             return None
 
-        return [
+        fallback_assignments = [
             assignment
             for assignment in result.assignments
             if assignment.operation_id in remaining_op_ids
         ]
+        fallback_assignments.sort(key=lambda assignment: op_positions[assignment.operation_id])
+        return fallback_assignments
 
     @property
     def name(self) -> str:
@@ -116,6 +119,7 @@ class IncrementalRepair(BaseSolver):
 
         orders_by_id = {o.id: o for o in problem.orders}
         ops_by_id = {op.id: op for op in problem.operations}
+        op_positions = {op.id: index for index, op in enumerate(problem.operations)}
         dispatch_context = build_dispatch_context(problem)
 
         # Identify neighbourhood: disrupted ops + `radius` downstream successors
@@ -131,7 +135,11 @@ class IncrementalRepair(BaseSolver):
 
         # Separate frozen vs. repaired assignments
         frozen = [a for a in base_assignments if a.operation_id not in neighbourhood]
-        to_repair = [ops_by_id[oid] for oid in neighbourhood if oid in ops_by_id]
+        to_repair = [
+            ops_by_id[operation_id]
+            for operation_id in sorted(neighbourhood, key=op_positions.__getitem__)
+            if operation_id in ops_by_id
+        ]
         horizon_start = problem.planning_horizon_start
         used_cpsat_fallback = False
 
@@ -148,6 +156,7 @@ class IncrementalRepair(BaseSolver):
             key=lambda operation: (
                 -orders_by_id[operation.order_id].priority,
                 operation.seq_in_order,
+                op_positions[operation.id],
             ),
         )
 
@@ -168,6 +177,8 @@ class IncrementalRepair(BaseSolver):
                     float,
                     float,
                     int,
+                    int,
+                    str,
                     Operation,
                     UUID,
                     Any,
@@ -212,14 +223,18 @@ class IncrementalRepair(BaseSolver):
                         slot.material_loss,
                         slot.start_offset,
                         operation.seq_in_order,
+                        op_positions[operation.id],
+                        str(work_center_id),
                     )
-                    if best_candidate is None or candidate_key < best_candidate[:5]:
+                    if best_candidate is None or candidate_key < best_candidate[:7]:
                         best_candidate = (
                             -op_priority,
                             slot.end_offset,
                             slot.material_loss,
                             slot.start_offset,
                             operation.seq_in_order,
+                            op_positions[operation.id],
+                            str(work_center_id),
                             operation,
                             work_center_id,
                             slot,
@@ -240,7 +255,7 @@ class IncrementalRepair(BaseSolver):
                     used_cpsat_fallback = True
                 break
 
-            _, _, _, _, _, operation, work_center_id, slot = best_candidate
+            _, _, _, _, _, _, _, operation, work_center_id, slot = best_candidate
             repaired.append(
                 Assignment(
                     operation_id=operation.id,
