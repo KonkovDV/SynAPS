@@ -11,6 +11,7 @@ from synaps.model import (
     Operation,
     Order,
     ScheduleProblem,
+    ScheduleResult,
     SolverStatus,
     State,
     WorkCenter,
