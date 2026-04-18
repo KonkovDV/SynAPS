@@ -17,8 +17,9 @@ the CP-SAT / ALNS sweet spot (≤5000 ops per window).
 from __future__ import annotations
 
 from collections import deque
-from heapq import nsmallest
+from heapq import heappop, heappush
 import logging
+import math
 import time
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
@@ -96,6 +97,13 @@ class RhcSolver(BaseSolver):
         no_improve_max_iters: int | None = (
             int(no_improve_max_iters_raw) if no_improve_max_iters_raw is not None else None
         )
+        due_pressure_k1: float = float(kwargs.get("due_pressure_k1", 1.0))
+        machine_coverage_boost: float = float(
+            kwargs.get("machine_coverage_boost", 1.15)
+        )
+        due_pressure_overdue_boost: float = float(
+            kwargs.get("due_pressure_overdue_boost", 1.25)
+        )
 
         ops_by_id = {op.id: op for op in problem.operations}
         orders_by_id = {o.id: o for o in problem.orders}
@@ -121,6 +129,67 @@ class RhcSolver(BaseSolver):
             order_due_offsets[order.id] = (order.due_date - horizon_start).total_seconds() / 60.0
 
         op_positions = {op.id: index for index, op in enumerate(problem.operations)}
+        all_work_center_ids = {work_center.id for work_center in problem.work_centers}
+        wc_speed_by_id = {
+            work_center.id: max(work_center.speed_factor, 1e-6)
+            for work_center in problem.work_centers
+        }
+        op_eligible_wc_ids: dict[UUID, set[UUID]] = {
+            op.id: (
+                set(op.eligible_wc_ids)
+                if op.eligible_wc_ids
+                else set(all_work_center_ids)
+            )
+            for op in problem.operations
+        }
+
+        op_mean_duration_by_id: dict[UUID, float] = {}
+        op_min_duration_by_id: dict[UUID, float] = {}
+        for op in problem.operations:
+            eligible_ids = op_eligible_wc_ids[op.id]
+            effective_durations = [
+                op.base_duration_min / wc_speed_by_id.get(wc_id, 1.0)
+                for wc_id in eligible_ids
+            ]
+            if not effective_durations:
+                effective_durations = [max(op.base_duration_min, 1.0)]
+            op_mean_duration_by_id[op.id] = max(
+                sum(effective_durations) / len(effective_durations),
+                1e-6,
+            )
+            op_min_duration_by_id[op.id] = max(min(effective_durations), 1e-6)
+
+        rms_processing = math.sqrt(
+            sum(duration * duration for duration in op_mean_duration_by_id.values())
+            / max(1, len(op_mean_duration_by_id))
+        )
+        avg_total_p = max(rms_processing, 1e-6)
+
+        positive_setups = [
+            setup_entry.setup_minutes
+            for setup_entry in problem.setup_matrix
+            if setup_entry.setup_minutes > 0
+        ]
+        expected_setup = (
+            sum(positive_setups) / len(positive_setups)
+            if positive_setups
+            else 0.0
+        )
+
+        order_ops_sorted: dict[UUID, list[Operation]] = {}
+        for order in problem.orders:
+            order_ops_sorted[order.id] = sorted(
+                [op for op in problem.operations if op.order_id == order.id],
+                key=lambda op: op.seq_in_order,
+            )
+
+        op_tail_rpt_by_id: dict[UUID, float] = {}
+        for order_id, order_ops in order_ops_sorted.items():
+            suffix_sum = 0.0
+            for reverse_index, op in enumerate(reversed(order_ops)):
+                suffix_sum += op_min_duration_by_id.get(op.id, max(op.base_duration_min, 1.0))
+                remaining_edges = reverse_index
+                op_tail_rpt_by_id[op.id] = suffix_sum + remaining_edges * expected_setup
         ops_sorted_by_earliest = sorted(
             problem.operations,
             key=lambda op: (
@@ -304,28 +373,133 @@ class RhcSolver(BaseSolver):
                 for op_id in sorted(window_candidate_ids, key=op_positions.__getitem__)
             ]
 
+            machine_available_offsets = {
+                work_center.id: 0.0
+                for work_center in problem.work_centers
+            }
+            for assignment in committed_assignments:
+                end_offset = (assignment.end_time - horizon_start).total_seconds() / 60.0
+                machine_available_offsets[assignment.work_center_id] = max(
+                    machine_available_offsets.get(assignment.work_center_id, 0.0),
+                    end_offset,
+                )
+
+            candidate_slack_by_id: dict[UUID, float] = {}
+            candidate_pressure_by_id: dict[UUID, float] = {}
+            for op in ordered_window_candidate_ops:
+                eligible_wc_ids = op_eligible_wc_ids[op.id]
+                if eligible_wc_ids:
+                    earliest_machine_ready = min(
+                        machine_available_offsets.get(wc_id, 0.0)
+                        for wc_id in eligible_wc_ids
+                    )
+                else:
+                    earliest_machine_ready = 0.0
+
+                predecessor_end = 0.0
+                if op.predecessor_op_id is not None:
+                    predecessor_assignment = committed_assignment_by_op.get(op.predecessor_op_id)
+                    if predecessor_assignment is not None:
+                        predecessor_end = (
+                            predecessor_assignment.end_time - horizon_start
+                        ).total_seconds() / 60.0
+                    else:
+                        predecessor_end = op_earliest.get(op.id, 0.0)
+                est_offset = max(predecessor_end, earliest_machine_ready)
+
+                due_offset = order_due_offsets.get(op.order_id, horizon_minutes)
+                rpt_tail = op_tail_rpt_by_id.get(op.id, op_mean_duration_by_id.get(op.id, 1.0))
+                slack = due_offset - (est_offset + rpt_tail)
+                candidate_slack_by_id[op.id] = slack
+
+                order_weight = max(
+                    1.0,
+                    float(orders_by_id[op.order_id].priority)
+                    if op.order_id in orders_by_id
+                    else 1.0,
+                )
+                p_tilde = op_mean_duration_by_id.get(op.id, max(op.base_duration_min, 1.0))
+                pressure = (order_weight / max(p_tilde, 1e-6)) * math.exp(
+                    -max(0.0, slack) / max(due_pressure_k1 * avg_total_p, 1e-6)
+                )
+                if slack <= 0.0:
+                    pressure *= due_pressure_overdue_boost
+                candidate_pressure_by_id[op.id] = pressure
+
             # Cap the window by configured budget and estimated machine throughput.
-            if len(window_candidate_ids) > effective_window_op_cap:
-                window_ops = nsmallest(
-                    effective_window_op_cap,
-                    ordered_window_candidate_ops,
-                    key=lambda op: (
+            uncovered_machines = {
+                wc_id
+                for op in ordered_window_candidate_ops
+                for wc_id in op_eligible_wc_ids[op.id]
+            }
+            window_heap: list[tuple[float, float, int, int, UUID, bool]] = []
+            for op in ordered_window_candidate_ops:
+                covers_uncovered = bool(op_eligible_wc_ids[op.id] & uncovered_machines)
+                score = candidate_pressure_by_id.get(op.id, 0.0)
+                if covers_uncovered:
+                    score *= machine_coverage_boost
+                heappush(
+                    window_heap,
+                    (
+                        -score,
                         order_due_offsets.get(op.order_id, horizon_minutes),
                         op.seq_in_order,
-                        op_earliest.get(op.id, 0.0),
                         op_positions[op.id],
+                        op.id,
+                        covers_uncovered,
                     ),
                 )
-            else:
-                window_ops = sorted(
-                    ordered_window_candidate_ops,
-                    key=lambda op: (
-                        order_due_offsets.get(op.order_id, horizon_minutes),
-                        op.seq_in_order,
-                        op_earliest.get(op.id, 0.0),
-                        op_positions[op.id],
+
+            selected_window_ids: set[UUID] = set()
+            capped_selected_ops: list[Operation] = []
+            cap_limit = min(effective_window_op_cap, len(ordered_window_candidate_ops))
+
+            while window_heap and len(capped_selected_ops) < cap_limit:
+                (
+                    neg_score,
+                    _due_key,
+                    _seq_key,
+                    _position_key,
+                    op_id,
+                    previous_cover,
+                ) = heappop(window_heap)
+                if op_id in selected_window_ids:
+                    continue
+
+                op = ops_by_id[op_id]
+                current_cover = bool(op_eligible_wc_ids[op_id] & uncovered_machines)
+                current_score = candidate_pressure_by_id.get(op_id, 0.0)
+                if current_cover:
+                    current_score *= machine_coverage_boost
+
+                if previous_cover != current_cover or abs((-neg_score) - current_score) > 1e-12:
+                    heappush(
+                        window_heap,
+                        (
+                            -current_score,
+                            order_due_offsets.get(op.order_id, horizon_minutes),
+                            op.seq_in_order,
+                            op_positions[op.id],
+                            op.id,
+                            current_cover,
+                        ),
                     )
-                )
+                    continue
+
+                selected_window_ids.add(op_id)
+                capped_selected_ops.append(op)
+                for wc_id in op_eligible_wc_ids[op_id]:
+                    uncovered_machines.discard(wc_id)
+
+            window_ops = sorted(
+                capped_selected_ops,
+                key=lambda op: (
+                    order_due_offsets.get(op.order_id, horizon_minutes),
+                    op.seq_in_order,
+                    op_earliest.get(op.id, 0.0),
+                    op_positions[op.id],
+                ),
+            )
 
             window_candidate_pressure = len(window_candidate_ids) / max(
                 1,
@@ -336,7 +510,7 @@ class RhcSolver(BaseSolver):
             due_only_selected_ids = {
                 op.id
                 for op in window_ops
-                if op.id in due_candidate_ids and op.id not in earliest_candidate_ids
+                if candidate_slack_by_id.get(op.id, 0.0) <= 0.0
             }
             due_pressure_selected_ids.update(due_only_selected_ids)
             window_due_pressure = len(due_only_selected_ids) / max(1, len(window_ops))
