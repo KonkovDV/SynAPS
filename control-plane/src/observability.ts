@@ -113,6 +113,10 @@ function asFiniteNumber(value: unknown): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
 function asNonNegativeInteger(value: unknown): number | null {
   const parsed = asFiniteNumber(value);
   if (parsed === null || parsed < 0) {
@@ -134,6 +138,7 @@ function prometheusEscape(value: string): string {
 export class SynapsMetricsRegistry {
   private readonly solveDuration = createHistogramState();
   private readonly feasibilityCounters = new Map<FeasibilityViolationKind, number>();
+  private readonly solverRunCounters = new Map<string, Map<string, number>>();
   private activeWindowsGauge = 0;
   private gapRatioGauge = 0;
 
@@ -159,6 +164,19 @@ export class SynapsMetricsRegistry {
     this.feasibilityCounters.set(kind, (this.feasibilityCounters.get(kind) ?? 0) + count);
   }
 
+  incrementSolverRun(solverConfig: string, status: string, count = 1): void {
+    if (count <= 0) {
+      return;
+    }
+
+    const solverConfigKey = solverConfig.trim().length > 0 ? solverConfig.trim() : "UNKNOWN";
+    const statusKey = status.trim().length > 0 ? status.trim().toLowerCase() : "unknown";
+
+    const statusCounters = this.solverRunCounters.get(solverConfigKey) ?? new Map<string, number>();
+    statusCounters.set(statusKey, (statusCounters.get(statusKey) ?? 0) + count);
+    this.solverRunCounters.set(solverConfigKey, statusCounters);
+  }
+
   setActiveWindows(value: number): void {
     if (!Number.isFinite(value) || value < 0) {
       return;
@@ -182,6 +200,14 @@ export class SynapsMetricsRegistry {
 
     const metadata = asObject(resultObject.metadata);
     const portfolioMetadata = asObject(metadata.portfolio);
+
+    const solverConfig =
+      asString(portfolioMetadata.solver_config) ??
+      asString(metadata.solver_config) ??
+      asString(resultObject.solver_name) ??
+      "UNKNOWN";
+    const status = asString(resultObject.status) ?? "unknown";
+    this.incrementSolverRun(solverConfig, status);
 
     const windowsSolved = asFiniteNumber(
       metadata.windows_solved ?? portfolioMetadata.windows_solved,
@@ -255,6 +281,24 @@ export class SynapsMetricsRegistry {
     );
     lines.push(`synaps_solve_duration_seconds_sum ${this.solveDuration.sum}`);
     lines.push(`synaps_solve_duration_seconds_count ${this.solveDuration.total}`);
+
+    lines.push(
+      "# HELP synaps_solver_runs_total Total solver outcomes by solver_config and status.",
+    );
+    lines.push("# TYPE synaps_solver_runs_total counter");
+    const solverEntries = Array.from(this.solverRunCounters.entries()).sort(([left], [right]) =>
+      left.localeCompare(right),
+    );
+    for (const [solverConfig, statusCounters] of solverEntries) {
+      const statusEntries = Array.from(statusCounters.entries()).sort(([left], [right]) =>
+        left.localeCompare(right),
+      );
+      for (const [status, value] of statusEntries) {
+        lines.push(
+          `synaps_solver_runs_total{solver_config=\"${prometheusEscape(solverConfig)}\",status=\"${prometheusEscape(status)}\"} ${value}`,
+        );
+      }
+    }
 
     lines.push(
       "# HELP synaps_feasibility_violations_total Total feasibility violations by kind.",

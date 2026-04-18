@@ -120,6 +120,7 @@ test("metrics endpoint exposes Prometheus series", async () => {
   const response = await app.inject({ method: "GET", url: "/metrics" });
   assert.equal(response.statusCode, 200);
   assert.match(response.body, /synaps_solve_duration_seconds_bucket/);
+  assert.match(response.body, /synaps_solver_runs_total/);
   assert.match(response.body, /synaps_feasibility_violations_total/);
   assert.match(response.body, /synaps_active_windows_gauge/);
   assert.match(response.body, /synaps_gap_ratio/);
@@ -177,6 +178,10 @@ test("metrics endpoint records violation kinds from portfolio metadata", async (
   assert.match(
     response.body,
     /synaps_feasibility_violations_total\{kind="overlap"\} 1/,
+  );
+  assert.match(
+    response.body,
+    /synaps_solver_runs_total\{solver_config="GREED",status="feasible"\} 1/,
   );
 
   await app.close();

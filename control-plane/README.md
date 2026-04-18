@@ -49,6 +49,11 @@ Key env vars:
 - `SYNAPS_PYTHON_EXEC_TIMEOUT_MS=...`
 - `SYNAPS_PYTHON_MAX_OUTPUT_BYTES=...`
 
+Ready-to-import monitoring artifacts (Grafana dashboard + Prometheus alert rules):
+
+- `../technical/monitoring/grafana/synaps-control-plane-slo.dashboard.json`
+- `../technical/monitoring/prometheus/synaps-control-plane-alerts.yml`
+
 ## Local Commands
 
 ```bash

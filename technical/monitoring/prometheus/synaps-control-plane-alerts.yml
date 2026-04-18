@@ -1,0 +1,72 @@
+groups:
+  - name: synaps-control-plane-slo
+    interval: 30s
+    rules:
+      - alert: SynapsHighTailLatencyP95
+        expr: histogram_quantile(0.95, sum by (le) (rate(synaps_solve_duration_seconds_bucket[10m]))) > 120
+        for: 15m
+        labels:
+          severity: warning
+          service: synaps-control-plane
+          slo: latency
+        annotations:
+          summary: SynAPS solve p95 latency is above 120s
+          description: |
+            The p95 of synaps_solve_duration_seconds over the last 10 minutes exceeds 120 seconds
+            for at least 15 minutes. Investigate heavy-tail behavior and fallback chain pressure.
+
+      - alert: SynapsHighTailLatencyP99
+        expr: histogram_quantile(0.99, sum by (le) (rate(synaps_solve_duration_seconds_bucket[10m]))) > 300
+        for: 15m
+        labels:
+          severity: critical
+          service: synaps-control-plane
+          slo: latency
+        annotations:
+          summary: SynAPS solve p99 latency is above 300s
+          description: |
+            The p99 of synaps_solve_duration_seconds over the last 10 minutes exceeds 300 seconds
+            for at least 15 minutes. Escalate to solver-configuration and capacity review.
+
+      - alert: SynapsSolverErrorRateHigh
+        expr: |
+          sum(rate(synaps_solver_runs_total{status=~"error|timeout|infeasible"}[10m]))
+            /
+          clamp_min(sum(rate(synaps_solver_runs_total[10m])), 0.001)
+          > 0.20
+        for: 10m
+        labels:
+          severity: critical
+          service: synaps-control-plane
+          slo: reliability
+        annotations:
+          summary: SynAPS solver error ratio exceeds 20%
+          description: |
+            More than 20% of solver outcomes are error/timeout/infeasible for at least 10 minutes.
+            Inspect bridge limits, fallback chain progression, and incoming workload profile.
+
+      - alert: SynapsFeasibilityViolationSpike
+        expr: sum(rate(synaps_feasibility_violations_total[5m])) > 5
+        for: 10m
+        labels:
+          severity: warning
+          service: synaps-control-plane
+          slo: schedule-quality
+        annotations:
+          summary: Feasibility violations are spiking
+          description: |
+            The 5-minute rate of feasibility violations is above 5 events/sec for at least 10 minutes.
+            Review precedence/setup/overlap pressure and check whether fallback quality degraded.
+
+      - alert: SynapsGapRatioPlateau
+        expr: avg_over_time(synaps_gap_ratio[20m]) > 0.12
+        for: 20m
+        labels:
+          severity: warning
+          service: synaps-control-plane
+          slo: optimality
+        annotations:
+          summary: Optimality gap remains above 12%
+          description: |
+            Gap ratio stayed above 12% for at least 20 minutes, indicating convergence plateau.
+            Consider changing solver config, budget envelope, or decomposition strategy.
