@@ -87,6 +87,66 @@ jobs:
       - name: Run tests
         run: pytest tests/ -v --tb=short --cov=synaps --cov-report=term-missing
 
+  native-accelerator:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m pip install maturin
+
+      - name: Install Rust toolchain
+        run: |
+          curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Build native accelerator module
+        run: |
+          python -m maturin develop --manifest-path native/synaps_native/Cargo.toml --release
+
+      - name: Verify active native backend
+        run: |
+          python - <<'PY'
+          from synaps import accelerators
+          status = accelerators.get_acceleration_status()
+          print(status)
+          assert status["native_available"] is True
+          assert status["atcs_log_score_batch_backend"] == "native"
+          PY
+
+      - name: Run accelerator-focused tests
+        run: |
+          pytest -q tests/test_accelerators.py tests/test_greedy_dispatch.py
+
+      - name: Run native acceleration microbenchmark
+        run: |
+          python -m benchmark.study_native_acceleration \
+            --sizes 5000,50000 \
+            --repeats 3 \
+            --output benchmark/results/ci-native-atcs-acceleration.json
+
+      - name: Upload native acceleration artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: native-acceleration-results
+          path: benchmark/results/ci-native-atcs-acceleration.json
+          if-no-files-found: error
+          retention-days: 14
+
   build-distributions:
     runs-on: ubuntu-latest
     needs: [lint, typecheck, test]

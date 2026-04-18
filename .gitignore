@@ -33,6 +33,13 @@ htmlcov/
 .coverage.*
 pip-wheel-metadata/
 
+# Rust / PyO3 native artifacts
+native/**/target/
+.maturin/
+*.so
+*.pyd
+*.dylib
+
 # Virtual environments
 .venv/
 venv/

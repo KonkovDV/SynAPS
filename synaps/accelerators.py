@@ -18,20 +18,26 @@ if os.getenv("SYNAPS_DISABLE_NATIVE_ACCELERATION") == "1":
     _native_compute_atcs_log_scores_batch = None
 else:
     try:
-        from synaps_native import (  # type: ignore[import-not-found]
-            compute_atcs_log_score as _synaps_native_compute_atcs_log_score,
-            compute_atcs_log_scores_batch as _synaps_native_compute_atcs_log_scores_batch,
-            resource_capacity_window_is_feasible as _synaps_native_resource_capacity_window_is_feasible,
-        )
+        import synaps_native as _synaps_native  # type: ignore[import-not-found]
     except ImportError:
         _native_compute_atcs_log_score = None
         _native_compute_atcs_log_scores_batch = None
         _native_resource_capacity_window_is_feasible = None
     else:
-        _native_compute_atcs_log_score = _synaps_native_compute_atcs_log_score
-        _native_compute_atcs_log_scores_batch = _synaps_native_compute_atcs_log_scores_batch
-        _native_resource_capacity_window_is_feasible = (
-            _synaps_native_resource_capacity_window_is_feasible
+        _native_compute_atcs_log_score = getattr(
+            _synaps_native,
+            "compute_atcs_log_score",
+            None,
+        )
+        _native_compute_atcs_log_scores_batch = getattr(
+            _synaps_native,
+            "compute_atcs_log_scores_batch",
+            None,
+        )
+        _native_resource_capacity_window_is_feasible = getattr(
+            _synaps_native,
+            "resource_capacity_window_is_feasible",
+            None,
         )
 
 

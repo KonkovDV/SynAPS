@@ -38,6 +38,10 @@ class TestGreedyDispatch:
         assert result.status == SolverStatus.FEASIBLE
         assert result.solver_name == "greedy_dispatch"
         assert result.metadata["acceleration"]["atcs_log_score_backend"] in {"python", "native"}
+        assert result.metadata["acceleration"]["atcs_log_score_batch_backend"] in {
+            "python",
+            "native",
+        }
 
     def test_all_operations_assigned(self, simple_problem: ScheduleProblem) -> None:
         solver = GreedyDispatch()

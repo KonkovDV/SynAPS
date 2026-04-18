@@ -3,10 +3,11 @@ from __future__ import annotations
 from math import log
 from typing import TYPE_CHECKING
 
+import pytest
 from synaps import accelerators
 
 if TYPE_CHECKING:
-    import pytest
+    pass
 
 
 def test_compute_atcs_log_score_matches_python_reference() -> None:
@@ -145,6 +146,23 @@ def test_compute_atcs_log_scores_batch_uses_native_backend_when_available(
         11.0,
     )
     assert status["atcs_log_score_batch_backend"] == "native"
+
+
+def test_compute_atcs_log_scores_batch_rejects_length_mismatch() -> None:
+    with pytest.raises(ValueError, match="identical lengths"):
+        accelerators.compute_atcs_log_scores_batch(
+            weights=[1.0, 2.0],
+            processing_minutes=[2.0],
+            slack=[0.0, 0.0],
+            ready_p_bar=4.0,
+            setup_minutes=[1.0, 1.0],
+            setup_scale=[1.0, 1.0],
+            k1=2.0,
+            k2=0.5,
+            material_loss=[0.0, 0.0],
+            material_scale=1.0,
+            k3=0.5,
+        )
 
 
 def test_resource_capacity_window_matches_python_reference() -> None:

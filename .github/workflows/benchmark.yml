@@ -32,6 +32,17 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
+          python -m pip install maturin
+
+      - name: Install Rust toolchain
+        run: |
+          curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Build native accelerator module (best effort)
+        continue-on-error: true
+        run: |
+          python -m maturin develop --manifest-path native/synaps_native/Cargo.toml --release
 
       - name: Run benchmark suite
         run: |
@@ -39,6 +50,13 @@ jobs:
           python -m benchmark.run_benchmark benchmark/instances/ \
             --solvers GREED CPSAT-10 CPSAT-30 --compare --runs 3 \
             > benchmark/results/weekly-benchmark.json
+
+      - name: Run native acceleration comparison
+        run: |
+          python -m benchmark.study_native_acceleration \
+            --sizes 5000,50000 \
+            --repeats 3 \
+            --output benchmark/results/native-atcs-acceleration.json
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
