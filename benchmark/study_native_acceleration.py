@@ -158,6 +158,12 @@ def _benchmark_mode(
     }
 
 
+def _safe_speedup(baseline_mean_ms: float, improved_mean_ms: float) -> float | None:
+    if baseline_mean_ms <= 0.0 or improved_mean_ms <= 0.0:
+        return None
+    return round(baseline_mean_ms / improved_mean_ms, 6)
+
+
 def _max_abs_diff(left: list[float], right: list[float]) -> float:
     if len(left) != len(right):
         raise ValueError("cannot compare vectors of different lengths")
@@ -245,6 +251,20 @@ def main() -> int:
                     "max_abs_diff_batch_python_vs_batch_active": round(
                         _max_abs_diff(batch_python_reference, batch_active_reference),
                         12,
+                    ),
+                },
+                "speedups": {
+                    "batch_python_over_scalar_python": _safe_speedup(
+                        scalar_python["mean_ms"],
+                        batch_python["mean_ms"],
+                    ),
+                    "batch_active_over_batch_python": _safe_speedup(
+                        batch_python["mean_ms"],
+                        batch_active["mean_ms"],
+                    ),
+                    "batch_active_over_scalar_python": _safe_speedup(
+                        scalar_python["mean_ms"],
+                        batch_active["mean_ms"],
                     ),
                 },
             }
