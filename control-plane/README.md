@@ -14,16 +14,40 @@ It proves a smaller but important boundary:
 ## Endpoints
 
 - `GET /healthz`
+- `GET /metrics` (Prometheus exposition)
 - `GET /openapi.json`
 - `GET /api/v1/runtime-contract`
 - `POST /api/v1/solve`
 - `POST /api/v1/repair`
+- `POST /api/v1/ui/gantt-model`
 
 `GET /openapi.json` publishes an OpenAPI 3.1 document built from the checked-in SynAPS
 runtime schemas.
 
 `GET /api/v1/runtime-contract` remains the smaller index surface for schema filenames and
 discoverability metadata, including the OpenAPI document path.
+
+`POST /api/v1/ui/gantt-model` returns a read-only lane/bar projection (with precedence links
+and delta overlays) so frontend Gantt viewers can render schedule vs baseline diff without
+parsing solver internals.
+
+## Observability + Guards
+
+The control-plane now emits:
+
+1. structured request/solver events (trace_id/span_id);
+2. OpenTelemetry spans (when enabled);
+3. RED-style Prometheus metrics under `/metrics`;
+4. limit-guard fallback chain for solve requests.
+
+Key env vars:
+
+- `SYNAPS_OTEL_ENABLED=1`
+- `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://.../v1/traces`
+- `SYNAPS_ENABLE_LIMIT_GUARDS=1`
+- `SYNAPS_LIMIT_GUARD_CHAIN=CPSAT-30,LBBD-10,RHC-ALNS,GREED`
+- `SYNAPS_PYTHON_EXEC_TIMEOUT_MS=...`
+- `SYNAPS_PYTHON_MAX_OUTPUT_BYTES=...`
 
 ## Local Commands
 

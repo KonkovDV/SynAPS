@@ -4,7 +4,10 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { buildControlPlaneApp } from "../src/app";
-import type { SynapsContractExecutor } from "../src/python-executor";
+import {
+  SynapsPythonBridgeError,
+  type SynapsContractExecutor,
+} from "../src/python-executor";
 import { resolveSynapsRepoRoot } from "../src/paths";
 
 function loadTinyProblem(): unknown {
@@ -96,6 +99,30 @@ test("runtime contract index exposes discoverability metadata", async () => {
   assert.equal(payload.openapi_json, "/openapi.json");
   assert.ok(payload.schema_files.includes("repair-request.schema.json"));
   assert.ok(payload.routes.includes("/api/v1/repair"));
+  assert.ok(payload.routes.includes("/metrics"));
+  assert.ok(payload.routes.includes("/api/v1/ui/gantt-model"));
+
+  await app.close();
+});
+
+test("metrics endpoint exposes Prometheus series", async () => {
+  const app = buildControlPlaneApp({
+    executor: {
+      async executeSolveRequest(): Promise<unknown> {
+        throw new Error("unused");
+      },
+      async executeRepairRequest(): Promise<unknown> {
+        throw new Error("unused");
+      },
+    },
+  });
+
+  const response = await app.inject({ method: "GET", url: "/metrics" });
+  assert.equal(response.statusCode, 200);
+  assert.match(response.body, /synaps_solve_duration_seconds_bucket/);
+  assert.match(response.body, /synaps_feasibility_violations_total/);
+  assert.match(response.body, /synaps_active_windows_gauge/);
+  assert.match(response.body, /synaps_gap_ratio/);
 
   await app.close();
 });
@@ -222,6 +249,161 @@ test("solve route rejects invalid upstream response", async () => {
   assert.equal(response.statusCode, 502);
   const payload = response.json() as { error: string };
   assert.equal(payload.error, "Bad Gateway");
+
+  await app.close();
+});
+
+test("solve route applies limit-guard fallback after timeout", async () => {
+  let attempts = 0;
+  const executor: SynapsContractExecutor = {
+    async executeSolveRequest(payload: object): Promise<unknown> {
+      attempts += 1;
+      const request = payload as { request_id?: string };
+
+      if (attempts === 1) {
+        throw new SynapsPythonBridgeError("synthetic timeout", "", "timeout");
+      }
+
+      return {
+        contract_version: "2026-04-03",
+        request_id: request.request_id,
+        result: {
+          solver_name: "greedy_dispatch",
+          status: "feasible",
+          assignments: [],
+          objective: {},
+          duration_ms: 1,
+          metadata: {
+            portfolio: {
+              solver_config: "GREED",
+            },
+          },
+          random_seed: null,
+        },
+      };
+    },
+    async executeRepairRequest(): Promise<unknown> {
+      throw new Error("unused");
+    },
+  };
+
+  const app = buildControlPlaneApp({ executor });
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/v1/solve",
+    payload: createSolveRequest(),
+  });
+
+  assert.equal(response.statusCode, 200);
+  const payload = response.json() as {
+    result: {
+      metadata: {
+        limit_guard?: {
+          applied: boolean;
+          attempts: unknown[];
+        };
+      };
+    };
+  };
+  assert.ok(payload.result.metadata.limit_guard?.applied);
+  assert.ok((payload.result.metadata.limit_guard?.attempts ?? []).length >= 1);
+  assert.ok(attempts >= 2);
+
+  await app.close();
+});
+
+test("solve route rejects cyclic precedence via ACL guardrails", async () => {
+  const app = buildControlPlaneApp({
+    executor: {
+      async executeSolveRequest(): Promise<unknown> {
+        throw new Error("executor should not be called on ACL failure");
+      },
+      async executeRepairRequest(): Promise<unknown> {
+        throw new Error("unused");
+      },
+    },
+  });
+
+  const cyclicRequest = createSolveRequest();
+  const problem = cyclicRequest.problem as {
+    operations: Array<{ predecessor_op_id: string | null; id: string }>;
+  };
+  if (problem.operations.length >= 2) {
+    problem.operations[0].predecessor_op_id = problem.operations[1].id;
+    problem.operations[1].predecessor_op_id = problem.operations[0].id;
+  }
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/v1/solve",
+    payload: cyclicRequest,
+  });
+
+  assert.equal(response.statusCode, 422);
+  const payload = response.json() as { error: string };
+  assert.equal(payload.error, "Unprocessable Entity");
+
+  await app.close();
+});
+
+test("gantt-model endpoint returns lanes and deltas", async () => {
+  const app = buildControlPlaneApp({
+    executor: {
+      async executeSolveRequest(): Promise<unknown> {
+        throw new Error("unused");
+      },
+      async executeRepairRequest(): Promise<unknown> {
+        throw new Error("unused");
+      },
+    },
+  });
+
+  const problem = loadTinyProblem() as {
+    operations: Array<Record<string, unknown>>;
+    work_centers: Array<Record<string, unknown>>;
+  };
+  const operation = problem.operations[0];
+  const workCenter = problem.work_centers[0];
+  const operationId = String(operation.id);
+  const workCenterId = String(workCenter.id);
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/v1/ui/gantt-model",
+    payload: {
+      problem,
+      schedule: {
+        assignments: [
+          {
+            operation_id: operationId,
+            work_center_id: workCenterId,
+            start_time: "2026-04-01T08:00:00.000Z",
+            end_time: "2026-04-01T09:00:00.000Z",
+          },
+        ],
+      },
+      baseline_schedule: {
+        assignments: [
+          {
+            operation_id: operationId,
+            work_center_id: workCenterId,
+            start_time: "2026-04-01T07:30:00.000Z",
+            end_time: "2026-04-01T08:30:00.000Z",
+          },
+        ],
+      },
+    },
+  });
+
+  assert.equal(response.statusCode, 200);
+  const payload = response.json() as {
+    lanes: unknown[];
+    deltas: unknown[];
+    summary: { operations: number };
+  };
+  assert.ok(payload.lanes.length >= 1);
+  assert.ok(payload.summary.operations >= 1);
+  assert.ok(payload.deltas.length >= 1);
 
   await app.close();
 });

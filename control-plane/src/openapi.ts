@@ -38,6 +38,66 @@ const runtimeContractIndexSchema = {
   required: ["schema_files", "openapi_json", "routes"],
 } as const;
 
+const ganttModelRequestSchema = {
+  type: "object",
+  properties: {
+    problem: { type: "object" },
+    schedule: {
+      type: "object",
+      properties: {
+        assignments: {
+          type: "array",
+          items: { type: "object" },
+        },
+      },
+      required: ["assignments"],
+    },
+    baseline_schedule: {
+      anyOf: [
+        {
+          type: "object",
+          properties: {
+            assignments: {
+              type: "array",
+              items: { type: "object" },
+            },
+          },
+          required: ["assignments"],
+        },
+        { type: "null" },
+      ],
+    },
+  },
+  required: ["problem", "schedule"],
+} as const;
+
+const ganttModelResponseSchema = {
+  type: "object",
+  properties: {
+    lanes: {
+      type: "array",
+      items: { type: "object" },
+    },
+    precedence_links: {
+      type: "array",
+      items: { type: "object" },
+    },
+    deltas: {
+      type: "array",
+      items: { type: "object" },
+    },
+    summary: {
+      type: "object",
+      properties: {
+        operations: { type: "integer" },
+        delayed_operations: { type: "integer" },
+      },
+      required: ["operations", "delayed_operations"],
+    },
+  },
+  required: ["lanes", "precedence_links", "deltas", "summary"],
+} as const;
+
 function withSchemaId(schema: object, id: string): JsonObject {
   return {
     ...(schema as JsonObject),
@@ -66,6 +126,24 @@ export function buildOpenApiDocument(schemas: SynapsContractSchemas): JsonObject
               content: {
                 "application/json": {
                   schema: { $ref: "#/components/schemas/HealthResponse" },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/metrics": {
+        get: {
+          summary: "Prometheus metrics",
+          operationId: "getMetrics",
+          responses: {
+            200: {
+              description: "Prometheus text exposition",
+              content: {
+                "text/plain": {
+                  schema: {
+                    type: "string",
+                  },
                 },
               },
             },
@@ -135,6 +213,30 @@ export function buildOpenApiDocument(schemas: SynapsContractSchemas): JsonObject
                 },
               },
             },
+            422: {
+              description: "ACL validation rejected the incoming graph",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+                },
+              },
+            },
+            503: {
+              description: "Bridge resource guard reached (OOM/output limit)",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+                },
+              },
+            },
+            504: {
+              description: "Bridge timeout",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+                },
+              },
+            },
             502: {
               description: "Upstream bridge or contract failure",
               content: {
@@ -175,8 +277,64 @@ export function buildOpenApiDocument(schemas: SynapsContractSchemas): JsonObject
                 },
               },
             },
+            422: {
+              description: "ACL validation rejected the incoming graph",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+                },
+              },
+            },
+            503: {
+              description: "Bridge resource guard reached (OOM/output limit)",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+                },
+              },
+            },
+            504: {
+              description: "Bridge timeout",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+                },
+              },
+            },
             502: {
               description: "Upstream bridge or contract failure",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/v1/ui/gantt-model": {
+        post: {
+          summary: "Build read-only gantt model for UI visualization",
+          operationId: "postGanttModel",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/GanttModelRequest" },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Gantt lane/bar payload with precedence links and repair deltas",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/GanttModelResponse" },
+                },
+              },
+            },
+            400: {
+              description: "Bad request",
               content: {
                 "application/json": {
                   schema: { $ref: "#/components/schemas/ErrorEnvelope" },
@@ -192,6 +350,8 @@ export function buildOpenApiDocument(schemas: SynapsContractSchemas): JsonObject
         HealthResponse: healthResponseSchema,
         RuntimeContractIndex: runtimeContractIndexSchema,
         ErrorEnvelope: errorEnvelopeSchema,
+        GanttModelRequest: ganttModelRequestSchema,
+        GanttModelResponse: ganttModelResponseSchema,
         SolveRequest: withSchemaId(
           schemas.solveRequest,
           "https://synaps.local/schemas/SolveRequest",
