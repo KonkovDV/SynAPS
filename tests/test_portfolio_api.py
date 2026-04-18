@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from synaps import recommend_repair_radius, repair_schedule, solve_schedule
-from synaps.model import ScheduleProblem, SolverStatus
+from synaps.model import Assignment, ScheduleProblem, SolverStatus
 from synaps.solvers.feasibility_checker import FeasibilityChecker
 from synaps.solvers.greedy_dispatch import GreedyDispatch
 from synaps.solvers.router import SolveRegime, SolverRoutingContext
+from synaps.validation import verify_schedule_result
+from tests.conftest import HORIZON_START
 
 
 def test_solve_schedule_routes_small_nominal_problem(simple_problem: ScheduleProblem) -> None:
@@ -19,6 +23,8 @@ def test_solve_schedule_routes_small_nominal_problem(simple_problem: SchedulePro
     assert result.metadata["portfolio"]["problem_profile"]["operation_count"] == 4
     assert result.metadata["portfolio"]["verified_feasible"] is True
     assert result.metadata["portfolio"]["violation_count"] == 0
+    assert result.metadata["portfolio"]["violation_kind_counts"] == {}
+    assert result.metadata["portfolio"]["feasibility_violation_kinds"] == {}
 
 
 def test_solve_schedule_respects_explicit_solver_override(
@@ -70,6 +76,8 @@ def test_repair_schedule_executes_incremental_repair(
     assert result.metadata["portfolio"]["solver_config"] == "INCREMENTAL_REPAIR"
     assert result.metadata["portfolio"]["regime"] == SolveRegime.RUSH_ORDER.value
     assert result.metadata["portfolio"]["verified_feasible"] is True
+    assert result.metadata["portfolio"]["violation_kind_counts"] == {}
+    assert result.metadata["portfolio"]["feasibility_violation_kinds"] == {}
 
     checker = FeasibilityChecker()
     assert checker.check(simple_problem, result.assignments) == []
@@ -132,3 +140,31 @@ def test_repair_schedule_uses_policy_radius_when_not_provided(
     assert result.metadata["portfolio"]["applied_radius"] == expected_radius
     assert result.metadata["portfolio"]["disrupted_operation_count"] == 1
     assert result.metadata["portfolio"]["problem_profile"]["size_band"] == "small"
+
+
+def test_verify_schedule_result_reports_violation_kind_counts(
+    simple_problem: ScheduleProblem,
+) -> None:
+    op_ids = [op.id for op in simple_problem.operations]
+    wc_id = simple_problem.work_centers[0].id
+    overlapping_assignments = [
+        Assignment(
+            operation_id=op_ids[index],
+            work_center_id=wc_id,
+            start_time=HORIZON_START + timedelta(minutes=index * 5),
+            end_time=HORIZON_START + timedelta(minutes=index * 5 + 25),
+        )
+        for index in range(len(op_ids))
+    ]
+
+    result = GreedyDispatch().solve(simple_problem)
+    result.status = SolverStatus.FEASIBLE
+    result.assignments = overlapping_assignments
+
+    verification = verify_schedule_result(simple_problem, result)
+
+    assert verification.feasible is False
+    assert verification.violation_count > 0
+    assert verification.violation_kind_counts
+    assert verification.violation_kinds == sorted(verification.violation_kind_counts.keys())
+    assert sum(verification.violation_kind_counts.values()) == verification.violation_count

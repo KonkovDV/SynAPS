@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 
 from synaps.model import ScheduleProblem, ScheduleResult, SolverStatus
@@ -15,6 +16,7 @@ class SolutionVerification:
     feasible: bool
     violation_count: int
     violation_kinds: list[str]
+    violation_kind_counts: dict[str, int]
     violations: list[FeasibilityViolation]
 
 
@@ -29,14 +31,17 @@ def verify_schedule_result(
             feasible=False,
             violation_count=0,
             violation_kinds=[],
+            violation_kind_counts={},
             violations=[],
         )
 
     violations = FeasibilityChecker().check(problem, result.assignments)
+    violation_kind_counts = Counter(violation.kind for violation in violations)
     return SolutionVerification(
         feasible=not violations,
         violation_count=len(violations),
-        violation_kinds=sorted({violation.kind for violation in violations}),
+        violation_kinds=sorted(violation_kind_counts.keys()),
+        violation_kind_counts=dict(sorted(violation_kind_counts.items())),
         violations=violations,
     )
 

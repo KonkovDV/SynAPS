@@ -127,6 +127,61 @@ test("metrics endpoint exposes Prometheus series", async () => {
   await app.close();
 });
 
+test("metrics endpoint records violation kinds from portfolio metadata", async () => {
+  const app = buildControlPlaneApp({
+    executor: {
+      async executeSolveRequest(payload: object): Promise<unknown> {
+        const request = payload as { request_id?: string };
+        return {
+          contract_version: "2026-04-03",
+          request_id: request.request_id,
+          result: {
+            solver_name: "greedy_dispatch",
+            status: "feasible",
+            assignments: [],
+            objective: {},
+            duration_ms: 2,
+            metadata: {
+              portfolio: {
+                solver_config: "GREED",
+                violation_count: 4,
+                violation_kind_counts: {
+                  PRECEDENCE_VIOLATION: 3,
+                  MACHINE_OVERLAP: 1,
+                },
+              },
+            },
+            random_seed: null,
+          },
+        };
+      },
+      async executeRepairRequest(): Promise<unknown> {
+        throw new Error("unused");
+      },
+    },
+  });
+
+  const solveResponse = await app.inject({
+    method: "POST",
+    url: "/api/v1/solve",
+    payload: createSolveRequest(),
+  });
+  assert.equal(solveResponse.statusCode, 200);
+
+  const response = await app.inject({ method: "GET", url: "/metrics" });
+  assert.equal(response.statusCode, 200);
+  assert.match(
+    response.body,
+    /synaps_feasibility_violations_total\{kind="precedence"\} 3/,
+  );
+  assert.match(
+    response.body,
+    /synaps_feasibility_violations_total\{kind="overlap"\} 1/,
+  );
+
+  await app.close();
+});
+
 test("openapi route exposes solve and repair schemas", async () => {
   const app = buildControlPlaneApp({
     executor: {

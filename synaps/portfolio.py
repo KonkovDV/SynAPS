@@ -187,6 +187,8 @@ def solve_schedule(
                 "verified_feasible": verification.feasible,
                 "violation_count": verification.violation_count,
                 "violation_kinds": verification.violation_kinds,
+                "violation_kind_counts": verification.violation_kind_counts,
+                "feasibility_violation_kinds": verification.violation_kind_counts,
             }
         )
         record_feasibility_event(
@@ -266,6 +268,8 @@ def repair_schedule(
                 "verified_feasible": verification.feasible,
                 "violation_count": verification.violation_count,
                 "violation_kinds": verification.violation_kinds,
+                "violation_kind_counts": verification.violation_kind_counts,
+                "feasibility_violation_kinds": verification.violation_kind_counts,
             }
         )
         if result.status.value in {"feasible", "optimal"} and not verification.feasible:

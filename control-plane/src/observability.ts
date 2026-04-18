@@ -181,19 +181,32 @@ export class SynapsMetricsRegistry {
     }
 
     const metadata = asObject(resultObject.metadata);
+    const portfolioMetadata = asObject(metadata.portfolio);
 
-    const windowsSolved = asFiniteNumber(metadata.windows_solved);
+    const windowsSolved = asFiniteNumber(
+      metadata.windows_solved ?? portfolioMetadata.windows_solved,
+    );
     if (windowsSolved !== null) {
       this.setActiveWindows(windowsSolved);
     }
 
-    const gapRatio = asFiniteNumber(metadata.gap);
+    const gapRatio = asFiniteNumber(metadata.gap ?? portfolioMetadata.gap);
     if (gapRatio !== null) {
       this.setGapRatio(gapRatio);
     }
 
-    const finalViolations = asNonNegativeInteger(metadata.final_violations);
-    const rawKinds = asObject(metadata.feasibility_violation_kinds);
+    const finalViolations = asNonNegativeInteger(
+      metadata.final_violations ??
+        metadata.violation_count ??
+        portfolioMetadata.final_violations ??
+        portfolioMetadata.violation_count,
+    );
+    const rawKinds = asObject(
+      metadata.feasibility_violation_kinds ??
+        metadata.violation_kind_counts ??
+        portfolioMetadata.feasibility_violation_kinds ??
+        portfolioMetadata.violation_kind_counts,
+    );
 
     if (Object.keys(rawKinds).length > 0) {
       for (const [rawKind, rawCount] of Object.entries(rawKinds)) {
@@ -202,14 +215,18 @@ export class SynapsMetricsRegistry {
           continue;
         }
 
+        const normalizedKind = rawKind.toLowerCase();
         let kind: FeasibilityViolationKind = "unknown";
-        if (rawKind.includes("preced")) {
+        if (normalizedKind.includes("preced")) {
           kind = "precedence";
-        } else if (rawKind.includes("overlap")) {
+        } else if (normalizedKind.includes("overlap")) {
           kind = "overlap";
-        } else if (rawKind.includes("setup")) {
+        } else if (normalizedKind.includes("setup")) {
           kind = "setup_capacity";
-        } else if (rawKind.includes("aux") || rawKind.includes("resource")) {
+        } else if (
+          normalizedKind.includes("aux") ||
+          normalizedKind.includes("resource")
+        ) {
           kind = "aux_capacity";
         }
         this.incrementFeasibilityViolation(kind, count);
