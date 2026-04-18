@@ -127,7 +127,14 @@ def _objective_cost(obj: ObjectiveValues, weights: dict[str, float]) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Destroy operators (Shaw 1998, Ropke & Pisinger 2006)
+# Destroy operators
+#   random     — uniform random removal
+#   worst      — removal by machine-local setup contribution
+#                (Shaw 1998; Ropke & Pisinger 2006, Transportation Science)
+#   related    — Shaw relatedness removal seeded by a random anchor
+#                (Shaw 1998)
+#   machine_segment — contiguous segment removal from one machine
+#                to break high-cost setup chains (domain heuristic)
 # ---------------------------------------------------------------------------
 
 def _destroy_random(
@@ -275,7 +282,8 @@ def _destroy_machine_segment(
     return {machine_seq[i].operation_id for i in range(start_idx, start_idx + seg_size)}
 
 
-# All destroy operators
+# All destroy operators (random, worst, related: Shaw/Ropke-Pisinger;
+#  machine_segment: domain heuristic for setup-chain disruption)
 DESTROY_OPERATORS = [
     ("random", _destroy_random),
     ("worst", _destroy_worst),
