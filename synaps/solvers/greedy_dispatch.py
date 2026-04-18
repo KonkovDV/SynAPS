@@ -12,7 +12,7 @@ import time
 from datetime import timedelta
 from typing import Any
 
-from synaps.accelerators import compute_atcs_log_score, get_acceleration_status
+from synaps.accelerators import compute_atcs_log_scores_batch, get_acceleration_status
 from synaps.model import (
     Assignment,
     ObjectiveValues,
@@ -193,29 +193,36 @@ class GreedyDispatch(BaseSolver):
 
             best_log_score = float("-inf")
             best_record = candidate_records[0]
-            for record in candidate_records:
-                slot = record["slot"]
-                p_j = record["processing_minutes"]
-                slack = max(record["due_offset"] - p_j - slot.start_offset, 0.0)
-                setup_scale = local_setup_scale_by_wc[record["work_center_id"]]
-
-                # Compare in log-space to avoid exp() underflow on sparse or
-                # heavy-tailed SDST matrices while preserving ATCS ranking.
-                # Extended ATCS: material-loss penalty reduces the attractiveness
-                # of transitions with equal setup time but higher material waste.
-                log_score = compute_atcs_log_score(
-                    weight=record["weight"],
-                    processing_minutes=p_j,
-                    slack=slack,
-                    ready_p_bar=ready_p_bar,
-                    setup_minutes=slot.setup_minutes,
-                    setup_scale=setup_scale,
-                    k1=self._k1,
-                    k2=self._k2,
-                    material_loss=slot.material_loss,
-                    material_scale=material_scale,
-                    k3=self._k3,
-                )
+            # Score all candidates in one SoA-style batch call.
+            # This keeps Python deterministic and lets optional PyO3/Rust
+            # backends process the hot path with lower overhead.
+            log_scores = compute_atcs_log_scores_batch(
+                weights=[record["weight"] for record in candidate_records],
+                processing_minutes=[
+                    record["processing_minutes"] for record in candidate_records
+                ],
+                slack=[
+                    max(
+                        record["due_offset"]
+                        - record["processing_minutes"]
+                        - record["slot"].start_offset,
+                        0.0,
+                    )
+                    for record in candidate_records
+                ],
+                ready_p_bar=ready_p_bar,
+                setup_minutes=[record["slot"].setup_minutes for record in candidate_records],
+                setup_scale=[
+                    local_setup_scale_by_wc[record["work_center_id"]]
+                    for record in candidate_records
+                ],
+                k1=self._k1,
+                k2=self._k2,
+                material_loss=[record["slot"].material_loss for record in candidate_records],
+                material_scale=material_scale,
+                k3=self._k3,
+            )
+            for record, log_score in zip(candidate_records, log_scores, strict=True):
                 if log_score > best_log_score:
                     best_log_score = log_score
                     best_record = record
@@ -436,25 +443,34 @@ class BeamSearchDispatch(BaseSolver):
 
                 # Score all candidates and keep top-B
                 scored: list[tuple[float, dict[str, Any]]] = []
-                for record in candidate_records:
-                    slot = record["slot"]
-                    p_j = record["processing_minutes"]
-                    slack = max(record["due_offset"] - p_j - slot.start_offset, 0.0)
-                    setup_scale = local_setup_scale_by_wc[record["work_center_id"]]
+                log_scores = compute_atcs_log_scores_batch(
+                    weights=[record["weight"] for record in candidate_records],
+                    processing_minutes=[
+                        record["processing_minutes"] for record in candidate_records
+                    ],
+                    slack=[
+                        max(
+                            record["due_offset"]
+                            - record["processing_minutes"]
+                            - record["slot"].start_offset,
+                            0.0,
+                        )
+                        for record in candidate_records
+                    ],
+                    ready_p_bar=ready_p_bar,
+                    setup_minutes=[record["slot"].setup_minutes for record in candidate_records],
+                    setup_scale=[
+                        local_setup_scale_by_wc[record["work_center_id"]]
+                        for record in candidate_records
+                    ],
+                    k1=self._k1,
+                    k2=self._k2,
+                    material_loss=[record["slot"].material_loss for record in candidate_records],
+                    material_scale=material_scale,
+                    k3=self._k3,
+                )
 
-                    log_score = compute_atcs_log_score(
-                        weight=record["weight"],
-                        processing_minutes=p_j,
-                        slack=slack,
-                        ready_p_bar=ready_p_bar,
-                        setup_minutes=slot.setup_minutes,
-                        setup_scale=setup_scale,
-                        k1=self._k1,
-                        k2=self._k2,
-                        material_loss=slot.material_loss,
-                        material_scale=material_scale,
-                        k3=self._k3,
-                    )
+                for record, log_score in zip(candidate_records, log_scores, strict=True):
                     scored.append((log_score, record))
 
                 scored.sort(key=lambda x: x[0], reverse=True)

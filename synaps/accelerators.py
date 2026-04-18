@@ -10,21 +10,26 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 _native_compute_atcs_log_score: Callable[..., float] | None = None
+_native_compute_atcs_log_scores_batch: Callable[..., list[float]] | None = None
 _native_resource_capacity_window_is_feasible: Callable[..., bool] | None = None
 
 if os.getenv("SYNAPS_DISABLE_NATIVE_ACCELERATION") == "1":
     _native_compute_atcs_log_score = None
+    _native_compute_atcs_log_scores_batch = None
 else:
     try:
         from synaps_native import (  # type: ignore[import-not-found]
             compute_atcs_log_score as _synaps_native_compute_atcs_log_score,
+            compute_atcs_log_scores_batch as _synaps_native_compute_atcs_log_scores_batch,
             resource_capacity_window_is_feasible as _synaps_native_resource_capacity_window_is_feasible,
         )
     except ImportError:
         _native_compute_atcs_log_score = None
+        _native_compute_atcs_log_scores_batch = None
         _native_resource_capacity_window_is_feasible = None
     else:
         _native_compute_atcs_log_score = _synaps_native_compute_atcs_log_score
+        _native_compute_atcs_log_scores_batch = _synaps_native_compute_atcs_log_scores_batch
         _native_resource_capacity_window_is_feasible = (
             _synaps_native_resource_capacity_window_is_feasible
         )
@@ -80,11 +85,15 @@ def get_acceleration_status() -> dict[str, Any]:
             backend is not None
             for backend in (
                 _native_compute_atcs_log_score,
+                _native_compute_atcs_log_scores_batch,
                 _native_resource_capacity_window_is_feasible,
             )
         ),
         "atcs_log_score_backend": "native"
         if _native_compute_atcs_log_score is not None
+        else "python",
+        "atcs_log_score_batch_backend": "native"
+        if _native_compute_atcs_log_scores_batch is not None
         else "python",
         "resource_capacity_backend": "native"
         if _native_resource_capacity_window_is_feasible is not None
@@ -94,11 +103,80 @@ def get_acceleration_status() -> dict[str, Any]:
             backend is not None
             for backend in (
                 _native_compute_atcs_log_score,
+                _native_compute_atcs_log_scores_batch,
                 _native_resource_capacity_window_is_feasible,
             )
         )
         else None,
     }
+
+
+def compute_atcs_log_scores_batch(
+    *,
+    weights: list[float],
+    processing_minutes: list[float],
+    slack: list[float],
+    ready_p_bar: float,
+    setup_minutes: list[float],
+    setup_scale: list[float],
+    k1: float,
+    k2: float,
+    material_loss: list[float],
+    material_scale: float,
+    k3: float,
+) -> list[float]:
+    """Return log-space ATCS scores for a candidate batch.
+
+    This is a Structure-of-Arrays seam intended for optional native backends
+    (PyO3/Rust) while keeping a deterministic Python fallback.
+    """
+
+    n = len(weights)
+    if not (
+        len(processing_minutes) == n
+        and len(slack) == n
+        and len(setup_minutes) == n
+        and len(setup_scale) == n
+        and len(material_loss) == n
+    ):
+        raise ValueError("ATCS batch vectors must have identical lengths")
+
+    if _native_compute_atcs_log_scores_batch is not None:
+        return [
+            float(value)
+            for value in _native_compute_atcs_log_scores_batch(
+                weights,
+                processing_minutes,
+                slack,
+                ready_p_bar,
+                setup_minutes,
+                setup_scale,
+                k1,
+                k2,
+                material_loss,
+                material_scale,
+                k3,
+            )
+        ]
+
+    return [
+        (
+            log(max(weights[i], 1e-9))
+            - log(max(processing_minutes[i], 0.1))
+            - (slack[i] / (k1 * ready_p_bar))
+            - (
+                setup_minutes[i] / (k2 * setup_scale[i])
+                if setup_minutes[i] > 0
+                else 0.0
+            )
+            - (
+                material_loss[i] / (k3 * material_scale)
+                if material_loss[i] > 0
+                else 0.0
+            )
+        )
+        for i in range(n)
+    ]
 
 
 def resource_capacity_window_is_feasible(
@@ -158,6 +236,7 @@ def resource_capacity_window_is_feasible(
 
 __all__ = [
     "compute_atcs_log_score",
+    "compute_atcs_log_scores_batch",
     "get_acceleration_status",
     "resource_capacity_window_is_feasible",
 ]
