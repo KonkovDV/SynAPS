@@ -1,86 +1,111 @@
 # SynAPS
 
-Открытый движок производственного планирования для задач класса MO-FJSP-SDST-ARC: гибкое цеховое планирование с последовательнозависимыми переналадками и вспомогательными ресурсами.
+Детерминированный движок производственного планирования для задач класса MO-FJSP-SDST-ARC.
 
 Language: [EN](README.md) | **RU**
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-## Что Здесь Есть
+SynAPS нужен там, где важно не просто получить расписание, а понять, почему оно именно такое, и воспроизвести результат.
 
-SynAPS - это детерминированный стек планирования для случаев, где результат нужно не только получить, но и проверить, объяснить и воспроизвести.
+- явный портфель решателей с именованными конфигурациями
+- прозрачная маршрутизация с метаданными
+- отдельная проверка допустимости
+- воспроизводимые benchmark-артефакты (включая отдельный 50K study)
 
-Текущий репозиторий включает:
+## Зачем Это Нужно
 
-- точные и декомпозиционные решатели: `CP-SAT`, `LBBD`, `LBBD-HD`, `Pareto Slice`
-- конструктивные и ремонтные слои: `Greedy ATCS`, `Beam Search`, `Incremental Repair`
-- крупномасштабные поисковые пути: `ALNS` и `RHC`
-- именованный реестр из 21 публичной solver-конфигурации
-- независимый `FeasibilityChecker`, который запускается после каждого допустимого или оптимального solve-path
-- необязательные native seams в [synaps/accelerators.py](synaps/accelerators.py) с безопасным Python fallback
+В планировании главный вопрос обычно не "что получилось", а "почему система так решила".
 
-На апрель 2026 года публичный портфель даёт 12 solver-семейств через 21 именованную конфигурацию.
+Подход SynAPS - белый ящик:
 
-## Граница Доказательности
+- выбранная конфигурация решателя известна
+- параметры запуска фиксируются (включая seed для стохастики)
+- путь валидации независим от решателя
+- артефакт запуска сохраняется рядом с кодом
 
-SynAPS решает реальную и тяжёлую задачу планирования, но здесь важнее честная граница доказательности, чем красивый слоган.
+## Текущее Состояние (апрель 2026)
 
-| Поверхность | Что реально подтверждено |
-|-------------|--------------------------|
-| Точный слой | Самая сильная текущая база - малые и средние инстансы. `CP-SAT` и `LBBD` дают точный или почти точный слой с явной нижней границей или `gap`-семантикой. |
-| Крупные инстансы | `ALNS`, `RHC` и `LBBD-HD` - текущий путь для синтетических исследований масштаба 5K-50K. Их задача сейчас - feasibility, runtime и поиск узких мест, а не доказательство оптимальности. |
-| Валидация | Каждый допустимый или оптимальный результат проходит через независимый `FeasibilityChecker`, который проверяет полноту, допустимость станков, precedence, ёмкость станков, setup gaps, вспомогательные ресурсы и границы горизонта. |
-| Отдельный 50K путь | Воспроизводимый 50K-study лежит в [benchmark/study_rhc_50k.py](benchmark/study_rhc_50k.py). Текущий материализованный артефакт - [benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json](benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json). |
-| Живой завод | Утверждение о внедрении на реальном заводе в этом репозитории не делается. |
+Что подтверждено в этом репозитории:
 
-Если нужен роутер по документации, начинайте с [docs/README_RU.md](docs/README_RU.md). Если нужен публикационный draft, смотрите [docs/habr/synaps-open-source-habr-v3.md](docs/habr/synaps-open-source-habr-v3.md).
+- 22 публичные solver-конфигурации в реестре (`available_solver_configs()`)
+- требование Python: `>=3.12` (`pyproject.toml`)
+- базовые runtime-зависимости: `ortools`, `highspy`, `pydantic`, `numpy`
+- стабильные JSON-контракты solve/repair (`synaps/contracts.py`)
+- отдельный `FeasibilityChecker` (`synaps/solvers/feasibility_checker.py`)
 
-## Что Показал Текущий 50K Прогон
+Что здесь не заявляется:
 
-У репозитория теперь есть стабильная 50K evidence surface, и её ценность как раз в том, что она показывает текущую границу без косметики.
+- промышленная валидация на живом заводе
+- гарантированное построение полного feasible 50K расписания в текущих timebox
 
-Артефакт [benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json](benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json) фиксирует текущий детерминированный `industrial-50k` запуск для `RHC-GREEDY` и `RHC-ALNS` уже после динамического window cap и индексированного slot-search.
+## 50K Срез (industrial-50k)
 
-- `RHC-GREEDY` останавливается через `120.115s` и успевает зафиксировать `6959` назначений за `11` окон.
-- `RHC-ALNS` останавливается через `366.23s` и успевает зафиксировать `1078` назначений за `3` окна.
-- оба прогона завершились с `status=error` и `feasible=false`
-- оба прогона всё ещё тянут почти весь earliest-frontier пул, доходя до `49 931` и `49 993` кандидатов
-- глобальный fallback repair по-прежнему честно пропускается после исчерпания бюджета времени, поэтому артефакт сохраняет реальное узкое место вместо бесконечной уборки в конце
+Канонический артефакт:
 
-Это значит, что отдельный 50K profiling path уже существует и greedy-путь заметно ускорился, но текущий `industrial-50k` preset всё ещё нельзя называть закрытым промышленным benchmark-успехом. Узкое место сместилось: admission уже лучше, а теперь сильнее всего мешает throughput внутреннего solver-path, особенно у `RHC-ALNS`.
+- `benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json`
+
+Сводка из этого артефакта:
+
+| Solver | Время (с) | Feasibility rate | Назначения |
+|---|---:|---:|---:|
+| `RHC-GREEDY` | 120.115 | 0.0 | 6 959 / 50 000 |
+| `RHC-ALNS` | 366.23 | 0.0 | 1 078 / 50 000 |
+
+Как это правильно читать:
+
+- Это profiling/evidence-срез, а не "50K уже решено".
+- Артефакт фиксирует честную границу: частичный прогресс и явные причины остановки.
+- На текущем этапе главное узкое место - давление большого пула кандидатов.
 
 ## Портфель Решателей
 
-| Слой | Основные профили | Роль |
-|------|------------------|------|
-| Точный | `CPSAT-10`, `CPSAT-30`, `CPSAT-120` | точные solve-path для малых и средних инстансов |
-| Декомпозиционный | `LBBD-5`, `LBBD-10`, `LBBD-5-HD`, `LBBD-10-HD`, `LBBD-20-HD` | точная или почти точная декомпозиция для более крупных ограниченных инстансов |
-| Многокритериальные срезы | `CPSAT-EPS-SETUP-110`, `CPSAT-EPS-TARD-110`, `CPSAT-EPS-MATERIAL-110` | воспроизводимые `epsilon`-constraint запуски |
-| Конструктивный | `GREED`, `GREED-K1-3`, `BEAM-3`, `BEAM-5` | быстрые допустимые расписания |
-| Крупномасштабный поиск | `ALNS-300`, `ALNS-500`, `ALNS-1000`, `RHC-ALNS`, `RHC-CPSAT`, `RHC-GREEDY` | синтетические большие инстансы и временная декомпозиция |
+Основные семейства:
 
-Авторитетный реестр лежит в [synaps/solvers/registry.py](synaps/solvers/registry.py). Политика выбора - в [synaps/solvers/router.py](synaps/solvers/router.py).
+- точные и почти точные: CP-SAT, LBBD, LBBD-HD
+- конструктивные: Greedy ATCS, Beam
+- многокритериальные срезы: epsilon/Pareto профили CP-SAT
+- крупномасштабные контуры: ALNS, RHC
+- ремонт: IncrementalRepair
+- валидация: FeasibilityChecker
+
+Авторитетный реестр:
+
+- `synaps/solvers/registry.py`
+
+Политика выбора решателя:
+
+- `synaps/solvers/router.py`
+
+## Нюанс По Детерминизму
+
+Часть портфеля стохастическая по определению и поддерживает seed.
+
+Для CP-SAT (OR-Tools):
+
+- `num_workers > 1` может ухудшать бит-в-бит повторяемость между запусками и машинами
+- если нужна более строгая воспроизводимость, фиксируйте `random_seed` и ставьте однопоточный режим (`num_workers = 1`)
 
 ## Быстрый Старт
 
 ```bash
 git clone https://github.com/KonkovDV/SynAPS.git
 cd SynAPS
-pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
 ```
 
-Решить маленький публичный инстанс:
+Решить маленький пример:
 
 ```bash
 python -m synaps solve benchmark/instances/tiny_3x3.json
 ```
 
-Запустить benchmark-сравнение:
+Сравнить решатели на benchmark-инстансе:
 
 ```bash
 python -m benchmark.run_benchmark benchmark/instances/tiny_3x3.json \
-  --solvers GREED CPSAT-10 --compare
+  --solvers GREED CPSAT-30 --compare
 ```
 
 Запустить отдельный 50K study:
@@ -90,10 +115,10 @@ python -m benchmark.study_rhc_50k \
   --preset industrial-50k \
   --seeds 1 \
   --solvers RHC-GREEDY RHC-ALNS \
-  --write-dir benchmark/studies/2026-04-13-rhc-50k-machine-index
+  --write-dir benchmark/studies/_local-rhc-50k
 ```
 
-Запустить Python test suite:
+Запустить тесты:
 
 ```bash
 python -m pytest tests -q
@@ -101,35 +126,23 @@ python -m pytest tests -q
 
 ## Карта Репозитория
 
-- [docs/README_RU.md](docs/README_RU.md) - роутер по документации
-- [benchmark/README_RU.md](benchmark/README_RU.md) - воспроизводимая benchmark-система
-- [control-plane/README_RU.md](control-plane/README_RU.md) - TypeScript BFF и runtime boundary
-- [docs/audit/ACADEMIC_AUDIT_L6_RESPONSE_2026_04_12.md](docs/audit/ACADEMIC_AUDIT_L6_RESPONSE_2026_04_12.md) - построчная академическая проверка ключевых утверждений
-- [docs/habr/synaps-open-source-habr-v3.md](docs/habr/synaps-open-source-habr-v3.md) - актуальный Habr draft
+- `synaps/solvers/` - реализации решателей и реестр
+- `synaps/model.py` - базовая Pydantic-модель
+- `synaps/contracts.py` - стабильные JSON-контракты
+- `synaps/problem_profile.py` - профилирование инстансов
+- `synaps/validation.py` - проверка результатов solve
+- `benchmark/` - harness и исследования
+- `tests/` - тестовый контур
+- `docs/` - архитектура, аудиты, публикационные материалы
 
-## Текущее Состояние
+## Что Читать Дальше
 
-Реализовано:
-
-- детерминированный solver-портфель с точным, декомпозиционным, конструктивным и крупномасштабным слоями
-- независимая проверка допустимости после каждого допустимого или оптимального solve-path
-- публичный benchmark harness и детерминированная генерация синтетических инстансов
-- отдельная команда для 50K study и материализованный артефакт с результатами
-- необязательные native seams для hot-path scoring и capacity-check логики
-
-Текущие узкие места:
-
-- earliest-frontier давление в текущем `industrial-50k` preset всё ещё слишком широкое даже после динамического cap
-- `RHC-GREEDY` заметно продвинулся, но `RHC-ALNS` по-прежнему слишком медленно проходит inner large-neighborhood path для сильного 50K результата
-
-Как факт здесь не заявляется:
-
-- валидация на живом заводе
-- готовая интеграция с ERP или MES
-- planner-facing production UI
-- доказанный допустимый полный `industrial-50k` solve в рамках текущих публичных time budget
-- обязательное compiled ядро beyond optional hot-path seams
+- Хабр-драфт (RU): `docs/habr/synaps-open-source-habr-v3.md`
+- Publication pack: `docs/habr/synaps-open-source-habr-v3-pack.md`
+- Benchmark guide: `benchmark/README_RU.md`
+- Contributing: `CONTRIBUTING.md`
+- Security policy: `SECURITY.md`
 
 ## Лицензия
 
-MIT.
+MIT. См. [LICENSE](LICENSE).
