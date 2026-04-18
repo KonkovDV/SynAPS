@@ -456,6 +456,14 @@ export function buildControlPlaneApp(
             shouldRetryAfterResultStatus(status) &&
             index < solveAttemptChain.length - 1
           ) {
+            const fromSolver = solverConfig ?? "AUTO";
+            const toSolver = solveAttemptChain[index + 1] ?? "AUTO";
+            metrics.incrementLimitGuardTransition(
+              fromSolver,
+              toSolver,
+              `status_${(status ?? "unknown").toLowerCase()}`,
+            );
+
             closeObservedSpan(attemptSpan, "error", {
               retry_next_solver: true,
               result_status: status ?? "unknown",
@@ -477,6 +485,9 @@ export function buildControlPlaneApp(
         } catch (error) {
           if (error instanceof SynapsPythonBridgeError) {
             lastBridgeError = error;
+            const fromSolver = solverConfig ?? "AUTO";
+            metrics.incrementBridgeError(fromSolver, error.code);
+
             attempts.push({
               solver_config: solverConfig,
               bridge_code: error.code,
@@ -492,6 +503,15 @@ export function buildControlPlaneApp(
               limitGuardsEnabled &&
               shouldRetryAfterBridgeError(error) &&
               index < solveAttemptChain.length - 1;
+
+            if (canRetry) {
+              const toSolver = solveAttemptChain[index + 1] ?? "AUTO";
+              metrics.incrementLimitGuardTransition(
+                fromSolver,
+                toSolver,
+                `bridge_${error.code}`,
+              );
+            }
 
             closeObservedSpan(attemptSpan, "error", {
               bridge_code: error.code,

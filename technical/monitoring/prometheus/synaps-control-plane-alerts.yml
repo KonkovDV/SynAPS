@@ -70,3 +70,33 @@ groups:
           description: |
             Gap ratio stayed above 12% for at least 20 minutes, indicating convergence plateau.
             Consider changing solver config, budget envelope, or decomposition strategy.
+
+      - alert: SynapsBridgeErrorRateHigh
+        expr: sum(rate(synaps_bridge_errors_total[5m])) > 0.20
+        for: 10m
+        labels:
+          severity: warning
+          service: synaps-control-plane
+          slo: reliability
+        annotations:
+          summary: Bridge error rate is above 0.2 events/s
+          description: |
+            Bridge errors are sustained above 0.2 events/s for at least 10 minutes.
+            Review python bridge timeout/output limits and current fallback behavior.
+
+      - alert: SynapsLimitGuardTransitionRatioHigh
+        expr: |
+          sum(rate(synaps_limit_guard_transitions_total[10m]))
+            /
+          clamp_min(sum(rate(synaps_solver_runs_total[10m])), 0.001)
+          > 0.30
+        for: 15m
+        labels:
+          severity: warning
+          service: synaps-control-plane
+          slo: reliability
+        annotations:
+          summary: Limit-guard fallback transition ratio exceeds 30%
+          description: |
+            More than 30% of runs transition across fallback chain over 10-minute windows.
+            Investigate solver budget saturation, incoming workload hardness, and fallback thresholds.

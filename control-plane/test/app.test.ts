@@ -121,6 +121,8 @@ test("metrics endpoint exposes Prometheus series", async () => {
   assert.equal(response.statusCode, 200);
   assert.match(response.body, /synaps_solve_duration_seconds_bucket/);
   assert.match(response.body, /synaps_solver_runs_total/);
+  assert.match(response.body, /synaps_limit_guard_transitions_total/);
+  assert.match(response.body, /synaps_bridge_errors_total/);
   assert.match(response.body, /synaps_feasibility_violations_total/);
   assert.match(response.body, /synaps_active_windows_gauge/);
   assert.match(response.body, /synaps_gap_ratio/);
@@ -273,10 +275,13 @@ test("solve route injects request id and returns validated response", async () =
   };
 
   const app = buildControlPlaneApp({ executor });
+  const request = createSolveRequest();
+  request.solver_config = "CPSAT-30";
+
   const response = await app.inject({
     method: "POST",
     url: "/api/v1/solve",
-    payload: createSolveRequest(),
+    payload: request,
   });
 
   assert.equal(response.statusCode, 200);
@@ -368,6 +373,98 @@ test("solve route applies limit-guard fallback after timeout", async () => {
   assert.ok(payload.result.metadata.limit_guard?.applied);
   assert.ok((payload.result.metadata.limit_guard?.attempts ?? []).length >= 1);
   assert.ok(attempts >= 2);
+
+  const metrics = await app.inject({ method: "GET", url: "/metrics" });
+  assert.equal(metrics.statusCode, 200);
+  assert.match(
+    metrics.body,
+    /synaps_bridge_errors_total\{solver_config="AUTO",code="timeout"\} 1/,
+  );
+  assert.match(
+    metrics.body,
+    /synaps_limit_guard_transitions_total\{from_solver="AUTO",to_solver="CPSAT-30",reason="bridge_timeout"\} 1/,
+  );
+
+  await app.close();
+});
+
+test("solve route records status-based fallback transition metrics", async () => {
+  let attempts = 0;
+  const executor: SynapsContractExecutor = {
+    async executeSolveRequest(payload: object): Promise<unknown> {
+      attempts += 1;
+      const request = payload as { request_id?: string; solver_config?: string };
+
+      if (attempts === 1) {
+        return {
+          contract_version: "2026-04-03",
+          request_id: request.request_id,
+          result: {
+            solver_name: "cpsat_solver",
+            status: "timeout",
+            assignments: [],
+            objective: {},
+            duration_ms: 1,
+            metadata: {
+              portfolio: {
+                solver_config: request.solver_config ?? "CPSAT-30",
+              },
+            },
+            random_seed: null,
+          },
+        };
+      }
+
+      return {
+        contract_version: "2026-04-03",
+        request_id: request.request_id,
+        result: {
+          solver_name: "lbbd_solver",
+          status: "feasible",
+          assignments: [],
+          objective: {},
+          duration_ms: 1,
+          metadata: {
+            portfolio: {
+              solver_config: request.solver_config ?? "LBBD-10",
+            },
+          },
+          random_seed: null,
+        },
+      };
+    },
+    async executeRepairRequest(): Promise<unknown> {
+      throw new Error("unused");
+    },
+  };
+
+  const app = buildControlPlaneApp({ executor });
+  const request = createSolveRequest();
+  request.solver_config = "CPSAT-30";
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/v1/solve",
+    payload: request,
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(attempts, 2);
+
+  const metrics = await app.inject({ method: "GET", url: "/metrics" });
+  assert.equal(metrics.statusCode, 200);
+  assert.match(
+    metrics.body,
+    /synaps_limit_guard_transitions_total\{from_solver="CPSAT-30",to_solver="LBBD-10",reason="status_timeout"\} 1/,
+  );
+  assert.match(
+    metrics.body,
+    /synaps_solver_runs_total\{solver_config="CPSAT-30",status="timeout"\} 1/,
+  );
+  assert.match(
+    metrics.body,
+    /synaps_solver_runs_total\{solver_config="LBBD-10",status="feasible"\} 1/,
+  );
 
   await app.close();
 });

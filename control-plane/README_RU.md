@@ -35,7 +35,7 @@ Control-plane теперь поддерживает:
 
 1. структурированные события (trace_id/span_id);
 2. OpenTelemetry-спаны (при включении);
-3. RED-метрики Prometheus через `/metrics`;
+3. RED-метрики Prometheus через `/metrics` (duration, solver outcomes, limit-guard transitions, bridge errors, feasibility kinds, gap/windows);
 4. limit-guard fallback цепочку для `solve`.
 
 Ключевые переменные окружения:

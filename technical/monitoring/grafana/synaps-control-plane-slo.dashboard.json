@@ -352,6 +352,86 @@
       ],
       "title": "Active Windows",
       "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 16
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (solver_config, code) (rate(synaps_bridge_errors_total{solver_config=~\"$solver_config\"}[5m]))",
+          "legendFormat": "{{solver_config}} / {{code}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Bridge Errors by Solver and Code",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 16
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (from_solver, to_solver, reason) (rate(synaps_limit_guard_transitions_total{from_solver=~\"$solver_config\"}[5m]))",
+          "legendFormat": "{{from_solver}} -> {{to_solver}} / {{reason}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Limit-Guard Transition Rates",
+      "type": "timeseries"
     }
   ],
   "refresh": "10s",

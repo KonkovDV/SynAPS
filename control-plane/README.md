@@ -37,7 +37,7 @@ The control-plane now emits:
 
 1. structured request/solver events (trace_id/span_id);
 2. OpenTelemetry spans (when enabled);
-3. RED-style Prometheus metrics under `/metrics`;
+3. RED-style Prometheus metrics under `/metrics` (duration, solver outcomes, limit-guard transitions, bridge errors, feasibility kinds, gap/windows);
 4. limit-guard fallback chain for solve requests.
 
 Key env vars:

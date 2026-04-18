@@ -13,6 +13,8 @@ The assets assume these exported series from `GET /metrics`:
 
 - `synaps_solve_duration_seconds` (histogram)
 - `synaps_solver_runs_total{solver_config,status}` (counter)
+- `synaps_limit_guard_transitions_total{from_solver,to_solver,reason}` (counter)
+- `synaps_bridge_errors_total{solver_config,code}` (counter)
 - `synaps_feasibility_violations_total{kind}` (counter)
 - `synaps_active_windows_gauge` (gauge)
 - `synaps_gap_ratio` (gauge)
@@ -30,4 +32,6 @@ The assets assume these exported series from `GET /metrics`:
 - p95 solve latency < 120s
 - p99 solve latency < 300s
 - solver error ratio < 20% over 10m
+- limit-guard transition ratio < 30% over 10m
+- bridge error rate < 0.2 events/s over 5m
 - average gap ratio < 12% over 20m

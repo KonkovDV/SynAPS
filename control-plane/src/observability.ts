@@ -117,6 +117,14 @@ function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+function normalizeMetricLabel(value: string | null | undefined, fallback: string): string {
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : fallback;
+}
+
 function asNonNegativeInteger(value: unknown): number | null {
   const parsed = asFiniteNumber(value);
   if (parsed === null || parsed < 0) {
@@ -139,6 +147,11 @@ export class SynapsMetricsRegistry {
   private readonly solveDuration = createHistogramState();
   private readonly feasibilityCounters = new Map<FeasibilityViolationKind, number>();
   private readonly solverRunCounters = new Map<string, Map<string, number>>();
+  private readonly bridgeErrorCounters = new Map<string, Map<string, number>>();
+  private readonly limitGuardTransitionCounters = new Map<
+    string,
+    Map<string, Map<string, number>>
+  >();
   private activeWindowsGauge = 0;
   private gapRatioGauge = 0;
 
@@ -175,6 +188,43 @@ export class SynapsMetricsRegistry {
     const statusCounters = this.solverRunCounters.get(solverConfigKey) ?? new Map<string, number>();
     statusCounters.set(statusKey, (statusCounters.get(statusKey) ?? 0) + count);
     this.solverRunCounters.set(solverConfigKey, statusCounters);
+  }
+
+  incrementBridgeError(solverConfig: string, code: string, count = 1): void {
+    if (count <= 0) {
+      return;
+    }
+
+    const solverConfigKey = normalizeMetricLabel(solverConfig, "UNKNOWN");
+    const codeKey = normalizeMetricLabel(code, "unknown").toLowerCase();
+
+    const codeCounters = this.bridgeErrorCounters.get(solverConfigKey) ?? new Map<string, number>();
+    codeCounters.set(codeKey, (codeCounters.get(codeKey) ?? 0) + count);
+    this.bridgeErrorCounters.set(solverConfigKey, codeCounters);
+  }
+
+  incrementLimitGuardTransition(
+    fromSolver: string,
+    toSolver: string,
+    reason: string,
+    count = 1,
+  ): void {
+    if (count <= 0) {
+      return;
+    }
+
+    const fromSolverKey = normalizeMetricLabel(fromSolver, "UNKNOWN");
+    const toSolverKey = normalizeMetricLabel(toSolver, "UNKNOWN");
+    const reasonKey = normalizeMetricLabel(reason, "unknown").toLowerCase();
+
+    const toSolverCounters =
+      this.limitGuardTransitionCounters.get(fromSolverKey) ??
+      new Map<string, Map<string, number>>();
+    const reasonCounters = toSolverCounters.get(toSolverKey) ?? new Map<string, number>();
+
+    reasonCounters.set(reasonKey, (reasonCounters.get(reasonKey) ?? 0) + count);
+    toSolverCounters.set(toSolverKey, reasonCounters);
+    this.limitGuardTransitionCounters.set(fromSolverKey, toSolverCounters);
   }
 
   setActiveWindows(value: number): void {
@@ -296,6 +346,47 @@ export class SynapsMetricsRegistry {
       for (const [status, value] of statusEntries) {
         lines.push(
           `synaps_solver_runs_total{solver_config=\"${prometheusEscape(solverConfig)}\",status=\"${prometheusEscape(status)}\"} ${value}`,
+        );
+      }
+    }
+
+    lines.push(
+      "# HELP synaps_limit_guard_transitions_total Total limit-guard fallback transitions by from/to solver and reason.",
+    );
+    lines.push("# TYPE synaps_limit_guard_transitions_total counter");
+    const transitionFromEntries = Array.from(this.limitGuardTransitionCounters.entries()).sort(
+      ([left], [right]) => left.localeCompare(right),
+    );
+    for (const [fromSolver, toSolverCounters] of transitionFromEntries) {
+      const transitionToEntries = Array.from(toSolverCounters.entries()).sort(([left], [right]) =>
+        left.localeCompare(right),
+      );
+      for (const [toSolver, reasonCounters] of transitionToEntries) {
+        const reasonEntries = Array.from(reasonCounters.entries()).sort(([left], [right]) =>
+          left.localeCompare(right),
+        );
+        for (const [reason, value] of reasonEntries) {
+          lines.push(
+            `synaps_limit_guard_transitions_total{from_solver=\"${prometheusEscape(fromSolver)}\",to_solver=\"${prometheusEscape(toSolver)}\",reason=\"${prometheusEscape(reason)}\"} ${value}`,
+          );
+        }
+      }
+    }
+
+    lines.push(
+      "# HELP synaps_bridge_errors_total Total bridge errors by solver_config and bridge error code.",
+    );
+    lines.push("# TYPE synaps_bridge_errors_total counter");
+    const bridgeEntries = Array.from(this.bridgeErrorCounters.entries()).sort(([left], [right]) =>
+      left.localeCompare(right),
+    );
+    for (const [solverConfig, codeCounters] of bridgeEntries) {
+      const codeEntries = Array.from(codeCounters.entries()).sort(([left], [right]) =>
+        left.localeCompare(right),
+      );
+      for (const [code, value] of codeEntries) {
+        lines.push(
+          `synaps_bridge_errors_total{solver_config=\"${prometheusEscape(solverConfig)}\",code=\"${prometheusEscape(code)}\"} ${value}`,
         );
       }
     }
