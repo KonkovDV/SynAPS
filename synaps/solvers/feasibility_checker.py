@@ -34,9 +34,12 @@ class FeasibilityChecker:
         1. All operations assigned exactly once.
         2. Assigned machine is in eligible set.
         3. Precedence constraints respected (predecessor ends before successor starts).
-        4. No time overlap on same machine.
+        4. No time overlap on same machine (covers machine capacity, lane setup gaps,
+           and serial SETUP_GAP_VIOLATION checks).
         5. Auxiliary resource pool not exceeded at any point in time across setup
            + processing windows.
+        6. Horizon bounds: no assignment starts before planning_horizon_start or ends
+           after planning_horizon_end.
     """
 
     def check(
