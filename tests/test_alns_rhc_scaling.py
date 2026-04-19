@@ -10,10 +10,13 @@ Test hierarchy:
 
 from __future__ import annotations
 
+import random
 import time
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+from hypothesis import given, settings
+from hypothesis import strategies as st
 import pytest
 
 from synaps.model import (
@@ -740,6 +743,43 @@ class TestRhcSolver:
 
         assert len(capped) == 2
         assert terminal_op.id in capped
+        for op_id in capped:
+            for successor_id in successors_by_op.get(op_id, []):
+                assert successor_id in capped
+
+    @given(
+        chain_size=st.integers(min_value=3, max_value=30),
+        destroy_cap=st.integers(min_value=1, max_value=20),
+        seed=st.integers(min_value=0, max_value=10_000),
+    )
+    @settings(max_examples=40, deadline=None)
+    def test_alns_cap_destroy_set_successor_closure_property(
+        self,
+        chain_size: int,
+        destroy_cap: int,
+        seed: int,
+    ) -> None:
+        """Capped destroy set must remain successor-closed for chain precedence graphs."""
+        import synaps.solvers.alns_solver as alns_module
+
+        problem = _make_long_chain_problem(chain_size)
+        ops_by_id = {op.id: op for op in problem.operations}
+        successors_by_op: dict = {}
+        for op in problem.operations:
+            if op.predecessor_op_id is not None:
+                successors_by_op.setdefault(op.predecessor_op_id, []).append(op.id)
+
+        full_destroy = {op.id for op in problem.operations}
+        effective_cap = max(1, min(destroy_cap, chain_size))
+        capped = alns_module._cap_destroy_set_preserving_successor_closure(
+            full_destroy,
+            ops_by_id,
+            successors_by_op,
+            max_destroy=effective_cap,
+            rng=random.Random(seed),
+        )
+
+        assert len(capped) <= effective_cap
         for op_id in capped:
             for successor_id in successors_by_op.get(op_id, []):
                 assert successor_id in capped

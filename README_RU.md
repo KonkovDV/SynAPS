@@ -140,6 +140,7 @@ python -m pytest tests -q
 - Хабр-драфт (RU): `docs/habr/synaps-open-source-habr-v3.md`
 - Publication pack: `docs/habr/synaps-open-source-habr-v3-pack.md`
 - Benchmark guide: `benchmark/README_RU.md`
+- Протокол воспроизводимости и робастности: `docs/architecture/06_BENCHMARK_REPRODUCIBILITY_AND_ROBUSTNESS.md`
 - Contributing: `CONTRIBUTING.md`
 - Security policy: `SECURITY.md`
 
