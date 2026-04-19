@@ -275,6 +275,9 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
             "inner_solver": "alns",
             "time_limit_s": 600,
             "max_ops_per_window": 5000,
+            "candidate_pool_factor": 2.0,
+            "due_admission_horizon_factor": 1.0,
+            "admission_tail_weight": 0.5,
             "inner_kwargs": {
                 "max_iterations": 100,
                 "destroy_fraction": 0.03,
@@ -299,6 +302,9 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
             "inner_solver": "cpsat",
             "time_limit_s": 300,
             "max_ops_per_window": 2000,
+            "candidate_pool_factor": 2.0,
+            "due_admission_horizon_factor": 1.0,
+            "admission_tail_weight": 0.5,
             "inner_kwargs": {
                 "time_limit_s": 30,
             },
@@ -316,6 +322,9 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
             "inner_solver": "greedy",
             "time_limit_s": 120,
             "max_ops_per_window": 10000,
+            "candidate_pool_factor": 2.0,
+            "due_admission_horizon_factor": 1.0,
+            "admission_tail_weight": 0.5,
         },
         description=(
             "Receding Horizon Control with greedy dispatch. "

@@ -819,6 +819,33 @@ class TestRhcSolver:
         assert result.metadata["effective_window_operation_cap"] >= 1
         assert result.metadata["window_load_factor"] >= 1.0
 
+    def test_rhc_candidate_pool_clamp_prevents_frontier_explosion(self) -> None:
+        """RHC should cap tie-heavy candidate frontiers to a bounded admission pool."""
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_tied_window_problem(n_orders=400)
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=240,
+            overlap_minutes=0,
+            inner_solver="greedy",
+            time_limit_s=20,
+            max_ops_per_window=10,
+            max_windows=1,
+            candidate_pool_factor=2.0,
+            due_admission_horizon_factor=4.0,
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL, SolverStatus.ERROR)
+        assert result.metadata["candidate_pool_limit"] == 20
+        assert result.metadata["peak_window_candidate_count"] <= 20
+        assert (
+            result.metadata["peak_raw_window_candidate_count"]
+            >= result.metadata["peak_window_candidate_count"]
+        )
+        assert result.metadata["candidate_pool_clamped_windows"] >= 1
+        assert result.metadata["candidate_pool_filtered_ops"] >= 1
+
     def test_rhc_window_cap_selection_is_deterministic_under_ties(self) -> None:
         """RHC should produce identical schedules under tie-heavy window ranking."""
         from synaps.solvers.rhc_solver import RhcSolver

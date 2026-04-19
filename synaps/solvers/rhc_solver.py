@@ -104,6 +104,24 @@ class RhcSolver(BaseSolver):
         due_pressure_overdue_boost: float = float(
             kwargs.get("due_pressure_overdue_boost", 1.25)
         )
+        random_seed_raw = kwargs.get("random_seed")
+        random_seed_base = int(random_seed_raw) if random_seed_raw is not None else 0
+        candidate_admission_enabled: bool = bool(
+            kwargs.get("candidate_admission_enabled", True)
+        )
+        candidate_pool_factor: float = max(
+            1.0,
+            float(kwargs.get("candidate_pool_factor", 3.0)),
+        )
+        due_admission_horizon_factor: float = max(
+            0.0,
+            float(kwargs.get("due_admission_horizon_factor", 1.0)),
+        )
+        admission_tail_weight: float = max(
+            0.0,
+            float(kwargs.get("admission_tail_weight", 0.5)),
+        )
+        max_candidate_pool_raw = kwargs.get("max_candidate_pool")
 
         ops_by_id = {op.id: op for op in problem.operations}
         orders_by_id = {o.id: o for o in problem.orders}
@@ -190,10 +208,27 @@ class RhcSolver(BaseSolver):
                 suffix_sum += op_min_duration_by_id.get(op.id, max(op.base_duration_min, 1.0))
                 remaining_edges = reverse_index
                 op_tail_rpt_by_id[op.id] = suffix_sum + remaining_edges * expected_setup
-        ops_sorted_by_earliest = sorted(
+        admission_horizon_minutes = (
+            window_minutes + overlap_minutes
+        ) * due_admission_horizon_factor
+        op_admission_offset_by_id: dict[UUID, float] = {}
+        for op in problem.operations:
+            due_offset = order_due_offsets.get(op.order_id, horizon_minutes)
+            rpt_tail = op_tail_rpt_by_id.get(op.id, op_mean_duration_by_id.get(op.id, 1.0))
+            due_release_offset = (
+                due_offset
+                - admission_horizon_minutes
+                + admission_tail_weight * rpt_tail
+            )
+            op_admission_offset_by_id[op.id] = max(
+                op_earliest.get(op.id, 0.0),
+                due_release_offset,
+            )
+
+        ops_sorted_by_admission = sorted(
             problem.operations,
             key=lambda op: (
-                op_earliest.get(op.id, 0.0),
+                op_admission_offset_by_id.get(op.id, op_earliest.get(op.id, 0.0)),
                 order_due_offsets.get(op.order_id, horizon_minutes),
                 op.seq_in_order,
             ),
@@ -217,6 +252,31 @@ class RhcSolver(BaseSolver):
                     window_load_factor=window_load_factor,
                 ),
             )
+        candidate_pool_limit = max(
+            effective_window_op_cap,
+            (
+                int(max_candidate_pool_raw)
+                if max_candidate_pool_raw is not None
+                else int(math.ceil(effective_window_op_cap * candidate_pool_factor))
+            ),
+        )
+        candidate_admission_active = (
+            candidate_admission_enabled
+            and len(problem.operations) > effective_window_op_cap
+        )
+        if not candidate_admission_active:
+            op_admission_offset_by_id = {
+                op.id: op_earliest.get(op.id, 0.0)
+                for op in problem.operations
+            }
+            ops_sorted_by_admission = sorted(
+                problem.operations,
+                key=lambda op: (
+                    op_admission_offset_by_id.get(op.id, op_earliest.get(op.id, 0.0)),
+                    order_due_offsets.get(op.order_id, horizon_minutes),
+                    op.seq_in_order,
+                ),
+            )
 
         # Sliding windows
         committed_assignments: list[Assignment] = []
@@ -224,13 +284,16 @@ class RhcSolver(BaseSolver):
         committed_op_ids: set[UUID] = set()
         window_start_offset = 0.0
         window_count = 0
-        earliest_cursor = 0
+        admission_cursor = 0
         due_cursor = 0
-        earliest_candidate_ids: set[UUID] = set()
+        admission_candidate_ids: set[UUID] = set()
         due_candidate_ids: set[UUID] = set()
         peak_window_candidate_count = 0
+        peak_raw_window_candidate_count = 0
+        candidate_pool_clamped_windows = 0
+        candidate_pool_filtered_ops = 0
         due_pressure_selected_ids: set[UUID] = set()
-        earliest_frontier_advances = 0
+        admission_frontier_advances = 0
         due_frontier_advances = 0
         candidate_pressure_values: list[float] = []
         due_pressure_values: list[float] = []
@@ -336,13 +399,16 @@ class RhcSolver(BaseSolver):
             window_end_offset = min(window_end_offset, horizon_minutes)
             window_count += 1
 
-            while earliest_cursor < len(ops_sorted_by_earliest):
-                op = ops_sorted_by_earliest[earliest_cursor]
-                if op_earliest.get(op.id, 0.0) >= window_end_offset:
+            while admission_cursor < len(ops_sorted_by_admission):
+                op = ops_sorted_by_admission[admission_cursor]
+                if (
+                    op_admission_offset_by_id.get(op.id, op_earliest.get(op.id, 0.0))
+                    >= window_end_offset
+                ):
                     break
-                earliest_candidate_ids.add(op.id)
-                earliest_cursor += 1
-                earliest_frontier_advances += 1
+                admission_candidate_ids.add(op.id)
+                admission_cursor += 1
+                admission_frontier_advances += 1
 
             while due_cursor < len(ops_sorted_by_due):
                 op = ops_sorted_by_due[due_cursor]
@@ -352,9 +418,64 @@ class RhcSolver(BaseSolver):
                 due_cursor += 1
                 due_frontier_advances += 1
 
+            admission_candidate_ids.difference_update(committed_op_ids)
+            due_candidate_ids.difference_update(committed_op_ids)
+
+            raw_window_candidate_ids = {
+                op_id
+                for op_id in (admission_candidate_ids | due_candidate_ids)
+                if op_id not in committed_op_ids
+            }
+            peak_raw_window_candidate_count = max(
+                peak_raw_window_candidate_count,
+                len(raw_window_candidate_ids),
+            )
+
+            if not raw_window_candidate_ids:
+                window_start_offset += window_minutes
+                continue
+
+            window_candidate_ids = raw_window_candidate_ids
+            if candidate_admission_active:
+                admitted_window_candidate_ids = {
+                    op_id
+                    for op_id in raw_window_candidate_ids
+                    if (
+                        op_admission_offset_by_id.get(op_id, op_earliest.get(op_id, 0.0))
+                        < window_end_offset
+                    )
+                }
+                if admitted_window_candidate_ids:
+                    candidate_pool_filtered_ops += max(
+                        0,
+                        len(raw_window_candidate_ids) - len(admitted_window_candidate_ids),
+                    )
+                    window_candidate_ids = admitted_window_candidate_ids
+
+            if len(window_candidate_ids) > candidate_pool_limit:
+                candidate_pool_clamped_windows += 1
+                candidate_pool_filtered_ops += len(window_candidate_ids) - candidate_pool_limit
+                window_candidate_ids = set(
+                    sorted(
+                        window_candidate_ids,
+                        key=lambda op_id: (
+                            1
+                            if (
+                                ops_by_id[op_id].predecessor_op_id is not None
+                                and ops_by_id[op_id].predecessor_op_id not in committed_op_ids
+                            )
+                            else 0,
+                            op_admission_offset_by_id.get(op_id, op_earliest.get(op_id, 0.0)),
+                            order_due_offsets.get(ops_by_id[op_id].order_id, horizon_minutes),
+                            ops_by_id[op_id].seq_in_order,
+                            op_positions[op_id],
+                        ),
+                    )[:candidate_pool_limit]
+                )
+
             window_candidate_ids = {
                 op_id
-                for op_id in (earliest_candidate_ids | due_candidate_ids)
+                for op_id in window_candidate_ids
                 if op_id not in committed_op_ids
             }
             peak_window_candidate_count = max(
@@ -595,6 +716,10 @@ class RhcSolver(BaseSolver):
                             effective_inner_kwargs["due_pressure"] = window_due_pressure
                             effective_inner_kwargs["candidate_pressure"] = (
                                 window_candidate_pressure
+                            )
+                            effective_inner_kwargs.setdefault(
+                                "random_seed",
+                                random_seed_base + window_count,
                             )
                             effective_inner_kwargs["dynamic_no_improve_enabled"] = (
                                 dynamic_no_improve_enabled
@@ -961,7 +1086,16 @@ class RhcSolver(BaseSolver):
                 "inner_solver": inner_solver_name,
                 "preprocessing_ms": preprocessing_ms,
                 "peak_window_candidate_count": peak_window_candidate_count,
+                "peak_raw_window_candidate_count": peak_raw_window_candidate_count,
                 "due_pressure_selected_ops": len(due_pressure_selected_ids),
+                "candidate_pool_limit": candidate_pool_limit,
+                "candidate_pool_factor": candidate_pool_factor,
+                "candidate_pool_clamped_windows": candidate_pool_clamped_windows,
+                "candidate_pool_filtered_ops": candidate_pool_filtered_ops,
+                "candidate_admission_enabled": candidate_admission_active,
+                "candidate_admission_configured": candidate_admission_enabled,
+                "due_admission_horizon_factor": due_admission_horizon_factor,
+                "admission_tail_weight": admission_tail_weight,
                 "candidate_pressure_mean": round(
                     sum(candidate_pressure_values) / len(candidate_pressure_values),
                     4,
@@ -987,7 +1121,8 @@ class RhcSolver(BaseSolver):
                 if due_drift_minutes_values
                 else 0.0,
                 "spillover_count": spillover_count,
-                "earliest_frontier_advances": earliest_frontier_advances,
+                "earliest_frontier_advances": admission_frontier_advances,
+                "admission_frontier_advances": admission_frontier_advances,
                 "due_frontier_advances": due_frontier_advances,
                 "effective_window_operation_cap": effective_window_op_cap,
                 "window_load_factor": window_load_factor,
@@ -998,6 +1133,7 @@ class RhcSolver(BaseSolver):
                 "no_improve_max_iters": no_improve_max_iters,
                 "max_windows": max_windows,
                 "inner_solver_min_budget_s": inner_solver_min_budget_s,
+                "random_seed_base": random_seed_base,
                 "time_limit_reached": time_limit_reached,
                 "fallback_repair_attempted": fallback_repair_attempted,
                 "fallback_repair_skipped": fallback_repair_skipped,
