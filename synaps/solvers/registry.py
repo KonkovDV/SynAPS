@@ -278,6 +278,15 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
             "candidate_pool_factor": 2.0,
             "due_admission_horizon_factor": 1.0,
             "admission_tail_weight": 0.5,
+            "hybrid_inner_routing_enabled": True,
+            "hybrid_inner_solver": "cpsat",
+            "hybrid_due_pressure_threshold": 0.35,
+            "hybrid_candidate_pressure_threshold": 1.75,
+            "hybrid_max_ops": 1500,
+            "hybrid_inner_kwargs": {
+                "num_workers": 4,
+            },
+            "inner_fallback_kpi_threshold": 0.10,
             "inner_kwargs": {
                 "max_iterations": 100,
                 "destroy_fraction": 0.03,
@@ -285,6 +294,12 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
                 "max_destroy": 40,
                 "max_no_improve_iters": 30,
                 "use_cpsat_repair": False,
+                "dynamic_sa_enabled": True,
+                "sa_due_alpha": 0.35,
+                "sa_candidate_beta": 0.15,
+                "sa_pressure_cooling_gamma": 0.0015,
+                "sa_temp_min": 50.0,
+                "sa_temp_max": 500.0,
             },
         },
         description=(

@@ -133,6 +133,15 @@ def _study_industrial_50k(
                 "inner_solver": "alns",
                 "time_limit_s": 1200,
                 "max_ops_per_window": 5_000,
+                "hybrid_inner_routing_enabled": True,
+                "hybrid_inner_solver": "cpsat",
+                "hybrid_due_pressure_threshold": 0.35,
+                "hybrid_candidate_pressure_threshold": 1.75,
+                "hybrid_max_ops": 1_500,
+                "hybrid_inner_kwargs": {
+                    "num_workers": 4,
+                },
+                "inner_fallback_kpi_threshold": 0.10,
                 "inner_kwargs": {
                     "max_iterations": 100,
                     "destroy_fraction": 0.03,
@@ -140,6 +149,12 @@ def _study_industrial_50k(
                     "max_destroy": 40,
                     "max_no_improve_iters": 30,
                     "use_cpsat_repair": False,
+                    "dynamic_sa_enabled": True,
+                    "sa_due_alpha": 0.35,
+                    "sa_candidate_beta": 0.15,
+                    "sa_pressure_cooling_gamma": 0.0015,
+                    "sa_temp_min": 50.0,
+                    "sa_temp_max": 500.0,
                 },
             },
         },
@@ -252,6 +267,16 @@ def _summarize_solver_records(records: list[dict[str, Any]]) -> dict[str, Any]:
         for record in records
         if "due_pressure_selected_ops" in record.get("solver_metadata", {})
     ]
+    inner_fallback_ratios = [
+        float(record.get("solver_metadata", {}).get("inner_fallback_ratio", 0.0))
+        for record in records
+        if "inner_fallback_ratio" in record.get("solver_metadata", {})
+    ]
+    fallback_kpi_pass_flags = [
+        bool(record.get("solver_metadata", {}).get("inner_fallback_kpi_passed", False))
+        for record in records
+        if "inner_fallback_kpi_passed" in record.get("solver_metadata", {})
+    ]
 
     summary: dict[str, Any] = {
         "instance_count": len(records),
@@ -275,6 +300,18 @@ def _summarize_solver_records(records: list[dict[str, Any]]) -> dict[str, Any]:
         summary["mean_due_pressure_selected_ops"] = round(
             statistics.mean(due_pressure_counts),
             2,
+        )
+    if inner_fallback_ratios:
+        summary["mean_inner_fallback_ratio"] = round(
+            statistics.mean(inner_fallback_ratios),
+            4,
+        )
+        summary["max_inner_fallback_ratio"] = round(max(inner_fallback_ratios), 4)
+    if fallback_kpi_pass_flags:
+        summary["inner_fallback_kpi_pass_rate"] = round(
+            sum(1 for passed in fallback_kpi_pass_flags if passed)
+            / len(fallback_kpi_pass_flags),
+            3,
         )
     return summary
 

@@ -677,6 +677,14 @@ class AlnsSolver(BaseSolver):
         no_improve_candidate_beta: float = float(
             kwargs.get("no_improve_candidate_beta", 0.4)
         )
+        dynamic_sa_enabled: bool = bool(kwargs.get("dynamic_sa_enabled", True))
+        sa_due_alpha: float = float(kwargs.get("sa_due_alpha", 0.35))
+        sa_candidate_beta: float = float(kwargs.get("sa_candidate_beta", 0.15))
+        sa_pressure_cooling_gamma: float = float(
+            kwargs.get("sa_pressure_cooling_gamma", 0.0015)
+        )
+        sa_temp_min: float = float(kwargs.get("sa_temp_min", 50.0))
+        sa_temp_max: float = float(kwargs.get("sa_temp_max", 500.0))
         no_improve_min_iters: int = int(
             kwargs.get(
                 "no_improve_min_iters",
@@ -720,6 +728,28 @@ class AlnsSolver(BaseSolver):
                 no_improve_max_iters,
                 max(no_improve_min_iters, scaled_no_improve),
             )
+
+        sa_pressure_factor = 1.0
+        if dynamic_sa_enabled:
+            sa_pressure_factor += (
+                sa_due_alpha * due_pressure
+                + sa_candidate_beta * candidate_pressure
+            )
+        effective_sa_initial_temp = min(
+            sa_temp_max,
+            max(sa_temp_min, sa_initial_temp * sa_pressure_factor),
+        )
+        effective_sa_cooling_rate = min(
+            0.9999,
+            max(
+                0.90,
+                sa_cooling_rate
+                + (
+                    sa_pressure_cooling_gamma
+                    * max(0.0, sa_pressure_factor - 1.0)
+                ),
+            ),
+        )
 
         rng = random.Random(seed)
         n_ops = len(problem.operations)
@@ -782,7 +812,7 @@ class AlnsSolver(BaseSolver):
         sigma_2 = 9.0   # better than current
         sigma_3 = 3.0   # accepted (SA)
 
-        temperature = sa_initial_temp
+        temperature = effective_sa_initial_temp
         destroy_size = max(min_destroy, int(n_ops * destroy_fraction))
         destroy_size = min(destroy_size, max_destroy)
 
@@ -1008,7 +1038,7 @@ class AlnsSolver(BaseSolver):
                     operator_attempts = [1] * n_operators
 
                 # Cool down
-                temperature *= sa_cooling_rate
+                temperature *= effective_sa_cooling_rate
 
                 if max_no_improve_iters > 0 and no_improve_streak >= max_no_improve_iters:
                     no_improve_early_stop = True
@@ -1097,8 +1127,17 @@ class AlnsSolver(BaseSolver):
                 "max_no_improve_iters": max_no_improve_iters,
                 "max_no_improve_base_iters": max_no_improve_base_iters,
                 "dynamic_no_improve_enabled": dynamic_no_improve_enabled,
+                "dynamic_sa_enabled": dynamic_sa_enabled,
                 "due_pressure": round(due_pressure, 4),
                 "candidate_pressure": round(candidate_pressure, 4),
+                "sa_pressure_factor": round(sa_pressure_factor, 4),
+                "effective_sa_initial_temp": round(effective_sa_initial_temp, 4),
+                "effective_sa_cooling_rate": round(effective_sa_cooling_rate, 6),
+                "sa_due_alpha": sa_due_alpha,
+                "sa_candidate_beta": sa_candidate_beta,
+                "sa_pressure_cooling_gamma": sa_pressure_cooling_gamma,
+                "sa_temp_min": sa_temp_min,
+                "sa_temp_max": sa_temp_max,
                 "no_improve_due_alpha": no_improve_due_alpha,
                 "no_improve_candidate_beta": no_improve_candidate_beta,
                 "no_improve_min_iters": no_improve_min_iters,

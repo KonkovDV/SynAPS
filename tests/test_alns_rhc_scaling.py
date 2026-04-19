@@ -581,6 +581,35 @@ class TestAlnsSolver:
         assert result.metadata["due_pressure"] == pytest.approx(1.0)
         assert result.metadata["candidate_pressure"] == pytest.approx(2.0)
 
+    def test_alns_scales_sa_profile_with_pressure(self) -> None:
+        """ALNS should expose pressure-aware SA temperature and cooling metadata."""
+        from synaps.solvers.alns_solver import AlnsSolver
+
+        problem = _make_3state_problem(n_orders=3, ops_per_order=2)
+
+        result = AlnsSolver().solve(
+            problem,
+            max_iterations=10,
+            time_limit_s=10,
+            use_cpsat_repair=False,
+            dynamic_sa_enabled=True,
+            due_pressure=1.0,
+            candidate_pressure=2.0,
+            sa_initial_temp=100.0,
+            sa_cooling_rate=0.995,
+            sa_due_alpha=0.35,
+            sa_candidate_beta=0.15,
+            sa_pressure_cooling_gamma=0.0015,
+            sa_temp_min=50.0,
+            sa_temp_max=500.0,
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert result.metadata["dynamic_sa_enabled"] is True
+        assert result.metadata["sa_pressure_factor"] == pytest.approx(1.65)
+        assert result.metadata["effective_sa_initial_temp"] == pytest.approx(165.0)
+        assert result.metadata["effective_sa_cooling_rate"] == pytest.approx(0.995975)
+
     def test_alns_recovers_when_final_validation_rejects_incumbent(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -1213,9 +1242,58 @@ class TestRhcInnerSolver:
         assert first_window["final_violations"] == 1
         assert first_window["fallback_iterations"] > 0
         assert first_window["ops_committed"] > 0
+        assert result.metadata["inner_fallback_windows"] >= 1
+        assert result.metadata["inner_fallback_ratio"] > 0.0
+        assert result.metadata["inner_resolution_counts"]["fallback_greedy"] >= 1
 
         verification = verify_schedule_result(problem, result)
         assert verification.feasible, f"Violations: {verification.violations}"
+
+    def test_rhc_hybrid_routes_dense_window_to_cpsat(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """RHC should route ALNS windows to CP-SAT when hybrid thresholds are triggered."""
+        from synaps.solvers.greedy_dispatch import GreedyDispatch
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_3state_problem(n_orders=4, ops_per_order=2)
+
+        def fail_if_alns_called(self, problem, **kwargs):
+            raise AssertionError("ALNS should be bypassed by hybrid routing")
+
+        def fake_cpsat(self, problem, **kwargs):
+            return GreedyDispatch().solve(problem)
+
+        monkeypatch.setattr(
+            "synaps.solvers.alns_solver.AlnsSolver.solve",
+            fail_if_alns_called,
+        )
+        monkeypatch.setattr(
+            "synaps.solvers.cpsat_solver.CpSatSolver.solve",
+            fake_cpsat,
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=480,
+            overlap_minutes=60,
+            inner_solver="alns",
+            time_limit_s=30,
+            max_ops_per_window=50,
+            hybrid_inner_routing_enabled=True,
+            hybrid_inner_solver="cpsat",
+            hybrid_due_pressure_threshold=0.0,
+            hybrid_candidate_pressure_threshold=0.0,
+            hybrid_max_ops=1000,
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert result.metadata["hybrid_route_attempts"] >= 1
+        assert result.metadata["hybrid_route_activations"] >= 1
+        assert result.metadata["hybrid_route_activation_rate"] > 0.0
+        assert result.metadata["inner_window_summaries"]
+        assert result.metadata["inner_window_summaries"][0]["inner_solver_selected"] == "cpsat"
 
     def test_rhc_skips_inner_alns_when_budget_below_minimum(
         self,

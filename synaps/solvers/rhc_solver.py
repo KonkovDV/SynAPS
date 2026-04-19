@@ -121,6 +121,23 @@ class RhcSolver(BaseSolver):
             0.0,
             float(kwargs.get("admission_tail_weight", 0.5)),
         )
+        hybrid_inner_routing_enabled: bool = bool(
+            kwargs.get("hybrid_inner_routing_enabled", False)
+        )
+        hybrid_inner_solver_name: str = str(
+            kwargs.get("hybrid_inner_solver", "cpsat")
+        )
+        hybrid_due_pressure_threshold: float = float(
+            kwargs.get("hybrid_due_pressure_threshold", 0.35)
+        )
+        hybrid_candidate_pressure_threshold: float = float(
+            kwargs.get("hybrid_candidate_pressure_threshold", 1.75)
+        )
+        hybrid_max_ops: int = int(kwargs.get("hybrid_max_ops", 1500))
+        hybrid_inner_kwargs: dict[str, Any] = dict(kwargs.get("hybrid_inner_kwargs", {}))
+        inner_fallback_kpi_threshold: float = float(
+            kwargs.get("inner_fallback_kpi_threshold", 0.1)
+        )
         max_candidate_pool_raw = kwargs.get("max_candidate_pool")
 
         ops_by_id = {op.id: op for op in problem.operations}
@@ -134,6 +151,9 @@ class RhcSolver(BaseSolver):
 
         # Build inner solver
         inner_solver = self._make_inner_solver(inner_solver_name)
+        hybrid_inner_solver = None
+        if hybrid_inner_routing_enabled and inner_solver_name == "alns":
+            hybrid_inner_solver = self._make_inner_solver(hybrid_inner_solver_name)
 
         preprocess_t0 = time.monotonic()
 
@@ -299,6 +319,9 @@ class RhcSolver(BaseSolver):
         due_pressure_values: list[float] = []
         due_drift_minutes_values: list[float] = []
         spillover_count = 0
+        hybrid_route_attempts = 0
+        hybrid_route_activations = 0
+        inner_fallback_windows = 0
         time_limit_reached = False
         fallback_repair_attempted = False
         fallback_repair_skipped = False
@@ -681,8 +704,35 @@ class RhcSolver(BaseSolver):
             inner_rejection_reason: str | None = None
             inner_exception_message: str | None = None
             fallback_iterations: int | None = None
+            selected_inner_solver_name = inner_solver_name
+            selected_inner_solver = inner_solver
+            selected_inner_kwargs = dict(inner_kwargs)
+            hybrid_routing_reason: str | None = None
 
-            if inner_solver_name != "greedy":
+            if (
+                hybrid_inner_routing_enabled
+                and inner_solver_name == "alns"
+                and hybrid_inner_solver is not None
+            ):
+                hybrid_route_attempts += 1
+                due_trigger = window_due_pressure >= hybrid_due_pressure_threshold
+                candidate_trigger = (
+                    window_candidate_pressure >= hybrid_candidate_pressure_threshold
+                )
+                size_trigger = len(clean_window_ops) <= hybrid_max_ops
+                if size_trigger and (due_trigger or candidate_trigger):
+                    selected_inner_solver_name = hybrid_inner_solver_name
+                    selected_inner_solver = hybrid_inner_solver
+                    selected_inner_kwargs = dict(hybrid_inner_kwargs)
+                    hybrid_route_activations += 1
+                    if due_trigger and candidate_trigger:
+                        hybrid_routing_reason = "due+candidate"
+                    elif due_trigger:
+                        hybrid_routing_reason = "due"
+                    else:
+                        hybrid_routing_reason = "candidate"
+
+            if selected_inner_solver_name != "greedy":
                 try:
                     # Build a sub-problem for just this window's operations
                     window_order_ids = {op.order_id for op in clean_window_ops}
@@ -706,13 +756,13 @@ class RhcSolver(BaseSolver):
                     per_window_limit = min(remaining_time * 0.8, 60.0)
 
                     if (
-                        inner_solver_name == "alns"
+                        selected_inner_solver_name == "alns"
                         and per_window_limit < inner_solver_min_budget_s
                     ):
                         inner_rejection_reason = "inner_skipped_low_budget"
                     else:
-                        effective_inner_kwargs = dict(inner_kwargs)
-                        if inner_solver_name == "alns":
+                        effective_inner_kwargs = dict(selected_inner_kwargs)
+                        if selected_inner_solver_name == "alns":
                             effective_inner_kwargs["due_pressure"] = window_due_pressure
                             effective_inner_kwargs["candidate_pressure"] = (
                                 window_candidate_pressure
@@ -737,7 +787,7 @@ class RhcSolver(BaseSolver):
                                     no_improve_max_iters
                                 )
 
-                        inner_result = inner_solver.solve(
+                        inner_result = selected_inner_solver.solve(
                             sub_problem,
                             time_limit_s=per_window_limit,
                             **effective_inner_kwargs,
@@ -776,11 +826,18 @@ class RhcSolver(BaseSolver):
                             due_drift_minutes=window_due_drift_minutes,
                             spillover_ops=window_spillover,
                         )
+                        if hybrid_routing_reason is not None:
+                            inner_window_summaries[-1]["inner_solver_selected"] = (
+                                selected_inner_solver_name
+                            )
+                            inner_window_summaries[-1]["hybrid_routing_reason"] = (
+                                hybrid_routing_reason
+                            )
                         logger.info(
                             "RHC window %d solved by %s inner solver "
                             "(%d ops committed)",
                             window_count,
-                            inner_solver_name,
+                            selected_inner_solver_name,
                             committed_now,
                         )
                     else:
@@ -799,7 +856,7 @@ class RhcSolver(BaseSolver):
                     inner_exception_message = "inner solver raised exception"
                     logger.warning(
                         "RHC window %d: inner solver '%s' failed, falling back to greedy",
-                        window_count, inner_solver_name,
+                        window_count, selected_inner_solver_name,
                         exc_info=True,
                     )
 
@@ -923,6 +980,7 @@ class RhcSolver(BaseSolver):
                         committed_op_ids.add(a.operation_id)
 
                 if inner_solver_name != "greedy":
+                    inner_fallback_windows += 1
                     append_inner_window_summary(
                         window=window_count,
                         ops_in_window=len(clean_window_ops),
@@ -937,6 +995,13 @@ class RhcSolver(BaseSolver):
                         fallback_iterations=fallback_iterations,
                         exception_message=inner_exception_message,
                     )
+                    inner_window_summaries[-1]["inner_solver_selected"] = (
+                        selected_inner_solver_name
+                    )
+                    if hybrid_routing_reason is not None:
+                        inner_window_summaries[-1]["hybrid_routing_reason"] = (
+                            hybrid_routing_reason
+                        )
 
                 window_start_offset += window_minutes
                 if time_limit_reached:
@@ -1073,6 +1138,27 @@ class RhcSolver(BaseSolver):
             final_obj.makespan_minutes, elapsed_ms,
         )
 
+        inner_solver_windows = sum(
+            1
+            for summary in inner_window_summaries
+            if summary.get("resolution_mode") in {"inner", "fallback_greedy"}
+        )
+        inner_fallback_ratio = (
+            inner_fallback_windows / max(1, inner_solver_windows)
+            if inner_solver_windows > 0
+            else 0.0
+        )
+        inner_resolution_counts = {
+            "inner": sum(
+                1 for summary in inner_window_summaries if summary.get("resolution_mode") == "inner"
+            ),
+            "fallback_greedy": sum(
+                1
+                for summary in inner_window_summaries
+                if summary.get("resolution_mode") == "fallback_greedy"
+            ),
+        }
+
         return ScheduleResult(
             solver_name=self.name,
             status=status,
@@ -1084,6 +1170,12 @@ class RhcSolver(BaseSolver):
                 "ops_scheduled": scheduled_count,
                 "ops_total": total_ops,
                 "inner_solver": inner_solver_name,
+                "inner_solver_windows": inner_solver_windows,
+                "inner_fallback_windows": inner_fallback_windows,
+                "inner_fallback_ratio": round(inner_fallback_ratio, 4),
+                "inner_resolution_counts": inner_resolution_counts,
+                "inner_fallback_kpi_threshold": inner_fallback_kpi_threshold,
+                "inner_fallback_kpi_passed": inner_fallback_ratio <= inner_fallback_kpi_threshold,
                 "preprocessing_ms": preprocessing_ms,
                 "peak_window_candidate_count": peak_window_candidate_count,
                 "peak_raw_window_candidate_count": peak_raw_window_candidate_count,
@@ -1134,6 +1226,19 @@ class RhcSolver(BaseSolver):
                 "max_windows": max_windows,
                 "inner_solver_min_budget_s": inner_solver_min_budget_s,
                 "random_seed_base": random_seed_base,
+                "hybrid_inner_routing_enabled": hybrid_inner_routing_enabled,
+                "hybrid_inner_solver": hybrid_inner_solver_name,
+                "hybrid_due_pressure_threshold": hybrid_due_pressure_threshold,
+                "hybrid_candidate_pressure_threshold": hybrid_candidate_pressure_threshold,
+                "hybrid_max_ops": hybrid_max_ops,
+                "hybrid_route_attempts": hybrid_route_attempts,
+                "hybrid_route_activations": hybrid_route_activations,
+                "hybrid_route_activation_rate": round(
+                    hybrid_route_activations / max(1, hybrid_route_attempts),
+                    4,
+                )
+                if hybrid_route_attempts > 0
+                else 0.0,
                 "time_limit_reached": time_limit_reached,
                 "fallback_repair_attempted": fallback_repair_attempted,
                 "fallback_repair_skipped": fallback_repair_skipped,
