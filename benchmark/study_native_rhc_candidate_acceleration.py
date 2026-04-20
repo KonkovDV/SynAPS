@@ -104,15 +104,36 @@ def _generate_vectors(
 @contextmanager
 def _force_python_backend() -> Iterator[None]:
     original = accelerators._native_compute_rhc_candidate_metrics_batch
+    original_np = accelerators._native_compute_rhc_candidate_metrics_batch_np
+    original_np_jagged = accelerators._native_compute_rhc_candidate_metrics_batch_np_jagged
     try:
         accelerators._native_compute_rhc_candidate_metrics_batch = None
+        accelerators._native_compute_rhc_candidate_metrics_batch_np = None
+        accelerators._native_compute_rhc_candidate_metrics_batch_np_jagged = None
         yield
     finally:
         accelerators._native_compute_rhc_candidate_metrics_batch = original
+        accelerators._native_compute_rhc_candidate_metrics_batch_np = original_np
+        accelerators._native_compute_rhc_candidate_metrics_batch_np_jagged = original_np_jagged
 
 
 def _run_batch(vectors: dict[str, Any]) -> tuple[list[float], list[float]]:
     return accelerators.compute_rhc_candidate_metrics_batch(
+        machine_available_offsets=vectors["machine_available_offsets"],
+        eligible_machine_indices=vectors["eligible_machine_indices"],
+        predecessor_end_offsets=vectors["predecessor_end_offsets"],
+        due_offsets=vectors["due_offsets"],
+        rpt_tail_minutes=vectors["rpt_tail_minutes"],
+        order_weights=vectors["order_weights"],
+        p_tilde_minutes=vectors["p_tilde_minutes"],
+        avg_total_p=vectors["avg_total_p"],
+        due_pressure_k1=vectors["due_pressure_k1"],
+        due_pressure_overdue_boost=vectors["due_pressure_overdue_boost"],
+    )
+
+
+def _run_batch_np(vectors: dict[str, Any]) -> tuple[list[float], list[float]]:
+    return accelerators.compute_rhc_candidate_metrics_batch_np(
         machine_available_offsets=vectors["machine_available_offsets"],
         eligible_machine_indices=vectors["eligible_machine_indices"],
         predecessor_end_offsets=vectors["predecessor_end_offsets"],
@@ -136,9 +157,44 @@ def _benchmark_mode(
     slack_checksum = 0.0
     pressure_checksum = 0.0
 
+    # Warmup: 1 iteration to amortize rayon thread pool init.
+    _run_batch(vectors)
+
     for _ in range(repeats):
         start = time.perf_counter()
         slacks, pressures = _run_batch(vectors)
+        elapsed_ms = (time.perf_counter() - start) * 1000.0
+        timings_ms.append(elapsed_ms)
+        slack_checksum = sum(slacks)
+        pressure_checksum = sum(pressures)
+
+    return {
+        "mode": label,
+        "runs": repeats,
+        "min_ms": round(min(timings_ms), 6),
+        "median_ms": round(statistics.median(timings_ms), 6),
+        "mean_ms": round(statistics.mean(timings_ms), 6),
+        "slack_checksum": round(slack_checksum, 6),
+        "pressure_checksum": round(pressure_checksum, 6),
+    }
+
+
+def _benchmark_mode_np(
+    *,
+    label: str,
+    repeats: int,
+    vectors: dict[str, Any],
+) -> dict[str, Any]:
+    timings_ms: list[float] = []
+    slack_checksum = 0.0
+    pressure_checksum = 0.0
+
+    # Warmup.
+    _run_batch_np(vectors)
+
+    for _ in range(repeats):
+        start = time.perf_counter()
+        slacks, pressures = _run_batch_np(vectors)
         elapsed_ms = (time.perf_counter() - start) * 1000.0
         timings_ms.append(elapsed_ms)
         slack_checksum = sum(slacks)
@@ -227,12 +283,19 @@ def main() -> int:
         )
         active_reference = _run_batch(vectors)
 
+        batch_active_np = _benchmark_mode_np(
+            label="batch_active_np",
+            repeats=args.repeats,
+            vectors=vectors,
+        )
+        np_reference = _run_batch_np(vectors)
+
         report["sizes"].append(
             {
                 "size": size,
                 "machine_count": vectors["machine_count"],
                 "pattern_count": vectors["pattern_count"],
-                "results": [batch_python, batch_active],
+                "results": [batch_python, batch_active, batch_active_np],
                 "consistency": {
                     "max_abs_diff_slack_python_vs_active": round(
                         _max_abs_diff(python_reference[0], active_reference[0]),
@@ -242,11 +305,27 @@ def main() -> int:
                         _max_abs_diff(python_reference[1], active_reference[1]),
                         12,
                     ),
+                    "max_abs_diff_slack_python_vs_np": round(
+                        _max_abs_diff(python_reference[0], np_reference[0]),
+                        12,
+                    ),
+                    "max_abs_diff_pressure_python_vs_np": round(
+                        _max_abs_diff(python_reference[1], np_reference[1]),
+                        12,
+                    ),
                 },
                 "speedups": {
                     "batch_active_over_batch_python": _safe_speedup(
                         batch_python["mean_ms"],
                         batch_active["mean_ms"],
+                    ),
+                    "batch_active_np_over_batch_python": _safe_speedup(
+                        batch_python["mean_ms"],
+                        batch_active_np["mean_ms"],
+                    ),
+                    "batch_active_np_over_batch_active": _safe_speedup(
+                        batch_active["mean_ms"],
+                        batch_active_np["mean_ms"],
                     ),
                 },
             }

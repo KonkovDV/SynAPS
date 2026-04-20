@@ -1,6 +1,41 @@
+use numpy::{PyArray1, PyArrayMethods, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use rayon::prelude::*;
+
+// ---------------------------------------------------------------------------
+// Fast approximate exp (Schraudolph 1999, IEEE-754 bit trick).
+// Max relative error ≈ 4% — perfectly acceptable for scheduling pressure
+// heuristics where we need throughput, not full IEEE precision.
+// ---------------------------------------------------------------------------
+
+#[inline(always)]
+fn fast_exp(x: f64) -> f64 {
+    // Clamp to avoid overflow/underflow in the bit trick.
+    let x = x.max(-700.0).min(700.0);
+    let a = 1048576.0 / core::f64::consts::LN_2; // 2^20 / ln(2)
+    let b = 1072693248.0 - 60801.0; // bias correction (Schraudolph constant)
+    let bits = ((a * x + b) as i64) << 32;
+    f64::from_bits(bits as u64)
+}
+
+// ---------------------------------------------------------------------------
+// Wrapper to send raw pointer across thread boundary.
+// SAFETY: caller must guarantee disjoint-index writes (rayon for_each).
+// ---------------------------------------------------------------------------
+
+struct SendPtr(*mut f64);
+unsafe impl Send for SendPtr {}
+unsafe impl Sync for SendPtr {}
+
+/// Minimum rayon chunk size for lightweight per-element kernels.
+/// Amortizes scheduler overhead (~50-100 ns/steal) against compute (~20-50 ns/element).
+/// See: Blumofe & Leiserson 1999, rayon `with_min_len` guidance.
+const RAYON_MIN_CHUNK: usize = 1024;
+
+// ---------------------------------------------------------------------------
+// Scalar ATCS — unchanged interface (single-operation scoring).
+// ---------------------------------------------------------------------------
 
 #[pyfunction]
 fn compute_atcs_log_score(
@@ -32,8 +67,14 @@ fn compute_atcs_log_score(
         0.0
     };
 
-    safe_weight.ln() - safe_processing.ln() - (slack / (k1 * safe_ready_p_bar)) - setup_penalty - material_penalty
+    safe_weight.ln() - safe_processing.ln() - (slack / (k1 * safe_ready_p_bar))
+        - setup_penalty
+        - material_penalty
 }
+
+// ---------------------------------------------------------------------------
+// Batch ATCS — Vec interface kept for backward compatibility.
+// ---------------------------------------------------------------------------
 
 #[pyfunction]
 fn compute_atcs_log_scores_batch(
@@ -62,10 +103,10 @@ fn compute_atcs_log_scores_batch(
         ));
     }
 
-    // Release the GIL while running data-parallel scoring.
     let scores = py.allow_threads(|| {
         (0..n)
             .into_par_iter()
+            .with_min_len(RAYON_MIN_CHUNK)
             .map(|i| {
                 let safe_weight = weights[i].max(1e-9);
                 let safe_processing = processing_minutes[i].max(0.1);
@@ -94,6 +135,10 @@ fn compute_atcs_log_scores_batch(
 
     Ok(scores)
 }
+
+// ---------------------------------------------------------------------------
+// Resource capacity feasibility — unchanged interface.
+// ---------------------------------------------------------------------------
 
 #[pyfunction]
 fn resource_capacity_window_is_feasible(
@@ -160,6 +205,61 @@ fn resource_capacity_window_is_feasible(
     Ok(true)
 }
 
+// ---------------------------------------------------------------------------
+// Shared per-element RHC kernel used by both Vec and numpy paths.
+// ---------------------------------------------------------------------------
+
+#[inline(always)]
+fn rhc_element_csr(
+    i: usize,
+    offsets: &[i64],
+    indices: &[i64],
+    mao: &[f64],
+    machine_count: usize,
+    peo: &[f64],
+    d_off: &[f64],
+    rpt: &[f64],
+    ow: &[f64],
+    ptm: &[f64],
+    safe_pressure_denominator: f64,
+    due_pressure_overdue_boost: f64,
+) -> (f64, f64) {
+    let row_start = offsets[i] as usize;
+    let row_end = offsets[i + 1] as usize;
+
+    let earliest_machine_ready = if row_start == row_end {
+        0.0
+    } else {
+        let mut min_val = f64::INFINITY;
+        for k in row_start..row_end {
+            let idx = indices[k] as usize;
+            if idx < machine_count {
+                let val = unsafe { *mao.get_unchecked(idx) };
+                if val < min_val {
+                    min_val = val;
+                }
+            }
+        }
+        min_val
+    };
+
+    let est_offset = peo[i].max(earliest_machine_ready);
+    let slack = d_off[i] - (est_offset + rpt[i]);
+
+    let mut pressure =
+        (ow[i] / ptm[i].max(1e-6)) * fast_exp(-slack.max(0.0) / safe_pressure_denominator);
+    if slack <= 0.0 {
+        pressure *= due_pressure_overdue_boost;
+    }
+
+    (slack, pressure)
+}
+
+// ---------------------------------------------------------------------------
+// Legacy Vec<Vec<usize>> interface — kept for backward compatibility.
+// Now internally converts to CSR and uses the shared kernel + with_min_len.
+// ---------------------------------------------------------------------------
+
 #[pyfunction]
 fn compute_rhc_candidate_metrics_batch(
     py: Python<'_>,
@@ -187,55 +287,258 @@ fn compute_rhc_candidate_metrics_batch(
     }
 
     let machine_count = machine_available_offsets.len();
+
+    // Build CSR in Rust — single pass, two allocations.
+    let mut csr_offsets: Vec<i64> = Vec::with_capacity(n + 1);
+    let mut csr_indices: Vec<i64> = Vec::new();
+    csr_offsets.push(0);
     for machine_indices in &eligible_machine_indices {
-        for machine_idx in machine_indices {
-            if *machine_idx >= machine_count {
+        for &machine_idx in machine_indices {
+            if machine_idx >= machine_count {
                 return Err(PyValueError::new_err(
                     "eligible machine index is out of range",
                 ));
             }
+            csr_indices.push(machine_idx as i64);
         }
+        csr_offsets.push(csr_indices.len() as i64);
     }
 
     let safe_pressure_denominator = (due_pressure_k1 * avg_total_p).max(1e-6);
 
-    // Release GIL while running data-parallel candidate scoring.
-    let metrics = py.allow_threads(|| {
+    let mut slacks = vec![0.0f64; n];
+    let mut pressures = vec![0.0f64; n];
+
+    py.allow_threads(|| {
+        let s_ptr = SendPtr(slacks.as_mut_ptr());
+        let p_ptr = SendPtr(pressures.as_mut_ptr());
+
         (0..n)
             .into_par_iter()
-            .map(|i| {
-                let earliest_machine_ready = if eligible_machine_indices[i].is_empty() {
-                    0.0
-                } else {
-                    eligible_machine_indices[i]
-                        .iter()
-                        .map(|machine_idx| machine_available_offsets[*machine_idx])
-                        .fold(f64::INFINITY, f64::min)
-                };
-
-                let est_offset = predecessor_end_offsets[i].max(earliest_machine_ready);
-                let slack = due_offsets[i] - (est_offset + rpt_tail_minutes[i]);
-
-                let mut pressure = (order_weights[i] / p_tilde_minutes[i].max(1e-6))
-                    * f64::exp(-slack.max(0.0) / safe_pressure_denominator);
-                if slack <= 0.0 {
-                    pressure *= due_pressure_overdue_boost;
+            .with_min_len(RAYON_MIN_CHUNK)
+            .for_each(|i| {
+                let (slack, pressure) = rhc_element_csr(
+                    i,
+                    &csr_offsets,
+                    &csr_indices,
+                    &machine_available_offsets,
+                    machine_count,
+                    &predecessor_end_offsets,
+                    &due_offsets,
+                    &rpt_tail_minutes,
+                    &order_weights,
+                    &p_tilde_minutes,
+                    safe_pressure_denominator,
+                    due_pressure_overdue_boost,
+                );
+                // SAFETY: each rayon task writes to a unique index i — no data races.
+                unsafe {
+                    *s_ptr.0.add(i) = slack;
+                    *p_ptr.0.add(i) = pressure;
                 }
-
-                (slack, pressure)
-            })
-            .collect::<Vec<(f64, f64)>>()
+            });
     });
-
-    let mut slacks = Vec::with_capacity(n);
-    let mut pressures = Vec::with_capacity(n);
-    for (slack, pressure) in metrics {
-        slacks.push(slack);
-        pressures.push(pressure);
-    }
 
     Ok((slacks, pressures))
 }
+
+// ---------------------------------------------------------------------------
+// Zero-copy numpy + CSR interface for 50k+ scale.
+//
+// P1 fix: writes directly into pre-allocated numpy arrays — eliminates 3
+// intermediate Vec allocations + Zip copy from the previous implementation.
+//
+// P2 fix: rayon with_min_len(1024) — amortizes scheduler overhead for
+// lightweight per-element kernels.
+//
+// Accepts EITHER pre-built CSR numpy arrays (from Python _build_csr_from_jagged)
+// OR the new _jagged variant below builds CSR in Rust (P3 fix).
+// ---------------------------------------------------------------------------
+
+#[pyfunction]
+fn compute_rhc_candidate_metrics_batch_np<'py>(
+    py: Python<'py>,
+    machine_available_offsets: PyReadonlyArray1<'py, f64>,
+    emi_offsets: PyReadonlyArray1<'py, i64>,
+    emi_indices: PyReadonlyArray1<'py, i64>,
+    predecessor_end_offsets: PyReadonlyArray1<'py, f64>,
+    due_offsets: PyReadonlyArray1<'py, f64>,
+    rpt_tail_minutes: PyReadonlyArray1<'py, f64>,
+    order_weights: PyReadonlyArray1<'py, f64>,
+    p_tilde_minutes: PyReadonlyArray1<'py, f64>,
+    avg_total_p: f64,
+    due_pressure_k1: f64,
+    due_pressure_overdue_boost: f64,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    let mao = machine_available_offsets.as_array();
+    let offsets = emi_offsets.as_array();
+    let indices = emi_indices.as_array();
+    let peo = predecessor_end_offsets.as_array();
+    let d_off = due_offsets.as_array();
+    let rpt = rpt_tail_minutes.as_array();
+    let ow = order_weights.as_array();
+    let ptm = p_tilde_minutes.as_array();
+
+    let n = peo.len();
+    if offsets.len() != n + 1 {
+        return Err(PyValueError::new_err("emi_offsets length must be N+1"));
+    }
+    if d_off.len() != n || rpt.len() != n || ow.len() != n || ptm.len() != n {
+        return Err(PyValueError::new_err(
+            "RHC candidate metric vectors must have identical lengths",
+        ));
+    }
+
+    let machine_count = mao.len();
+    let offsets_raw = offsets.as_slice().unwrap();
+    let indices_raw = indices.as_slice().unwrap();
+    let mao_raw = mao.as_slice().unwrap();
+    let peo_raw = peo.as_slice().unwrap();
+    let d_off_raw = d_off.as_slice().unwrap();
+    let rpt_raw = rpt.as_slice().unwrap();
+    let ow_raw = ow.as_slice().unwrap();
+    let ptm_raw = ptm.as_slice().unwrap();
+
+    let safe_pressure_denominator = (due_pressure_k1 * avg_total_p).max(1e-6);
+
+    // P1: Pre-allocate output arrays while GIL is held. numpy memory is
+    // GC-pinned for the duration of allow_threads — safe to write via raw ptr.
+    let out_slacks = PyArray1::<f64>::zeros(py, n, false);
+    let out_pressures = PyArray1::<f64>::zeros(py, n, false);
+
+    let s_ptr = SendPtr(unsafe { out_slacks.as_slice_mut().unwrap().as_mut_ptr() });
+    let p_ptr = SendPtr(unsafe { out_pressures.as_slice_mut().unwrap().as_mut_ptr() });
+
+    // Release GIL while running data-parallel scoring.
+    // SAFETY: each rayon task writes to a unique index i — no data races.
+    // Output pointers are stable: numpy buffers are not moved while GIL is released.
+    py.allow_threads(|| {
+        (0..n)
+            .into_par_iter()
+            .with_min_len(RAYON_MIN_CHUNK)
+            .for_each(|i| {
+                let (slack, pressure) = rhc_element_csr(
+                    i,
+                    offsets_raw,
+                    indices_raw,
+                    mao_raw,
+                    machine_count,
+                    peo_raw,
+                    d_off_raw,
+                    rpt_raw,
+                    ow_raw,
+                    ptm_raw,
+                    safe_pressure_denominator,
+                    due_pressure_overdue_boost,
+                );
+                unsafe {
+                    *s_ptr.0.add(i) = slack;
+                    *p_ptr.0.add(i) = pressure;
+                }
+            });
+    });
+
+    Ok((out_slacks.into(), out_pressures.into()))
+}
+
+// ---------------------------------------------------------------------------
+// P3: CSR-in-Rust variant — accepts jagged Vec<Vec<i64>> directly from Python,
+// builds CSR internally (eliminates Python _build_csr_from_jagged loop).
+// ---------------------------------------------------------------------------
+
+#[pyfunction]
+fn compute_rhc_candidate_metrics_batch_np_jagged<'py>(
+    py: Python<'py>,
+    machine_available_offsets: PyReadonlyArray1<'py, f64>,
+    eligible_machine_indices: Vec<Vec<i64>>,
+    predecessor_end_offsets: PyReadonlyArray1<'py, f64>,
+    due_offsets: PyReadonlyArray1<'py, f64>,
+    rpt_tail_minutes: PyReadonlyArray1<'py, f64>,
+    order_weights: PyReadonlyArray1<'py, f64>,
+    p_tilde_minutes: PyReadonlyArray1<'py, f64>,
+    avg_total_p: f64,
+    due_pressure_k1: f64,
+    due_pressure_overdue_boost: f64,
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>)> {
+    let mao = machine_available_offsets.as_array();
+    let peo = predecessor_end_offsets.as_array();
+    let d_off = due_offsets.as_array();
+    let rpt = rpt_tail_minutes.as_array();
+    let ow = order_weights.as_array();
+    let ptm = p_tilde_minutes.as_array();
+
+    let n = eligible_machine_indices.len();
+    if peo.len() != n || d_off.len() != n || rpt.len() != n || ow.len() != n || ptm.len() != n {
+        return Err(PyValueError::new_err(
+            "RHC candidate metric vectors must have identical lengths",
+        ));
+    }
+
+    let machine_count = mao.len();
+
+    // Build CSR in Rust — single pass, two allocations (P3).
+    let mut csr_offsets: Vec<i64> = Vec::with_capacity(n + 1);
+    let mut csr_indices: Vec<i64> = Vec::new();
+    csr_offsets.push(0);
+    for row in &eligible_machine_indices {
+        for &idx in row {
+            if (idx as usize) >= machine_count {
+                return Err(PyValueError::new_err(
+                    "eligible machine index is out of range",
+                ));
+            }
+            csr_indices.push(idx);
+        }
+        csr_offsets.push(csr_indices.len() as i64);
+    }
+
+    let mao_raw = mao.as_slice().unwrap();
+    let peo_raw = peo.as_slice().unwrap();
+    let d_off_raw = d_off.as_slice().unwrap();
+    let rpt_raw = rpt.as_slice().unwrap();
+    let ow_raw = ow.as_slice().unwrap();
+    let ptm_raw = ptm.as_slice().unwrap();
+
+    let safe_pressure_denominator = (due_pressure_k1 * avg_total_p).max(1e-6);
+
+    let out_slacks = PyArray1::<f64>::zeros(py, n, false);
+    let out_pressures = PyArray1::<f64>::zeros(py, n, false);
+
+    let s_ptr = SendPtr(unsafe { out_slacks.as_slice_mut().unwrap().as_mut_ptr() });
+    let p_ptr = SendPtr(unsafe { out_pressures.as_slice_mut().unwrap().as_mut_ptr() });
+
+    py.allow_threads(|| {
+        (0..n)
+            .into_par_iter()
+            .with_min_len(RAYON_MIN_CHUNK)
+            .for_each(|i| {
+                let (slack, pressure) = rhc_element_csr(
+                    i,
+                    &csr_offsets,
+                    &csr_indices,
+                    mao_raw,
+                    machine_count,
+                    peo_raw,
+                    d_off_raw,
+                    rpt_raw,
+                    ow_raw,
+                    ptm_raw,
+                    safe_pressure_denominator,
+                    due_pressure_overdue_boost,
+                );
+                unsafe {
+                    *s_ptr.0.add(i) = slack;
+                    *p_ptr.0.add(i) = pressure;
+                }
+            });
+    });
+
+    Ok((out_slacks.into(), out_pressures.into()))
+}
+
+// ---------------------------------------------------------------------------
+// Module registration.
+// ---------------------------------------------------------------------------
 
 #[pymodule]
 fn synaps_native(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -243,5 +546,10 @@ fn synaps_native(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> 
     module.add_function(wrap_pyfunction!(compute_atcs_log_scores_batch, module)?)?;
     module.add_function(wrap_pyfunction!(resource_capacity_window_is_feasible, module)?)?;
     module.add_function(wrap_pyfunction!(compute_rhc_candidate_metrics_batch, module)?)?;
+    module.add_function(wrap_pyfunction!(compute_rhc_candidate_metrics_batch_np, module)?)?;
+    module.add_function(wrap_pyfunction!(
+        compute_rhc_candidate_metrics_batch_np_jagged,
+        module
+    )?)?;
     Ok(())
 }

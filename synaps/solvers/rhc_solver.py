@@ -319,6 +319,7 @@ class RhcSolver(BaseSolver):
         candidate_pool_filtered_ops = 0
         due_pressure_selected_ids: set[UUID] = set()
         admission_frontier_advances = 0
+        admission_starvation_count = 0
         due_frontier_advances = 0
         candidate_pressure_values: list[float] = []
         due_pressure_values: list[float] = []
@@ -658,6 +659,8 @@ class RhcSolver(BaseSolver):
                         len(raw_window_candidate_ids) - len(admitted_window_candidate_ids),
                     )
                     window_candidate_ids = admitted_window_candidate_ids
+                else:
+                    admission_starvation_count += 1
 
             if len(window_candidate_ids) > candidate_pool_limit:
                 candidate_pool_clamped_windows += 1
@@ -1455,6 +1458,7 @@ class RhcSolver(BaseSolver):
                 "spillover_count": spillover_count,
                 "earliest_frontier_advances": admission_frontier_advances,
                 "admission_frontier_advances": admission_frontier_advances,
+                "admission_starvation_count": admission_starvation_count,
                 "due_frontier_advances": due_frontier_advances,
                 "effective_window_operation_cap": effective_window_op_cap,
                 "window_load_factor": window_load_factor,
@@ -1598,7 +1602,6 @@ class RhcSolver(BaseSolver):
 
         horizon_start = problem.planning_horizon_start
         ops_by_id = {op.id: op for op in problem.operations}
-        {o.id: o for o in problem.orders}
 
         makespan = max(
             (a.end_time - horizon_start).total_seconds() / 60.0 for a in assignments

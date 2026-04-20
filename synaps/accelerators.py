@@ -10,24 +10,41 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+try:
+    import numpy as np
+
+    _HAS_NUMPY = True
+except ImportError:  # pragma: no cover
+    _HAS_NUMPY = False
+
+_synaps_native: Any | None = None
 _native_compute_atcs_log_score: Callable[..., float] | None = None
 _native_compute_atcs_log_scores_batch: Callable[..., list[float]] | None = None
 _native_resource_capacity_window_is_feasible: Callable[..., bool] | None = None
-_native_compute_rhc_candidate_metrics_batch: Callable[..., tuple[list[float], list[float]]] | None = None
+_native_compute_rhc_candidate_metrics_batch: (
+    Callable[..., tuple[list[float], list[float]]] | None
+) = None
+_native_compute_rhc_candidate_metrics_batch_np: Callable[..., Any] | None = None
+_native_compute_rhc_candidate_metrics_batch_np_jagged: Callable[..., Any] | None = None
 
 if os.getenv("SYNAPS_DISABLE_NATIVE_ACCELERATION") == "1":
     _native_compute_atcs_log_score = None
     _native_compute_atcs_log_scores_batch = None
     _native_resource_capacity_window_is_feasible = None
     _native_compute_rhc_candidate_metrics_batch = None
+    _native_compute_rhc_candidate_metrics_batch_np = None
+    _native_compute_rhc_candidate_metrics_batch_np_jagged = None
 else:
     try:
         _synaps_native = importlib.import_module("synaps_native")
-    except ImportError:
+    except Exception:
+        _synaps_native = None
         _native_compute_atcs_log_score = None
         _native_compute_atcs_log_scores_batch = None
         _native_resource_capacity_window_is_feasible = None
         _native_compute_rhc_candidate_metrics_batch = None
+        _native_compute_rhc_candidate_metrics_batch_np = None
+        _native_compute_rhc_candidate_metrics_batch_np_jagged = None
     else:
         _native_compute_atcs_log_score = getattr(
             _synaps_native,
@@ -47,6 +64,16 @@ else:
         _native_compute_rhc_candidate_metrics_batch = getattr(
             _synaps_native,
             "compute_rhc_candidate_metrics_batch",
+            None,
+        )
+        _native_compute_rhc_candidate_metrics_batch_np = getattr(
+            _synaps_native,
+            "compute_rhc_candidate_metrics_batch_np",
+            None,
+        )
+        _native_compute_rhc_candidate_metrics_batch_np_jagged = getattr(
+            _synaps_native,
+            "compute_rhc_candidate_metrics_batch_np_jagged",
             None,
         )
 
@@ -117,6 +144,12 @@ def get_acceleration_status() -> dict[str, Any]:
         else "python",
         "rhc_candidate_metrics_backend": "native"
         if _native_compute_rhc_candidate_metrics_batch is not None
+        else "python",
+        "rhc_candidate_metrics_np_backend": "native"
+        if _native_compute_rhc_candidate_metrics_batch_np is not None
+        else "python",
+        "rhc_candidate_metrics_np_jagged_backend": "native"
+        if _native_compute_rhc_candidate_metrics_batch_np_jagged is not None
         else "python",
         "native_module": "synaps_native"
         if any(
@@ -333,10 +366,96 @@ def compute_rhc_candidate_metrics_batch(
     return slacks, pressures
 
 
+def _build_csr_from_jagged(
+    jagged: list[list[int]],
+) -> tuple[Any, Any]:
+    """Convert a jagged list-of-lists into CSR (offsets, indices) numpy arrays.
+
+    Returns plain Python lists when numpy is unavailable (fallback path only).
+    """
+    offsets: list[int] = [0]
+    flat: list[int] = []
+    for row in jagged:
+        flat.extend(row)
+        offsets.append(len(flat))
+    if _HAS_NUMPY:
+        return np.array(offsets, dtype=np.int64), np.array(flat, dtype=np.int64)
+    return offsets, flat  # pragma: no cover
+
+
+def compute_rhc_candidate_metrics_batch_np(
+    *,
+    machine_available_offsets: list[float],
+    eligible_machine_indices: list[list[int]],
+    predecessor_end_offsets: list[float],
+    due_offsets: list[float],
+    rpt_tail_minutes: list[float],
+    order_weights: list[float],
+    p_tilde_minutes: list[float],
+    avg_total_p: float,
+    due_pressure_k1: float,
+    due_pressure_overdue_boost: float,
+) -> tuple[list[float], list[float]]:
+    """Zero-copy numpy + CSR path for RHC candidate metrics at 50k+ scale.
+
+    Prefers the _np_jagged variant (CSR built in Rust, avoids Python loop),
+    then falls back to the _np variant (pre-built CSR from Python), then
+    to the legacy Vec path, then to pure-Python.
+    """
+    # P3: CSR-in-Rust path — fastest, no Python loop.
+    if _native_compute_rhc_candidate_metrics_batch_np_jagged is not None and _HAS_NUMPY:
+        np_slacks, np_pressures = _native_compute_rhc_candidate_metrics_batch_np_jagged(
+            np.asarray(machine_available_offsets, dtype=np.float64),
+            eligible_machine_indices,
+            np.asarray(predecessor_end_offsets, dtype=np.float64),
+            np.asarray(due_offsets, dtype=np.float64),
+            np.asarray(rpt_tail_minutes, dtype=np.float64),
+            np.asarray(order_weights, dtype=np.float64),
+            np.asarray(p_tilde_minutes, dtype=np.float64),
+            avg_total_p,
+            due_pressure_k1,
+            due_pressure_overdue_boost,
+        )
+        return np_slacks.tolist(), np_pressures.tolist()
+
+    # Fallback: pre-built CSR from Python.
+    if _native_compute_rhc_candidate_metrics_batch_np is not None and _HAS_NUMPY:
+        emi_offsets, emi_indices = _build_csr_from_jagged(eligible_machine_indices)
+        np_slacks, np_pressures = _native_compute_rhc_candidate_metrics_batch_np(
+            np.asarray(machine_available_offsets, dtype=np.float64),
+            emi_offsets,
+            emi_indices,
+            np.asarray(predecessor_end_offsets, dtype=np.float64),
+            np.asarray(due_offsets, dtype=np.float64),
+            np.asarray(rpt_tail_minutes, dtype=np.float64),
+            np.asarray(order_weights, dtype=np.float64),
+            np.asarray(p_tilde_minutes, dtype=np.float64),
+            avg_total_p,
+            due_pressure_k1,
+            due_pressure_overdue_boost,
+        )
+        return np_slacks.tolist(), np_pressures.tolist()
+
+    # Transparent fallback to the legacy path.
+    return compute_rhc_candidate_metrics_batch(
+        machine_available_offsets=machine_available_offsets,
+        eligible_machine_indices=eligible_machine_indices,
+        predecessor_end_offsets=predecessor_end_offsets,
+        due_offsets=due_offsets,
+        rpt_tail_minutes=rpt_tail_minutes,
+        order_weights=order_weights,
+        p_tilde_minutes=p_tilde_minutes,
+        avg_total_p=avg_total_p,
+        due_pressure_k1=due_pressure_k1,
+        due_pressure_overdue_boost=due_pressure_overdue_boost,
+    )
+
+
 __all__ = [
     "compute_atcs_log_score",
     "compute_atcs_log_scores_batch",
     "compute_rhc_candidate_metrics_batch",
+    "compute_rhc_candidate_metrics_batch_np",
     "get_acceleration_status",
     "resource_capacity_window_is_feasible",
 ]

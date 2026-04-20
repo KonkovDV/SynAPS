@@ -74,7 +74,6 @@ def _evaluate_objective(
 
     horizon_start = problem.planning_horizon_start
     ops_by_id = {op.id: op for op in problem.operations}
-    {o.id: o for o in problem.orders}
 
     # Makespan
     makespan = max(
@@ -828,6 +827,8 @@ class AlnsSolver(BaseSolver):
         cpsat_repair_ms_total = 0
         greedy_repair_ms_total = 0
         feasibility_failures = 0
+        sa_worsening_accepted = 0
+        sa_worsening_rejected = 0
         repair_rejection_reasons: dict[str, int] = {}
         iterations_completed = 0
         no_improve_streak = 0
@@ -1016,9 +1017,12 @@ class AlnsSolver(BaseSolver):
                     if delta < 0:
                         no_improve_streak = 0
                     else:
+                        sa_worsening_accepted += 1
                         no_improve_streak += 1
                 # else: reject
                 else:
+                    if delta > 0:
+                        sa_worsening_rejected += 1
                     no_improve_streak += 1
 
                 # Update operator scores
@@ -1144,6 +1148,12 @@ class AlnsSolver(BaseSolver):
                 "no_improve_max_iters": no_improve_max_iters,
                 "no_improve_early_stop": no_improve_early_stop,
                 "no_improve_streak_final": no_improve_streak,
+                "sa_worsening_accepted": sa_worsening_accepted,
+                "sa_worsening_rejected": sa_worsening_rejected,
+                "effective_sa_acceptance_rate": round(
+                    sa_worsening_accepted / max(1, sa_worsening_accepted + sa_worsening_rejected),
+                    4,
+                ),
                 "cpsat_repair_ms_total": cpsat_repair_ms_total,
                 "greedy_repair_ms_total": greedy_repair_ms_total,
                 "cpsat_repair_ms_mean": round(cpsat_repair_ms_total / cpsat_repair_attempts, 2)
