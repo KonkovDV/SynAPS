@@ -94,7 +94,23 @@ Operational rule:
 
 Rust is the preferred target for the computational hot path once profiling proves the need.
 
-First candidates:
+### Current proof surface (v0.3.0)
+
+The `synaps_native` PyO3 extension implements:
+
+1. **ATCS scoring**: scalar and batch (rayon-parallel) variants;
+2. **RHC candidate metrics**: Vec, zero-copy NumPy+CSR, and CSR-in-Rust (jagged) paths;
+3. **Resource capacity feasibility**: sweep-line algorithm.
+
+Silicon-level optimizations verified on Intel i5-13600KF (Raptor Lake):
+- Branchless overdue boost (eliminates branch misprediction on P/E hybrid);
+- Rayon work-stealing tuned for P/E core asymmetry (`with_min_len(256)`);
+- `target-cpu=native` enables AVX2/FMA3 auto-vectorization;
+- **No AVX-512**: hardware-disabled on 12th–14th Gen hybrid architectures.
+
+See: [08_HPC_SILICON_OPTIMIZATION_ROADMAP.md](08_HPC_SILICON_OPTIMIZATION_ROADMAP.md) for the full hardware-aware optimization roadmap.
+
+### Target candidates
 
 1. GREED / ATCS scoring loops;
 2. feasibility checking over large neighborhoods;

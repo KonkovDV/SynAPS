@@ -1,4 +1,6 @@
-# P4: Enable AVX2/SSE4.2 auto-vectorization for the host CPU.
+# Enable AVX2/FMA3 auto-vectorization for the host CPU.
+# Target: Intel 12th-14th Gen (Raptor Lake) — AVX2+FMA3, NOT AVX-512.
+# AVX-512 is hardware-disabled on hybrid P/E core architectures.
 # For portable wheels, change to: target-cpu=x86-64-v3
 [target.'cfg(target_arch = "x86_64")']
 rustflags = ["-C", "target-cpu=native"]

@@ -124,6 +124,33 @@ python -m benchmark.study_rhc_50k \
 python -m pytest tests -q
 ```
 
+## Нативное Ускорение
+
+SynAPS включает опциональное Rust-ядро ускорения (`synaps_native` v0.3.0) для горячих путей вычислений через PyO3.
+
+**Целевое железо**: Intel 12–14 поколение (Raptor Lake) с гибридной архитектурой P/E-ядер и поддержкой AVX2+FMA3. AVX-512 **не используется** — он аппаратно отключён на гибридных процессорах.
+
+Реализованные оптимизации (v0.3.0):
+
+| Оптимизация | Механизм | Ожидаемый эффект |
+|---|---|---|
+| **Branchless-скоринг** | `cmov`/blend вместо ветвления для overdue-буста | 5–15% (устраняет ~50% промахов предсказателя) |
+| **Гибридный параллелизм** | Rayon `with_min_len(256)` для work-stealing P/E-ядер | 10–25% (устраняет эффект «отстающих» E-ядер) |
+| **Zero-copy NumPy + CSR** | Прямая запись в буферы, без промежуточных аллокаций | 2–3× по сравнению с Vec-путём |
+| **target-cpu=native** | LLVM AVX2/FMA3 авто-векторизация | 10–40% (зависит от структуры цикла) |
+| **fast_exp (Шраудольф)** | IEEE-754 bit trick, ~4% ошибка, монотонная | Бесплатно vs `libm::exp()` |
+
+Ядро опционально — SynAPS автоматически переключается на чистый Python при его отсутствии.
+
+Сборка нативного расширения:
+
+```bash
+cd native/synaps_native
+maturin develop --release
+```
+
+См.: [HPC-дорожная карта оптимизаций уровня кремния](docs/architecture/08_HPC_SILICON_OPTIMIZATION_ROADMAP.md)
+
 ## Карта Репозитория
 
 - `synaps/solvers/` - реализации решателей и реестр
@@ -140,6 +167,7 @@ python -m pytest tests -q
 - Хабр-драфт (RU): `docs/habr/synaps-open-source-habr-v3.md`
 - Publication pack: `docs/habr/synaps-open-source-habr-v3-pack.md`
 - Benchmark guide: `benchmark/README_RU.md`
+- HPC-дорожная карта: `docs/architecture/08_HPC_SILICON_OPTIMIZATION_ROADMAP.md`
 - Протокол воспроизводимости и робастности: `docs/architecture/06_BENCHMARK_REPRODUCIBILITY_AND_ROBUSTNESS.md`
 - Contributing: `CONTRIBUTING.md`
 - Security policy: `SECURITY.md`

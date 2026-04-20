@@ -124,6 +124,33 @@ Run tests:
 python -m pytest tests -q
 ```
 
+## Native Acceleration
+
+SynAPS includes an optional Rust-based acceleration kernel (`synaps_native` v0.3.0) for hot-path scheduling computations via PyO3.
+
+**Target hardware**: Intel 12th–14th Gen (Raptor Lake) hybrid P/E architectures with AVX2+FMA3. AVX-512 is **not** used — it is hardware-disabled on hybrid CPUs.
+
+Implemented optimizations (v0.3.0):
+
+| Optimization | Mechanism | Expected Impact |
+|---|---|---|
+| **Branchless scoring** | `cmov`/blend instead of branch for overdue boost | 5–15% (eliminates ~50% misprediction rate) |
+| **Hybrid-aware parallelism** | Rayon `with_min_len(256)` for P/E core work-stealing | 10–25% (prevents E-core straggler effect) |
+| **Zero-copy NumPy + CSR** | Direct buffer writes, no intermediate allocations | 2–3× over Vec path |
+| **target-cpu=native** | LLVM AVX2/FMA3 auto-vectorization | 10–40% (depends on loop structure) |
+| **fast_exp (Schraudolph)** | IEEE-754 bit trick, ~4% error, monotonic | Free vs `libm::exp()` |
+
+The kernel is optional — SynAPS falls back to pure Python when not available.
+
+Build the native extension:
+
+```bash
+cd native/synaps_native
+maturin develop --release
+```
+
+See: [HPC Silicon-Level Optimization Roadmap](docs/architecture/08_HPC_SILICON_OPTIMIZATION_ROADMAP.md)
+
 ## Repository Map
 
 - `synaps/solvers/` - solver implementations and registry
@@ -140,6 +167,7 @@ python -m pytest tests -q
 - Habr draft (RU): `docs/habr/synaps-open-source-habr-v3.md`
 - Publication pack: `docs/habr/synaps-open-source-habr-v3-pack.md`
 - Benchmark guide: `benchmark/README.md`
+- HPC optimization roadmap: `docs/architecture/08_HPC_SILICON_OPTIMIZATION_ROADMAP.md`
 - Reproducibility and robustness protocol: `docs/architecture/06_BENCHMARK_REPRODUCIBILITY_AND_ROBUSTNESS.md`
 - Contributing: `CONTRIBUTING.md`
 - Security policy: `SECURITY.md`

@@ -38,4 +38,4 @@ def test_native_rhc_candidate_acceleration_study_writes_report(tmp_path: Path) -
     assert "speedups" in size_payload
 
     result_modes = {entry["mode"] for entry in size_payload["results"]}
-    assert result_modes == {"batch_python", "batch_active"}
+    assert result_modes == {"batch_python", "batch_active", "batch_active_np"}
