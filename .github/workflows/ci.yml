@@ -116,7 +116,9 @@ jobs:
 
       - name: Build native accelerator module
         run: |
-          python -m maturin develop --manifest-path native/synaps_native/Cargo.toml --release
+          mkdir -p native-dist
+          python -m maturin build --manifest-path native/synaps_native/Cargo.toml --release --out native-dist
+          python -m pip install --force-reinstall native-dist/*.whl
 
       - name: Verify active native backend
         run: |
@@ -126,6 +128,7 @@ jobs:
           print(status)
           assert status["native_available"] is True
           assert status["atcs_log_score_batch_backend"] == "native"
+          assert status["rhc_candidate_metrics_backend"] == "native"
           PY
 
       - name: Run accelerator-focused tests

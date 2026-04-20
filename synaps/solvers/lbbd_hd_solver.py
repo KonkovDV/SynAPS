@@ -1360,11 +1360,13 @@ def _generate_all_cuts(
             scoped_ops = list(assignment_map.keys())
 
         if len(scoped_ops) > local_branching_max_ops:
+            def _local_branching_duration(op_id: UUID) -> float:
+                operation = ops_by_id.get(op_id)
+                return float(operation.base_duration_min) if operation is not None else 0.0
+
             scoped_ops = sorted(
                 scoped_ops,
-                key=lambda op_id: ops_by_id.get(op_id).base_duration_min
-                if ops_by_id.get(op_id) is not None
-                else 0,
+                key=_local_branching_duration,
                 reverse=True,
             )[:local_branching_max_ops]
 

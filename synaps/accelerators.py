@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import os
 from math import exp, log
 from typing import TYPE_CHECKING, Any
@@ -21,7 +22,7 @@ if os.getenv("SYNAPS_DISABLE_NATIVE_ACCELERATION") == "1":
     _native_compute_rhc_candidate_metrics_batch = None
 else:
     try:
-        import synaps_native as _synaps_native  # type: ignore[import-not-found]
+        _synaps_native = importlib.import_module("synaps_native")
     except ImportError:
         _native_compute_atcs_log_score = None
         _native_compute_atcs_log_scores_batch = None
@@ -290,7 +291,7 @@ def compute_rhc_candidate_metrics_batch(
                 raise ValueError("eligible machine index is out of range")
 
     if _native_compute_rhc_candidate_metrics_batch is not None:
-        slacks, pressures = _native_compute_rhc_candidate_metrics_batch(
+        native_slacks, native_pressures = _native_compute_rhc_candidate_metrics_batch(
             machine_available_offsets,
             eligible_machine_indices,
             predecessor_end_offsets,
@@ -302,7 +303,10 @@ def compute_rhc_candidate_metrics_batch(
             due_pressure_k1,
             due_pressure_overdue_boost,
         )
-        return ([float(value) for value in slacks], [float(value) for value in pressures])
+        return (
+            [float(value) for value in native_slacks],
+            [float(value) for value in native_pressures],
+        )
 
     safe_pressure_denominator = max(due_pressure_k1 * avg_total_p, 1e-6)
     slacks: list[float] = []

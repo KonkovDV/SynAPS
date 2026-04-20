@@ -42,7 +42,9 @@ jobs:
       - name: Build native accelerator module (best effort)
         continue-on-error: true
         run: |
-          python -m maturin develop --manifest-path native/synaps_native/Cargo.toml --release
+          mkdir -p native-dist
+          python -m maturin build --manifest-path native/synaps_native/Cargo.toml --release --out native-dist
+          python -m pip install --force-reinstall native-dist/*.whl
 
       - name: Run benchmark suite
         run: |

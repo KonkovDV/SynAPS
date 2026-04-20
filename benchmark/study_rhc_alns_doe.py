@@ -7,7 +7,6 @@ statistics (mean + CVaR) with a quality-gate verdict per configuration.
 from __future__ import annotations
 
 import argparse
-from copy import deepcopy
 import itertools
 import json
 import math
