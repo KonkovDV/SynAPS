@@ -26,6 +26,14 @@ python -m benchmark.study_rhc_50k --preset industrial-50k --seeds 1 \
   --solvers RHC-GREEDY RHC-ALNS \
   --write-dir benchmark/studies/2026-04-12-rhc-50k
 
+# Run the staged 500K stress-study in safe planning mode (resource projection + gate)
+python -m benchmark.study_rhc_500k --execution-mode plan --lane both --seeds 1 2 3
+
+# Execute gated stress-study ladder (runs only scales that pass admission gate)
+python -m benchmark.study_rhc_500k --execution-mode gated --lane both --seeds 1 \
+  --scales 50000 100000 200000 300000 500000 \
+  --write-dir benchmark/studies/2026-04-19-rhc-500k
+
 # Routed portfolio mode (router chooses the concrete solver)
 python -m benchmark.run_benchmark benchmark/instances/tiny_3x3.json --solvers AUTO
 
@@ -249,6 +257,38 @@ It is useful because it preserves the current limit instead of hiding it:
 - peak candidate-pool pressure still reaches `49,931` and `49,993`
 
 So the public 50K path is real and reproducible, and the latest optimization pass materially improved greedy throughput. It is still a profiling surface rather than a solved industrial benchmark, and the current bottleneck has shifted toward inner-solver throughput on the `RHC-ALNS` path.
+
+## Staged 500K Study
+
+`benchmark.study_rhc_500k` is the stress-study harness for 500K+ operation scenarios.
+
+It extends the 50K workflow with:
+
+1. staged scale ladder (default `50k -> 100k -> 200k -> 300k -> 500k`);
+2. explicit resource projection (setup entries, eligibility links, dense SDST footprint, working-set estimate);
+3. admission gate before expensive solves (`execution-mode gated`);
+4. robust summary metrics (mean/median/IQR/CVaR for makespan and wall-time, scheduled-ratio and tail unscheduled risk);
+5. quality gate versus baseline solver on the same lane and scale.
+
+### Execution modes
+
+- `plan`: only topology/resource projection and gate decisions; no solver execution.
+- `gated`: executes only scales that pass resource gate.
+- `full`: executes all requested scales, ignoring gate decisions.
+
+### Typical usage
+
+```bash
+# Fast scientific planning pass (no heavy solve)
+python -m benchmark.study_rhc_500k --execution-mode plan --lane both --seeds 1 2 3
+
+# Controlled stress run with gate-protected execution
+python -m benchmark.study_rhc_500k --execution-mode gated --lane both --seeds 1 \
+  --scales 50000 100000 200000 300000 500000 \
+  --write-dir benchmark/studies/2026-04-19-rhc-500k
+```
+
+The script writes `rhc_500k_study.json` into the selected study directory.
 
 ## Instances
 

@@ -1,0 +1,225 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+
+def test_study_rhc_500k_plan_mode_skips_execution(monkeypatch, tmp_path: Path) -> None:
+    import benchmark.study_rhc_500k as study_module
+
+    def fail_if_called(**kwargs):
+        raise AssertionError("run_scaling_case must not be called in plan mode")
+
+    monkeypatch.setattr(study_module, "run_scaling_case", fail_if_called)
+
+    report = study_module.study_rhc_500k(
+        execution_mode="plan",
+        scales=[50_000],
+        seeds=[1],
+        solver_names=["RHC-GREEDY"],
+        lane="throughput",
+        write_dir=tmp_path,
+    )
+
+    assert report["study_kind"] == "rhc-500k"
+    assert report["execution_mode"] == "plan"
+    assert report["scale_records"][0]["execution"] == "skipped"
+    assert Path(report["artifact_path"]).exists()
+
+
+def test_study_rhc_500k_gated_mode_respects_resource_gate(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import benchmark.study_rhc_500k as study_module
+
+    call_count = 0
+
+    def fake_run_scaling_case(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        return {
+            "status": "feasible",
+            "feasible": True,
+            "solver": kwargs["solver_name"],
+            "makespan_min": 100.0,
+            "total_setup_min": 20.0,
+            "total_tardiness_min": 0.0,
+            "total_material_loss": 0.0,
+            "assigned_ops": kwargs["n_ops"],
+            "violations": 0,
+            "solve_ms": 1,
+            "gen_ms": 1,
+            "verify_ms": 0,
+            "n_ops": kwargs["n_ops"],
+            "n_machines": kwargs["n_machines"],
+            "n_states": kwargs["n_states"],
+            "sdst_memory_bytes": 0,
+            "metadata": {},
+        }
+
+    monkeypatch.setattr(study_module, "run_scaling_case", fake_run_scaling_case)
+
+    report = study_module.study_rhc_500k(
+        execution_mode="gated",
+        scales=[500_000],
+        seeds=[1],
+        solver_names=["RHC-GREEDY"],
+        lane="throughput",
+        max_eligible_links=1_000,
+        write_dir=tmp_path,
+    )
+
+    assert call_count == 0
+    record = report["scale_records"][0]
+    assert record["resource_gate"]["allowed"] is False
+    assert record["execution"] == "skipped"
+    assert record["skip_reason"] == "resource_gate"
+
+
+def test_study_rhc_500k_reports_summary_and_quality_gate(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import benchmark.study_rhc_500k as study_module
+
+    def fake_run_scaling_case(*, n_ops, n_machines, n_states, solver_name, solver_kwargs, seed):
+        if solver_name == "rhc-greedy":
+            makespan = 100.0 + seed
+            metadata = {
+                "acceleration": {
+                    "rhc_candidate_metrics_backend": "python",
+                },
+            }
+        else:
+            makespan = 103.0 + seed
+            metadata = {
+                "inner_fallback_ratio": 0.05,
+                "acceleration": {
+                    "rhc_candidate_metrics_backend": "native",
+                },
+            }
+
+        return {
+            "status": "feasible",
+            "feasible": True,
+            "solver": solver_name,
+            "makespan_min": makespan,
+            "total_setup_min": 20.0,
+            "total_tardiness_min": 0.0,
+            "total_material_loss": 0.0,
+            "assigned_ops": n_ops,
+            "violations": 0,
+            "solve_ms": 10,
+            "gen_ms": 1,
+            "verify_ms": 1,
+            "n_ops": n_ops,
+            "n_machines": n_machines,
+            "n_states": n_states,
+            "sdst_memory_bytes": 0,
+            "metadata": metadata,
+        }
+
+    monkeypatch.setattr(study_module, "run_scaling_case", fake_run_scaling_case)
+
+    report = study_module.study_rhc_500k(
+        execution_mode="gated",
+        scales=[50_000],
+        seeds=[1, 2],
+        solver_names=["RHC-GREEDY", "RHC-ALNS"],
+        lane="throughput",
+        write_dir=tmp_path,
+    )
+
+    greedy_key = "RHC-GREEDY|throughput|50000"
+    alns_key = "RHC-ALNS|throughput|50000"
+
+    assert greedy_key in report["summary_by_config"]
+    assert alns_key in report["summary_by_config"]
+    assert report["summary_by_config"][alns_key]["feasibility_rate"] == 1.0
+    assert "cvar_makespan_minutes" in report["summary_by_config"][alns_key]
+    assert "mean_inner_fallback_ratio" in report["summary_by_config"][alns_key]
+    greedy_run = next(
+        run
+        for run in report["scale_records"][0]["runs"]
+        if run["solver_label"] == "RHC-GREEDY"
+    )
+    alns_run = next(
+        run
+        for run in report["scale_records"][0]["runs"]
+        if run["solver_label"] == "RHC-ALNS"
+    )
+    assert greedy_run["results"]["acceleration"] == {
+        "rhc_candidate_metrics_backend": "python",
+    }
+    assert alns_run["results"]["acceleration"] == {
+        "rhc_candidate_metrics_backend": "native",
+    }
+
+    gate_result = report["quality_gate"]["results"][alns_key]
+    assert gate_result["checks"]["feasibility"] is True
+    assert gate_result["checks"]["scheduled_ratio"] is True
+    assert gate_result["checks"]["fallback_ratio"] is True
+    assert gate_result["checks"]["objective_degradation"] is True
+    assert gate_result["passed"] is True
+
+
+def test_study_rhc_500k_lane_both_profiles_workers(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import benchmark.study_rhc_500k as study_module
+
+    captured_kwargs: list[dict] = []
+
+    def fake_run_scaling_case(*, n_ops, n_machines, n_states, solver_name, solver_kwargs, seed):
+        captured_kwargs.append({
+            "solver_name": solver_name,
+            "solver_kwargs": solver_kwargs,
+            "seed": seed,
+        })
+        return {
+            "status": "feasible",
+            "feasible": True,
+            "solver": solver_name,
+            "makespan_min": 100.0,
+            "total_setup_min": 20.0,
+            "total_tardiness_min": 0.0,
+            "total_material_loss": 0.0,
+            "assigned_ops": n_ops,
+            "violations": 0,
+            "solve_ms": 1,
+            "gen_ms": 1,
+            "verify_ms": 0,
+            "n_ops": n_ops,
+            "n_machines": n_machines,
+            "n_states": n_states,
+            "sdst_memory_bytes": 0,
+            "metadata": {"inner_fallback_ratio": 0.0},
+        }
+
+    monkeypatch.setattr(study_module, "run_scaling_case", fake_run_scaling_case)
+
+    report = study_module.study_rhc_500k(
+        execution_mode="gated",
+        scales=[50_000],
+        seeds=[11],
+        solver_names=["RHC-ALNS"],
+        lane="both",
+        write_dir=tmp_path,
+    )
+
+    assert report["lane_mode"] == "both"
+    assert len(captured_kwargs) == 2
+
+    workers = sorted(
+        {
+            kwargs["solver_kwargs"]["hybrid_inner_kwargs"]["num_workers"]
+            for kwargs in captured_kwargs
+        }
+    )
+    assert workers == [1, 4]
+
+    for kwargs in captured_kwargs:
+        assert kwargs["solver_kwargs"]["random_seed"] == 11
+        assert kwargs["solver_kwargs"]["inner_kwargs"]["random_seed"] == 11
+        assert kwargs["solver_kwargs"]["hybrid_inner_kwargs"]["random_seed"] == 11

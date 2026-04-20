@@ -314,6 +314,29 @@ class TestLbbdHdSolver:
         if result.metadata.get("iterations", 0) > 1:
             assert cut_pool.get("size", 0) > 0
 
+    def test_few_strong_cut_controls_are_exposed(self) -> None:
+        problem = _make_medium_problem(n_orders=6, ops_per_order=3, n_machines=4)
+        solver = LbbdHdSolver()
+        result = solver.solve(
+            problem,
+            max_iterations=4,
+            time_limit_s=60,
+            setup_cut_top_k=1,
+            local_branching_enabled=True,
+            local_branching_delta_ratio=0.2,
+            local_branching_max_ops=16,
+        )
+
+        assert result.metadata["setup_cut_top_k"] == 1
+        assert result.metadata["local_branching_enabled"] is True
+        assert result.metadata["local_branching_delta_ratio"] == 0.2
+        assert result.metadata["local_branching_max_ops"] == 16
+
+        cut_pool = result.metadata.get("cut_pool", {})
+        cut_kinds = cut_pool.get("kinds", {})
+        if result.metadata.get("iterations", 0) > 1:
+            assert cut_kinds.get("local_branching", 0) >= 1
+
     def test_cluster_cap_respected(self) -> None:
         """Verify partitioning creates multiple clusters when ops exceed cap."""
         problem = _make_medium_problem(n_orders=8, ops_per_order=4, n_machines=8)

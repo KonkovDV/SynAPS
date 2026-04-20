@@ -91,6 +91,18 @@ class LbbdHdSolver(BaseSolver):
         sub_num_workers: int = int(kwargs.get("sub_num_workers", 4))
         use_warm_start: bool = bool(kwargs.get("use_warm_start", True))
         setup_relaxation: bool = bool(kwargs.get("setup_relaxation", True))
+        setup_cut_top_k: int = max(1, int(kwargs.get("setup_cut_top_k", 3)))
+        local_branching_enabled: bool = bool(
+            kwargs.get("local_branching_enabled", False)
+        )
+        local_branching_delta_ratio: float = min(
+            0.95,
+            max(0.01, float(kwargs.get("local_branching_delta_ratio", 0.10))),
+        )
+        local_branching_max_ops: int = max(
+            4,
+            int(kwargs.get("local_branching_max_ops", 128)),
+        )
 
         sub_time_limit_s: int = max(
             2, time_limit_s // max(max_iterations, 1)
@@ -290,6 +302,10 @@ class LbbdHdSolver(BaseSolver):
             _generate_all_cuts(
                 problem, sub_assignments, assignment_map,
                 benders_cuts, sub_makespan, wc_by_id, ops_by_id,
+                setup_cut_top_k=setup_cut_top_k,
+                local_branching_enabled=local_branching_enabled,
+                local_branching_delta_ratio=local_branching_delta_ratio,
+                local_branching_max_ops=local_branching_max_ops,
             )
 
         # ---- Build final result ----
@@ -316,6 +332,10 @@ class LbbdHdSolver(BaseSolver):
                 "iteration_log": iteration_log,
                 "gap_threshold": gap_threshold,
                 "setup_relaxation": setup_relaxation,
+                "setup_cut_top_k": setup_cut_top_k,
+                "local_branching_enabled": local_branching_enabled,
+                "local_branching_delta_ratio": local_branching_delta_ratio,
+                "local_branching_max_ops": local_branching_max_ops,
                 "master_warm_start_iterations": master_warm_starts,
                 "max_ops_per_cluster": max_ops_per_cluster,
                 "num_workers": num_workers,
@@ -621,6 +641,25 @@ def _solve_precedence_aware_master(
                     len(cp_indices),
                     np.array(cp_indices, dtype=np.int32),
                     np.array(cp_coeffs),
+                )
+        elif cut.kind == "local_branching":
+            lb_indices: list[int] = []
+            for op_id in cut.bottleneck_ops:
+                lb_wc = cut.assignment_map.get(op_id)
+                if lb_wc is None:
+                    continue
+                key = (op_id, lb_wc)
+                if key in var_index:
+                    lb_indices.append(var_index[key])
+            if lb_indices:
+                # Enforce at least delta assignment changes in this neighborhood:
+                # sum(match incumbent assignments) <= |S| - delta
+                h.addRow(
+                    -highspy.kHighsInf,
+                    cut.rhs,
+                    len(lb_indices),
+                    np.array(lb_indices, dtype=np.int32),
+                    np.ones(len(lb_indices)),
                 )
 
     # ---- Solve ----
@@ -1176,6 +1215,11 @@ def _generate_all_cuts(
     sub_makespan: float,
     wc_by_id: dict[UUID, WorkCenter],
     ops_by_id: dict[UUID, Operation],
+    *,
+    setup_cut_top_k: int,
+    local_branching_enabled: bool,
+    local_branching_delta_ratio: float,
+    local_branching_max_ops: int,
 ) -> None:
     """Generate all applicable Benders cuts from subproblem solutions.
 
@@ -1184,6 +1228,7 @@ def _generate_all_cuts(
         2. Setup-cost cut (SynAPS extension for SDST)
         3. Load-balance cut (Hooker 2007, §7.3)
         4. Critical-path cut (Naderi & Roshanaei 2022)
+        5. Local-branching cut (few-but-strong neighborhood exclusion)
     """
     setup_lookup = {
         (e.work_center_id, e.from_state_id, e.to_state_id): e.setup_minutes
@@ -1202,6 +1247,7 @@ def _generate_all_cuts(
             machine_loads[a.work_center_id] = end_offset
 
     # 1. Capacity cut: bottleneck machine
+    bottleneck_ops: set[UUID] = set()
     if machine_loads:
         bottleneck_wc = max(machine_loads, key=machine_loads.get)  # type: ignore[arg-type]
         bottleneck_ops = {
@@ -1222,6 +1268,7 @@ def _generate_all_cuts(
     for a in sub_assignments:
         assignments_by_machine[_assignment_sequence_key(a)].append(a)
 
+    machine_setup_profiles: list[tuple[float, set[UUID], float]] = []
     for (wc_id, _lane_id), m_assignments in assignments_by_machine.items():
         if len(m_assignments) < 2:
             continue
@@ -1246,12 +1293,25 @@ def _generate_all_cuts(
             for a in m_assignments
             if a.operation_id in ops_by_id
         )
+        machine_setup_profiles.append(
+            (
+                actual_setup_total,
+                {a.operation_id for a in m_assignments},
+                processing_total + actual_setup_total,
+            )
+        )
+
+    for _setup_total, setup_ops, setup_rhs in sorted(
+        machine_setup_profiles,
+        key=lambda item: item[0],
+        reverse=True,
+    )[:setup_cut_top_k]:
         benders_cuts.append(
             _BendersCut(
                 assignment_map=dict(assignment_map),
                 kind="setup_cost",
-                rhs=processing_total + actual_setup_total,
-                bottleneck_ops={a.operation_id for a in m_assignments},
+                rhs=setup_rhs,
+                bottleneck_ops=setup_ops,
             )
         )
 
@@ -1288,6 +1348,37 @@ def _generate_all_cuts(
                 bottleneck_ops=set(critical_ops),
             )
         )
+
+    # 5. Few-but-strong local branching cut (optional)
+    if local_branching_enabled and assignment_map:
+        scoped_ops: list[UUID]
+        if critical_ops:
+            scoped_ops = list(critical_ops)
+        elif bottleneck_ops:
+            scoped_ops = list(bottleneck_ops)
+        else:
+            scoped_ops = list(assignment_map.keys())
+
+        if len(scoped_ops) > local_branching_max_ops:
+            scoped_ops = sorted(
+                scoped_ops,
+                key=lambda op_id: ops_by_id.get(op_id).base_duration_min
+                if ops_by_id.get(op_id) is not None
+                else 0,
+                reverse=True,
+            )[:local_branching_max_ops]
+
+        if scoped_ops:
+            delta = max(1, int(round(len(scoped_ops) * local_branching_delta_ratio)))
+            rhs = max(0, len(scoped_ops) - delta)
+            benders_cuts.append(
+                _BendersCut(
+                    assignment_map=dict(assignment_map),
+                    kind="local_branching",
+                    rhs=float(rhs),
+                    bottleneck_ops=set(scoped_ops),
+                )
+            )
 
 
 def _find_critical_path(

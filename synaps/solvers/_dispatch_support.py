@@ -55,7 +55,10 @@ class MachineIndex:
         self._by_machine: dict[Any, list[Assignment]] = {}
         self._all: list[Assignment] = []
         self._setup_window_starts: dict[Any, float] | None = None
-        self._resource_windows_cache: dict[frozenset[Any], dict[Any, list[tuple[float, float, int]]]] = {}
+        self._resource_windows_cache: dict[
+            frozenset[Any],
+            dict[Any, ResourceWindowSeries],
+        ] = {}
 
     # -- mutators ---------------------------------------------------------
 
@@ -82,7 +85,7 @@ class MachineIndex:
 
     def get_resource_windows(
         self, required_resource_ids: set[Any],
-    ) -> dict[Any, list[tuple[float, float, int]]]:
+    ) -> dict[Any, ResourceWindowSeries]:
         key = frozenset(required_resource_ids)
         if key not in self._resource_windows_cache:
             self._resource_windows_cache[key] = _resource_windows_by_resource(
@@ -122,6 +125,14 @@ class SlotCandidate:
     setup_minutes: int
     material_loss: float
     aux_resource_ids: list[UUID]
+
+
+@dataclass(frozen=True)
+class ResourceWindowSeries:
+    windows: list[tuple[float, float, int]]
+    start_offsets: list[float]
+    end_offsets: list[float]
+    quantities: list[int]
 
 
 def recompute_assignment_setups(
@@ -218,7 +229,7 @@ def _assignment_setup_window_starts(
 
 def _resource_is_feasible(
     context: DispatchContext,
-    resource_windows_by_resource: dict[UUID, list[tuple[float, float, int]]],
+    resource_windows_by_resource: dict[UUID, ResourceWindowSeries],
     operation_id: UUID,
     start_offset: float,
     end_offset: float,
@@ -231,11 +242,13 @@ def _resource_is_feasible(
         resource = context.resources_by_id.get(requirement.aux_resource_id)
         if resource is None:
             continue
-        resource_windows = resource_windows_by_resource.get(requirement.aux_resource_id, [])
+        resource_windows = resource_windows_by_resource.get(requirement.aux_resource_id)
+        if resource_windows is None:
+            continue
         if not resource_capacity_window_is_feasible(
-            window_starts=[window[0] for window in resource_windows],
-            window_ends=[window[1] for window in resource_windows],
-            window_quantities=[window[2] for window in resource_windows],
+            window_starts=resource_windows.start_offsets,
+            window_ends=resource_windows.end_offsets,
+            window_quantities=resource_windows.quantities,
             candidate_start=candidate_window_start,
             candidate_end=end_offset,
             requested_quantity=requirement.quantity_needed,
@@ -251,7 +264,7 @@ def _resource_windows_by_resource(
     scheduled_assignments: list[Assignment],
     setup_window_starts: dict[Any, float],
     required_resource_ids: set[UUID],
-) -> dict[UUID, list[tuple[float, float, int]]]:
+) -> dict[UUID, ResourceWindowSeries]:
     resource_windows: dict[UUID, list[tuple[float, float, int]]] = {
         resource_id: [] for resource_id in required_resource_ids
     }
@@ -273,7 +286,15 @@ def _resource_windows_by_resource(
                 (start_offset, end_offset, requirement.quantity_needed)
             )
 
-    return resource_windows
+    return {
+        resource_id: ResourceWindowSeries(
+            windows=windows,
+            start_offsets=[window[0] for window in windows],
+            end_offsets=[window[1] for window in windows],
+            quantities=[window[2] for window in windows],
+        )
+        for resource_id, windows in resource_windows.items()
+    }
 
 
 def _candidate_starts(
@@ -283,7 +304,7 @@ def _candidate_starts(
     gap_start: float,
     latest_start: float,
     setup_minutes: int,
-    resource_windows_by_resource: dict[UUID, list[tuple[float, float, int]]] | None = None,
+    resource_windows_by_resource: dict[UUID, ResourceWindowSeries] | None = None,
 ) -> list[float]:
     starts = {gap_start}
     required_resource_ids = {
@@ -295,7 +316,7 @@ def _candidate_starts(
 
     if resource_windows_by_resource is not None:
         for resource_windows in resource_windows_by_resource.values():
-            for _other_start, other_end, _quantity in resource_windows:
+            for _other_start, other_end, _quantity in resource_windows.windows:
                 release_offset = other_end + setup_minutes
                 if gap_start <= release_offset <= latest_start:
                     starts.add(release_offset)

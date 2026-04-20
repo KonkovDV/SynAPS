@@ -1225,6 +1225,7 @@ class TestRhcInnerSolver:
     def test_rhc_greedy_fallback_still_works(self) -> None:
         """When inner_solver='greedy', RHC should still schedule via greedy dispatch."""
         from synaps.solvers.rhc_solver import RhcSolver
+        from synaps.validation import verify_schedule_result
 
         problem = _make_3state_problem(n_orders=6, ops_per_order=2)
         solver = RhcSolver()
@@ -1238,6 +1239,80 @@ class TestRhcInnerSolver:
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
         assert len(result.assignments) == len(problem.operations)
         assert result.metadata["inner_solver"] == "greedy"
+        assert result.metadata["acceleration"]["rhc_candidate_metrics_backend"] in {
+            "python",
+            "native",
+        }
+
+        verification = verify_schedule_result(problem, result)
+        assert verification.feasible, f"Violations: {verification.violations}"
+
+    def test_rhc_clips_assignments_beyond_horizon(self) -> None:
+        """RHC should never return assignments that end after planning horizon."""
+        from synaps.solvers.feasibility_checker import FeasibilityChecker
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        state_id = uuid4()
+        work_center_id = uuid4()
+        order_id = uuid4()
+        op1_id = uuid4()
+        op2_id = uuid4()
+
+        problem = ScheduleProblem(
+            states=[State(id=state_id, code="HZ", label="Horizon")],
+            orders=[
+                Order(
+                    id=order_id,
+                    external_ref="HZ-0001",
+                    due_date=HORIZON_START + timedelta(minutes=60),
+                    priority=1000,
+                )
+            ],
+            operations=[
+                Operation(
+                    id=op1_id,
+                    order_id=order_id,
+                    seq_in_order=0,
+                    state_id=state_id,
+                    base_duration_min=40,
+                    eligible_wc_ids=[work_center_id],
+                    predecessor_op_id=None,
+                ),
+                Operation(
+                    id=op2_id,
+                    order_id=order_id,
+                    seq_in_order=1,
+                    state_id=state_id,
+                    base_duration_min=40,
+                    eligible_wc_ids=[work_center_id],
+                    predecessor_op_id=op1_id,
+                ),
+            ],
+            work_centers=[
+                WorkCenter(
+                    id=work_center_id,
+                    code="HZ-M1",
+                    capability_group="hz",
+                    speed_factor=1.0,
+                )
+            ],
+            setup_matrix=[],
+            planning_horizon_start=HORIZON_START,
+            planning_horizon_end=HORIZON_START + timedelta(minutes=60),
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=60,
+            overlap_minutes=0,
+            inner_solver="greedy",
+            max_ops_per_window=10,
+            time_limit_s=20,
+        )
+
+        violations = FeasibilityChecker().check(problem, result.assignments)
+        assert all(v.kind != "HORIZON_BOUND_VIOLATION" for v in violations)
+        assert result.metadata["horizon_clipped_assignments"] >= 1
 
     def test_rhc_records_fallback_window_summary_when_inner_solver_is_rejected(
         self,

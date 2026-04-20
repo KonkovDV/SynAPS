@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from math import log
+from math import exp, log
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -12,10 +12,13 @@ if TYPE_CHECKING:
 _native_compute_atcs_log_score: Callable[..., float] | None = None
 _native_compute_atcs_log_scores_batch: Callable[..., list[float]] | None = None
 _native_resource_capacity_window_is_feasible: Callable[..., bool] | None = None
+_native_compute_rhc_candidate_metrics_batch: Callable[..., tuple[list[float], list[float]]] | None = None
 
 if os.getenv("SYNAPS_DISABLE_NATIVE_ACCELERATION") == "1":
     _native_compute_atcs_log_score = None
     _native_compute_atcs_log_scores_batch = None
+    _native_resource_capacity_window_is_feasible = None
+    _native_compute_rhc_candidate_metrics_batch = None
 else:
     try:
         import synaps_native as _synaps_native  # type: ignore[import-not-found]
@@ -23,6 +26,7 @@ else:
         _native_compute_atcs_log_score = None
         _native_compute_atcs_log_scores_batch = None
         _native_resource_capacity_window_is_feasible = None
+        _native_compute_rhc_candidate_metrics_batch = None
     else:
         _native_compute_atcs_log_score = getattr(
             _synaps_native,
@@ -37,6 +41,11 @@ else:
         _native_resource_capacity_window_is_feasible = getattr(
             _synaps_native,
             "resource_capacity_window_is_feasible",
+            None,
+        )
+        _native_compute_rhc_candidate_metrics_batch = getattr(
+            _synaps_native,
+            "compute_rhc_candidate_metrics_batch",
             None,
         )
 
@@ -93,6 +102,7 @@ def get_acceleration_status() -> dict[str, Any]:
                 _native_compute_atcs_log_score,
                 _native_compute_atcs_log_scores_batch,
                 _native_resource_capacity_window_is_feasible,
+                _native_compute_rhc_candidate_metrics_batch,
             )
         ),
         "atcs_log_score_backend": "native"
@@ -104,6 +114,9 @@ def get_acceleration_status() -> dict[str, Any]:
         "resource_capacity_backend": "native"
         if _native_resource_capacity_window_is_feasible is not None
         else "python",
+        "rhc_candidate_metrics_backend": "native"
+        if _native_compute_rhc_candidate_metrics_batch is not None
+        else "python",
         "native_module": "synaps_native"
         if any(
             backend is not None
@@ -111,6 +124,7 @@ def get_acceleration_status() -> dict[str, Any]:
                 _native_compute_atcs_log_score,
                 _native_compute_atcs_log_scores_batch,
                 _native_resource_capacity_window_is_feasible,
+                _native_compute_rhc_candidate_metrics_batch,
             )
         )
         else None,
@@ -240,9 +254,85 @@ def resource_capacity_window_is_feasible(
     return True
 
 
+def compute_rhc_candidate_metrics_batch(
+    *,
+    machine_available_offsets: list[float],
+    eligible_machine_indices: list[list[int]],
+    predecessor_end_offsets: list[float],
+    due_offsets: list[float],
+    rpt_tail_minutes: list[float],
+    order_weights: list[float],
+    p_tilde_minutes: list[float],
+    avg_total_p: float,
+    due_pressure_k1: float,
+    due_pressure_overdue_boost: float,
+) -> tuple[list[float], list[float]]:
+    """Return (slack, pressure) vectors for RHC window candidates.
+
+    Intended as an optional native seam for the hot candidate scoring loop in
+    ``RhcSolver`` while keeping a deterministic Python fallback.
+    """
+
+    n = len(eligible_machine_indices)
+    if not (
+        len(predecessor_end_offsets) == n
+        and len(due_offsets) == n
+        and len(rpt_tail_minutes) == n
+        and len(order_weights) == n
+        and len(p_tilde_minutes) == n
+    ):
+        raise ValueError("RHC candidate metric vectors must have identical lengths")
+
+    machine_count = len(machine_available_offsets)
+    for machine_indices in eligible_machine_indices:
+        for machine_idx in machine_indices:
+            if machine_idx < 0 or machine_idx >= machine_count:
+                raise ValueError("eligible machine index is out of range")
+
+    if _native_compute_rhc_candidate_metrics_batch is not None:
+        slacks, pressures = _native_compute_rhc_candidate_metrics_batch(
+            machine_available_offsets,
+            eligible_machine_indices,
+            predecessor_end_offsets,
+            due_offsets,
+            rpt_tail_minutes,
+            order_weights,
+            p_tilde_minutes,
+            avg_total_p,
+            due_pressure_k1,
+            due_pressure_overdue_boost,
+        )
+        return ([float(value) for value in slacks], [float(value) for value in pressures])
+
+    safe_pressure_denominator = max(due_pressure_k1 * avg_total_p, 1e-6)
+    slacks: list[float] = []
+    pressures: list[float] = []
+    for i, machine_indices in enumerate(eligible_machine_indices):
+        if machine_indices:
+            earliest_machine_ready = min(
+                machine_available_offsets[machine_idx]
+                for machine_idx in machine_indices
+            )
+        else:
+            earliest_machine_ready = 0.0
+
+        est_offset = max(predecessor_end_offsets[i], earliest_machine_ready)
+        slack = due_offsets[i] - (est_offset + rpt_tail_minutes[i])
+        pressure = (order_weights[i] / max(p_tilde_minutes[i], 1e-6)) * exp(
+            -max(0.0, slack) / safe_pressure_denominator
+        )
+        if slack <= 0.0:
+            pressure *= due_pressure_overdue_boost
+        slacks.append(slack)
+        pressures.append(pressure)
+
+    return slacks, pressures
+
+
 __all__ = [
     "compute_atcs_log_score",
     "compute_atcs_log_scores_batch",
+    "compute_rhc_candidate_metrics_batch",
     "get_acceleration_status",
     "resource_capacity_window_is_feasible",
 ]

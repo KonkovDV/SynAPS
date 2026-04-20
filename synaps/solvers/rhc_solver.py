@@ -16,7 +16,7 @@ the CP-SAT / ALNS sweet spot (≤5000 ops per window).
 
 from __future__ import annotations
 
-from collections import deque
+from collections import defaultdict, deque
 from heapq import heappop, heappush
 import logging
 import math
@@ -24,6 +24,10 @@ import time
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
+from synaps.accelerators import (
+    compute_rhc_candidate_metrics_batch,
+    get_acceleration_status,
+)
 from synaps.model import (
     Assignment,
     ObjectiveValues,
@@ -68,6 +72,7 @@ class RhcSolver(BaseSolver):
 
     def solve(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
         t0 = time.monotonic()
+        acceleration_status = get_acceleration_status()
 
         # Parameters
         window_minutes: int = int(kwargs.get("window_minutes", 480))
@@ -322,6 +327,7 @@ class RhcSolver(BaseSolver):
         hybrid_route_attempts = 0
         hybrid_route_activations = 0
         inner_fallback_windows = 0
+        horizon_clipped_assignments = 0
         time_limit_reached = False
         fallback_repair_attempted = False
         fallback_repair_skipped = False
@@ -408,6 +414,184 @@ class RhcSolver(BaseSolver):
 
         def global_time_exceeded() -> bool:
             return (time.monotonic() - t0) > time_limit_s
+
+        def collect_commit_candidates(
+            assignments: list[Assignment],
+            *,
+            commit_boundary: float,
+            commit_all: bool,
+            eligible_ids: set[UUID] | None = None,
+        ) -> dict[UUID, Assignment]:
+            nonlocal horizon_clipped_assignments
+
+            candidates: dict[UUID, Assignment] = {}
+            for assignment in assignments:
+                op_id = assignment.operation_id
+                if op_id in committed_op_ids:
+                    continue
+                if eligible_ids is not None and op_id not in eligible_ids:
+                    continue
+
+                start_offset = (assignment.start_time - horizon_start).total_seconds() / 60.0
+                end_offset = (assignment.end_time - horizon_start).total_seconds() / 60.0
+                if end_offset > horizon_minutes + 1e-9:
+                    horizon_clipped_assignments += 1
+                    continue
+
+                if start_offset < commit_boundary or commit_all:
+                    candidates[op_id] = assignment
+
+            # Commit set must be precedence-closed.
+            changed = True
+            while changed:
+                changed = False
+                for op_id in list(candidates.keys()):
+                    operation = ops_by_id.get(op_id)
+                    predecessor_op_id = (
+                        operation.predecessor_op_id if operation is not None else None
+                    )
+                    if predecessor_op_id is None:
+                        continue
+                    if (
+                        predecessor_op_id not in committed_op_ids
+                        and predecessor_op_id not in candidates
+                    ):
+                        del candidates[op_id]
+                        changed = True
+
+            return candidates
+
+        def stabilize_temporal_consistency(
+            assignments: list[Assignment],
+            *,
+            max_passes: int = 8,
+        ) -> dict[str, int]:
+            """Repair residual precedence and machine/setup conflicts in-place.
+
+            The pass is forward-only (only shifts later), bounded, and intended
+            as a final consistency stabilization step before objective evaluation.
+            """
+
+            if not assignments:
+                return {
+                    "passes": 0,
+                    "precedence_shifts": 0,
+                    "machine_shifts": 0,
+                }
+
+            assignment_by_op: dict[UUID, Assignment] = {
+                assignment.operation_id: assignment for assignment in assignments
+            }
+            assigned_op_ids = set(assignment_by_op.keys())
+
+            indegree: dict[UUID, int] = {op_id: 0 for op_id in assigned_op_ids}
+            successors: dict[UUID, list[UUID]] = defaultdict(list)
+            for op_id in assigned_op_ids:
+                operation = ops_by_id.get(op_id)
+                if operation is None:
+                    continue
+                predecessor_op_id = operation.predecessor_op_id
+                if predecessor_op_id is None or predecessor_op_id not in assigned_op_ids:
+                    continue
+                successors[predecessor_op_id].append(op_id)
+                indegree[op_id] = indegree.get(op_id, 0) + 1
+
+            topo_queue = deque(
+                sorted(
+                    [op_id for op_id, deg in indegree.items() if deg == 0],
+                    key=lambda op_id: (
+                        ops_by_id[op_id].seq_in_order if op_id in ops_by_id else 0
+                    ),
+                )
+            )
+            topo_order: list[UUID] = []
+            while topo_queue:
+                op_id = topo_queue.popleft()
+                topo_order.append(op_id)
+                for succ_id in successors.get(op_id, []):
+                    indegree[succ_id] -= 1
+                    if indegree[succ_id] == 0:
+                        topo_queue.append(succ_id)
+
+            if len(topo_order) < len(assigned_op_ids):
+                remaining_ids = assigned_op_ids - set(topo_order)
+                topo_order.extend(
+                    sorted(
+                        remaining_ids,
+                        key=lambda op_id: (
+                            ops_by_id[op_id].seq_in_order if op_id in ops_by_id else 0
+                        ),
+                    )
+                )
+
+            precedence_shifts = 0
+            machine_shifts = 0
+            passes = 0
+
+            for pass_index in range(max_passes):
+                changed = False
+                passes = pass_index + 1
+
+                for op_id in topo_order:
+                    operation = ops_by_id.get(op_id)
+                    if operation is None or operation.predecessor_op_id is None:
+                        continue
+                    predecessor_assignment = assignment_by_op.get(operation.predecessor_op_id)
+                    current_assignment = assignment_by_op.get(op_id)
+                    if predecessor_assignment is None or current_assignment is None:
+                        continue
+                    if current_assignment.start_time < predecessor_assignment.end_time:
+                        delta = predecessor_assignment.end_time - current_assignment.start_time
+                        current_assignment.start_time += delta
+                        current_assignment.end_time += delta
+                        precedence_shifts += 1
+                        changed = True
+
+                assignments_by_machine: dict[UUID, list[Assignment]] = defaultdict(list)
+                for assignment in assignment_by_op.values():
+                    assignments_by_machine[assignment.work_center_id].append(assignment)
+
+                for work_center_id, machine_assignments in assignments_by_machine.items():
+                    machine_assignments.sort(key=lambda assignment: assignment.start_time)
+                    previous_assignment: Assignment | None = None
+                    for current_assignment in machine_assignments:
+                        if previous_assignment is None:
+                            previous_assignment = current_assignment
+                            continue
+
+                        previous_operation = ops_by_id.get(previous_assignment.operation_id)
+                        current_operation = ops_by_id.get(current_assignment.operation_id)
+                        required_setup = 0
+                        if previous_operation is not None and current_operation is not None:
+                            required_setup = dispatch_context.setup_minutes.get(
+                                (
+                                    work_center_id,
+                                    previous_operation.state_id,
+                                    current_operation.state_id,
+                                ),
+                                0,
+                            )
+
+                        required_start = previous_assignment.end_time + timedelta(
+                            minutes=required_setup,
+                        )
+                        if current_assignment.start_time < required_start:
+                            delta = required_start - current_assignment.start_time
+                            current_assignment.start_time += delta
+                            current_assignment.end_time += delta
+                            machine_shifts += 1
+                            changed = True
+
+                        previous_assignment = current_assignment
+
+                if not changed:
+                    break
+
+            return {
+                "passes": passes,
+                "precedence_shifts": precedence_shifts,
+                "machine_shifts": machine_shifts,
+            }
 
         while window_start_offset < horizon_minutes:
             if max_windows is not None and window_count >= max_windows:
@@ -528,18 +712,30 @@ class RhcSolver(BaseSolver):
                     end_offset,
                 )
 
-            candidate_slack_by_id: dict[UUID, float] = {}
-            candidate_pressure_by_id: dict[UUID, float] = {}
-            for op in ordered_window_candidate_ops:
-                eligible_wc_ids = op_eligible_wc_ids[op.id]
-                if eligible_wc_ids:
-                    earliest_machine_ready = min(
-                        machine_available_offsets.get(wc_id, 0.0)
-                        for wc_id in eligible_wc_ids
-                    )
-                else:
-                    earliest_machine_ready = 0.0
+            ordered_machine_ids = [work_center.id for work_center in problem.work_centers]
+            machine_available_offsets_vector = [
+                machine_available_offsets[machine_id]
+                for machine_id in ordered_machine_ids
+            ]
+            machine_index_by_id = {
+                machine_id: machine_index
+                for machine_index, machine_id in enumerate(ordered_machine_ids)
+            }
 
+            eligible_machine_indices = [
+                [
+                    machine_index_by_id[wc_id]
+                    for wc_id in op_eligible_wc_ids[op.id]
+                    if wc_id in machine_index_by_id
+                ]
+                for op in ordered_window_candidate_ops
+            ]
+            predecessor_end_offsets: list[float] = []
+            due_offsets: list[float] = []
+            rpt_tail_minutes: list[float] = []
+            order_weights: list[float] = []
+            p_tilde_minutes: list[float] = []
+            for op in ordered_window_candidate_ops:
                 predecessor_end = 0.0
                 if op.predecessor_op_id is not None:
                     predecessor_assignment = committed_assignment_by_op.get(op.predecessor_op_id)
@@ -549,26 +745,54 @@ class RhcSolver(BaseSolver):
                         ).total_seconds() / 60.0
                     else:
                         predecessor_end = op_earliest.get(op.id, 0.0)
-                est_offset = max(predecessor_end, earliest_machine_ready)
+                predecessor_end_offsets.append(predecessor_end)
 
-                due_offset = order_due_offsets.get(op.order_id, horizon_minutes)
-                rpt_tail = op_tail_rpt_by_id.get(op.id, op_mean_duration_by_id.get(op.id, 1.0))
-                slack = due_offset - (est_offset + rpt_tail)
-                candidate_slack_by_id[op.id] = slack
+                due_offsets.append(order_due_offsets.get(op.order_id, horizon_minutes))
+                rpt_tail_minutes.append(
+                    op_tail_rpt_by_id.get(op.id, op_mean_duration_by_id.get(op.id, 1.0))
+                )
 
-                order_weight = max(
-                    1.0,
-                    float(orders_by_id[op.order_id].priority)
-                    if op.order_id in orders_by_id
-                    else 1.0,
+                order_weights.append(
+                    max(
+                        1.0,
+                        float(orders_by_id[op.order_id].priority)
+                        if op.order_id in orders_by_id
+                        else 1.0,
+                    )
                 )
-                p_tilde = op_mean_duration_by_id.get(op.id, max(op.base_duration_min, 1.0))
-                pressure = (order_weight / max(p_tilde, 1e-6)) * math.exp(
-                    -max(0.0, slack) / max(due_pressure_k1 * avg_total_p, 1e-6)
+                p_tilde_minutes.append(
+                    op_mean_duration_by_id.get(op.id, max(op.base_duration_min, 1.0))
                 )
-                if slack <= 0.0:
-                    pressure *= due_pressure_overdue_boost
-                candidate_pressure_by_id[op.id] = pressure
+
+            candidate_slacks, candidate_pressures = compute_rhc_candidate_metrics_batch(
+                machine_available_offsets=machine_available_offsets_vector,
+                eligible_machine_indices=eligible_machine_indices,
+                predecessor_end_offsets=predecessor_end_offsets,
+                due_offsets=due_offsets,
+                rpt_tail_minutes=rpt_tail_minutes,
+                order_weights=order_weights,
+                p_tilde_minutes=p_tilde_minutes,
+                avg_total_p=avg_total_p,
+                due_pressure_k1=due_pressure_k1,
+                due_pressure_overdue_boost=due_pressure_overdue_boost,
+            )
+
+            candidate_slack_by_id: dict[UUID, float] = {
+                op.id: slack
+                for op, slack in zip(
+                    ordered_window_candidate_ops,
+                    candidate_slacks,
+                    strict=True,
+                )
+            }
+            candidate_pressure_by_id: dict[UUID, float] = {
+                op.id: pressure
+                for op, pressure in zip(
+                    ordered_window_candidate_ops,
+                    candidate_pressures,
+                    strict=True,
+                )
+            }
 
             # Cap the window by configured budget and estimated machine throughput.
             uncovered_machines = {
@@ -799,20 +1023,19 @@ class RhcSolver(BaseSolver):
                         and inner_result.assignments
                     ):
                         # Map inner solver assignments into committed set
-                        committed_now = 0
-                        for a in inner_result.assignments:
-                            if a.operation_id not in committed_op_ids:
-                                start_offset = (
-                                    (a.start_time - horizon_start).total_seconds() / 60.0
-                                )
-                                if (
-                                    start_offset < commit_boundary
-                                    or window_end_offset >= horizon_minutes
-                                ):
-                                    committed_assignments.append(a)
-                                    committed_assignment_by_op[a.operation_id] = a
-                                    committed_op_ids.add(a.operation_id)
-                                    committed_now += 1
+                        commit_candidates = collect_commit_candidates(
+                            inner_result.assignments,
+                            commit_boundary=commit_boundary,
+                            commit_all=window_end_offset >= horizon_minutes,
+                        )
+                        committed_now = len(commit_candidates)
+                        for op_id, assignment in sorted(
+                            commit_candidates.items(),
+                            key=lambda item: item[1].start_time,
+                        ):
+                            committed_assignments.append(assignment)
+                            committed_assignment_by_op[op_id] = assignment
+                            committed_op_ids.add(op_id)
                         window_start_offset += window_minutes
                         window_solved_via_inner = True
                         append_inner_window_summary(
@@ -935,6 +1158,9 @@ class RhcSolver(BaseSolver):
                             )
                             if slot is None:
                                 continue
+                            if slot.end_offset > horizon_minutes + 1e-9:
+                                horizon_clipped_assignments += 1
+                                continue
                             if best_slot is None or slot.end_offset < best_slot.end_offset:
                                 best_slot = slot
                                 best_wc = wc_id
@@ -967,17 +1193,19 @@ class RhcSolver(BaseSolver):
                 fallback_iterations = inner_iter
 
                 # Commit assignments from this window
-                for a in scheduled_so_far:
-                    if a.operation_id in committed_op_ids:
-                        continue
-                    if a.operation_id not in window_scheduled_ids:
-                        continue
-                    start_offset = (a.start_time - horizon_start).total_seconds() / 60.0
-                    # Commit if starts before the overlap boundary, or if it's the last window
-                    if start_offset < commit_boundary or window_end_offset >= horizon_minutes:
-                        committed_assignments.append(a)
-                        committed_assignment_by_op[a.operation_id] = a
-                        committed_op_ids.add(a.operation_id)
+                commit_candidates = collect_commit_candidates(
+                    scheduled_so_far,
+                    commit_boundary=commit_boundary,
+                    commit_all=window_end_offset >= horizon_minutes,
+                    eligible_ids=window_scheduled_ids,
+                )
+                for op_id, assignment in sorted(
+                    commit_candidates.items(),
+                    key=lambda item: item[1].start_time,
+                ):
+                    committed_assignments.append(assignment)
+                    committed_assignment_by_op[op_id] = assignment
+                    committed_op_ids.add(op_id)
 
                 if inner_solver_name != "greedy":
                     inner_fallback_windows += 1
@@ -1076,6 +1304,9 @@ class RhcSolver(BaseSolver):
                             )
                             if slot is None:
                                 continue
+                            if slot.end_offset > horizon_minutes + 1e-9:
+                                horizon_clipped_assignments += 1
+                                continue
                             if best_slot is None or slot.end_offset < best_slot.end_offset:
                                 best_slot = slot
                                 best_wc = wc_id
@@ -1105,6 +1336,11 @@ class RhcSolver(BaseSolver):
                         break
 
         # ------- Final objective evaluation -------
+        stabilization_pass_budget = 8 if len(committed_assignments) <= 5_000 else 5
+        temporal_stabilization = stabilize_temporal_consistency(
+            committed_assignments,
+            max_passes=stabilization_pass_budget,
+        )
         recompute_assignment_setups(committed_assignments, dispatch_context)
 
         if not committed_assignments:
@@ -1115,12 +1351,15 @@ class RhcSolver(BaseSolver):
                 duration_ms=elapsed_ms,
                 metadata={
                     "error": "no assignments produced",
+                    "acceleration": acceleration_status,
                     "windows": window_count,
                     "time_limit_reached": time_limit_reached,
+                    "horizon_clipped_assignments": horizon_clipped_assignments,
                     "fallback_repair_attempted": fallback_repair_attempted,
                     "fallback_repair_skipped": fallback_repair_skipped,
                     "fallback_repair_time_limited": fallback_repair_time_limited,
                     "ops_unscheduled": len(problem.operations),
+                    "temporal_stabilization": temporal_stabilization,
                 },
             )
 
@@ -1166,6 +1405,7 @@ class RhcSolver(BaseSolver):
             objective=final_obj,
             duration_ms=elapsed_ms,
             metadata={
+                "acceleration": acceleration_status,
                 "windows_solved": window_count,
                 "ops_scheduled": scheduled_count,
                 "ops_total": total_ops,
@@ -1239,6 +1479,8 @@ class RhcSolver(BaseSolver):
                 )
                 if hybrid_route_attempts > 0
                 else 0.0,
+                "horizon_clipped_assignments": horizon_clipped_assignments,
+                "temporal_stabilization": temporal_stabilization,
                 "time_limit_reached": time_limit_reached,
                 "fallback_repair_attempted": fallback_repair_attempted,
                 "fallback_repair_skipped": fallback_repair_skipped,
