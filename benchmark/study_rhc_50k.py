@@ -472,6 +472,32 @@ def _summarize_solver_records(
         for record in records
         if "inner_fallback_kpi_passed" in record.get("solver_metadata", {})
     ]
+    native_acceleration_flags: list[bool] = []
+    warm_start_window_flags: list[bool] = []
+    warm_start_completed_counts: list[float] = []
+
+    for record in records:
+        solver_metadata = record.get("solver_metadata", {})
+        acceleration = solver_metadata.get("acceleration")
+        if isinstance(acceleration, dict):
+            backend = acceleration.get(
+                "rhc_candidate_metrics_np_backend",
+                acceleration.get("rhc_candidate_metrics_backend"),
+            )
+            if backend in {"native", "python"}:
+                native_acceleration_flags.append(backend == "native")
+
+        inner_window_summaries = solver_metadata.get("inner_window_summaries")
+        if isinstance(inner_window_summaries, list):
+            for summary in inner_window_summaries:
+                if not isinstance(summary, dict):
+                    continue
+                if "warm_start_used" in summary:
+                    warm_start_window_flags.append(bool(summary["warm_start_used"]))
+                if "warm_start_completed_assignments" in summary:
+                    warm_start_completed_counts.append(
+                        float(summary["warm_start_completed_assignments"])
+                    )
 
     summary: dict[str, Any] = {
         "instance_count": len(records),
@@ -522,6 +548,23 @@ def _summarize_solver_records(
         summary["inner_fallback_kpi_pass_rate"] = round(
             sum(1 for passed in fallback_kpi_pass_flags if passed)
             / len(fallback_kpi_pass_flags),
+            3,
+        )
+    if native_acceleration_flags:
+        summary["native_acceleration_rate"] = round(
+            sum(1 for enabled in native_acceleration_flags if enabled)
+            / len(native_acceleration_flags),
+            3,
+        )
+    if warm_start_window_flags:
+        summary["mean_warm_start_window_rate"] = round(
+            sum(1 for used in warm_start_window_flags if used)
+            / len(warm_start_window_flags),
+            3,
+        )
+    if warm_start_completed_counts:
+        summary["mean_warm_start_completed_assignments"] = round(
+            statistics.mean(warm_start_completed_counts),
             3,
         )
     return summary
