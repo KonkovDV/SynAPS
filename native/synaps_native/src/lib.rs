@@ -5,23 +5,39 @@ use rayon::prelude::*;
 
 // ---------------------------------------------------------------------------
 // Fast approximate exp (Schraudolph 1999, IEEE-754 bit trick).
-// Max relative error ≈ 4% — perfectly acceptable for scheduling pressure
-// heuristics where we need throughput, not full IEEE precision.
+// Max relative error ≈ 4% — acceptable for scheduling pressure heuristics
+// where ranking throughput matters more than full IEEE precision.
+//
+// The bit-trick reconstruction relies on little-endian IEEE-754 layout.
+// On non-little-endian targets, we fall back to exact exp() to preserve
+// correctness instead of emitting a silently wrong approximation.
 // ---------------------------------------------------------------------------
 
 #[inline(always)]
 fn fast_exp(x: f64) -> f64 {
-    // Clamp to avoid overflow/underflow in the bit trick.
-    let x = x.max(-700.0).min(700.0);
+    fast_exp_impl(x.clamp(-700.0, 700.0))
+}
+
+#[cfg(target_endian = "little")]
+#[inline(always)]
+fn fast_exp_impl(x: f64) -> f64 {
     let a = 1048576.0 / core::f64::consts::LN_2; // 2^20 / ln(2)
     let b = 1072693248.0 - 60801.0; // bias correction (Schraudolph constant)
     let bits = ((a * x + b) as i64) << 32;
     f64::from_bits(bits as u64)
 }
 
+#[cfg(not(target_endian = "little"))]
+#[inline(always)]
+fn fast_exp_impl(x: f64) -> f64 {
+    x.exp()
+}
+
 // ---------------------------------------------------------------------------
 // Wrapper to send raw pointer across thread boundary.
-// SAFETY: caller must guarantee disjoint-index writes (rayon for_each).
+// SAFETY: caller must guarantee disjoint-index writes and that the backing
+// buffer outlives the rayon region. This establishes memory safety only; it
+// does not eliminate cache-line contention or other performance effects.
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy)]

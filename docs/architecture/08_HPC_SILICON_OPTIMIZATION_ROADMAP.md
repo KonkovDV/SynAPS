@@ -65,7 +65,7 @@ let pressure = pressure * (1.0 + overdue * (due_pressure_overdue_boost - 1.0));
 
 `.cargo/config.toml` enables LLVM to use AVX2/FMA3 instructions during auto-vectorization. The `fast_exp` computation and min-scan loop are primary beneficiaries.
 
-**Critical**: The config explicitly targets `native` (which resolves to AVX2 on Raptor Lake), NOT AVX-512 which would cause `Illegal Instruction` on this hardware.
+**Critical**: The config explicitly targets `native` (which resolves to AVX2 on the profiled Raptor Lake workstation), NOT AVX-512 which would cause `Illegal Instruction` on this hardware. This is a deployment-specific constraint, not a universal claim about every future SynAPS build.
 
 ---
 
@@ -251,7 +251,9 @@ Even on CPUs where AVX-512 is available (Xeon, older i9), it causes:
 - **License switching**: transitioning to/from AVX-512 incurs ~10 μs penalty
 - **Thermal pressure**: doubled power draw per vector operation
 
-For SynAPS on Raptor Lake: **AVX2 is the ceiling**. The 256-bit width processing 4×f64 is the maximum vector throughput achievable.
+For SynAPS on the profiled Raptor Lake workstation: **AVX2 is the ceiling today**. The 256-bit width processing 4×f64 is the maximum vector throughput achievable on this machine.
+
+That is not a universal statement about all future SynAPS deployments. On AVX-512-capable non-hybrid servers, a separate wheel or runtime-dispatch path is possible in principle, but it is not implemented in this repository today and must be justified against downclock and license-switching costs with benchmark evidence.
 
 ### 6.3 DDR5-6000 Bandwidth Topology (EXPO CL30 Active)
 

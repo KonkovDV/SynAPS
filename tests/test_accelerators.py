@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import importlib
 import sys
-from math import exp, log
+from math import exp, isfinite, log
 from types import SimpleNamespace
 
 import pytest
@@ -200,6 +200,25 @@ def test_compute_rhc_candidate_metrics_batch_matches_python_reference() -> None:
 
     assert slacks == expected_slacks
     assert pressures == pytest.approx(expected_pressures, **_rhc_pressure_tolerance())
+
+
+def test_compute_rhc_candidate_metrics_batch_keeps_extreme_slack_finite() -> None:
+    slacks, pressures = accelerators.compute_rhc_candidate_metrics_batch(
+        machine_available_offsets=[0.0],
+        eligible_machine_indices=[[0]],
+        predecessor_end_offsets=[0.0],
+        due_offsets=[1_000_000_000.0],
+        rpt_tail_minutes=[1.0],
+        order_weights=[1.0],
+        p_tilde_minutes=[1.0],
+        avg_total_p=1.0,
+        due_pressure_k1=1e-6,
+        due_pressure_overdue_boost=1.0,
+    )
+
+    assert slacks == [999_999_999.0]
+    assert isfinite(pressures[0])
+    assert 0.0 <= pressures[0] < 1e-100
 
 
 def test_compute_rhc_candidate_metrics_batch_uses_native_backend_when_available(

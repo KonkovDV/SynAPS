@@ -31,7 +31,7 @@ The current implementation is **architecturally sound** — it follows PyO3 best
 |---|-------------|--------|-----------|
 | L1 | Branchless overdue boost | **IMPLEMENTED** | `cmov`/blend replaces `if slack <= 0` branch |
 | L2 | P/E core work-stealing | **IMPLEMENTED** | `RAYON_MIN_CHUNK` reduced from 1024 → 256 |
-| L3 | AVX2+FMA3 targeting | **CONFIGURED** | `target-cpu=native` (NOT AVX-512, disabled on Raptor Lake) |
+| L3 | AVX2+FMA3 targeting | **CONFIGURED** | Current profiled path uses `target-cpu=native` on Raptor Lake (AVX2/FMA3, not AVX-512) |
 | L4 | Software prefetch | **DOCUMENTED** | Roadmap item, awaiting Rust toolchain version confirmation |
 | L5 | Explicit AVX2 SIMD kernel | **DOCUMENTED** | Code sketch in HPC roadmap, implementation pending |
 | L6 | BIOS EXPO CL30 | **APPLIED ✓** | DDR5 CL40→CL30 activated (25% latency reduction, ~10 ns) |
@@ -230,7 +230,7 @@ Or in `.cargo/config.toml`:
 rustflags = ["-C", "target-cpu=native"]
 ```
 
-**Caveat:** This makes the binary non-portable. For distribution, use `target-cpu=x86-64-v3` (AVX2 baseline, covers ~95% of modern x86 CPUs) or provide multiple wheels.
+**Caveat:** This makes the binary non-portable. For distribution, use `target-cpu=x86-64-v3` (AVX2 baseline, covers most modern x86 CPUs), provide multiple wheels, or add runtime dispatch for server-class non-hybrid AVX-512 hosts.
 
 **Expected impact:** **1.1–1.4× faster** depending on whether LLVM auto-vectorizes the hot loop. The min-scan with 1–4 elements per row is too short to benefit from SIMD; the batch-level parallelism matters more. Biggest win is on the `fast_exp` computation and the overall instruction scheduling.
 
@@ -268,7 +268,7 @@ fn fast_exp_remez(x: f64) -> f64 {
 
 2. **`fast-math` crate** (docs.rs/fast-math, 0.1.1) — provides `fast_math::exp()` with better error bounds.
 
-**Recommendation:** Keep current `fast_exp` for now (it works). Consider upgrading to the Remez variant if numerical accuracy becomes a concern in solver convergence. The throughput difference is negligible.
+**Recommendation:** Keep current `fast_exp` for now (it works). As of 2026-04-21, the native kernel clamps the input to `[-700, 700]` and uses the Schraudolph bit trick only on little-endian targets, falling back to exact `exp()` elsewhere. Consider upgrading to the Remez variant if numerical accuracy becomes a concern in solver convergence. The throughput difference is negligible.
 
 ---
 

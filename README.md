@@ -128,7 +128,7 @@ python -m pytest tests -q
 
 SynAPS includes an optional Rust-based acceleration kernel (`synaps_native` v0.3.0) for hot-path scheduling computations via PyO3.
 
-**Target hardware**: Intel 12th–14th Gen (Raptor Lake) hybrid P/E architectures with AVX2+FMA3. AVX-512 is **not** used — it is hardware-disabled on hybrid CPUs.
+**Profiled target hardware**: Intel 12th–14th Gen (Raptor Lake) hybrid P/E architectures with AVX2+FMA3. AVX-512 is **not** used on this profiled path because it is hardware-disabled on hybrid CPUs.
 
 Implemented optimizations (v0.3.0):
 
@@ -141,6 +141,8 @@ Implemented optimizations (v0.3.0):
 | **fast_exp (Schraudolph)** | IEEE-754 bit trick, ~4% error, monotonic | Free vs `libm::exp()` |
 
 The kernel is optional — SynAPS falls back to pure Python when not available.
+
+These optimization notes describe the profiled Raptor Lake workstation, not a universal ISA ceiling for every future SynAPS deployment. On AVX-512-capable non-hybrid servers, a separate runtime-dispatch or wheel-split strategy remains possible in principle; the current repository ships and benchmarks the AVX2/FMA3 path only.
 
 Build the native extension:
 
