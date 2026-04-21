@@ -305,6 +305,10 @@ def compute_rhc_candidate_metrics_batch(
 
     Intended as an optional native seam for the hot candidate scoring loop in
     ``RhcSolver`` while keeping a deterministic Python fallback.
+
+    Note: the native backend is allowed to use a monotone fast-exp
+    approximation for the pressure term. Callers should treat pressure as a
+    ranking heuristic, not as a bit-for-bit scientific reference value.
     """
 
     n = len(eligible_machine_indices)
@@ -401,6 +405,10 @@ def compute_rhc_candidate_metrics_batch_np(
     Prefers the _np_jagged variant (CSR built in Rust, avoids Python loop),
     then falls back to the _np variant (pre-built CSR from Python), then
     to the legacy Vec path, then to pure-Python.
+
+    Native backends may use the same monotone fast-exp approximation as the
+    list-based API, so pressure should be treated as a ranking signal rather
+    than a bit-for-bit scientific reference value.
     """
     # P3: CSR-in-Rust path — fastest, no Python loop.
     if _native_compute_rhc_candidate_metrics_batch_np_jagged is not None and _HAS_NUMPY:

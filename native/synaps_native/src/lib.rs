@@ -24,9 +24,18 @@ fn fast_exp(x: f64) -> f64 {
 // SAFETY: caller must guarantee disjoint-index writes (rayon for_each).
 // ---------------------------------------------------------------------------
 
+#[derive(Clone, Copy)]
 struct SendPtr(*mut f64);
 unsafe impl Send for SendPtr {}
 unsafe impl Sync for SendPtr {}
+
+impl SendPtr {
+    /// Write value at index. SAFETY: caller must ensure disjoint-index access.
+    #[inline(always)]
+    unsafe fn write_at(self, i: usize, val: f64) {
+        *self.0.add(i) = val;
+    }
+}
 
 /// Minimum rayon chunk size for lightweight per-element kernels.
 /// Tuned for hybrid P-core/E-core architectures (Intel 12th–14th Gen Raptor Lake):
@@ -338,8 +347,8 @@ fn compute_rhc_candidate_metrics_batch(
                 );
                 // SAFETY: each rayon task writes to a unique index i — no data races.
                 unsafe {
-                    *s_ptr.0.add(i) = slack;
-                    *p_ptr.0.add(i) = pressure;
+                    s_ptr.write_at(i, slack);
+                    p_ptr.write_at(i, pressure);
                 }
             });
     });
@@ -437,8 +446,8 @@ fn compute_rhc_candidate_metrics_batch_np<'py>(
                     due_pressure_overdue_boost,
                 );
                 unsafe {
-                    *s_ptr.0.add(i) = slack;
-                    *p_ptr.0.add(i) = pressure;
+                    s_ptr.write_at(i, slack);
+                    p_ptr.write_at(i, pressure);
                 }
             });
     });
@@ -532,8 +541,8 @@ fn compute_rhc_candidate_metrics_batch_np_jagged<'py>(
                     due_pressure_overdue_boost,
                 );
                 unsafe {
-                    *s_ptr.0.add(i) = slack;
-                    *p_ptr.0.add(i) = pressure;
+                    s_ptr.write_at(i, slack);
+                    p_ptr.write_at(i, pressure);
                 }
             });
     });

@@ -5,7 +5,7 @@
 **Goal:** 50 000+ candidates/batch at high speed on Rust  
 **Scope:** lib.rs (~350 LOC), accelerators.py (430 LOC), Cargo.toml, benchmark harnesses  
 **Method:** Static analysis + SOTA literature review + CPU-Z hardware profiling (April 2026)  
-**Hardware:** Intel Core i5-13600KF (Raptor Lake), 6P+8E, DDR5-6000 CL40, Gigabyte B760
+**Hardware:** Intel Core i5-13600KF (Raptor Lake), 6P+8E, DDR5-6000 **CL30 EXPO** (1.350V), Gigabyte B760 (BIOS F13)
 
 ---
 
@@ -34,7 +34,7 @@ The current implementation is **architecturally sound** — it follows PyO3 best
 | L3 | AVX2+FMA3 targeting | **CONFIGURED** | `target-cpu=native` (NOT AVX-512, disabled on Raptor Lake) |
 | L4 | Software prefetch | **DOCUMENTED** | Roadmap item, awaiting Rust toolchain version confirmation |
 | L5 | Explicit AVX2 SIMD kernel | **DOCUMENTED** | Code sketch in HPC roadmap, implementation pending |
-| L6 | BIOS EXPO CL30 | **RECOMMENDED** | DDR5 CL40→CL30 for ~15-20% free latency reduction |
+| L6 | BIOS EXPO CL30 | **APPLIED ✓** | DDR5 CL40→CL30 activated (25% latency reduction, ~10 ns) |
 
 **Compound result:** P1–P6 delivered 3–8× Rust-over-Python gain. L1–L3 add an estimated further 15–40% on top for the target hardware profile.
 
@@ -81,6 +81,20 @@ panic = "abort"    # ✓ No unwinding overhead
 ```
 
 Missing: `strip = true` (see P6), and no RUSTFLAGS guidance for `target-cpu=native`.
+
+### 2.4 Windows GNU Linker Reliability (APPLIED)
+
+On Windows hosts with non-ASCII user profile paths, `maturin develop --release` can fail when the GNU toolchain falls back to external MinGW `ld.exe`. The failure mode is unrelated to solver logic; it is a build-path encoding issue.
+
+`.cargo/config.toml` now adds a Windows GNU override:
+
+```toml
+[target.x86_64-pc-windows-gnu]
+linker = "rust-lld"
+rustflags = ["-C", "target-cpu=native", "-C", "link-self-contained=yes"]
+```
+
+This forces Rust's bundled LLD instead of the external GNU linker driver and avoids the known Unicode-path failure mode on developer machines with Cyrillic usernames. This is a build-stability fix, not a runtime optimization.
 
 ---
 

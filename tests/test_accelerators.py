@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 import importlib
-from math import exp, log
 import sys
+from math import exp, log
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
 
 import pytest
+
 from synaps import accelerators
 
-if TYPE_CHECKING:
-    pass
+
+def _rhc_pressure_tolerance() -> dict[str, float]:
+    """Allow native fast_exp approximation while keeping Python exact."""
+
+    status = accelerators.get_acceleration_status()
+    if status["rhc_candidate_metrics_backend"] == "native":
+        return {"rel": 0.05, "abs": 1e-9}
+    return {"rel": 1e-12, "abs": 1e-12}
 
 
 def test_compute_atcs_log_score_matches_python_reference() -> None:
@@ -193,7 +199,7 @@ def test_compute_rhc_candidate_metrics_batch_matches_python_reference() -> None:
     expected_pressures[2] *= exp(-(5.0 / 12.0))
 
     assert slacks == expected_slacks
-    assert pressures == pytest.approx(expected_pressures)
+    assert pressures == pytest.approx(expected_pressures, **_rhc_pressure_tolerance())
 
 
 def test_compute_rhc_candidate_metrics_batch_uses_native_backend_when_available(
@@ -293,7 +299,7 @@ def test_compute_rhc_candidate_metrics_batch_overdue_applies_boost() -> None:
     assert slacks == [-5.0]
     # pressure = (1/4) * exp(-max(0,-5)/8) * 1.5 = 0.25 * 1.0 * 1.5 = 0.375
     expected = (1.0 / 4.0) * exp(0.0) * 1.5
-    assert pressures == pytest.approx([expected])
+    assert pressures == pytest.approx([expected], **_rhc_pressure_tolerance())
 
 
 def test_compute_rhc_candidate_metrics_batch_empty_candidates() -> None:
@@ -312,6 +318,68 @@ def test_compute_rhc_candidate_metrics_batch_empty_candidates() -> None:
     )
     assert slacks == []
     assert pressures == []
+
+
+def test_compute_rhc_candidate_metrics_batch_np_preserves_pressure_ranking() -> None:
+    """The 50k-oriented NumPy wrapper must preserve ranking against exact pressure."""
+
+    machine_available_offsets = [10.0, 30.0, 5.0, 20.0]
+    eligible_machine_indices = [
+        [0, 1],
+        [1],
+        [2, 3],
+        [0, 2],
+        [3],
+        [0, 1, 2, 3],
+        [2],
+        [1, 3],
+    ]
+    predecessor_end_offsets = [5.0, 40.0, 2.0, 11.0, 8.0, 0.0, 22.0, 17.0]
+    due_offsets = [50.0, 80.0, 10.0, 44.0, 31.0, 70.0, 120.0, 55.0]
+    rpt_tail_minutes = [10.0, 15.0, 3.0, 8.0, 7.0, 20.0, 11.0, 9.0]
+    order_weights = [2.0, 1.0, 1.0, 3.0, 1.5, 2.5, 0.9, 1.2]
+    p_tilde_minutes = [8.0, 20.0, 5.0, 9.0, 6.0, 13.0, 10.0, 7.0]
+    avg_total_p = 12.0
+    due_pressure_k1 = 1.0
+    due_pressure_overdue_boost = 1.25
+
+    slacks, pressures = accelerators.compute_rhc_candidate_metrics_batch_np(
+        machine_available_offsets=machine_available_offsets,
+        eligible_machine_indices=eligible_machine_indices,
+        predecessor_end_offsets=predecessor_end_offsets,
+        due_offsets=due_offsets,
+        rpt_tail_minutes=rpt_tail_minutes,
+        order_weights=order_weights,
+        p_tilde_minutes=p_tilde_minutes,
+        avg_total_p=avg_total_p,
+        due_pressure_k1=due_pressure_k1,
+        due_pressure_overdue_boost=due_pressure_overdue_boost,
+    )
+
+    safe_pressure_denominator = max(due_pressure_k1 * avg_total_p, 1e-6)
+    expected_slacks: list[float] = []
+    expected_pressures: list[float] = []
+    for i, machine_indices in enumerate(eligible_machine_indices):
+        earliest_machine_ready = min(
+            (machine_available_offsets[machine_idx] for machine_idx in machine_indices),
+            default=0.0,
+        )
+        est_offset = max(predecessor_end_offsets[i], earliest_machine_ready)
+        slack = due_offsets[i] - (est_offset + rpt_tail_minutes[i])
+        pressure = (order_weights[i] / max(p_tilde_minutes[i], 1e-6)) * exp(
+            -max(0.0, slack) / safe_pressure_denominator
+        )
+        if slack <= 0.0:
+            pressure *= due_pressure_overdue_boost
+        expected_slacks.append(slack)
+        expected_pressures.append(pressure)
+
+    assert slacks == expected_slacks
+    assert sorted(range(len(pressures)), key=lambda idx: pressures[idx], reverse=True) == sorted(
+        range(len(expected_pressures)),
+        key=lambda idx: expected_pressures[idx],
+        reverse=True,
+    )
 
 
 def test_resource_capacity_window_matches_python_reference() -> None:
