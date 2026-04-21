@@ -22,6 +22,7 @@ Start here if you want the larger system context around the current scheduling c
 - [06_LANGUAGE_AND_RUNTIME_STRATEGY.md](architecture/06_LANGUAGE_AND_RUNTIME_STRATEGY.md)
 - [07_RUNTIME_CONTRACT.md](architecture/07_RUNTIME_CONTRACT.md)
 - [08_HPC_SILICON_OPTIMIZATION_ROADMAP.md](architecture/08_HPC_SILICON_OPTIMIZATION_ROADMAP.md)
+- [LEVEL2_RUSTIFICATION.md](architecture/LEVEL2_RUSTIFICATION.md)
 
 ## Domain Parametrization
 

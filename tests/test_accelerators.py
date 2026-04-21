@@ -5,6 +5,7 @@ import sys
 from math import exp, isfinite, log
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from synaps import accelerators
@@ -541,3 +542,41 @@ def test_disable_native_acceleration_env_wins_over_available_module(
         monkeypatch.delenv("SYNAPS_DISABLE_NATIVE_ACCELERATION", raising=False)
         monkeypatch.delitem(sys.modules, "synaps_native", raising=False)
         importlib.reload(accelerators)
+
+
+def test_synaps_engine_load_graph_builds_successor_index() -> None:
+    native_module = importlib.import_module("synaps_native")
+
+    if not hasattr(native_module, "SynApsEngine"):
+        pytest.fail("synaps_native.SynApsEngine is missing")
+
+    engine = native_module.SynApsEngine(machine_count=3, avg_total_p=12.0)
+    engine.load_graph(
+        np.array([-1, 0, 0, 2], dtype=np.int64),
+        np.array([5.0, 7.0, 11.0, 13.0], dtype=np.float64),
+        np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float64),
+        np.array([6.0, 8.0, 10.0, 12.0], dtype=np.float64),
+    )
+
+    assert engine.graph_loaded() is True
+    assert engine.machine_count == 3
+    assert engine.avg_total_p == pytest.approx(12.0)
+    assert engine.operation_count() == 4
+    assert engine.successor_edge_count() == 3
+
+
+def test_synaps_engine_load_graph_rejects_length_mismatch() -> None:
+    native_module = importlib.import_module("synaps_native")
+
+    if not hasattr(native_module, "SynApsEngine"):
+        pytest.fail("synaps_native.SynApsEngine is missing")
+
+    engine = native_module.SynApsEngine(machine_count=1, avg_total_p=1.0)
+
+    with pytest.raises(ValueError, match="identical lengths"):
+        engine.load_graph(
+            np.array([-1, 0], dtype=np.int64),
+            np.array([5.0], dtype=np.float64),
+            np.array([1.0, 2.0], dtype=np.float64),
+            np.array([6.0, 7.0], dtype=np.float64),
+        )

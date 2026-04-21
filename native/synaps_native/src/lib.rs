@@ -69,6 +69,143 @@ impl SendPtr {
 /// See: Blumofe & Leiserson 1999, rayon `with_min_len` guidance.
 const RAYON_MIN_CHUNK: usize = 256;
 
+fn build_successor_index(predecessor_ids: &[i64]) -> PyResult<(Vec<usize>, Vec<usize>)> {
+    let op_count = predecessor_ids.len();
+    let mut successor_offsets = vec![0usize; op_count + 1];
+
+    for &predecessor_idx in predecessor_ids {
+        if predecessor_idx < 0 {
+            continue;
+        }
+
+        let predecessor_idx = predecessor_idx as usize;
+        if predecessor_idx >= op_count {
+            return Err(PyValueError::new_err(
+                "predecessor index is out of range",
+            ));
+        }
+
+        successor_offsets[predecessor_idx + 1] += 1;
+    }
+
+    for idx in 0..op_count {
+        successor_offsets[idx + 1] += successor_offsets[idx];
+    }
+
+    let mut write_positions = successor_offsets[..op_count].to_vec();
+    let mut successor_indices = vec![0usize; successor_offsets[op_count]];
+
+    for (child_idx, &predecessor_idx) in predecessor_ids.iter().enumerate() {
+        if predecessor_idx < 0 {
+            continue;
+        }
+
+        let predecessor_idx = predecessor_idx as usize;
+        let slot = write_positions[predecessor_idx];
+        successor_indices[slot] = child_idx;
+        write_positions[predecessor_idx] += 1;
+    }
+
+    Ok((successor_offsets, successor_indices))
+}
+
+#[pyclass]
+struct SynApsEngine {
+    machine_count: usize,
+    avg_total_p: f64,
+    predecessor_ids: Vec<i64>,
+    base_durations: Vec<f64>,
+    order_weights: Vec<f64>,
+    p_tilde_minutes: Vec<f64>,
+    successor_offsets: Vec<usize>,
+    successor_indices: Vec<usize>,
+}
+
+#[pymethods]
+impl SynApsEngine {
+    #[new]
+    fn new(machine_count: usize, avg_total_p: f64) -> Self {
+        Self {
+            machine_count,
+            avg_total_p,
+            predecessor_ids: Vec::new(),
+            base_durations: Vec::new(),
+            order_weights: Vec::new(),
+            p_tilde_minutes: Vec::new(),
+            successor_offsets: vec![0],
+            successor_indices: Vec::new(),
+        }
+    }
+
+    #[getter]
+    fn machine_count(&self) -> usize {
+        self.machine_count
+    }
+
+    #[getter]
+    fn avg_total_p(&self) -> f64 {
+        self.avg_total_p
+    }
+
+    fn graph_loaded(&self) -> bool {
+        !self.predecessor_ids.is_empty()
+    }
+
+    fn operation_count(&self) -> usize {
+        self.predecessor_ids.len()
+    }
+
+    fn successor_edge_count(&self) -> usize {
+        self.successor_indices.len()
+    }
+
+    fn clear_graph(&mut self) {
+        self.predecessor_ids.clear();
+        self.base_durations.clear();
+        self.order_weights.clear();
+        self.p_tilde_minutes.clear();
+        self.successor_offsets.clear();
+        self.successor_offsets.push(0);
+        self.successor_indices.clear();
+    }
+
+    fn load_graph(
+        &mut self,
+        py: Python<'_>,
+        predecessor_ids: PyReadonlyArray1<'_, i64>,
+        base_durations: PyReadonlyArray1<'_, f64>,
+        order_weights: PyReadonlyArray1<'_, f64>,
+        p_tilde_minutes: PyReadonlyArray1<'_, f64>,
+    ) -> PyResult<()> {
+        let predecessor_ids = predecessor_ids.as_slice()?.to_vec();
+        let base_durations = base_durations.as_slice()?.to_vec();
+        let order_weights = order_weights.as_slice()?.to_vec();
+        let p_tilde_minutes = p_tilde_minutes.as_slice()?.to_vec();
+
+        let op_count = predecessor_ids.len();
+        if base_durations.len() != op_count
+            || order_weights.len() != op_count
+            || p_tilde_minutes.len() != op_count
+        {
+            return Err(PyValueError::new_err(
+                "SynApsEngine graph vectors must have identical lengths",
+            ));
+        }
+
+        let (successor_offsets, successor_indices) =
+            py.allow_threads(|| build_successor_index(&predecessor_ids))?;
+
+        self.predecessor_ids = predecessor_ids;
+        self.base_durations = base_durations;
+        self.order_weights = order_weights;
+        self.p_tilde_minutes = p_tilde_minutes;
+        self.successor_offsets = successor_offsets;
+        self.successor_indices = successor_indices;
+
+        Ok(())
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Scalar ATCS — unchanged interface (single-operation scoring).
 // ---------------------------------------------------------------------------
@@ -581,6 +718,7 @@ fn compute_rhc_candidate_metrics_batch_np_jagged<'py>(
 
 #[pymodule]
 fn synaps_native(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
+    module.add_class::<SynApsEngine>()?;
     module.add_function(wrap_pyfunction!(compute_atcs_log_score, module)?)?;
     module.add_function(wrap_pyfunction!(compute_atcs_log_scores_batch, module)?)?;
     module.add_function(wrap_pyfunction!(resource_capacity_window_is_feasible, module)?)?;

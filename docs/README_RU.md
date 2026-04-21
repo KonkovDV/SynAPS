@@ -21,6 +21,8 @@ Language: [EN](README.md) | **RU**
 - [architecture/05_DEPLOYMENT.md](architecture/05_DEPLOYMENT.md)
 - [architecture/06_LANGUAGE_AND_RUNTIME_STRATEGY.md](architecture/06_LANGUAGE_AND_RUNTIME_STRATEGY.md)
 - [architecture/07_RUNTIME_CONTRACT.md](architecture/07_RUNTIME_CONTRACT.md)
+- [architecture/08_HPC_SILICON_OPTIMIZATION_ROADMAP.md](architecture/08_HPC_SILICON_OPTIMIZATION_ROADMAP.md)
+- [architecture/LEVEL2_RUSTIFICATION.md](architecture/LEVEL2_RUSTIFICATION.md)
 
 ## Доменные параметризации
 
