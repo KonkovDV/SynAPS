@@ -34,6 +34,9 @@ What is implemented and verified in this repository:
 - Core runtime dependencies: `ortools`, `highspy`, `pydantic`, `numpy`
 - Stable solve/repair JSON contracts (`synaps/contracts.py`)
 - Separate feasibility checker (`synaps/solvers/feasibility_checker.py`)
+- ALNS can accept partial warm starts, complete missing assignments, and recompute setups before local search
+- RHC can carry unfinished overlap tails into the next ALNS window and exposes warm-start metadata in solver output
+- RHC candidate scoring is wired through the NumPy/native batch seam when acceleration is available
 
 What is not claimed:
 
@@ -66,7 +69,7 @@ Main families:
 - Exact / near-exact: CP-SAT, LBBD, LBBD-HD
 - Constructive: Greedy ATCS, Beam
 - Trade-off slices: epsilon/Pareto CP-SAT profiles
-- Large-scale paths: ALNS, RHC
+- Large-scale paths: ALNS, RHC with overlap-tail propagation and optional native batch scoring
 - Repair: IncrementalRepair
 - Validation: FeasibilityChecker
 
@@ -138,11 +141,13 @@ Implemented optimizations (v0.3.0):
 | **Hybrid-aware parallelism** | Rayon `with_min_len(256)` for P/E core work-stealing | 10–25% (prevents E-core straggler effect) |
 | **Zero-copy NumPy + CSR** | Direct buffer writes, no intermediate allocations | 2–3× over Vec path |
 | **target-cpu=native** | LLVM AVX2/FMA3 auto-vectorization | 10–40% (depends on loop structure) |
-| **fast_exp (Schraudolph)** | IEEE-754 bit trick, ~4% error, monotonic | Free vs `libm::exp()` |
+| **fast_exp (Schraudolph)** | IEEE-754 bit trick with residual correction, clamp, and endian guard | Free vs `libm::exp()` while preserving close-score ordering |
 
 The kernel is optional — SynAPS falls back to pure Python when not available.
 
 These optimization notes describe the profiled Raptor Lake workstation, not a universal ISA ceiling for every future SynAPS deployment. On AVX-512-capable non-hybrid servers, a separate runtime-dispatch or wheel-split strategy remains possible in principle; the current repository ships and benchmarks the AVX2/FMA3 path only.
+
+Recent native hardening also covers finite behavior on extreme slack inputs and a regression test for very close positive slack values, so the installed native path keeps candidate pressures strictly ordered where the earlier bucketed approximation could collapse ties.
 
 Build the native extension:
 
