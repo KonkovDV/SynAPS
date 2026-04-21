@@ -25,7 +25,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from synaps.accelerators import (
-    compute_rhc_candidate_metrics_batch,
+    compute_rhc_candidate_metrics_batch_np,
     get_acceleration_status,
 )
 from synaps.model import (
@@ -334,6 +334,7 @@ class RhcSolver(BaseSolver):
         fallback_repair_skipped = False
         fallback_repair_time_limited = False
         inner_window_summaries: list[dict[str, Any]] = []
+        previous_window_tail_assignments: list[Assignment] = []
 
         inner_summary_metadata_keys = (
             "iterations_completed",
@@ -359,6 +360,10 @@ class RhcSolver(BaseSolver):
             "no_improve_early_stop",
             "no_improve_streak_final",
             "final_violations",
+            "warm_start_used",
+            "warm_start_supplied_assignments",
+            "warm_start_completed_assignments",
+            "warm_start_rejected_reason",
         )
 
         def append_inner_window_summary(
@@ -767,7 +772,7 @@ class RhcSolver(BaseSolver):
                     op_mean_duration_by_id.get(op.id, max(op.base_duration_min, 1.0))
                 )
 
-            candidate_slacks, candidate_pressures = compute_rhc_candidate_metrics_batch(
+            candidate_slacks, candidate_pressures = compute_rhc_candidate_metrics_batch_np(
                 machine_available_offsets=machine_available_offsets_vector,
                 eligible_machine_indices=eligible_machine_indices,
                 predecessor_end_offsets=predecessor_end_offsets,
@@ -861,6 +866,18 @@ class RhcSolver(BaseSolver):
                 capped_selected_ops.append(op)
                 for wc_id in op_eligible_wc_ids[op_id]:
                     uncovered_machines.discard(wc_id)
+
+            carryover_tail_ids = [
+                assignment.operation_id
+                for assignment in previous_window_tail_assignments
+                if assignment.operation_id in ops_by_id
+                and assignment.operation_id not in committed_op_ids
+            ]
+            for op_id in sorted(set(carryover_tail_ids), key=op_positions.__getitem__):
+                if op_id in selected_window_ids:
+                    continue
+                selected_window_ids.add(op_id)
+                capped_selected_ops.append(ops_by_id[op_id])
 
             window_ops = sorted(
                 capped_selected_ops,
@@ -989,6 +1006,11 @@ class RhcSolver(BaseSolver):
                         inner_rejection_reason = "inner_skipped_low_budget"
                     else:
                         effective_inner_kwargs = dict(selected_inner_kwargs)
+                        if previous_window_tail_assignments:
+                            effective_inner_kwargs["warm_start_assignments"] = sorted(
+                                previous_window_tail_assignments,
+                                key=lambda assignment: assignment.start_time,
+                            )
                         if selected_inner_solver_name == "alns":
                             effective_inner_kwargs["due_pressure"] = window_due_pressure
                             effective_inner_kwargs["candidate_pressure"] = (
@@ -1039,6 +1061,14 @@ class RhcSolver(BaseSolver):
                             committed_assignments.append(assignment)
                             committed_assignment_by_op[op_id] = assignment
                             committed_op_ids.add(op_id)
+                        previous_window_tail_assignments = sorted(
+                            [
+                                assignment
+                                for assignment in inner_result.assignments
+                                if assignment.operation_id not in commit_candidates
+                            ],
+                            key=lambda assignment: assignment.start_time,
+                        )
                         window_start_offset += window_minutes
                         window_solved_via_inner = True
                         append_inner_window_summary(
@@ -1088,6 +1118,7 @@ class RhcSolver(BaseSolver):
 
             # ------ Fallback: greedy dispatch (original behavior) ------
             if not window_solved_via_inner:
+                previous_window_tail_assignments = []
                 # Solve the window by greedy dispatch on its operations, building
                 # on top of already-committed assignments.
                 scheduled_so_far = list(committed_assignments)

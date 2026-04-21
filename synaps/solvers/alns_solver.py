@@ -710,6 +710,7 @@ class AlnsSolver(BaseSolver):
                 {"makespan": 1.0, "setup": 0.3, "material_loss": 0.2, "tardiness": 0.5},
             )
         )
+        warm_start_assignments_raw = kwargs.get("warm_start_assignments")
 
         max_no_improve_iters = max_no_improve_base_iters
         if dynamic_no_improve_enabled and max_no_improve_base_iters > 0:
@@ -753,6 +754,7 @@ class AlnsSolver(BaseSolver):
         rng = random.Random(seed)
         n_ops = len(problem.operations)
         ops_by_id = {op.id: op for op in problem.operations}
+        problem_op_ids = set(ops_by_id.keys())
         op_positions = {op.id: index for index, op in enumerate(problem.operations)}
         successors_by_op: dict[UUID, list[UUID]] = {}
         for op in problem.operations:
@@ -767,25 +769,94 @@ class AlnsSolver(BaseSolver):
         from synaps.solvers.greedy_dispatch import GreedyDispatch
 
         initial_solution_t0 = time.monotonic()
-        if n_ops <= initial_beam_op_limit:
-            initial_solver_name = "beam"
-            initial_result = BeamSearchDispatch(beam_width=3).solve(problem)
-        else:
-            initial_solver_name = "greedy"
-            initial_result = GreedyDispatch().solve(problem)
+        warm_start_assignments: list[Assignment] = []
+        warm_start_supplied_assignments = 0
+        warm_start_completed_assignments = 0
+        warm_start_used = False
+        warm_start_rejected_reason: str | None = None
 
-        if not initial_result.assignments or len(initial_result.assignments) != n_ops:
-            # Fall back to greedy if beam failed to cover the full instance.
-            initial_solver_name = "greedy"
-            initial_result = GreedyDispatch().solve(problem)
-            if not initial_result.assignments or len(initial_result.assignments) != n_ops:
-                elapsed_ms = int((time.monotonic() - t0) * 1000)
-                return ScheduleResult(
-                    solver_name=self.name,
-                    status=SolverStatus.ERROR,
-                    duration_ms=elapsed_ms,
-                    metadata={"error": "initial solution generation failed"},
+        if isinstance(warm_start_assignments_raw, list):
+            seen_warm_start_ids: set[UUID] = set()
+            for assignment in warm_start_assignments_raw:
+                op_id = getattr(assignment, "operation_id", None)
+                if op_id not in problem_op_ids or op_id in seen_warm_start_ids:
+                    continue
+                warm_start_assignments.append(assignment)
+                seen_warm_start_ids.add(op_id)
+            warm_start_supplied_assignments = len(warm_start_assignments)
+
+        def _is_valid_complete_schedule(assignments: list[Assignment]) -> bool:
+            return (
+                len(assignments) == n_ops
+                and len({assignment.operation_id for assignment in assignments}) == n_ops
+                and not _has_machine_overlap(assignments)
+                and not _has_precedence_violation(assignments, ops_by_id)
+            )
+
+        initial_solver_name = "greedy"
+        initial_result: ScheduleResult | None = None
+
+        if warm_start_assignments:
+            warm_candidate = sorted(
+                warm_start_assignments,
+                key=lambda assignment: assignment.start_time,
+            )
+            warm_missing_ids = problem_op_ids.difference(
+                assignment.operation_id for assignment in warm_candidate
+            )
+            if warm_missing_ids:
+                warm_outcome = _repair_greedy_outcome(
+                    problem,
+                    warm_candidate,
+                    warm_missing_ids,
                 )
+                if warm_outcome.status == RepairStatus.FEASIBLE:
+                    warm_candidate = sorted(
+                        warm_candidate + list(warm_outcome.assignments),
+                        key=lambda assignment: assignment.start_time,
+                    )
+                    warm_start_completed_assignments = len(warm_outcome.assignments)
+                else:
+                    warm_start_rejected_reason = warm_outcome.reason
+
+            if _is_valid_complete_schedule(warm_candidate):
+                recompute_assignment_setups(warm_candidate, dispatch_context)
+                initial_solver_name = "warm_start"
+                warm_start_used = True
+                initial_result = ScheduleResult(
+                    solver_name=self.name,
+                    status=SolverStatus.FEASIBLE,
+                    assignments=warm_candidate,
+                )
+            elif warm_start_rejected_reason is None:
+                warm_start_rejected_reason = "warm_start_incomplete"
+
+        if initial_result is None:
+            if n_ops <= initial_beam_op_limit:
+                initial_solver_name = "beam"
+                initial_result = BeamSearchDispatch(beam_width=3).solve(problem)
+            else:
+                initial_solver_name = "greedy"
+                initial_result = GreedyDispatch().solve(problem)
+
+            if not initial_result.assignments or len(initial_result.assignments) != n_ops:
+                # Fall back to greedy if beam failed to cover the full instance.
+                initial_solver_name = "greedy"
+                initial_result = GreedyDispatch().solve(problem)
+                if not initial_result.assignments or len(initial_result.assignments) != n_ops:
+                    elapsed_ms = int((time.monotonic() - t0) * 1000)
+                    return ScheduleResult(
+                        solver_name=self.name,
+                        status=SolverStatus.ERROR,
+                        duration_ms=elapsed_ms,
+                        metadata={
+                            "error": "initial solution generation failed",
+                            "warm_start_used": warm_start_used,
+                            "warm_start_supplied_assignments": warm_start_supplied_assignments,
+                            "warm_start_completed_assignments": warm_start_completed_assignments,
+                            "warm_start_rejected_reason": warm_start_rejected_reason,
+                        },
+                    )
 
         initial_solution_ms = int((time.monotonic() - initial_solution_t0) * 1000)
         time_limit_exhausted_before_search = (time.monotonic() - t0) > time_limit_s
@@ -1124,6 +1195,10 @@ class AlnsSolver(BaseSolver):
                 "greedy_repair_timeouts": greedy_repair_timeouts,
                 "repair_rejection_reasons": repair_rejection_reasons,
                 "initial_solver": initial_solver_name,
+                "warm_start_used": warm_start_used,
+                "warm_start_supplied_assignments": warm_start_supplied_assignments,
+                "warm_start_completed_assignments": warm_start_completed_assignments,
+                "warm_start_rejected_reason": warm_start_rejected_reason,
                 "initial_beam_op_limit": initial_beam_op_limit,
                 "cpsat_max_destroy_ops": cpsat_max_destroy_ops,
                 "initial_solution_ms": initial_solution_ms,

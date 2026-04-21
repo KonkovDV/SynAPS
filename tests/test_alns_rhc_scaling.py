@@ -292,7 +292,7 @@ def _make_tied_window_problem(n_orders: int = 40) -> ScheduleProblem:
 
 class TestSdstMatrix:
     def test_from_problem_builds_correct_dimensions(self) -> None:
-        problem = _make_3state_problem(n_orders=2, ops_per_order=2)
+        problem = _make_3state_problem(n_orders=8, ops_per_order=2)
         sdst = SdstMatrix.from_problem(problem)
         assert sdst.n_wc == 2
         assert sdst.n_states == 3
@@ -649,6 +649,7 @@ class TestAlnsSolver:
     def test_alns_deterministic_with_seed(self) -> None:
         """Same seed should produce identical results."""
         from synaps.solvers.alns_solver import AlnsSolver
+        from synaps.solvers.greedy_dispatch import GreedyDispatch
 
         problem = _make_3state_problem(n_orders=5, ops_per_order=2)
         solver = AlnsSolver()
@@ -657,6 +658,28 @@ class TestAlnsSolver:
         r2 = solver.solve(problem, max_iterations=30, time_limit_s=15, random_seed=123)
 
         assert r1.objective.makespan_minutes == pytest.approx(r2.objective.makespan_minutes)
+
+        baseline = GreedyDispatch().solve(problem)
+        partial_warm_start = [
+            assignment
+            for assignment in baseline.assignments
+            if next(op for op in problem.operations if op.id == assignment.operation_id).seq_in_order == 0
+        ]
+
+        warmed = solver.solve(
+            problem,
+            max_iterations=10,
+            time_limit_s=15,
+            random_seed=123,
+            use_cpsat_repair=False,
+            warm_start_assignments=partial_warm_start,
+        )
+
+        assert warmed.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert warmed.metadata["warm_start_used"] is True
+        assert warmed.metadata["warm_start_supplied_assignments"] == len(partial_warm_start)
+        assert warmed.metadata["warm_start_completed_assignments"] > 0
+        assert warmed.metadata["initial_solver"] == "warm_start"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1109,7 +1132,7 @@ class TestRhcInnerSolver:
         from synaps.solvers.rhc_solver import RhcSolver
         from synaps.validation import verify_schedule_result
 
-        problem = _make_3state_problem(n_orders=8, ops_per_order=2)
+        problem = _make_3state_problem(n_orders=12, ops_per_order=3)
         solver = RhcSolver()
         result = solver.solve(
             problem,
@@ -1198,6 +1221,110 @@ class TestRhcInnerSolver:
         assert float(first_call["due_pressure"]) >= 0.0
         assert float(first_call["candidate_pressure"]) >= 0.0
         assert first_call["max_no_improve_iters"] == 7
+
+    def test_rhc_passes_overlap_tail_into_next_alns_window(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """RHC should reuse unfinished overlap assignments as warm start for the next window."""
+        from datetime import timedelta
+
+        from synaps.model import Assignment, ScheduleResult
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_due_pressure_chain_problem()
+        work_center_id = problem.work_centers[0].id
+        ops_by_seq = sorted(problem.operations, key=lambda op: op.seq_in_order)
+        captured_warm_starts: list[list[Assignment]] = []
+
+        def fake_alns_solve(self, sub_problem, **kwargs):
+            supplied_warm_start = list(kwargs.get("warm_start_assignments", []) or [])
+            captured_warm_starts.append(supplied_warm_start)
+
+            assignments = []
+            for op in sorted(sub_problem.operations, key=lambda op: op.seq_in_order):
+                start_offset = op.seq_in_order * 40
+                start_time = problem.planning_horizon_start + timedelta(minutes=start_offset)
+                assignments.append(
+                    Assignment(
+                        operation_id=op.id,
+                        work_center_id=work_center_id,
+                        start_time=start_time,
+                        end_time=start_time + timedelta(minutes=10),
+                        setup_minutes=0,
+                        aux_resource_ids=[],
+                    )
+                )
+
+            return ScheduleResult(
+                solver_name="alns",
+                status=SolverStatus.FEASIBLE,
+                assignments=assignments,
+                metadata={
+                    "warm_start_used": bool(supplied_warm_start),
+                    "warm_start_supplied_assignments": len(supplied_warm_start),
+                    "warm_start_completed_assignments": 0,
+                },
+            )
+
+        monkeypatch.setattr(
+            "synaps.solvers.alns_solver.AlnsSolver.solve",
+            fake_alns_solve,
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=30,
+            overlap_minutes=120,
+            inner_solver="alns",
+            time_limit_s=30,
+            max_ops_per_window=10,
+            inner_kwargs={
+                "max_iterations": 5,
+                "use_cpsat_repair": False,
+            },
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert len(captured_warm_starts) >= 2
+        assert captured_warm_starts[0] == []
+
+        expected_tail_ids = {ops_by_seq[1].id, ops_by_seq[2].id}
+        assert {
+            assignment.operation_id for assignment in captured_warm_starts[1]
+        } == expected_tail_ids
+
+    def test_rhc_uses_numpy_candidate_metrics_path(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """RHC should use the NumPy/native candidate-metrics seam for window scoring."""
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_3state_problem(n_orders=5, ops_per_order=2)
+        np_path_calls = {"count": 0}
+
+        def fake_candidate_metrics_np(**kwargs):
+            np_path_calls["count"] += 1
+            n = len(kwargs["eligible_machine_indices"])
+            return [0.0] * n, [1.0] * n
+
+        monkeypatch.setattr(
+            "synaps.solvers.rhc_solver.compute_rhc_candidate_metrics_batch_np",
+            fake_candidate_metrics_np,
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=240,
+            overlap_minutes=30,
+            inner_solver="greedy",
+            time_limit_s=30,
+            max_ops_per_window=20,
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert np_path_calls["count"] >= 1
 
     def test_rhc_with_cpsat_inner_produces_feasible_result(self) -> None:
         """RHC-CPSAT must delegate to CP-SAT per window."""
