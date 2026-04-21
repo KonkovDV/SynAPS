@@ -23,8 +23,17 @@ fn fast_exp(x: f64) -> f64 {
 fn fast_exp_impl(x: f64) -> f64 {
     let a = 1048576.0 / core::f64::consts::LN_2; // 2^20 / ln(2)
     let b = 1072693248.0 - 60801.0; // bias correction (Schraudolph constant)
-    let bits = ((a * x + b) as i64) << 32;
-    f64::from_bits(bits as u64)
+    let scaled = a * x + b;
+    let quantized = scaled as i64;
+    let bits = quantized << 32;
+    let approx = f64::from_bits(bits as u64);
+
+    // The Schraudolph bit trick is piecewise constant inside each quantization
+    // bucket. Re-introduce the sub-bucket slope with a tiny residual-domain
+    // polynomial so close candidate pressures stay strictly ordered.
+    let quantized_x = ((quantized as f64) - b) / a;
+    let residual = x - quantized_x;
+    approx * (1.0 + residual * (1.0 + 0.5 * residual))
 }
 
 #[cfg(not(target_endian = "little"))]

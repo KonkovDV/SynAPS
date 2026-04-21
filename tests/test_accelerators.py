@@ -221,6 +221,28 @@ def test_compute_rhc_candidate_metrics_batch_keeps_extreme_slack_finite() -> Non
     assert 0.0 <= pressures[0] < 1e-100
 
 
+def test_compute_rhc_candidate_metrics_batch_keeps_close_positive_slacks_ordered() -> None:
+    status = accelerators.get_acceleration_status()
+    if status["rhc_candidate_metrics_backend"] != "native":
+        pytest.skip("native fast_exp monotonicity regression requires native backend")
+
+    n = 64
+    _, pressures = accelerators.compute_rhc_candidate_metrics_batch(
+        machine_available_offsets=[0.0],
+        eligible_machine_indices=[[0]] * n,
+        predecessor_end_offsets=[0.0] * n,
+        due_offsets=[1.0 + i * 1e-7 for i in range(n)],
+        rpt_tail_minutes=[0.0] * n,
+        order_weights=[1.0] * n,
+        p_tilde_minutes=[1.0] * n,
+        avg_total_p=1.0,
+        due_pressure_k1=1.0,
+        due_pressure_overdue_boost=1.0,
+    )
+
+    assert all(pressures[i] > pressures[i + 1] for i in range(n - 1))
+
+
 def test_compute_rhc_candidate_metrics_batch_uses_native_backend_when_available(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
