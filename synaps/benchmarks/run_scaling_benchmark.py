@@ -141,14 +141,16 @@ BENCHMARK_SUITE: list[BenchmarkConfig] = [
         "n_ops": 50000, "n_machines": 100, "n_states": 20,
         "solver_name": "rhc-alns", "solver_kwargs": {
         "window_minutes": 480, "overlap_minutes": 120, "inner_solver": "alns",
-        "time_limit_s": 300, "max_ops_per_window": 5000,
+        "time_limit_s": 300, "alns_inner_window_time_cap_s": 180, "max_ops_per_window": 5000,
         "inner_kwargs": {
             "max_iterations": 100,
             "destroy_fraction": 0.03,
             "min_destroy": 10,
             "max_destroy": 40,
             "max_no_improve_iters": 30,
-            "use_cpsat_repair": False,
+            "use_cpsat_repair": True,
+            "repair_time_limit_s": 5,
+            "cpsat_max_destroy_ops": 12,
         },
     }},
 ]

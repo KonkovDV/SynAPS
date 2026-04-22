@@ -68,6 +68,7 @@ def _evaluate_quality_gate(
     *,
     summaries: dict[str, dict[str, Any]],
     baseline_solver: str,
+    min_scheduled_ratio: float,
     max_makespan_degradation_ratio: float,
     max_inner_fallback_ratio: float,
 ) -> dict[str, dict[str, Any]]:
@@ -109,6 +110,7 @@ def _evaluate_quality_gate(
 
         checks = {
             "feasibility": feasibility_ok,
+            "scheduled_ratio": float(summary.get("mean_scheduled_ratio", 0.0)) >= min_scheduled_ratio,
             "fallback_ratio": fallback_ok,
             "objective_degradation": objective_ok,
         }
@@ -118,6 +120,7 @@ def _evaluate_quality_gate(
             "objective_degradation_ratio": round(objective_ratio, 4)
             if math.isfinite(objective_ratio)
             else None,
+            "min_scheduled_ratio": min_scheduled_ratio,
             "max_makespan_degradation_ratio": max_makespan_degradation_ratio,
             "max_inner_fallback_ratio": max_inner_fallback_ratio,
             "checks": checks,
@@ -138,6 +141,7 @@ def study_rhc_50k(
     cvar_alpha: float = 0.95,
     quality_gate_enabled: bool = True,
     quality_gate_baseline_solver: str = "RHC-GREEDY",
+    min_scheduled_ratio: float = 0.90,
     max_makespan_degradation_ratio: float = 1.05,
     max_inner_fallback_ratio: float = 0.10,
 ) -> dict[str, Any]:
@@ -153,6 +157,7 @@ def study_rhc_50k(
             cvar_alpha=cvar_alpha,
             quality_gate_enabled=quality_gate_enabled,
             quality_gate_baseline_solver=quality_gate_baseline_solver,
+            min_scheduled_ratio=min_scheduled_ratio,
             max_makespan_degradation_ratio=max_makespan_degradation_ratio,
             max_inner_fallback_ratio=max_inner_fallback_ratio,
         )
@@ -230,6 +235,7 @@ def study_rhc_50k(
             "results": _evaluate_quality_gate(
                 summaries=report["summary_by_solver"],
                 baseline_solver=quality_gate_baseline_solver,
+                min_scheduled_ratio=min_scheduled_ratio,
                 max_makespan_degradation_ratio=max_makespan_degradation_ratio,
                 max_inner_fallback_ratio=max_inner_fallback_ratio,
             ),
@@ -253,6 +259,7 @@ def _study_industrial_50k(
     cvar_alpha: float,
     quality_gate_enabled: bool,
     quality_gate_baseline_solver: str,
+    min_scheduled_ratio: float,
     max_makespan_degradation_ratio: float,
     max_inner_fallback_ratio: float,
 ) -> dict[str, Any]:
@@ -277,6 +284,7 @@ def _study_industrial_50k(
                 "overlap_minutes": 120,
                 "inner_solver": "alns",
                 "time_limit_s": 1200,
+                "alns_inner_window_time_cap_s": 180,
                 "max_ops_per_window": 5_000,
                 "hybrid_inner_routing_enabled": True,
                 "hybrid_inner_solver": "cpsat",
@@ -293,7 +301,9 @@ def _study_industrial_50k(
                     "min_destroy": 10,
                     "max_destroy": 40,
                     "max_no_improve_iters": 30,
-                    "use_cpsat_repair": False,
+                    "use_cpsat_repair": True,
+                    "repair_time_limit_s": 5,
+                    "cpsat_max_destroy_ops": 12,
                     "dynamic_sa_enabled": True,
                     "sa_due_alpha": 0.35,
                     "sa_candidate_beta": 0.15,
@@ -425,6 +435,7 @@ def _study_industrial_50k(
             "results": _evaluate_quality_gate(
                 summaries=gate_scope,
                 baseline_solver=quality_gate_baseline_solver,
+                min_scheduled_ratio=min_scheduled_ratio,
                 max_makespan_degradation_ratio=max_makespan_degradation_ratio,
                 max_inner_fallback_ratio=max_inner_fallback_ratio,
             ),
@@ -447,6 +458,23 @@ def _summarize_solver_records(
     verification_times = [record["statistics"]["verification_time_ms"] for record in records]
     makespans = [record["results"]["makespan_minutes"] for record in records]
     setup_minutes = [record["results"]["total_setup_minutes"] for record in records]
+    assigned_counts = [
+        float(record.get("results", {}).get("assignments", 0.0))
+        for record in records
+    ]
+    total_ops = [
+        float(
+            record.get("benchmark_config", {}).get(
+                "n_ops",
+                max(1.0, record.get("results", {}).get("assignments", 0.0)),
+            )
+        )
+        for record in records
+    ]
+    scheduled_ratios = [
+        assigned / max(1.0, total)
+        for assigned, total in zip(assigned_counts, total_ops)
+    ]
     preprocessing = [
         float(record.get("solver_metadata", {}).get("preprocessing_ms", 0.0))
         for record in records
@@ -510,6 +538,11 @@ def _summarize_solver_records(
         "feasibility_rate": round(
             sum(1 for record in records if record["verification"]["feasible"]) / len(records),
             3,
+        ),
+        "mean_scheduled_ratio": round(statistics.mean(scheduled_ratios), 4),
+        "cvar_unscheduled_ratio": round(
+            _tail_cvar([1.0 - value for value in scheduled_ratios], cvar_alpha),
+            4,
         ),
         "cvar_alpha": round(cvar_alpha, 4),
         "cvar_makespan_minutes": round(_tail_cvar(makespans, cvar_alpha), 2),
@@ -623,6 +656,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Baseline solver used for objective degradation check",
     )
     parser.add_argument(
+        "--min-scheduled-ratio",
+        type=float,
+        default=0.90,
+        help="Minimum allowed mean scheduled ratio for the quality gate (default: 0.90)",
+    )
+    parser.add_argument(
         "--max-makespan-degradation-ratio",
         type=float,
         default=1.05,
@@ -655,6 +694,7 @@ def main(argv: list[str] | None = None) -> int:
         cvar_alpha=args.cvar_alpha,
         quality_gate_enabled=args.quality_gate,
         quality_gate_baseline_solver=args.quality_gate_baseline,
+        min_scheduled_ratio=args.min_scheduled_ratio,
         max_makespan_degradation_ratio=args.max_makespan_degradation_ratio,
         max_inner_fallback_ratio=args.max_inner_fallback_ratio,
     )

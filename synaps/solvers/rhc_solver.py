@@ -83,6 +83,28 @@ class RhcSolver(BaseSolver):
         inner_kwargs.pop("time_limit_s", None)
         time_limit_s: float = float(kwargs.get("time_limit_s", 600))
         inner_solver_min_budget_s: float = float(kwargs.get("inner_solver_min_budget_s", 0.0))
+        inner_window_time_fraction: float = min(
+            1.0,
+            max(0.1, float(kwargs.get("inner_window_time_fraction", 0.8))),
+        )
+        inner_window_time_cap_raw = kwargs.get("inner_window_time_cap_s")
+        inner_window_time_cap_s: float | None = (
+            float(inner_window_time_cap_raw)
+            if inner_window_time_cap_raw is not None
+            else None
+        )
+        alns_inner_window_time_cap_raw = kwargs.get("alns_inner_window_time_cap_s")
+        alns_inner_window_time_cap_s: float | None = (
+            float(alns_inner_window_time_cap_raw)
+            if alns_inner_window_time_cap_raw is not None
+            else None
+        )
+        alns_inner_window_time_cap_scale_threshold_ops: int = int(
+            kwargs.get("alns_inner_window_time_cap_scale_threshold_ops", 4000)
+        )
+        alns_inner_window_time_cap_scaled_s: float = float(
+            kwargs.get("alns_inner_window_time_cap_scaled_s", 180.0)
+        )
         max_ops_per_window: int = int(kwargs.get("max_ops_per_window", 5000))
         window_load_factor: float = float(kwargs.get("window_load_factor", 1.25))
         max_windows_raw = kwargs.get("max_windows")
@@ -373,6 +395,7 @@ class RhcSolver(BaseSolver):
             ops_committed: int,
             resolution_mode: str,
             inner_result: ScheduleResult | None,
+            inner_time_limit_s: float | None = None,
             candidate_pressure: float | None = None,
             due_pressure: float | None = None,
             due_drift_minutes: float | None = None,
@@ -387,6 +410,8 @@ class RhcSolver(BaseSolver):
                 "ops_in_window": ops_in_window,
                 "resolution_mode": resolution_mode,
             }
+            if inner_time_limit_s is not None:
+                summary["inner_time_limit_s"] = round(inner_time_limit_s, 2)
             if candidate_pressure is not None:
                 summary["candidate_pressure"] = round(candidate_pressure, 4)
             if due_pressure is not None:
@@ -976,6 +1001,20 @@ class RhcSolver(BaseSolver):
                     else:
                         hybrid_routing_reason = "candidate"
 
+            def resolve_inner_window_time_cap() -> float:
+                if selected_inner_solver_name == "alns":
+                    if alns_inner_window_time_cap_s is not None:
+                        return alns_inner_window_time_cap_s
+                    if inner_window_time_cap_s is not None:
+                        return inner_window_time_cap_s
+                    if len(clean_window_ops) >= alns_inner_window_time_cap_scale_threshold_ops:
+                        return alns_inner_window_time_cap_scaled_s
+                    return 60.0
+
+                if inner_window_time_cap_s is not None:
+                    return inner_window_time_cap_s
+                return 60.0
+
             if selected_inner_solver_name != "greedy":
                 try:
                     # Build a sub-problem for just this window's operations
@@ -997,7 +1036,13 @@ class RhcSolver(BaseSolver):
 
                     # Compute remaining time budget for this window
                     remaining_time = max(10.0, time_limit_s - (time.monotonic() - t0))
-                    per_window_limit = min(remaining_time * 0.8, 60.0)
+                    per_window_limit = max(
+                        10.0,
+                        min(
+                            remaining_time * inner_window_time_fraction,
+                            resolve_inner_window_time_cap(),
+                        ),
+                    )
 
                     if (
                         selected_inner_solver_name == "alns"
@@ -1077,6 +1122,7 @@ class RhcSolver(BaseSolver):
                             ops_committed=committed_now,
                             resolution_mode="inner",
                             inner_result=inner_result,
+                            inner_time_limit_s=per_window_limit,
                             candidate_pressure=window_candidate_pressure,
                             due_pressure=window_due_pressure,
                             due_drift_minutes=window_due_drift_minutes,
@@ -1249,6 +1295,7 @@ class RhcSolver(BaseSolver):
                         ops_committed=len(committed_op_ids) - committed_before_window,
                         resolution_mode="fallback_greedy",
                         inner_result=inner_result,
+                        inner_time_limit_s=per_window_limit,
                         candidate_pressure=window_candidate_pressure,
                         due_pressure=window_due_pressure,
                         due_drift_minutes=window_due_drift_minutes,
@@ -1500,6 +1547,11 @@ class RhcSolver(BaseSolver):
                 "no_improve_max_iters": no_improve_max_iters,
                 "max_windows": max_windows,
                 "inner_solver_min_budget_s": inner_solver_min_budget_s,
+                "inner_window_time_fraction": inner_window_time_fraction,
+                "inner_window_time_cap_s": inner_window_time_cap_s,
+                "alns_inner_window_time_cap_s": alns_inner_window_time_cap_s,
+                "alns_inner_window_time_cap_scale_threshold_ops": alns_inner_window_time_cap_scale_threshold_ops,
+                "alns_inner_window_time_cap_scaled_s": alns_inner_window_time_cap_scaled_s,
                 "random_seed_base": random_seed_base,
                 "hybrid_inner_routing_enabled": hybrid_inner_routing_enabled,
                 "hybrid_inner_solver": hybrid_inner_solver_name,

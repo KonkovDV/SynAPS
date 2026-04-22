@@ -1294,6 +1294,70 @@ class TestRhcInnerSolver:
             assignment.operation_id for assignment in captured_warm_starts[1]
         } == expected_tail_ids
 
+    def test_rhc_passes_configured_alns_window_budget_to_inner_solver(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """RHC should honor an explicit ALNS per-window time cap for large-window runs."""
+        from datetime import timedelta
+
+        from synaps.model import Assignment, ScheduleResult
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_due_pressure_chain_problem()
+        work_center_id = problem.work_centers[0].id
+        captured_time_limits: list[float] = []
+
+        def fake_alns_solve(self, sub_problem, **kwargs):
+            captured_time_limits.append(float(kwargs["time_limit_s"]))
+
+            assignments = []
+            for op in sorted(sub_problem.operations, key=lambda op: op.seq_in_order):
+                start_offset = op.seq_in_order * 40
+                start_time = problem.planning_horizon_start + timedelta(minutes=start_offset)
+                assignments.append(
+                    Assignment(
+                        operation_id=op.id,
+                        work_center_id=work_center_id,
+                        start_time=start_time,
+                        end_time=start_time + timedelta(minutes=10),
+                        setup_minutes=0,
+                        aux_resource_ids=[],
+                    )
+                )
+
+            return ScheduleResult(
+                solver_name="alns",
+                status=SolverStatus.FEASIBLE,
+                assignments=assignments,
+                metadata={},
+            )
+
+        monkeypatch.setattr(
+            "synaps.solvers.alns_solver.AlnsSolver.solve",
+            fake_alns_solve,
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=30,
+            overlap_minutes=120,
+            inner_solver="alns",
+            time_limit_s=600,
+            max_ops_per_window=10,
+            alns_inner_window_time_cap_s=180,
+            inner_kwargs={
+                "max_iterations": 5,
+                "use_cpsat_repair": False,
+            },
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert captured_time_limits
+        assert captured_time_limits[0] == pytest.approx(180.0)
+        assert result.metadata["inner_window_summaries"]
+        assert result.metadata["inner_window_summaries"][0]["inner_time_limit_s"] == pytest.approx(180.0)
+
     def test_rhc_uses_numpy_candidate_metrics_path(
         self,
         monkeypatch: pytest.MonkeyPatch,
