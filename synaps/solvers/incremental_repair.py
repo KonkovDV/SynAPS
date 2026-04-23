@@ -43,6 +43,8 @@ class IncrementalRepair(BaseSolver):
         frozen_assignments: list[Assignment],
         remaining_op_ids: set[Any],
         already_scheduled_ids: set[Any],
+        *,
+        num_workers: int = 1,
     ) -> list[Assignment] | None:
         """Use a micro CP-SAT solve when constructive repair cannot place the remainder."""
         from synaps.solvers.cpsat_solver import CpSatSolver
@@ -80,7 +82,8 @@ class IncrementalRepair(BaseSolver):
         result = CpSatSolver().solve(
             sub_problem,
             time_limit_s=5,
-            num_workers=4,
+            num_workers=max(1, int(num_workers)),
+            auto_greedy_warm_start=False,
             enable_symmetry_breaking=False,
         )
 
@@ -109,6 +112,10 @@ class IncrementalRepair(BaseSolver):
         base_assignments = cast("list[Assignment]", kwargs.get("base_assignments", []))
         disrupted_op_ids = set(cast("list[Any]", kwargs.get("disrupted_op_ids", [])))
         radius: int = int(kwargs.get("radius", 5))
+        cpsat_fallback_num_workers: int = max(
+            1,
+            int(kwargs.get("cpsat_fallback_num_workers", kwargs.get("num_workers", 1))),
+        )
 
         if not base_assignments:
             return ScheduleResult(
@@ -247,6 +254,7 @@ class IncrementalRepair(BaseSolver):
                     frozen + repaired,
                     remaining_ids,
                     scheduled_ids,
+                    num_workers=cpsat_fallback_num_workers,
                 )
                 if cpsat_result is not None:
                     repaired.extend(cpsat_result)
@@ -334,6 +342,7 @@ class IncrementalRepair(BaseSolver):
                 "neighbourhood_size": len(neighbourhood),
                 "frozen_count": len(frozen),
                 "repaired_count": len(repaired),
+                "cpsat_fallback_num_workers": cpsat_fallback_num_workers,
                 "used_cpsat_fallback": used_cpsat_fallback,
             },
         )

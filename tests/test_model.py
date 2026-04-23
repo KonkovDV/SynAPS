@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from synaps.model import (
+    MAX_SCHEDULE_OPERATIONS,
     ObjectiveValues,
     Operation,
     Order,
@@ -249,6 +250,16 @@ class TestDomainModel:
         problem = ScheduleProblem.model_validate(normalized)
         assert problem.operations[1].predecessor_op_id == problem.operations[0].id
         assert problem.operations[2].predecessor_op_id == problem.operations[1].id
+
+    def test_schedule_problem_rejects_excessive_operation_count_before_nested_validation(
+        self,
+        simple_problem: ScheduleProblem,
+    ) -> None:
+        payload = simple_problem.model_dump()
+        payload["operations"] = [payload["operations"][0]] * (MAX_SCHEDULE_OPERATIONS + 1)
+
+        with pytest.raises(ValidationError, match="operations exceeds max supported items"):
+            ScheduleProblem.model_validate(payload)
 
     def test_schedule_problem_rejects_conflicting_same_order_predecessor_chain(self) -> None:
         horizon_start = datetime(2026, 6, 1, tzinfo=UTC)

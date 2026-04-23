@@ -99,13 +99,14 @@ def test_create_solver_supports_greedy_variant() -> None:
     assert solve_kwargs == {}
 
 
-def test_create_solver_rhc_alns_defaults_to_greedy_only_inner_repair() -> None:
+def test_create_solver_rhc_alns_defaults_to_bounded_cpsat_inner_repair() -> None:
     solver, solve_kwargs = create_solver("RHC-ALNS")
 
     assert solver.name == "rhc"
     assert solve_kwargs["inner_solver"] == "alns"
-    assert solve_kwargs["inner_kwargs"]["use_cpsat_repair"] is False
+    assert solve_kwargs["inner_kwargs"]["use_cpsat_repair"] is True
     assert solve_kwargs["inner_kwargs"]["max_no_improve_iters"] == 30
+    assert solve_kwargs["inner_kwargs"]["repair_num_workers"] == 1
 
 
 def test_create_solver_supports_academic_epsilon_profile() -> None:

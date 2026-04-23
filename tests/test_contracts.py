@@ -14,7 +14,7 @@ from synaps.contracts import (
     execute_solve_request,
     write_contract_schemas,
 )
-from synaps.model import SolverStatus
+from synaps.model import MAX_SCHEDULE_OPERATIONS, SolverStatus
 from synaps.replay import build_runtime_replay_artifact
 from synaps.solvers.greedy_dispatch import GreedyDispatch
 from synaps.solvers.router import SolveRegime
@@ -94,6 +94,11 @@ def test_build_contract_schema_bundle_contains_all_public_contracts() -> None:
         "repair-response.schema.json",
     }
     assert bundle["solve-request.schema.json"]["title"] == "SolveRequest"
+    solve_problem_schema = bundle["solve-request.schema.json"]["$defs"]["ScheduleProblem"]
+    assert solve_problem_schema["properties"]["operations"]["maxItems"] == MAX_SCHEDULE_OPERATIONS
+    repair_schema = bundle["repair-request.schema.json"]
+    assert repair_schema["properties"]["base_assignments"]["maxItems"] == MAX_SCHEDULE_OPERATIONS
+    assert repair_schema["properties"]["disrupted_op_ids"]["maxItems"] == MAX_SCHEDULE_OPERATIONS
 
 
 def test_write_contract_schemas_writes_schema_files(tmp_path: Path) -> None:

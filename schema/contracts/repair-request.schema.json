@@ -233,6 +233,7 @@
           "items": {
             "$ref": "#/$defs/OperationAuxRequirement"
           },
+          "maxItems": 400000,
           "title": "Aux Requirements",
           "type": "array"
         },
@@ -240,6 +241,7 @@
           "items": {
             "$ref": "#/$defs/AuxiliaryResource"
           },
+          "maxItems": 100000,
           "title": "Auxiliary Resources",
           "type": "array"
         },
@@ -247,6 +249,7 @@
           "items": {
             "$ref": "#/$defs/Operation"
           },
+          "maxItems": 200000,
           "title": "Operations",
           "type": "array"
         },
@@ -254,6 +257,7 @@
           "items": {
             "$ref": "#/$defs/Order"
           },
+          "maxItems": 200000,
           "title": "Orders",
           "type": "array"
         },
@@ -271,6 +275,7 @@
           "items": {
             "$ref": "#/$defs/SetupEntry"
           },
+          "maxItems": 2000000,
           "title": "Setup Matrix",
           "type": "array"
         },
@@ -278,6 +283,7 @@
           "items": {
             "$ref": "#/$defs/State"
           },
+          "maxItems": 10000,
           "title": "States",
           "type": "array"
         },
@@ -285,6 +291,7 @@
           "items": {
             "$ref": "#/$defs/WorkCenter"
           },
+          "maxItems": 10000,
           "title": "Work Centers",
           "type": "array"
         }
@@ -441,6 +448,7 @@
       "items": {
         "$ref": "#/$defs/Assignment"
       },
+      "maxItems": 200000,
       "title": "Base Assignments",
       "type": "array"
     },
@@ -455,6 +463,7 @@
         "format": "uuid",
         "type": "string"
       },
+      "maxItems": 200000,
       "title": "Disrupted Op Ids",
       "type": "array"
     },

@@ -106,6 +106,10 @@
           "title": "Duration Ms",
           "type": "integer"
         },
+        "error_category": {
+          "$ref": "#/$defs/SolverErrorCategory",
+          "default": "none"
+        },
         "metadata": {
           "additionalProperties": true,
           "title": "Metadata",
@@ -140,6 +144,23 @@
       ],
       "title": "ScheduleResult",
       "type": "object"
+    },
+    "SolverErrorCategory": {
+      "description": "Structured error taxonomy for solver failures.\n\nEach category maps to a recovery hint that downstream systems can use\nto decide whether to retry, fall back, or escalate.",
+      "enum": [
+        "none",
+        "timeout_partial",
+        "timeout_no_solution",
+        "infeasible_overconstrained",
+        "infeasible_precedence_cycle",
+        "infeasible_no_eligible_wc",
+        "master_infeasible",
+        "subproblem_infeasible",
+        "constructive_failure",
+        "internal_error"
+      ],
+      "title": "SolverErrorCategory",
+      "type": "string"
     },
     "SolverStatus": {
       "enum": [

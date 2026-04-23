@@ -224,6 +224,37 @@ def test_explicit_warm_start_assignments_reported_in_metadata(
     assert result.metadata["hint_count"] > 0
 
 
+def test_explicit_auto_greedy_warm_start_toggle_skips_implicit_greedy(
+    monkeypatch,
+) -> None:
+    problem = _make_parallel_no_setup_problem(max_parallel=1, operation_count=40)
+
+    def fail_if_called(self, problem):
+        raise AssertionError("auto GreedyDispatch warm start should be skipped")
+
+    monkeypatch.setattr(
+        "synaps.solvers.greedy_dispatch.GreedyDispatch.solve",
+        fail_if_called,
+    )
+
+    result = CpSatSolver().solve(
+        problem,
+        time_limit_s=5,
+        random_seed=42,
+        auto_greedy_warm_start=False,
+    )
+
+    assert result.status in {
+        SolverStatus.OPTIMAL,
+        SolverStatus.FEASIBLE,
+        SolverStatus.INFEASIBLE,
+        SolverStatus.TIMEOUT,
+    }
+    assert result.metadata["auto_greedy_warm_start"] is False
+    assert result.metadata["warm_started"] is False
+    assert result.metadata["hint_count"] == 0
+
+
 def test_symmetry_breaking_toggle_preserves_feasible_solution() -> None:
     problem = _make_identical_machine_problem()
     solver = CpSatSolver()

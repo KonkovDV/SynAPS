@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from synaps.model import (  # noqa: TC001
     Assignment,
+    MAX_SCHEDULE_OPERATIONS,
     ScheduleProblem,
     ScheduleResult,
     normalize_schedule_problem_data,
@@ -91,8 +92,8 @@ class RepairRequest(BaseModel):
     contract_version: Literal["2026-04-03"] = CONTRACT_VERSION
     request_id: str | None = None
     problem: ScheduleProblem
-    base_assignments: list[Assignment]
-    disrupted_op_ids: list[UUID]
+    base_assignments: list[Assignment] = Field(max_length=MAX_SCHEDULE_OPERATIONS)
+    disrupted_op_ids: list[UUID] = Field(max_length=MAX_SCHEDULE_OPERATIONS)
     radius: int | None = None
     regime: SolveRegime = SolveRegime.BREAKDOWN
     verify_feasibility: bool = True

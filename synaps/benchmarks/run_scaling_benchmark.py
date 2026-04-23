@@ -150,7 +150,8 @@ BENCHMARK_SUITE: list[BenchmarkConfig] = [
             "max_no_improve_iters": 30,
             "use_cpsat_repair": True,
             "repair_time_limit_s": 5,
-            "cpsat_max_destroy_ops": 12,
+            "repair_num_workers": 1,
+            "cpsat_max_destroy_ops": 32,
         },
     }},
 ]

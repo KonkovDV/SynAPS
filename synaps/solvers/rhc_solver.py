@@ -288,6 +288,15 @@ class RhcSolver(BaseSolver):
                 op_earliest.get(op.id, 0.0),
             ),
         )
+        ops_sorted_by_earliest = sorted(
+            problem.operations,
+            key=lambda op: (
+                op_earliest.get(op.id, 0.0),
+                order_due_offsets.get(op.order_id, horizon_minutes),
+                op.seq_in_order,
+                op_positions[op.id],
+            ),
+        )
         preprocessing_ms = int((time.monotonic() - preprocess_t0) * 1000)
         effective_window_op_cap = max_ops_per_window
         if len(problem.operations) > max_ops_per_window:
@@ -469,7 +478,10 @@ class RhcSolver(BaseSolver):
                     horizon_clipped_assignments += 1
                     continue
 
-                if start_offset < commit_boundary or commit_all:
+                # Freeze only work that fully completes inside the active horizon.
+                # Assignments that cross the rolling boundary must survive as tail
+                # so the overlap region can seed the next window.
+                if end_offset <= commit_boundary + 1e-9 or commit_all:
                     candidates[op_id] = assignment
 
             # Commit set must be precedence-closed.
@@ -670,8 +682,56 @@ class RhcSolver(BaseSolver):
             )
 
             if not raw_window_candidate_ids:
-                window_start_offset += window_minutes
-                continue
+                carryover_candidate_ids = {
+                    assignment.operation_id
+                    for assignment in previous_window_tail_assignments
+                    if assignment.operation_id in ops_by_id
+                    and assignment.operation_id not in committed_op_ids
+                }
+                if carryover_candidate_ids:
+                    raw_window_candidate_ids = carryover_candidate_ids
+                    peak_raw_window_candidate_count = max(
+                        peak_raw_window_candidate_count,
+                        len(raw_window_candidate_ids),
+                    )
+                    logger.info(
+                        "RHC window %d recovered %d carry-over tail ops into an empty frontier",
+                        window_count,
+                        len(raw_window_candidate_ids),
+                    )
+                else:
+                    bootstrap_candidate_ids: set[UUID] = set()
+                    for op in ops_sorted_by_earliest:
+                        if op_earliest.get(op.id, 0.0) >= window_end_offset:
+                            break
+                        if op.id in committed_op_ids:
+                            continue
+                        bootstrap_candidate_ids.add(op.id)
+                        if len(bootstrap_candidate_ids) >= candidate_pool_limit:
+                            break
+
+                    if bootstrap_candidate_ids:
+                        raw_window_candidate_ids = bootstrap_candidate_ids
+                        peak_raw_window_candidate_count = max(
+                            peak_raw_window_candidate_count,
+                            len(raw_window_candidate_ids),
+                        )
+                        logger.info(
+                            "RHC window %d bootstrap-admitted %d earliest-ready ops into an empty frontier",
+                            window_count,
+                            len(raw_window_candidate_ids),
+                        )
+                    else:
+                        append_inner_window_summary(
+                            window=window_count,
+                            ops_in_window=0,
+                            ops_committed=0,
+                            resolution_mode="no_candidates",
+                            inner_result=None,
+                            spillover_ops=0,
+                        )
+                        window_start_offset += window_minutes
+                        continue
 
             window_candidate_ids = raw_window_candidate_ids
             if candidate_admission_active:
@@ -724,6 +784,17 @@ class RhcSolver(BaseSolver):
             )
 
             if not window_candidate_ids:
+                append_inner_window_summary(
+                    window=window_count,
+                    ops_in_window=0,
+                    ops_committed=0,
+                    resolution_mode="no_candidates",
+                    inner_result=None,
+                    candidate_pressure=0.0,
+                    due_pressure=0.0,
+                    due_drift_minutes=0.0,
+                    spillover_ops=0,
+                )
                 window_start_offset += window_minutes
                 continue
 
@@ -1056,6 +1127,8 @@ class RhcSolver(BaseSolver):
                                 previous_window_tail_assignments,
                                 key=lambda assignment: assignment.start_time,
                             )
+                        if selected_inner_solver_name == "cpsat":
+                            effective_inner_kwargs["auto_greedy_warm_start"] = False
                         if selected_inner_solver_name == "alns":
                             effective_inner_kwargs["due_pressure"] = window_due_pressure
                             effective_inner_kwargs["candidate_pressure"] = (
@@ -1549,6 +1622,7 @@ class RhcSolver(BaseSolver):
                 "inner_solver_min_budget_s": inner_solver_min_budget_s,
                 "inner_window_time_fraction": inner_window_time_fraction,
                 "inner_window_time_cap_s": inner_window_time_cap_s,
+                "commit_boundary_mode": "end_time",
                 "alns_inner_window_time_cap_s": alns_inner_window_time_cap_s,
                 "alns_inner_window_time_cap_scale_threshold_ops": alns_inner_window_time_cap_scale_threshold_ops,
                 "alns_inner_window_time_cap_scaled_s": alns_inner_window_time_cap_scaled_s,

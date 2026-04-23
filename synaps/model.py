@@ -10,6 +10,15 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field, model_validator
 
 
+MAX_SCHEDULE_STATES = 10_000
+MAX_SCHEDULE_ORDERS = 200_000
+MAX_SCHEDULE_OPERATIONS = 200_000
+MAX_SCHEDULE_WORK_CENTERS = 10_000
+MAX_SCHEDULE_SETUP_ENTRIES = 2_000_000
+MAX_SCHEDULE_AUX_RESOURCES = 100_000
+MAX_SCHEDULE_AUX_REQUIREMENTS = 400_000
+
+
 class State(BaseModel):
     """Product / process state used in SDST transitions."""
 
@@ -144,15 +153,49 @@ def normalize_schedule_problem_data(data: object) -> object:
 class ScheduleProblem(BaseModel):
     """Complete input to any solver."""
 
-    states: list[State]
-    orders: list[Order]
-    operations: list[Operation]
-    work_centers: list[WorkCenter]
-    setup_matrix: list[SetupEntry]
-    auxiliary_resources: list[AuxiliaryResource] = Field(default_factory=list)
-    aux_requirements: list[OperationAuxRequirement] = Field(default_factory=list)
+    states: list[State] = Field(max_length=MAX_SCHEDULE_STATES)
+    orders: list[Order] = Field(max_length=MAX_SCHEDULE_ORDERS)
+    operations: list[Operation] = Field(max_length=MAX_SCHEDULE_OPERATIONS)
+    work_centers: list[WorkCenter] = Field(max_length=MAX_SCHEDULE_WORK_CENTERS)
+    setup_matrix: list[SetupEntry] = Field(max_length=MAX_SCHEDULE_SETUP_ENTRIES)
+    auxiliary_resources: list[AuxiliaryResource] = Field(
+        default_factory=list,
+        max_length=MAX_SCHEDULE_AUX_RESOURCES,
+    )
+    aux_requirements: list[OperationAuxRequirement] = Field(
+        default_factory=list,
+        max_length=MAX_SCHEDULE_AUX_REQUIREMENTS,
+    )
     planning_horizon_start: datetime
     planning_horizon_end: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_collection_size_limits(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+
+        limits = {
+            "states": MAX_SCHEDULE_STATES,
+            "orders": MAX_SCHEDULE_ORDERS,
+            "operations": MAX_SCHEDULE_OPERATIONS,
+            "work_centers": MAX_SCHEDULE_WORK_CENTERS,
+            "setup_matrix": MAX_SCHEDULE_SETUP_ENTRIES,
+            "auxiliary_resources": MAX_SCHEDULE_AUX_RESOURCES,
+            "aux_requirements": MAX_SCHEDULE_AUX_REQUIREMENTS,
+        }
+        issues: list[str] = []
+        for field_name, limit in limits.items():
+            raw_value = data.get(field_name)
+            if isinstance(raw_value, list) and len(raw_value) > limit:
+                issues.append(
+                    f"{field_name} exceeds max supported items ({len(raw_value)} > {limit})"
+                )
+
+        if issues:
+            raise ValueError("; ".join(issues))
+
+        return data
 
     @staticmethod
     def _duplicate_keys(values: list[Any]) -> set[Any]:

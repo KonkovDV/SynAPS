@@ -285,6 +285,51 @@ def _make_tied_window_problem(n_orders: int = 40) -> ScheduleProblem:
     )
 
 
+def _make_bootstrap_frontier_problem(n_orders: int = 200) -> ScheduleProblem:
+    """Build a far-due fixture where empty-frontier bootstrap would otherwise flood the window."""
+    state_id = uuid4()
+    wc1_id = uuid4()
+    wc2_id = uuid4()
+    due_date = HORIZON_START + timedelta(days=30)
+
+    orders: list[Order] = []
+    operations: list[Operation] = []
+    for index in range(n_orders):
+        order_id = uuid4()
+        orders.append(
+            Order(
+                id=order_id,
+                external_ref=f"BOOT-{index:04d}",
+                due_date=due_date,
+                priority=100,
+            )
+        )
+        operations.append(
+            Operation(
+                id=uuid4(),
+                order_id=order_id,
+                seq_in_order=0,
+                state_id=state_id,
+                base_duration_min=15,
+                eligible_wc_ids=[wc1_id, wc2_id],
+                predecessor_op_id=None,
+            )
+        )
+
+    return ScheduleProblem(
+        states=[State(id=state_id, code="BOOT", label="Bootstrap")],
+        orders=orders,
+        operations=operations,
+        work_centers=[
+            WorkCenter(id=wc1_id, code="BOOT-M1", capability_group="boot", speed_factor=1.0),
+            WorkCenter(id=wc2_id, code="BOOT-M2", capability_group="boot", speed_factor=1.0),
+        ],
+        setup_matrix=[],
+        planning_horizon_start=HORIZON_START,
+        planning_horizon_end=HORIZON_START + timedelta(days=40),
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 1. SdstMatrix tests
 # ═══════════════════════════════════════════════════════════════════════════
@@ -881,6 +926,49 @@ class TestRhcSolver:
         assert result.metadata["max_windows"] == 1
         assert result.metadata["windows_solved"] == 1
 
+    def test_rhc_bootstraps_earliest_ready_ops_when_due_admission_starves_window(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """RHC should seed earliest-ready work when due/admission frontiers are empty."""
+        from synaps.solvers.greedy_dispatch import GreedyDispatch
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_long_chain_problem(20)
+        captured_window_sizes: list[int] = []
+
+        def fake_alns_solve(self, sub_problem, **kwargs):
+            captured_window_sizes.append(len(sub_problem.operations))
+            return GreedyDispatch().solve(sub_problem)
+
+        monkeypatch.setattr(
+            "synaps.solvers.alns_solver.AlnsSolver.solve",
+            fake_alns_solve,
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=60,
+            overlap_minutes=0,
+            inner_solver="alns",
+            time_limit_s=120,
+            max_ops_per_window=5,
+            max_windows=1,
+            inner_kwargs={
+                "max_iterations": 5,
+                "use_cpsat_repair": False,
+            },
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL, SolverStatus.ERROR)
+        assert result.metadata["windows_solved"] == 1
+        assert result.metadata["max_windows"] == 1
+        assert captured_window_sizes
+        assert captured_window_sizes[0] > 0
+        assert result.metadata["inner_window_summaries"]
+        assert result.metadata["inner_window_summaries"][0]["ops_in_window"] > 0
+        assert result.metadata["inner_window_summaries"][0]["resolution_mode"] != "no_candidates"
+
     def test_rhc_metadata_tracks_due_pressure_and_candidate_peak(self) -> None:
         """RHC should expose scaling metadata for candidate-pool pressure and due-date pulls."""
         from synaps.solvers.rhc_solver import RhcSolver
@@ -937,6 +1025,31 @@ class TestRhcSolver:
         )
         assert result.metadata["candidate_pool_clamped_windows"] >= 1
         assert result.metadata["candidate_pool_filtered_ops"] >= 1
+
+    def test_rhc_bootstrap_admission_respects_candidate_pool_limit(self) -> None:
+        """Empty-frontier bootstrap should seed only a bounded earliest-ready candidate pool."""
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_bootstrap_frontier_problem(n_orders=200)
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=60,
+            overlap_minutes=0,
+            inner_solver="greedy",
+            time_limit_s=20,
+            max_ops_per_window=10,
+            max_windows=1,
+            candidate_pool_factor=2.0,
+            due_admission_horizon_factor=4.0,
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL, SolverStatus.ERROR)
+        assert result.metadata["candidate_pool_limit"] == 20
+        assert result.metadata["admission_starvation_count"] >= 1
+        assert result.metadata["peak_window_candidate_count"] <= 20
+        assert result.metadata["peak_raw_window_candidate_count"] <= 20
+        assert result.metadata["candidate_pool_clamped_windows"] == 0
+        assert result.metadata["candidate_pool_filtered_ops"] == 0
 
     def test_rhc_window_cap_selection_is_deterministic_under_ties(self) -> None:
         """RHC should produce identical schedules under tie-heavy window ranking."""
@@ -1294,6 +1407,84 @@ class TestRhcInnerSolver:
             assignment.operation_id for assignment in captured_warm_starts[1]
         } == expected_tail_ids
 
+    def test_rhc_retains_boundary_crossing_assignments_for_next_window(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Assignments crossing the boundary must stay tentative for the next window."""
+        from datetime import timedelta
+
+        from synaps.model import Assignment, ScheduleResult
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_due_pressure_chain_problem()
+        work_center_id = problem.work_centers[0].id
+        ops_by_seq = sorted(problem.operations, key=lambda op: op.seq_in_order)
+        captured_warm_starts: list[list[Assignment]] = []
+
+        start_offsets = [0, 20, 50]
+        end_offsets = [20, 50, 60]
+
+        def fake_alns_solve(self, sub_problem, **kwargs):
+            supplied_warm_start = list(kwargs.get("warm_start_assignments", []) or [])
+            captured_warm_starts.append(supplied_warm_start)
+
+            assignments = []
+            for op, start_offset, end_offset in zip(
+                sorted(sub_problem.operations, key=lambda op: op.seq_in_order),
+                start_offsets,
+                end_offsets,
+                strict=False,
+            ):
+                start_time = problem.planning_horizon_start + timedelta(minutes=start_offset)
+                end_time = problem.planning_horizon_start + timedelta(minutes=end_offset)
+                assignments.append(
+                    Assignment(
+                        operation_id=op.id,
+                        work_center_id=work_center_id,
+                        start_time=start_time,
+                        end_time=end_time,
+                        setup_minutes=0,
+                        aux_resource_ids=[],
+                    )
+                )
+
+            return ScheduleResult(
+                solver_name="alns",
+                status=SolverStatus.FEASIBLE,
+                assignments=assignments,
+                metadata={
+                    "warm_start_used": bool(supplied_warm_start),
+                    "warm_start_supplied_assignments": len(supplied_warm_start),
+                    "warm_start_completed_assignments": 0,
+                },
+            )
+
+        monkeypatch.setattr(
+            "synaps.solvers.alns_solver.AlnsSolver.solve",
+            fake_alns_solve,
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=30,
+            overlap_minutes=120,
+            inner_solver="alns",
+            time_limit_s=30,
+            max_ops_per_window=10,
+            inner_kwargs={
+                "max_iterations": 5,
+                "use_cpsat_repair": False,
+            },
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert len(captured_warm_starts) >= 2
+        assert captured_warm_starts[0] == []
+        assert {
+            assignment.operation_id for assignment in captured_warm_starts[1]
+        } == {ops_by_seq[1].id, ops_by_seq[2].id}
+
     def test_rhc_passes_configured_alns_window_budget_to_inner_solver(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -1564,11 +1755,13 @@ class TestRhcInnerSolver:
         from synaps.solvers.rhc_solver import RhcSolver
 
         problem = _make_3state_problem(n_orders=4, ops_per_order=2)
+        captured_cpsat_kwargs: list[dict[str, object]] = []
 
         def fail_if_alns_called(self, problem, **kwargs):
             raise AssertionError("ALNS should be bypassed by hybrid routing")
 
         def fake_cpsat(self, problem, **kwargs):
+            captured_cpsat_kwargs.append(dict(kwargs))
             return GreedyDispatch().solve(problem)
 
         monkeypatch.setattr(
@@ -1600,6 +1793,8 @@ class TestRhcInnerSolver:
         assert result.metadata["hybrid_route_activation_rate"] > 0.0
         assert result.metadata["inner_window_summaries"]
         assert result.metadata["inner_window_summaries"][0]["inner_solver_selected"] == "cpsat"
+        assert captured_cpsat_kwargs
+        assert captured_cpsat_kwargs[0]["auto_greedy_warm_start"] is False
 
     def test_rhc_skips_inner_alns_when_budget_below_minimum(
         self,
@@ -1730,6 +1925,39 @@ class TestAlnsCpsatRepair:
         assert outcome.status == alns_module.RepairStatus.TIMEOUT
         assert outcome.reason == "cpsat_timeout"
         assert outcome.assignments == ()
+
+    def test_repair_cpsat_disables_auto_greedy_warm_start(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """ALNS CP-SAT repair must not spend budget on implicit GreedyDispatch warm starts."""
+        from types import SimpleNamespace
+
+        import synaps.solvers.alns_solver as alns_module
+
+        problem = _make_3state_problem(n_orders=3, ops_per_order=2)
+        destroyed_op_ids = {problem.operations[0].id, problem.operations[1].id}
+        captured_kwargs: dict[str, object] = {}
+
+        def fake_cpsat_solve(self, sub_problem, **kwargs):
+            captured_kwargs.update(kwargs)
+            return SimpleNamespace(status=SolverStatus.TIMEOUT, assignments=[])
+
+        monkeypatch.setattr(
+            "synaps.solvers.cpsat_solver.CpSatSolver.solve",
+            fake_cpsat_solve,
+        )
+
+        outcome = alns_module._repair_cpsat_outcome(
+            problem,
+            frozen_assignments=[],
+            destroyed_op_ids=destroyed_op_ids,
+            num_workers=2,
+        )
+
+        assert outcome.status == alns_module.RepairStatus.TIMEOUT
+        assert captured_kwargs["auto_greedy_warm_start"] is False
+        assert captured_kwargs["num_workers"] == 2
 
     def test_repair_greedy_partial_assignment_returns_none(
         self,
@@ -1937,6 +2165,74 @@ class TestAlnsCpsatRepair:
             problem.operations[0].id,
             problem.operations[1].id,
         ]
+
+    def test_repair_cpsat_outcome_respects_frozen_machine_intervals(self) -> None:
+        """CP-SAT repair must not overlap frozen machine occupancy."""
+        from datetime import timedelta
+
+        import synaps.solvers.alns_solver as alns_module
+        from synaps.model import Assignment
+
+        problem = _make_3state_problem(n_orders=1, ops_per_order=2)
+        frozen_op = problem.operations[0].model_copy(update={"eligible_wc_ids": [WC1]})
+        destroyed_op = problem.operations[1].model_copy(
+            update={"eligible_wc_ids": [WC1], "predecessor_op_id": None}
+        )
+        constrained_problem = problem.model_copy(update={"operations": [frozen_op, destroyed_op]})
+        frozen_assignment = Assignment(
+            operation_id=frozen_op.id,
+            work_center_id=WC1,
+            start_time=HORIZON_START,
+            end_time=HORIZON_START + timedelta(minutes=30),
+            setup_minutes=0,
+            aux_resource_ids=[],
+        )
+
+        outcome = alns_module._repair_cpsat_outcome(
+            constrained_problem,
+            frozen_assignments=[frozen_assignment],
+            destroyed_op_ids={destroyed_op.id},
+            time_limit_s=3,
+        )
+
+        assert outcome.status == alns_module.RepairStatus.FEASIBLE
+        assert len(outcome.assignments) == 1
+        repaired = outcome.assignments[0]
+        assert repaired.work_center_id == WC1
+        assert repaired.start_time >= frozen_assignment.end_time
+
+    def test_repair_cpsat_outcome_respects_frozen_predecessor_end(self) -> None:
+        """CP-SAT repair must honor frozen predecessors that stay outside the sub-problem."""
+        from datetime import timedelta
+
+        import synaps.solvers.alns_solver as alns_module
+        from synaps.model import Assignment
+
+        problem = _make_3state_problem(n_orders=1, ops_per_order=2)
+        frozen_op = problem.operations[0].model_copy(update={"eligible_wc_ids": [WC1]})
+        destroyed_op = problem.operations[1].model_copy(update={"eligible_wc_ids": [WC2]})
+        constrained_problem = problem.model_copy(update={"operations": [frozen_op, destroyed_op]})
+        frozen_assignment = Assignment(
+            operation_id=frozen_op.id,
+            work_center_id=WC1,
+            start_time=HORIZON_START + timedelta(minutes=5),
+            end_time=HORIZON_START + timedelta(minutes=45),
+            setup_minutes=0,
+            aux_resource_ids=[],
+        )
+
+        outcome = alns_module._repair_cpsat_outcome(
+            constrained_problem,
+            frozen_assignments=[frozen_assignment],
+            destroyed_op_ids={destroyed_op.id},
+            time_limit_s=3,
+        )
+
+        assert outcome.status == alns_module.RepairStatus.FEASIBLE
+        assert len(outcome.assignments) == 1
+        repaired = outcome.assignments[0]
+        assert repaired.work_center_id == WC2
+        assert repaired.start_time >= frozen_assignment.end_time
 
     def test_alns_cpsat_repair_produces_feasible_result(self) -> None:
         """ALNS with use_cpsat_repair=True must exercise CP-SAT repair path."""

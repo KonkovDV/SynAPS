@@ -128,6 +128,10 @@ class CpSatSolver(BaseSolver):
         presences: dict[tuple[Any, Any], Any],
         setup_minutes_lookup: dict[tuple[Any, Any, Any], int],
         setup_material_lookup: dict[tuple[Any, Any, Any], int],
+        *,
+        planning_horizon_start: Any,
+        horizon: int,
+        frozen_assignments: list[Assignment] | None = None,
     ) -> tuple[list[Any], list[Any], dict[Any, list[tuple[Any, Any]]]]:
         """Model SDST via AddCircuit (O(N²) arcs per machine, not O(N³) booleans).
 
@@ -143,6 +147,13 @@ class CpSatSolver(BaseSolver):
         material_terms: list[Any] = []
         # Maps operation_id → [(setup_interval, arc_literal)] for aux resource tracking
         setup_intervals_by_op: dict[Any, list[tuple[Any, Any]]] = {}
+        frozen_assignments_by_machine: dict[Any, list[Assignment]] = {}
+        if frozen_assignments:
+            for assignment in frozen_assignments:
+                frozen_assignments_by_machine.setdefault(
+                    assignment.work_center_id,
+                    [],
+                ).append(assignment)
 
         for work_center in problem.work_centers:
             machine_operations = [
@@ -156,13 +167,61 @@ class CpSatSolver(BaseSolver):
             machine_intervals = [
                 intervals[(operation.id, work_center.id)] for operation in machine_operations
             ]
+            frozen_machine_intervals: list[Any] = []
+            for frozen_index, frozen_assignment in enumerate(
+                sorted(
+                    frozen_assignments_by_machine.get(work_center.id, []),
+                    key=lambda assignment: assignment.start_time,
+                )
+            ):
+                start_offset = int(
+                    round(
+                        (
+                            frozen_assignment.start_time - planning_horizon_start
+                        ).total_seconds()
+                        / 60.0
+                    )
+                )
+                end_offset = int(
+                    round(
+                        (
+                            frozen_assignment.end_time - planning_horizon_start
+                        ).total_seconds()
+                        / 60.0
+                    )
+                )
+                start_offset = max(0, min(start_offset, horizon))
+                end_offset = max(0, min(end_offset, horizon))
+                if end_offset <= start_offset:
+                    continue
+
+                frozen_start = model.new_int_var(
+                    start_offset,
+                    start_offset,
+                    f"frozen_start_{work_center.id}_{frozen_index}",
+                )
+                frozen_end = model.new_int_var(
+                    end_offset,
+                    end_offset,
+                    f"frozen_end_{work_center.id}_{frozen_index}",
+                )
+                frozen_machine_intervals.append(
+                    model.new_interval_var(
+                        frozen_start,
+                        end_offset - start_offset,
+                        frozen_end,
+                        f"frozen_interval_{work_center.id}_{frozen_index}",
+                    )
+                )
+
+            constrained_machine_intervals = machine_intervals + frozen_machine_intervals
 
             if work_center.max_parallel <= 1:
-                model.add_no_overlap(machine_intervals)
+                model.add_no_overlap(constrained_machine_intervals)
             else:
                 model.add_cumulative(
-                    machine_intervals,
-                    [1] * len(machine_intervals),
+                    constrained_machine_intervals,
+                    [1] * len(constrained_machine_intervals),
                     work_center.max_parallel,
                 )
 
@@ -529,12 +588,21 @@ class CpSatSolver(BaseSolver):
         time_limit_s = int(kwargs.get("time_limit_s", 30))
         random_seed = int(kwargs.get("random_seed", 42))
         num_workers = int(kwargs.get("num_workers", 8))
+        auto_greedy_warm_start = bool(kwargs.get("auto_greedy_warm_start", True))
         objective_weights = dict(kwargs.get("objective_weights", {}))
         material_loss_scale = int(kwargs.get("material_loss_scale", 1000))
         epsilon_constraints: dict[str, int] | None = kwargs.get("epsilon_constraints")
         objective_mode = str(kwargs.get("objective_mode", "weighted_sum"))
         primary_objective = str(kwargs.get("primary_objective", "makespan"))
         warm_start_assignments: list[Assignment] | None = kwargs.get("warm_start_assignments")
+        frozen_assignments_raw = kwargs.get("frozen_assignments")
+        frozen_assignments: list[Assignment] = list(frozen_assignments_raw or [])
+        frozen_predecessor_end_offsets = {
+            op_id: int(offset)
+            for op_id, offset in dict(
+                kwargs.get("frozen_predecessor_end_offsets", {})
+            ).items()
+        }
         enable_symmetry_breaking = bool(kwargs.get("enable_symmetry_breaking", True))
 
         t0 = time.monotonic()
@@ -617,6 +685,9 @@ class CpSatSolver(BaseSolver):
                 model.add(
                     selected_starts[operation.id] >= selected_ends[operation.predecessor_op_id]
                 )
+            frozen_predecessor_end_offset = frozen_predecessor_end_offsets.get(operation.id)
+            if frozen_predecessor_end_offset is not None:
+                model.add(selected_starts[operation.id] >= frozen_predecessor_end_offset)
 
         setup_terms, material_terms, setup_intervals_by_op = self._add_machine_order_and_adjacency(
             model,
@@ -627,6 +698,9 @@ class CpSatSolver(BaseSolver):
             presences,
             setup_minutes_lookup,
             setup_material_lookup,
+            planning_horizon_start=solve_problem.planning_horizon_start,
+            horizon=horizon,
+            frozen_assignments=frozen_assignments if not virtual_to_original else [],
         )
         self._add_aux_resource_cumulative_constraints(
             model, solve_problem, eligible_by_op, intervals, setup_intervals_by_op
@@ -679,7 +753,12 @@ class CpSatSolver(BaseSolver):
                     if presences_a and presences_b:
                         model.add(sum(presences_a) >= sum(presences_b))
 
-        if warm_start_assignments is None and time_limit_s >= 5 and not virtual_to_original:
+        if (
+            auto_greedy_warm_start
+            and warm_start_assignments is None
+            and time_limit_s >= 5
+            and not virtual_to_original
+        ):
             from synaps.solvers.greedy_dispatch import GreedyDispatch
 
             greedy_result = GreedyDispatch().solve(problem)
@@ -749,6 +828,7 @@ class CpSatSolver(BaseSolver):
                 "objective_mode": objective_mode,
                 "primary_objective": primary_objective,
                 "epsilon_constraints": dict(epsilon_constraints or {}),
+                "auto_greedy_warm_start": auto_greedy_warm_start,
                 "warm_started": warm_start_assignments is not None and not virtual_to_original,
                 "hint_count": hint_count,
                 "symmetry_breaking": enable_symmetry_breaking,

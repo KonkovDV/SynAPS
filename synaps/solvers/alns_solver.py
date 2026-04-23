@@ -356,6 +356,7 @@ def _repair_cpsat_outcome(
     frozen_assignments: list[Assignment],
     destroyed_op_ids: set[UUID],
     time_limit_s: int = 10,
+    num_workers: int = 1,
     ops_by_id: dict[UUID, Any] | None = None,
     op_positions: dict[UUID, int] | None = None,
 ) -> RepairOutcome:
@@ -400,6 +401,46 @@ def _repair_cpsat_outcome(
             reason="empty_subproblem",
         )
 
+    all_work_center_ids = [work_center.id for work_center in problem.work_centers]
+    relevant_machine_ids = {
+        work_center_id
+        for operation in sub_operations
+        for work_center_id in (
+            operation.eligible_wc_ids if operation.eligible_wc_ids else all_work_center_ids
+        )
+    }
+    relevant_frozen_assignments = [
+        assignment
+        for assignment in frozen_assignments
+        if assignment.work_center_id in relevant_machine_ids
+    ]
+    frozen_assignments_by_op = {
+        assignment.operation_id: assignment for assignment in frozen_assignments
+    }
+    frozen_predecessor_end_offsets: dict[UUID, int] = {}
+    for op_id in destroyed_op_ids:
+        operation = ops_by_id.get(op_id)
+        if operation is None or operation.predecessor_op_id is None:
+            continue
+        if operation.predecessor_op_id in needed_ids:
+            continue
+
+        frozen_predecessor = frozen_assignments_by_op.get(operation.predecessor_op_id)
+        if frozen_predecessor is None:
+            continue
+
+        frozen_predecessor_end_offsets[op_id] = max(
+            0,
+            int(
+                round(
+                    (
+                        frozen_predecessor.end_time - problem.planning_horizon_start
+                    ).total_seconds()
+                    / 60.0
+                )
+            ),
+        )
+
     # Build sub-problem with the relevant operations only
     sub_problem = ScheduleProblem(
         states=problem.states,
@@ -420,8 +461,11 @@ def _repair_cpsat_outcome(
     result = solver.solve(
         sub_problem,
         time_limit_s=time_limit_s,
-        num_workers=4,
+        num_workers=max(1, int(num_workers)),
+        auto_greedy_warm_start=False,
         enable_symmetry_breaking=False,
+        frozen_assignments=relevant_frozen_assignments,
+        frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
     )
 
     if result.status == SolverStatus.TIMEOUT:
@@ -661,6 +705,10 @@ class AlnsSolver(BaseSolver):
         min_destroy: int = int(kwargs.get("min_destroy", 20))
         max_destroy: int = int(kwargs.get("max_destroy", 300))
         repair_time_limit_s: int = int(kwargs.get("repair_time_limit_s", 10))
+        repair_num_workers: int = max(
+            1,
+            int(kwargs.get("repair_num_workers", kwargs.get("num_workers", 1))),
+        )
         sa_initial_temp: float = float(kwargs.get("sa_initial_temp", 100.0))
         sa_cooling_rate: float = float(kwargs.get("sa_cooling_rate", 0.995))
         max_no_improve_base_iters: int = int(kwargs.get("max_no_improve_iters", 0))
@@ -983,6 +1031,7 @@ class AlnsSolver(BaseSolver):
                         frozen,
                         destroyed_ids,
                         time_limit_s=repair_time_limit_s,
+                        num_workers=repair_num_workers,
                         ops_by_id=ops_by_id,
                         op_positions=op_positions,
                     )
@@ -1201,6 +1250,7 @@ class AlnsSolver(BaseSolver):
                 "warm_start_rejected_reason": warm_start_rejected_reason,
                 "initial_beam_op_limit": initial_beam_op_limit,
                 "cpsat_max_destroy_ops": cpsat_max_destroy_ops,
+                "repair_num_workers": repair_num_workers,
                 "initial_solution_ms": initial_solution_ms,
                 "time_limit_exhausted_before_search": time_limit_exhausted_before_search,
                 "max_no_improve_iters": max_no_improve_iters,

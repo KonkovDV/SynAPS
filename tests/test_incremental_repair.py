@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -307,6 +308,49 @@ class TestIncrementalRepair:
         assert fallback_assignments is not None
         assert {assignment.operation_id for assignment in fallback_assignments} == remaining_op_ids
 
+    def test_cpsat_fallback_disables_auto_greedy_warm_start_and_forwards_workers(
+        self,
+        simple_problem: ScheduleProblem,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        repair = IncrementalRepair()
+        remaining_op_ids = {simple_problem.operations[-1].id}
+        captured_kwargs: dict[str, object] = {}
+
+        def fake_cpsat_solve(self, sub_problem, **kwargs):
+            captured_kwargs.update(kwargs)
+            operation = sub_problem.operations[0]
+            return SimpleNamespace(
+                status=SolverStatus.FEASIBLE,
+                assignments=[
+                    Assignment(
+                        operation_id=operation.id,
+                        work_center_id=operation.eligible_wc_ids[0],
+                        start_time=simple_problem.planning_horizon_start,
+                        end_time=simple_problem.planning_horizon_start + timedelta(minutes=30),
+                        setup_minutes=0,
+                        aux_resource_ids=[],
+                    )
+                ],
+            )
+
+        monkeypatch.setattr(
+            "synaps.solvers.cpsat_solver.CpSatSolver.solve",
+            fake_cpsat_solve,
+        )
+
+        fallback_assignments = repair._cpsat_fallback(
+            simple_problem,
+            [],
+            remaining_op_ids,
+            set(),
+            num_workers=2,
+        )
+
+        assert fallback_assignments is not None
+        assert captured_kwargs["auto_greedy_warm_start"] is False
+        assert captured_kwargs["num_workers"] == 2
+
     def test_uses_cpsat_fallback_when_constructive_dispatch_finds_no_slot(
         self,
         simple_problem: ScheduleProblem,
@@ -329,7 +373,10 @@ class TestIncrementalRepair:
             _frozen_assignments: list[Assignment],
             _remaining_op_ids: set[Any],
             _already_scheduled_ids: set[Any],
+            *,
+            num_workers: int = 1,
         ) -> list[Assignment]:
+            assert num_workers >= 1
             return preserved_assignments
 
         monkeypatch.setattr(
