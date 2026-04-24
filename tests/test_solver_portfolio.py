@@ -108,6 +108,9 @@ def test_create_solver_rhc_alns_defaults_to_bounded_cpsat_inner_repair() -> None
     assert solve_kwargs["inner_kwargs"]["max_no_improve_iters"] == 30
     assert solve_kwargs["inner_kwargs"]["repair_num_workers"] == 1
     assert solve_kwargs["inner_kwargs"]["sa_auto_calibration_enabled"] is True
+    assert solve_kwargs["backtracking_enabled"] is True
+    assert solve_kwargs["backtracking_tail_minutes"] == 60
+    assert solve_kwargs["backtracking_max_ops"] == 24
 
 
 def test_create_solver_supports_academic_epsilon_profile() -> None:

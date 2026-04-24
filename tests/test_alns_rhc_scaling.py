@@ -1260,6 +1260,51 @@ class TestRhcSolver:
         assert result.metadata["fallback_repair_attempted"] is False
         assert result.metadata["fallback_repair_skipped"] is True
 
+    def test_rhc_backtracking_rewinds_recent_boundary_assignments_into_next_window(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Backtracking should re-inject recent committed assignments into the next inner window."""
+        import synaps.solvers.alns_solver as alns_module
+        from synaps.solvers.greedy_dispatch import GreedyDispatch
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_long_chain_problem(18)
+        captured_window_ops: list[list[UUID]] = []
+
+        def fake_alns_solve(self, sub_problem, **kwargs):
+            captured_window_ops.append([op.id for op in sub_problem.operations])
+            return GreedyDispatch().solve(sub_problem)
+
+        monkeypatch.setattr(alns_module.AlnsSolver, "solve", fake_alns_solve)
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=60,
+            overlap_minutes=0,
+            inner_solver="alns",
+            time_limit_s=30,
+            max_ops_per_window=18,
+            max_windows=2,
+            backtracking_enabled=True,
+            backtracking_tail_minutes=20,
+            backtracking_max_ops=4,
+            inner_kwargs={
+                "max_iterations": 5,
+                "use_cpsat_repair": False,
+            },
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL, SolverStatus.ERROR)
+        assert len(captured_window_ops) >= 2
+        first_window_ids = set(captured_window_ops[0])
+        second_window_ids = set(captured_window_ops[1])
+        assert first_window_ids & second_window_ids
+        assert result.metadata["backtracking_enabled"] is True
+        assert result.metadata["backtracking_windows"] >= 1
+        assert result.metadata["backtracking_ops_total"] >= 1
+        assert result.metadata["inner_window_summaries"][1]["backtracking_rewind_ops"] >= 1
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 4. Instance generator tests

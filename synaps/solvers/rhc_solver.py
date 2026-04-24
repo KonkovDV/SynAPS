@@ -85,6 +85,12 @@ class RhcSolver(BaseSolver):
         inner_kwargs.pop("time_limit_s", None)
         time_limit_s: float = float(kwargs.get("time_limit_s", 600))
         inner_solver_min_budget_s: float = float(kwargs.get("inner_solver_min_budget_s", 0.0))
+        backtracking_enabled: bool = bool(kwargs.get("backtracking_enabled", False))
+        backtracking_tail_minutes: float = max(
+            0.0,
+            float(kwargs.get("backtracking_tail_minutes", overlap_minutes)),
+        )
+        backtracking_max_ops: int = max(0, int(kwargs.get("backtracking_max_ops", 0)))
         inner_window_time_fraction: float = min(
             1.0,
             max(0.1, float(kwargs.get("inner_window_time_fraction", 0.8))),
@@ -361,6 +367,8 @@ class RhcSolver(BaseSolver):
         hybrid_route_attempts = 0
         hybrid_route_activations = 0
         inner_fallback_windows = 0
+        backtracking_windows = 0
+        backtracking_ops_total = 0
         horizon_clipped_assignments = 0
         time_limit_reached = False
         fallback_repair_attempted = False
@@ -468,14 +476,17 @@ class RhcSolver(BaseSolver):
             *,
             commit_boundary: float,
             commit_all: bool,
+            frozen_committed_ids: set[UUID] | None = None,
             eligible_ids: set[UUID] | None = None,
         ) -> dict[UUID, Assignment]:
             nonlocal horizon_clipped_assignments
 
+            frozen_ids = committed_op_ids if frozen_committed_ids is None else frozen_committed_ids
+
             candidates: dict[UUID, Assignment] = {}
             for assignment in assignments:
                 op_id = assignment.operation_id
-                if op_id in committed_op_ids:
+                if op_id in frozen_ids:
                     continue
                 if eligible_ids is not None and op_id not in eligible_ids:
                     continue
@@ -504,13 +515,54 @@ class RhcSolver(BaseSolver):
                     if predecessor_op_id is None:
                         continue
                     if (
-                        predecessor_op_id not in committed_op_ids
+                        predecessor_op_id not in frozen_ids
                         and predecessor_op_id not in candidates
                     ):
                         del candidates[op_id]
                         changed = True
 
             return candidates
+
+        def select_backtracking_assignments(window_start_offset: float) -> list[Assignment]:
+            if (
+                not backtracking_enabled
+                or backtracking_tail_minutes <= 0.0
+                or backtracking_max_ops <= 0
+                or not committed_assignments
+            ):
+                return []
+
+            rewind_boundary = max(0.0, window_start_offset - backtracking_tail_minutes)
+            rewound_ids = {
+                assignment.operation_id
+                for assignment in committed_assignments
+                if (
+                    (assignment.end_time - horizon_start).total_seconds() / 60.0
+                    > rewind_boundary + 1e-9
+                )
+            }
+            if not rewound_ids:
+                return []
+
+            changed = True
+            while changed:
+                changed = False
+                for op_id, assignment in committed_assignment_by_op.items():
+                    if op_id in rewound_ids:
+                        continue
+                    operation = ops_by_id.get(op_id)
+                    predecessor_op_id = operation.predecessor_op_id if operation is not None else None
+                    if predecessor_op_id in rewound_ids:
+                        rewound_ids.add(op_id)
+                        changed = True
+
+            if len(rewound_ids) > backtracking_max_ops:
+                return []
+
+            return sorted(
+                [committed_assignment_by_op[op_id] for op_id in rewound_ids],
+                key=lambda assignment: assignment.start_time,
+            )
 
         def stabilize_temporal_consistency(
             assignments: list[Assignment],
@@ -983,6 +1035,16 @@ class RhcSolver(BaseSolver):
                 selected_window_ids.add(op_id)
                 capped_selected_ops.append(ops_by_id[op_id])
 
+            rewound_assignments = select_backtracking_assignments(window_start_offset)
+            rewound_ids = {assignment.operation_id for assignment in rewound_assignments}
+            if rewound_assignments:
+                backtracking_windows += 1
+                backtracking_ops_total += len(rewound_assignments)
+                for assignment in rewound_assignments:
+                    if assignment.operation_id not in selected_window_ids:
+                        selected_window_ids.add(assignment.operation_id)
+                        capped_selected_ops.append(ops_by_id[assignment.operation_id])
+
             window_ops = sorted(
                 capped_selected_ops,
                 key=lambda op: (
@@ -1023,10 +1085,22 @@ class RhcSolver(BaseSolver):
             window_spillover = max(0, len(window_candidate_ids) - len(window_ops))
             spillover_count += window_spillover
 
+            frozen_committed_assignments = [
+                assignment
+                for assignment in committed_assignments
+                if assignment.operation_id not in rewound_ids
+            ]
+            frozen_committed_assignment_by_op = {
+                op_id: assignment
+                for op_id, assignment in committed_assignment_by_op.items()
+                if op_id not in rewound_ids
+            }
+            frozen_committed_op_ids = set(frozen_committed_assignment_by_op.keys())
+
             window_op_ids = self._expand_predecessor_closure(
                 {op.id for op in window_ops},
                 ops_by_id,
-                committed_op_ids,
+                frozen_committed_op_ids,
             )
 
             # Clear predecessor links that point to committed (frozen) operations
@@ -1131,9 +1205,12 @@ class RhcSolver(BaseSolver):
                         inner_rejection_reason = "inner_skipped_low_budget"
                     else:
                         effective_inner_kwargs = dict(selected_inner_kwargs)
-                        if previous_window_tail_assignments:
+                        warm_start_assignments = list(previous_window_tail_assignments)
+                        if rewound_assignments:
+                            warm_start_assignments.extend(rewound_assignments)
+                        if warm_start_assignments:
                             effective_inner_kwargs["warm_start_assignments"] = sorted(
-                                previous_window_tail_assignments,
+                                warm_start_assignments,
                                 key=lambda assignment: assignment.start_time,
                             )
                         if selected_inner_solver_name == "cpsat":
@@ -1179,8 +1256,12 @@ class RhcSolver(BaseSolver):
                             inner_result.assignments,
                             commit_boundary=commit_boundary,
                             commit_all=window_end_offset >= horizon_minutes,
+                            frozen_committed_ids=frozen_committed_op_ids,
                         )
                         committed_now = len(commit_candidates)
+                        committed_assignments = list(frozen_committed_assignments)
+                        committed_assignment_by_op = dict(frozen_committed_assignment_by_op)
+                        committed_op_ids = set(frozen_committed_op_ids)
                         for op_id, assignment in sorted(
                             commit_candidates.items(),
                             key=lambda item: item[1].start_time,
@@ -1211,6 +1292,10 @@ class RhcSolver(BaseSolver):
                             due_drift_minutes=window_due_drift_minutes,
                             spillover_ops=window_spillover,
                         )
+                        if rewound_assignments:
+                            inner_window_summaries[-1]["backtracking_rewind_ops"] = len(
+                                rewound_assignments
+                            )
                         if hybrid_routing_reason is not None:
                             inner_window_summaries[-1]["inner_solver_selected"] = (
                                 selected_inner_solver_name
@@ -1250,8 +1335,8 @@ class RhcSolver(BaseSolver):
                 previous_window_tail_assignments = []
                 # Solve the window by greedy dispatch on its operations, building
                 # on top of already-committed assignments.
-                scheduled_so_far = list(committed_assignments)
-                scheduled_by_op = dict(committed_assignment_by_op)
+                scheduled_so_far = list(frozen_committed_assignments)
+                scheduled_by_op = dict(frozen_committed_assignment_by_op)
                 machine_idx = MachineIndex(dispatch_context)
                 for assignment in scheduled_so_far:
                     machine_idx.add(assignment)
@@ -1360,8 +1445,12 @@ class RhcSolver(BaseSolver):
                     scheduled_so_far,
                     commit_boundary=commit_boundary,
                     commit_all=window_end_offset >= horizon_minutes,
+                    frozen_committed_ids=frozen_committed_op_ids,
                     eligible_ids=window_scheduled_ids,
                 )
+                committed_assignments = list(frozen_committed_assignments)
+                committed_assignment_by_op = dict(frozen_committed_assignment_by_op)
+                committed_op_ids = set(frozen_committed_op_ids)
                 for op_id, assignment in sorted(
                     commit_candidates.items(),
                     key=lambda item: item[1].start_time,
@@ -1387,6 +1476,10 @@ class RhcSolver(BaseSolver):
                         fallback_iterations=fallback_iterations,
                         exception_message=inner_exception_message,
                     )
+                    if rewound_assignments:
+                        inner_window_summaries[-1]["backtracking_rewind_ops"] = len(
+                            rewound_assignments
+                        )
                     inner_window_summaries[-1]["inner_solver_selected"] = (
                         selected_inner_solver_name
                     )
@@ -1639,6 +1732,11 @@ class RhcSolver(BaseSolver):
                 "no_improve_max_iters": no_improve_max_iters,
                 "max_windows": max_windows,
                 "inner_solver_min_budget_s": inner_solver_min_budget_s,
+                "backtracking_enabled": backtracking_enabled,
+                "backtracking_tail_minutes": backtracking_tail_minutes,
+                "backtracking_max_ops": backtracking_max_ops,
+                "backtracking_windows": backtracking_windows,
+                "backtracking_ops_total": backtracking_ops_total,
                 "inner_window_time_fraction": inner_window_time_fraction,
                 "inner_window_time_cap_s": inner_window_time_cap_s,
                 "commit_boundary_mode": "end_time",

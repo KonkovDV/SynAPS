@@ -290,6 +290,9 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
             "hybrid_due_pressure_threshold": 0.35,
             "hybrid_candidate_pressure_threshold": 1.75,
             "hybrid_max_ops": 1500,
+            "backtracking_enabled": True,
+            "backtracking_tail_minutes": 60,
+            "backtracking_max_ops": 24,
             "hybrid_inner_kwargs": {
                 "num_workers": 4,
             },

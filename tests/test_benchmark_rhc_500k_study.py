@@ -223,3 +223,6 @@ def test_study_rhc_500k_lane_both_profiles_workers(
         assert kwargs["solver_kwargs"]["random_seed"] == 11
         assert kwargs["solver_kwargs"]["inner_kwargs"]["random_seed"] == 11
         assert kwargs["solver_kwargs"]["hybrid_inner_kwargs"]["random_seed"] == 11
+        assert kwargs["solver_kwargs"]["backtracking_enabled"] is True
+        assert kwargs["solver_kwargs"]["backtracking_tail_minutes"] == 60
+        assert kwargs["solver_kwargs"]["backtracking_max_ops"] == 24
