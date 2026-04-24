@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { setImmediate as delayImmediate } from "node:timers/promises";
 
 import { buildControlPlaneApp } from "../src/app";
 import {
@@ -53,6 +54,9 @@ type OpenApiDocument = {
           };
         };
       };
+      get?: {
+        parameters?: Array<{ name: string }>;
+      };
     }
   >;
 };
@@ -99,6 +103,8 @@ test("runtime contract index exposes discoverability metadata", async () => {
   assert.equal(payload.openapi_json, "/openapi.json");
   assert.ok(payload.schema_files.includes("repair-request.schema.json"));
   assert.ok(payload.routes.includes("/api/v1/repair"));
+  assert.ok(payload.routes.includes("/api/v1/solve/jobs"));
+  assert.ok(payload.routes.includes("/api/v1/solve/jobs/:jobId"));
   assert.ok(payload.routes.includes("/metrics"));
   assert.ok(payload.routes.includes("/api/v1/ui/gantt-model"));
 
@@ -216,6 +222,11 @@ test("openapi route exposes solve and repair schemas", async () => {
     payload.paths["/api/v1/repair"].post?.requestBody.content["application/json"].schema.$ref,
     "#/components/schemas/RepairRequest",
   );
+  assert.equal(
+    payload.paths["/api/v1/solve/jobs"].post?.requestBody.content["application/json"].schema.$ref,
+    "#/components/schemas/SolveRequest",
+  );
+  assert.equal(payload.paths["/api/v1/solve/jobs/{jobId}"].get?.parameters?.[0]?.name, "jobId");
 
   await app.close();
 });
@@ -289,6 +300,119 @@ test("solve route injects request id and returns validated response", async () =
   assert.equal(payload.result.solver_name, "greedy_dispatch");
   assert.equal(payload.request_id, seenRequestId);
   assert.ok(typeof seenRequestId === "string" && seenRequestId.length > 0);
+
+  await app.close();
+});
+
+test("async solve job route accepts work and exposes polling status", async () => {
+  let releaseSolve: (() => void) | undefined;
+  const executor: SynapsContractExecutor = {
+    async executeSolveRequest(payload: object): Promise<unknown> {
+      const request = payload as { request_id?: string };
+      await new Promise<void>((resolve) => {
+        releaseSolve = resolve;
+      });
+      return {
+        contract_version: "2026-04-03",
+        request_id: request.request_id,
+        result: {
+          solver_name: "greedy_dispatch",
+          status: "feasible",
+          assignments: [],
+          objective: {},
+          duration_ms: 1,
+          metadata: {
+            portfolio: {
+              solver_config: "GREED",
+            },
+          },
+          random_seed: null,
+        },
+      };
+    },
+    async executeRepairRequest(): Promise<unknown> {
+      throw new Error("unused");
+    },
+  };
+
+  const app = buildControlPlaneApp({ executor });
+  const createResponse = await app.inject({
+    method: "POST",
+    url: "/api/v1/solve/jobs",
+    payload: createSolveRequest(),
+  });
+
+  assert.equal(createResponse.statusCode, 202);
+  const accepted = createResponse.json() as {
+    job_id: string;
+    request_id: string;
+    status: string;
+    status_url: string;
+  };
+  assert.ok(accepted.job_id.length > 0);
+  assert.equal(accepted.status, "pending");
+  assert.equal(accepted.status_url, `/api/v1/solve/jobs/${accepted.job_id}`);
+
+  await delayImmediate();
+  const runningResponse = await app.inject({
+    method: "GET",
+    url: accepted.status_url,
+  });
+  assert.equal(runningResponse.statusCode, 200);
+  const running = runningResponse.json() as { status: string; result: unknown };
+  assert.equal(running.status, "running");
+  assert.equal(running.result, null);
+
+  releaseSolve?.();
+  let doneResponse = await app.inject({
+    method: "GET",
+    url: accepted.status_url,
+  });
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const payload = doneResponse.json() as { status: string };
+    if (payload.status === "succeeded") {
+      break;
+    }
+    await delayImmediate();
+    doneResponse = await app.inject({
+      method: "GET",
+      url: accepted.status_url,
+    });
+  }
+
+  assert.equal(doneResponse.statusCode, 200);
+  const done = doneResponse.json() as {
+    status: string;
+    request_id: string;
+    result: { result: { solver_name: string } };
+  };
+  assert.equal(done.status, "succeeded");
+  assert.equal(done.request_id, accepted.request_id);
+  assert.equal(done.result.result.solver_name, "greedy_dispatch");
+
+  await app.close();
+});
+
+test("async solve job status returns 404 for unknown job", async () => {
+  const app = buildControlPlaneApp({
+    executor: {
+      async executeSolveRequest(): Promise<unknown> {
+        throw new Error("unused");
+      },
+      async executeRepairRequest(): Promise<unknown> {
+        throw new Error("unused");
+      },
+    },
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/api/v1/solve/jobs/missing-job",
+  });
+
+  assert.equal(response.statusCode, 404);
+  const payload = response.json() as { error: string };
+  assert.equal(payload.error, "Not Found");
 
   await app.close();
 });

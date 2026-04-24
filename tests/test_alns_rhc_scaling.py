@@ -10,6 +10,7 @@ Test hierarchy:
 
 from __future__ import annotations
 
+import math
 import random
 import time
 from datetime import UTC, datetime, timedelta
@@ -473,8 +474,16 @@ class TestAlnsSolver:
         assert "repair_rejection_reasons" in result.metadata
         assert "destroy_operators" in result.metadata
         assert "sdst_matrix_bytes" in result.metadata
+        assert "lower_bound" in result.metadata
+        assert "upper_bound" in result.metadata
+        assert "gap" in result.metadata
+        assert "lower_bound_method" in result.metadata
+        assert "lower_bound_components" in result.metadata
         assert result.metadata["cpsat_repair_attempts"] >= result.metadata["cpsat_repairs"]
         assert result.metadata["greedy_repair_attempts"] >= result.metadata["greedy_repairs"]
+        assert result.metadata["lower_bound"] >= 0
+        assert result.metadata["upper_bound"] >= result.objective.makespan_minutes
+        assert result.metadata["upper_bound"] >= result.metadata["lower_bound"]
 
     def test_alns_skips_cpsat_for_large_destroy_neighbourhood(
         self,
@@ -640,6 +649,7 @@ class TestAlnsSolver:
             max_iterations=10,
             time_limit_s=10,
             use_cpsat_repair=False,
+            sa_auto_calibration_enabled=False,
             dynamic_sa_enabled=True,
             due_pressure=1.0,
             candidate_pressure=2.0,
@@ -657,6 +667,90 @@ class TestAlnsSolver:
         assert result.metadata["sa_pressure_factor"] == pytest.approx(1.65)
         assert result.metadata["effective_sa_initial_temp"] == pytest.approx(165.0)
         assert result.metadata["effective_sa_cooling_rate"] == pytest.approx(0.995975)
+
+    def test_alns_segment_weight_update_blends_towards_uniform(self) -> None:
+        """Operator segment refresh should retain exploration pressure instead of collapsing to one arm."""
+        import synaps.solvers.alns_solver as alns_module
+
+        refreshed = alns_module._update_operator_weights_for_segment(
+            [30.0, 0.0, 0.0, 0.0],
+            [3, 0, 0, 0],
+            reset_mix=0.25,
+        )
+
+        assert len(refreshed) == 4
+        assert sum(refreshed) == pytest.approx(1.0)
+        assert refreshed[0] < 1.0
+        assert all(weight > 0 for weight in refreshed)
+        assert refreshed[1] > 0.0
+
+    def test_alns_auto_calibration_derives_temperature_from_positive_deltas(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Auto-calibration should derive a base temperature from sampled worsening deltas."""
+        import synaps.solvers.alns_solver as alns_module
+        from synaps.solvers.greedy_dispatch import GreedyDispatch
+
+        problem = _make_3state_problem(n_orders=2, ops_per_order=2)
+        current_assignments = GreedyDispatch().solve(problem).assignments
+        sdst = alns_module.SdstMatrix.from_problem(problem)
+        ops_by_id = {op.id: op for op in problem.operations}
+        successors_by_op: dict[UUID, list[UUID]] = {}
+        for op in problem.operations:
+            if op.predecessor_op_id is not None:
+                successors_by_op.setdefault(op.predecessor_op_id, []).append(op.id)
+
+        destroyed_op_id = current_assignments[0].operation_id
+        original_operator = alns_module.DESTROY_OPERATORS[0]
+
+        def fake_destroy(assignments, problem, sdst, destroy_size, rng):
+            return {destroyed_op_id}
+
+        def fake_repair(problem, frozen_assignments, destroyed_op_ids):
+            repaired = [
+                assignment
+                for assignment in current_assignments
+                if assignment.operation_id in destroyed_op_ids
+            ]
+            return alns_module.RepairOutcome(
+                status=alns_module.RepairStatus.FEASIBLE,
+                assignments=tuple(repaired),
+                reason="ok",
+            )
+
+        monkeypatch.setattr(
+            alns_module,
+            "DESTROY_OPERATORS",
+            [("deterministic", fake_destroy)] + list(alns_module.DESTROY_OPERATORS[1:]),
+        )
+        monkeypatch.setattr(alns_module, "_repair_greedy_outcome", fake_repair)
+        monkeypatch.setattr(alns_module, "_objective_cost", lambda obj, weights: 120.0)
+
+        calibrated_temp, sample_count = alns_module._calibrate_sa_temperature(
+            problem,
+            current_assignments,
+            current_cost=100.0,
+            objective_weights={"makespan": 1.0},
+            sdst=sdst,
+            destroy_size=1,
+            max_destroy=1,
+            ops_by_id=ops_by_id,
+            successors_by_op=successors_by_op,
+            trials=3,
+            acceptance_probability=0.8,
+            seed=42,
+            fallback_temperature=50.0,
+        )
+
+        monkeypatch.setattr(
+            alns_module,
+            "DESTROY_OPERATORS",
+            [original_operator] + list(alns_module.DESTROY_OPERATORS[1:]),
+        )
+
+        assert sample_count == 3
+        assert calibrated_temp == pytest.approx(-20.0 / math.log(0.8))
 
     def test_alns_recovers_when_final_validation_rejects_incumbent(
         self,
@@ -994,10 +1088,50 @@ class TestRhcSolver:
         assert result.metadata["due_drift_minutes_mean"] >= 0
         assert result.metadata["due_drift_minutes_max"] >= 0
         assert result.metadata["spillover_count"] >= 0
+        assert result.metadata["lower_bound"] >= 0
+        assert result.metadata["upper_bound"] >= result.metadata["lower_bound"]
+        assert result.metadata["lower_bound_method"] == "relaxed_precedence_capacity"
+        assert result.metadata["lower_bound_components"]["precedence_critical_path_lb"] >= 0
         assert result.metadata["earliest_frontier_advances"] <= len(problem.operations)
         assert result.metadata["due_frontier_advances"] <= len(problem.operations)
         assert result.metadata["effective_window_operation_cap"] >= 1
         assert result.metadata["window_load_factor"] >= 1.0
+
+    def test_rhc_inner_window_summary_exposes_window_lower_bound(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Inner-solver window summaries should carry deterministic lower bounds."""
+        from synaps.solvers.greedy_dispatch import GreedyDispatch
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_long_chain_problem(12)
+
+        def fake_alns_solve(self, sub_problem, **kwargs):
+            return GreedyDispatch().solve(sub_problem)
+
+        monkeypatch.setattr(
+            "synaps.solvers.alns_solver.AlnsSolver.solve",
+            fake_alns_solve,
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=120,
+            overlap_minutes=0,
+            inner_solver="alns",
+            time_limit_s=30,
+            max_ops_per_window=20,
+            max_windows=1,
+            inner_kwargs={
+                "max_iterations": 5,
+                "use_cpsat_repair": False,
+            },
+        )
+
+        assert result.metadata["inner_window_summaries"]
+        first_window = result.metadata["inner_window_summaries"][0]
+        assert first_window["lower_bound"] >= 0
 
     def test_rhc_candidate_pool_clamp_prevents_frontier_explosion(self) -> None:
         """RHC should cap tie-heavy candidate frontiers to a bounded admission pool."""

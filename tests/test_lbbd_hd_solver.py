@@ -265,11 +265,15 @@ class TestLbbdHdSolver:
 
         assert "lower_bound" in result.metadata
         assert "upper_bound" in result.metadata
+        assert "lower_bound_method" in result.metadata
+        assert "lower_bound_components" in result.metadata
         assert "iteration_log" in result.metadata
         assert "max_ops_per_cluster" in result.metadata
         assert "warm_start_used" in result.metadata
         assert "cut_pool" in result.metadata
         assert "size" in result.metadata["cut_pool"]
+        if result.metadata["upper_bound"] < float("inf"):
+            assert result.metadata["upper_bound"] >= result.metadata["lower_bound"]
 
     def test_warm_start_improves_convergence(self) -> None:
         """With warm start, we should get at least one master warm-start iteration."""

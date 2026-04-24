@@ -43,6 +43,7 @@ from synaps.solvers._dispatch_support import (
     find_earliest_feasible_slot,
     recompute_assignment_setups,
 )
+from synaps.solvers.lower_bounds import compute_relaxed_makespan_lower_bound
 from synaps.solvers.sdst_matrix import SdstMatrix
 
 if TYPE_CHECKING:
@@ -73,6 +74,7 @@ class RhcSolver(BaseSolver):
     def solve(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
         t0 = time.monotonic()
         acceleration_status = get_acceleration_status()
+        global_lower_bound = compute_relaxed_makespan_lower_bound(problem)
 
         # Parameters
         window_minutes: int = int(kwargs.get("window_minutes", 480))
@@ -368,6 +370,9 @@ class RhcSolver(BaseSolver):
         previous_window_tail_assignments: list[Assignment] = []
 
         inner_summary_metadata_keys = (
+            "lower_bound",
+            "upper_bound",
+            "gap",
             "iterations_completed",
             "improvements",
             "cpsat_repair_skips_large_destroy",
@@ -404,6 +409,7 @@ class RhcSolver(BaseSolver):
             ops_committed: int,
             resolution_mode: str,
             inner_result: ScheduleResult | None,
+            lower_bound: float | None = None,
             inner_time_limit_s: float | None = None,
             candidate_pressure: float | None = None,
             due_pressure: float | None = None,
@@ -419,6 +425,8 @@ class RhcSolver(BaseSolver):
                 "ops_in_window": ops_in_window,
                 "resolution_mode": resolution_mode,
             }
+            if lower_bound is not None:
+                summary["lower_bound"] = round(lower_bound, 4)
             if inner_time_limit_s is not None:
                 summary["inner_time_limit_s"] = round(inner_time_limit_s, 2)
             if candidate_pressure is not None:
@@ -1104,6 +1112,7 @@ class RhcSolver(BaseSolver):
                         planning_horizon_start=problem.planning_horizon_start,
                         planning_horizon_end=problem.planning_horizon_end,
                     )
+                    window_lower_bound = compute_relaxed_makespan_lower_bound(sub_problem)
 
                     # Compute remaining time budget for this window
                     remaining_time = max(10.0, time_limit_s - (time.monotonic() - t0))
@@ -1195,6 +1204,7 @@ class RhcSolver(BaseSolver):
                             ops_committed=committed_now,
                             resolution_mode="inner",
                             inner_result=inner_result,
+                            lower_bound=window_lower_bound.value,
                             inner_time_limit_s=per_window_limit,
                             candidate_pressure=window_candidate_pressure,
                             due_pressure=window_due_pressure,
@@ -1563,6 +1573,15 @@ class RhcSolver(BaseSolver):
                 "windows_solved": window_count,
                 "ops_scheduled": scheduled_count,
                 "ops_total": total_ops,
+                "lower_bound": round(global_lower_bound.value, 4),
+                "upper_bound": round(final_obj.makespan_minutes, 4),
+                "gap": round(
+                    max(final_obj.makespan_minutes - global_lower_bound.value, 0.0)
+                    / max(final_obj.makespan_minutes, 1e-9),
+                    6,
+                ),
+                "lower_bound_method": "relaxed_precedence_capacity",
+                "lower_bound_components": global_lower_bound.as_metadata(),
                 "inner_solver": inner_solver_name,
                 "inner_solver_windows": inner_solver_windows,
                 "inner_fallback_windows": inner_fallback_windows,

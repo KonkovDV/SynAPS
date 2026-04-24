@@ -34,6 +34,7 @@ from synaps.solvers._dispatch_support import (
     recompute_assignment_setups,
 )
 from synaps.solvers.feasibility_checker import FeasibilityChecker
+from synaps.solvers.lower_bounds import compute_relaxed_makespan_lower_bound
 from synaps.solvers.sdst_matrix import SdstMatrix
 
 if TYPE_CHECKING:
@@ -664,6 +665,120 @@ def _sa_accept(
     return rng.random() < prob
 
 
+def _update_operator_weights_for_segment(
+    operator_scores: list[float],
+    operator_attempts: list[int],
+    *,
+    reset_mix: float,
+    min_weight: float = 0.05,
+) -> list[float]:
+    """Refresh operator weights from the current segment and reset towards uniform."""
+
+    n_operators = len(operator_scores)
+    if n_operators == 0:
+        return []
+
+    segment_rewards = [
+        operator_scores[idx] / operator_attempts[idx]
+        if operator_attempts[idx] > 0
+        else 0.0
+        for idx in range(n_operators)
+    ]
+    reward_mass = sum(max(reward, 0.0) for reward in segment_rewards)
+    if reward_mass > 0:
+        normalized = [max(reward, 0.0) / reward_mass for reward in segment_rewards]
+    else:
+        normalized = [1.0 / n_operators] * n_operators
+
+    uniform_weight = 1.0 / n_operators
+    blended = [
+        max(
+            min_weight,
+            (1.0 - reset_mix) * normalized[idx] + reset_mix * uniform_weight,
+        )
+        for idx in range(n_operators)
+    ]
+    total = sum(blended)
+    return [weight / total for weight in blended]
+
+
+def _calibrate_sa_temperature(
+    problem: ScheduleProblem,
+    current_assignments: list[Assignment],
+    *,
+    current_cost: float,
+    objective_weights: dict[str, float],
+    sdst: SdstMatrix,
+    destroy_size: int,
+    max_destroy: int,
+    ops_by_id: dict[UUID, Any],
+    successors_by_op: dict[UUID, list[UUID]],
+    trials: int,
+    acceptance_probability: float,
+    seed: int,
+    fallback_temperature: float,
+) -> tuple[float, int]:
+    """Estimate a base SA temperature from sampled worsening greedy-repair deltas."""
+
+    if trials <= 0 or not (0.0 < acceptance_probability < 1.0):
+        return fallback_temperature, 0
+
+    calibration_rng = random.Random(seed ^ 0xA11CE)
+    positive_deltas: list[float] = []
+
+    for _ in range(trials):
+        _, destroy_fn = DESTROY_OPERATORS[calibration_rng.randrange(len(DESTROY_OPERATORS))]
+        destroyed_ids = destroy_fn(
+            current_assignments,
+            problem,
+            sdst,
+            destroy_size,
+            calibration_rng,
+        )
+        if not destroyed_ids:
+            continue
+
+        destroyed_ids = _expand_successor_closure(destroyed_ids, successors_by_op)
+        destroyed_ids = _cap_destroy_set_preserving_successor_closure(
+            destroyed_ids,
+            ops_by_id,
+            successors_by_op,
+            max_destroy,
+            calibration_rng,
+        )
+
+        frozen = [
+            assignment
+            for assignment in current_assignments
+            if assignment.operation_id not in destroyed_ids
+        ]
+        repair_outcome = _repair_greedy_outcome(problem, frozen, destroyed_ids)
+        if repair_outcome.status != RepairStatus.FEASIBLE:
+            continue
+
+        candidate = frozen + list(repair_outcome.assignments)
+        candidate_op_ids = {assignment.operation_id for assignment in candidate}
+        if len(candidate_op_ids) != len(problem.operations):
+            continue
+        if _has_precedence_violation(candidate, ops_by_id):
+            continue
+        if _has_machine_overlap(candidate):
+            continue
+
+        candidate_obj = _evaluate_objective(problem, candidate, sdst)
+        candidate_cost = _objective_cost(candidate_obj, objective_weights)
+        delta = candidate_cost - current_cost
+        if delta > 0:
+            positive_deltas.append(delta)
+
+    if not positive_deltas:
+        return fallback_temperature, 0
+
+    mean_positive_delta = sum(positive_deltas) / len(positive_deltas)
+    calibrated_temperature = -mean_positive_delta / math.log(acceptance_probability)
+    return calibrated_temperature, len(positive_deltas)
+
+
 # ---------------------------------------------------------------------------
 # Main ALNS solver
 # ---------------------------------------------------------------------------
@@ -709,8 +824,23 @@ class AlnsSolver(BaseSolver):
             1,
             int(kwargs.get("repair_num_workers", kwargs.get("num_workers", 1))),
         )
+        sa_auto_calibration_enabled: bool = bool(
+            kwargs.get("sa_auto_calibration_enabled", False)
+        )
+        sa_calibration_trials: int = max(0, int(kwargs.get("sa_calibration_trials", 5)))
+        sa_initial_acceptance_probability: float = float(
+            kwargs.get("sa_initial_acceptance_probability", 0.8)
+        )
         sa_initial_temp: float = float(kwargs.get("sa_initial_temp", 100.0))
         sa_cooling_rate: float = float(kwargs.get("sa_cooling_rate", 0.995))
+        operator_weight_segment_length: int = max(
+            1,
+            int(kwargs.get("operator_weight_segment_length", 50)),
+        )
+        operator_weight_reset_mix: float = min(
+            0.95,
+            max(0.0, float(kwargs.get("operator_weight_reset_mix", 0.2))),
+        )
         max_no_improve_base_iters: int = int(kwargs.get("max_no_improve_iters", 0))
         dynamic_no_improve_enabled: bool = bool(
             kwargs.get("dynamic_no_improve_enabled", False)
@@ -777,6 +907,12 @@ class AlnsSolver(BaseSolver):
                 max(no_improve_min_iters, scaled_no_improve),
             )
 
+        destroy_size = max(min_destroy, int(len(problem.operations) * destroy_fraction))
+        destroy_size = min(destroy_size, max_destroy)
+
+        sa_calibrated_base_temp = sa_initial_temp
+        sa_calibration_samples = 0
+
         sa_pressure_factor = 1.0
         if dynamic_sa_enabled:
             sa_pressure_factor += (
@@ -785,7 +921,7 @@ class AlnsSolver(BaseSolver):
             )
         effective_sa_initial_temp = min(
             sa_temp_max,
-            max(sa_temp_min, sa_initial_temp * sa_pressure_factor),
+            max(sa_temp_min, sa_calibrated_base_temp * sa_pressure_factor),
         )
         effective_sa_cooling_rate = min(
             0.9999,
@@ -811,6 +947,7 @@ class AlnsSolver(BaseSolver):
         sdst = SdstMatrix.from_problem(problem)
         checker = FeasibilityChecker()
         dispatch_context = build_dispatch_context(problem)
+        lower_bound = compute_relaxed_makespan_lower_bound(problem)
 
         # ------- Phase 1: Initial solution -------
         from synaps.solvers.greedy_dispatch import BeamSearchDispatch
@@ -919,10 +1056,27 @@ class AlnsSolver(BaseSolver):
         best_obj = current_obj
         best_cost = current_cost
 
+        if sa_auto_calibration_enabled:
+            sa_calibrated_base_temp, sa_calibration_samples = _calibrate_sa_temperature(
+                problem,
+                current_assignments,
+                current_cost=current_cost,
+                objective_weights=objective_weights,
+                sdst=sdst,
+                destroy_size=destroy_size,
+                max_destroy=max_destroy,
+                ops_by_id=ops_by_id,
+                successors_by_op=successors_by_op,
+                trials=sa_calibration_trials,
+                acceptance_probability=sa_initial_acceptance_probability,
+                seed=seed,
+                fallback_temperature=sa_initial_temp,
+            )
+
         # ------- Phase 2: ALNS operator selection (Roulette Wheel) -------
         n_operators = len(DESTROY_OPERATORS)
-        operator_scores = [1.0] * n_operators  # Accumulated scores
-        operator_attempts = [1] * n_operators  # Avoid /0
+        operator_scores = [0.0] * n_operators
+        operator_attempts = [0] * n_operators
         operator_weights = [1.0 / n_operators] * n_operators
 
         # Score rewards (Ropke & Pisinger 2006 §4.2)
@@ -931,8 +1085,6 @@ class AlnsSolver(BaseSolver):
         sigma_3 = 3.0   # accepted (SA)
 
         temperature = effective_sa_initial_temp
-        destroy_size = max(min_destroy, int(n_ops * destroy_fraction))
-        destroy_size = min(destroy_size, max_destroy)
 
         # Tracking
         improvements = 0
@@ -1149,17 +1301,15 @@ class AlnsSolver(BaseSolver):
                 operator_scores[selected_op_idx] += score_reward
                 operator_attempts[selected_op_idx] += 1
 
-                # Update operator weights every 50 iterations (Ropke & Pisinger 2006 §4.2)
-                if iteration % 50 == 0:
-                    for idx in range(n_operators):
-                        if operator_attempts[idx] > 0:
-                            operator_weights[idx] = max(
-                                0.05,
-                                0.5 * operator_weights[idx]
-                                + 0.5 * (operator_scores[idx] / operator_attempts[idx]),
-                            )
+                # Update operator weights on segment boundaries and reset the segment.
+                if iteration % operator_weight_segment_length == 0:
+                    operator_weights = _update_operator_weights_for_segment(
+                        operator_scores,
+                        operator_attempts,
+                        reset_mix=operator_weight_reset_mix,
+                    )
                     operator_scores = [0.0] * n_operators
-                    operator_attempts = [1] * n_operators
+                    operator_attempts = [0] * n_operators
 
                 # Cool down
                 temperature *= effective_sa_cooling_rate
@@ -1257,11 +1407,18 @@ class AlnsSolver(BaseSolver):
                 "max_no_improve_base_iters": max_no_improve_base_iters,
                 "dynamic_no_improve_enabled": dynamic_no_improve_enabled,
                 "dynamic_sa_enabled": dynamic_sa_enabled,
+                "sa_auto_calibration_enabled": sa_auto_calibration_enabled,
+                "sa_calibration_trials": sa_calibration_trials,
+                "sa_calibration_samples": sa_calibration_samples,
+                "sa_initial_acceptance_probability": sa_initial_acceptance_probability,
                 "due_pressure": round(due_pressure, 4),
                 "candidate_pressure": round(candidate_pressure, 4),
                 "sa_pressure_factor": round(sa_pressure_factor, 4),
+                "sa_calibrated_base_temp": round(sa_calibrated_base_temp, 4),
                 "effective_sa_initial_temp": round(effective_sa_initial_temp, 4),
                 "effective_sa_cooling_rate": round(effective_sa_cooling_rate, 6),
+                "operator_weight_segment_length": operator_weight_segment_length,
+                "operator_weight_reset_mix": operator_weight_reset_mix,
                 "sa_due_alpha": sa_due_alpha,
                 "sa_candidate_beta": sa_candidate_beta,
                 "sa_pressure_cooling_gamma": sa_pressure_cooling_gamma,
@@ -1302,6 +1459,15 @@ class AlnsSolver(BaseSolver):
                 "sdst_matrix_bytes": sdst.memory_bytes(),
                 "initial_cost": round(initial_cost, 2),
                 "final_cost": round(final_cost, 2),
+                "lower_bound": round(lower_bound.value, 4),
+                "upper_bound": round(final_obj.makespan_minutes, 4),
+                "gap": round(
+                    max(final_obj.makespan_minutes - lower_bound.value, 0.0)
+                    / max(final_obj.makespan_minutes, 1e-9),
+                    6,
+                ),
+                "lower_bound_method": "relaxed_precedence_capacity",
+                "lower_bound_components": lower_bound.as_metadata(),
                 "improvement_pct": round(
                     (1 - final_cost / max(initial_cost, 1e-9)) * 100, 2
                 ),

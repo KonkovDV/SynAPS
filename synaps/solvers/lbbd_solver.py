@@ -339,6 +339,10 @@ class LbbdSolver(BaseSolver):
                 "lower_bound": reported_lb,
                 "upper_bound": best_ub,
                 "gap": (best_ub - reported_lb) / max(best_ub, 1e-9) if best_ub < float("inf") else None,
+                "lower_bound_method": "master_relaxation_benders",
+                "lower_bound_components": {
+                    "master_relaxation_lb": reported_lb,
+                },
                 "iteration_log": iteration_log,
                 "gap_threshold": gap_threshold,
                 "setup_relaxation": setup_relaxation,

@@ -229,6 +229,7 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
             "max_destroy": 200,
             "repair_time_limit_s": 5,
             "repair_num_workers": 1,
+            "sa_auto_calibration_enabled": True,
         },
         description=(
             "ALNS with micro-CP-SAT repair. 300 iterations, 2-minute budget. "
@@ -245,6 +246,7 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
             "max_destroy": 300,
             "repair_time_limit_s": 10,
             "repair_num_workers": 1,
+            "sa_auto_calibration_enabled": True,
         },
         description=(
             "ALNS with micro-CP-SAT repair. 500 iterations, 5-minute budget. "
@@ -261,6 +263,7 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
             "max_destroy": 500,
             "repair_time_limit_s": 15,
             "repair_num_workers": 1,
+            "sa_auto_calibration_enabled": True,
             "sa_initial_temp": 200.0,
             "sa_cooling_rate": 0.998,
         },
@@ -301,6 +304,7 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
                 "repair_time_limit_s": 5,
                 "repair_num_workers": 1,
                 "cpsat_max_destroy_ops": 32,
+                "sa_auto_calibration_enabled": True,
                 "dynamic_sa_enabled": True,
                 "sa_due_alpha": 0.35,
                 "sa_candidate_beta": 0.15,

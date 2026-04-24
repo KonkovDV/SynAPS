@@ -315,6 +315,8 @@ class LbbdHdSolver(BaseSolver):
         for cut in benders_cuts:
             cut_kinds[cut.kind] = cut_kinds.get(cut.kind, 0) + 1
 
+        reported_lb = min(lb, best_ub) if best_ub < float("inf") else lb
+
         return ScheduleResult(
             solver_name=self.name,
             status=status,
@@ -324,11 +326,15 @@ class LbbdHdSolver(BaseSolver):
             random_seed=random_seed,
             metadata={
                 "iterations": len(iteration_log),
-                "lower_bound": lb,
+                "lower_bound": reported_lb,
                 "upper_bound": best_ub,
-                "gap": (best_ub - lb) / max(best_ub, 1e-9)
+                "gap": (best_ub - reported_lb) / max(best_ub, 1e-9)
                 if best_ub < float("inf")
                 else None,
+                "lower_bound_method": "master_relaxation_benders_hd",
+                "lower_bound_components": {
+                    "master_relaxation_lb": reported_lb,
+                },
                 "iteration_log": iteration_log,
                 "gap_threshold": gap_threshold,
                 "setup_relaxation": setup_relaxation,

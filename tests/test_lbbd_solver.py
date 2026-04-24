@@ -71,6 +71,8 @@ class TestLbbdSolver:
 
         assert "lower_bound" in result.metadata
         assert "upper_bound" in result.metadata
+        assert "lower_bound_method" in result.metadata
+        assert "lower_bound_components" in result.metadata
         assert "iteration_log" in result.metadata
         assert result.metadata["lower_bound"] >= 0
         if result.metadata["upper_bound"] < float("inf"):

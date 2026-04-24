@@ -94,6 +94,7 @@ def _default_solver_specs() -> dict[str, dict[str, Any]]:
                     "repair_time_limit_s": 5,
                     "repair_num_workers": 1,
                     "cpsat_max_destroy_ops": 32,
+                    "sa_auto_calibration_enabled": True,
                     "dynamic_sa_enabled": True,
                     "sa_due_alpha": 0.35,
                     "sa_candidate_beta": 0.15,

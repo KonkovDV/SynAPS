@@ -20,11 +20,17 @@ import {
   SynapsPythonBridgeError,
   type SynapsContractExecutor,
 } from "./python-executor";
+import {
+  InMemorySolveJobStore,
+  type SolveJobError,
+  type SynapsSolveJobStore,
+} from "./solve-jobs";
 
 export interface BuildControlPlaneAppOptions {
   executor?: SynapsContractExecutor;
   logger?: boolean;
   metrics?: SynapsMetricsRegistry;
+  solveJobs?: SynapsSolveJobStore;
 }
 
 const errorEnvelopeSchema = {
@@ -66,6 +72,34 @@ const runtimeContractIndexSchema = {
 
 const metricsResponseSchema = {
   type: "string",
+} as const;
+
+const solveJobAcceptedSchema = {
+  type: "object",
+  properties: {
+    job_id: { type: "string" },
+    request_id: { type: "string" },
+    status: { enum: ["pending", "running", "succeeded", "failed"] },
+    status_url: { type: "string" },
+    created_at: { type: "string" },
+    started_at: { anyOf: [{ type: "string" }, { type: "null" }] },
+    completed_at: { anyOf: [{ type: "string" }, { type: "null" }] },
+    result: {
+      anyOf: [{ type: "object", additionalProperties: true }, { type: "null" }],
+    },
+    error: { anyOf: [errorEnvelopeSchema, { type: "null" }] },
+  },
+  required: [
+    "job_id",
+    "request_id",
+    "status",
+    "status_url",
+    "created_at",
+    "started_at",
+    "completed_at",
+    "result",
+    "error",
+  ],
 } as const;
 
 const ganttRequestSchema = {
@@ -248,6 +282,36 @@ function deriveHttpStatusFromBridgeError(error: SynapsPythonBridgeError): number
   }
 }
 
+function serializeSolveJobError(error: unknown): SolveJobError {
+  if (error instanceof SynapsPythonBridgeError) {
+    const statusCode = deriveHttpStatusFromBridgeError(error);
+    return {
+      statusCode,
+      error: statusCode === 504 ? "Gateway Timeout" : "Bad Gateway",
+      message: error.message,
+      bridge_code: error.code,
+    };
+  }
+
+  const maybeEnvelope = asObject(error);
+  const statusCode =
+    typeof maybeEnvelope.statusCode === "number" ? maybeEnvelope.statusCode : 500;
+  const errorText = asString(maybeEnvelope.error) ?? "Internal Server Error";
+  const message = asString(maybeEnvelope.message) ?? String(error);
+  const serialized: SolveJobError = {
+    statusCode,
+    error: errorText,
+    message,
+  };
+  if ("errors" in maybeEnvelope) {
+    serialized.errors = maybeEnvelope.errors;
+  }
+  if (typeof maybeEnvelope.bridge_code === "string") {
+    serialized.bridge_code = maybeEnvelope.bridge_code;
+  }
+  return serialized;
+}
+
 export function buildControlPlaneApp(
   options: BuildControlPlaneAppOptions = {},
 ): FastifyInstance {
@@ -255,6 +319,7 @@ export function buildControlPlaneApp(
   const validators = buildContractValidators(schemas);
   const executor = options.executor ?? createPythonContractExecutor();
   const metrics = options.metrics ?? new SynapsMetricsRegistry();
+  const solveJobs = options.solveJobs ?? new InMemorySolveJobStore();
   const openApiDocument = buildOpenApiDocument(schemas);
   const routeList = [
     "/healthz",
@@ -262,9 +327,21 @@ export function buildControlPlaneApp(
     "/openapi.json",
     "/api/v1/runtime-contract",
     "/api/v1/solve",
+    "/api/v1/solve/jobs",
+    "/api/v1/solve/jobs/:jobId",
     "/api/v1/repair",
     "/api/v1/ui/gantt-model",
   ];
+
+  const solveJobStatusSchema = {
+    ...solveJobAcceptedSchema,
+    properties: {
+      ...solveJobAcceptedSchema.properties,
+      result: {
+        anyOf: [{ type: "object", additionalProperties: true }, { type: "null" }],
+      },
+    },
+  };
 
   const fallbackChain = parseLimitGuardChain();
   const limitGuardsEnabled = process.env.SYNAPS_ENABLE_LIMIT_GUARDS !== "0";
@@ -571,6 +648,79 @@ export function buildControlPlaneApp(
         error: "Bad Gateway",
         message: "Solve request exhausted fallback chain without a valid response",
       });
+    },
+  );
+
+  app.post(
+    "/api/v1/solve/jobs",
+    {
+      schema: {
+        body: schemas.solveRequest,
+        response: {
+          202: solveJobAcceptedSchema,
+          400: errorEnvelopeSchema,
+          422: errorEnvelopeSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const rawPayload = normalizeSolvePayload(
+        withRequestId(request.body as Record<string, unknown>, request.id),
+      );
+      const guardedPayload: Record<string, unknown> = {
+        ...rawPayload,
+        problem: applyAclGuardrails(rawPayload.problem),
+      };
+      const requestId = asString(guardedPayload.request_id) ?? request.id;
+
+      const job = solveJobs.enqueueSolveJob({
+        requestId,
+        statusUrlBase: "/api/v1/solve/jobs",
+        run: async () => {
+          const response = await executor.executeSolveRequest(guardedPayload);
+          if (!validators.solveResponse(response)) {
+            throw {
+              statusCode: 502,
+              error: "Bad Gateway",
+              message: "Python solve response failed contract validation",
+              errors: collectValidationFailure(
+                validators.solveResponse,
+                "invalid solve response",
+              ).errors,
+            };
+          }
+
+          const result = asObject(asObject(response).result);
+          metrics.recordScheduleResult(result);
+          return response as Record<string, unknown>;
+        },
+        serializeError: serializeSolveJobError,
+      });
+
+      return reply.code(202).send(job);
+    },
+  );
+
+  app.get(
+    "/api/v1/solve/jobs/:jobId",
+    {
+      schema: {
+        response: {
+          200: solveJobStatusSchema,
+          404: errorEnvelopeSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const job = solveJobs.getSolveJob(asObject(request.params).jobId as string);
+      if (job === null) {
+        return reply.code(404).send({
+          statusCode: 404,
+          error: "Not Found",
+          message: "Solve job not found",
+        });
+      }
+      return reply.code(200).send(job);
     },
   );
 

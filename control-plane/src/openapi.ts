@@ -38,6 +38,45 @@ const runtimeContractIndexSchema = {
   required: ["schema_files", "openapi_json", "routes"],
 } as const;
 
+const solveJobAcceptedSchema = {
+  type: "object",
+  properties: {
+    job_id: { type: "string" },
+    request_id: { type: "string" },
+    status: { enum: ["pending", "running", "succeeded", "failed"] },
+    status_url: { type: "string" },
+    created_at: { type: "string" },
+    started_at: { anyOf: [{ type: "string" }, { type: "null" }] },
+    completed_at: { anyOf: [{ type: "string" }, { type: "null" }] },
+    result: { anyOf: [{ type: "object" }, { type: "null" }] },
+    error: { anyOf: [{ $ref: "#/components/schemas/ErrorEnvelope" }, { type: "null" }] },
+  },
+  required: [
+    "job_id",
+    "request_id",
+    "status",
+    "status_url",
+    "created_at",
+    "started_at",
+    "completed_at",
+    "result",
+    "error",
+  ],
+} as const;
+
+const solveJobStatusSchema = {
+  ...solveJobAcceptedSchema,
+  properties: {
+    ...solveJobAcceptedSchema.properties,
+    result: {
+      anyOf: [
+        { $ref: "#/components/schemas/SolveResponse" },
+        { type: "null" },
+      ],
+    },
+  },
+} as const;
+
 const ganttModelRequestSchema = {
   type: "object",
   properties: {
@@ -248,6 +287,78 @@ export function buildOpenApiDocument(schemas: SynapsContractSchemas): JsonObject
           },
         },
       },
+      "/api/v1/solve/jobs": {
+        post: {
+          summary: "Create an asynchronous solve job",
+          operationId: "postSolveJob",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/SolveRequest" },
+              },
+            },
+          },
+          responses: {
+            202: {
+              description: "Accepted asynchronous solve job",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/SolveJobAccepted" },
+                },
+              },
+            },
+            400: {
+              description: "Bad request",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+                },
+              },
+            },
+            422: {
+              description: "ACL validation rejected the incoming graph",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/v1/solve/jobs/{jobId}": {
+        get: {
+          summary: "Poll asynchronous solve job status",
+          operationId: "getSolveJob",
+          parameters: [
+            {
+              name: "jobId",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          responses: {
+            200: {
+              description: "Current solve job state",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/SolveJobStatus" },
+                },
+              },
+            },
+            404: {
+              description: "Unknown solve job",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+                },
+              },
+            },
+          },
+        },
+      },
       "/api/v1/repair": {
         post: {
           summary: "Repair a schedule around disrupted operations",
@@ -350,6 +461,8 @@ export function buildOpenApiDocument(schemas: SynapsContractSchemas): JsonObject
         HealthResponse: healthResponseSchema,
         RuntimeContractIndex: runtimeContractIndexSchema,
         ErrorEnvelope: errorEnvelopeSchema,
+        SolveJobAccepted: solveJobAcceptedSchema,
+        SolveJobStatus: solveJobStatusSchema,
         GanttModelRequest: ganttModelRequestSchema,
         GanttModelResponse: ganttModelResponseSchema,
         SolveRequest: withSchemaId(
