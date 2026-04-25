@@ -129,6 +129,12 @@ python -m benchmark.study_rhc_50k \
 python -m pytest tests -q
 ```
 
+Запустить строгую type-check проверку, которая используется в CI:
+
+```bash
+python -m mypy synaps --strict --no-error-summary
+```
+
 Запустить boundary-тесты TypeScript control-plane:
 
 ```bash

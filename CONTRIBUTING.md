@@ -39,6 +39,7 @@ For most code changes, run:
 
 ```bash
 pytest tests/ -v
+python -m mypy synaps --strict --no-error-summary
 ruff check synaps tests benchmark --select F,E9
 python -m build
 twine check dist/*

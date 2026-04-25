@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+from uuid import UUID
 
-from synaps.model import ScheduleProblem
+if TYPE_CHECKING:
+    from synaps.model import ScheduleProblem
 
 
 @dataclass(frozen=True)
@@ -50,10 +53,10 @@ def compute_relaxed_makespan_lower_bound(problem: ScheduleProblem) -> MakespanLo
     work_centers_by_id = {work_center.id: work_center for work_center in problem.work_centers}
     all_work_center_ids = [work_center.id for work_center in problem.work_centers]
 
-    min_duration_by_op: dict[object, float] = {}
-    successors_by_op: dict[object, list[object]] = defaultdict(list)
-    indegree_by_op: dict[object, int] = {operation.id: 0 for operation in problem.operations}
-    exclusive_machine_loads: dict[object, float] = defaultdict(float)
+    min_duration_by_op: dict[UUID, float] = {}
+    successors_by_op: dict[UUID, list[UUID]] = defaultdict(list)
+    indegree_by_op: dict[UUID, int] = {operation.id: 0 for operation in problem.operations}
+    exclusive_machine_loads: dict[UUID, float] = defaultdict(float)
 
     total_min_duration = 0.0
     max_operation_lb = 0.0
@@ -73,7 +76,10 @@ def compute_relaxed_makespan_lower_bound(problem: ScheduleProblem) -> MakespanLo
         if len(eligible_work_centers) == 1:
             exclusive_machine_loads[eligible_work_centers[0]] += min_duration
 
-        if operation.predecessor_op_id is not None and operation.predecessor_op_id in indegree_by_op:
+        if (
+            operation.predecessor_op_id is not None
+            and operation.predecessor_op_id in indegree_by_op
+        ):
             successors_by_op[operation.predecessor_op_id].append(operation.id)
             indegree_by_op[operation.id] += 1
 
@@ -82,7 +88,7 @@ def compute_relaxed_makespan_lower_bound(problem: ScheduleProblem) -> MakespanLo
         for operation in problem.operations
         if indegree_by_op.get(operation.id, 0) == 0
     ]
-    topo_order: list[object] = []
+    topo_order: list[UUID] = []
     while topo_frontier:
         op_id = topo_frontier.pop()
         topo_order.append(op_id)
@@ -94,7 +100,7 @@ def compute_relaxed_makespan_lower_bound(problem: ScheduleProblem) -> MakespanLo
     if len(topo_order) != len(problem.operations):
         topo_order = [operation.id for operation in problem.operations]
 
-    longest_path_to: dict[object, float] = {}
+    longest_path_to: dict[UUID, float] = {}
     for op_id in topo_order:
         longest_path_to[op_id] = max(
             longest_path_to.get(op_id, 0.0),

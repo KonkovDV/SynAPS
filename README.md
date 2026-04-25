@@ -129,6 +129,12 @@ Run tests:
 python -m pytest tests -q
 ```
 
+Run the strict type check used in CI:
+
+```bash
+python -m mypy synaps --strict --no-error-summary
+```
+
 Run the TypeScript control-plane boundary tests:
 
 ```bash
