@@ -54,14 +54,24 @@ Ready-to-import monitoring artifacts (Grafana dashboard + Prometheus alert rules
 - `../technical/monitoring/grafana/synaps-control-plane-slo.dashboard.json`
 - `../technical/monitoring/prometheus/synaps-control-plane-alerts.yml`
 
-## Local Commands
+## Local Setup
+
+This package is not a standalone Node service. `npm test`, `npm run dev`, and the live
+solve/repair routes shell out into the Python `synaps` CLI, so the repository-level
+Python package must be installed into the interpreter that the bridge will use.
 
 ```bash
+cd ..
+python -m pip install -e ".[dev]"
+cd control-plane
 npm install
 npm run test
 npm run build
 npm run dev
 ```
+
+The GitHub Actions `control-plane` job follows the same bootstrap order: set up Python,
+install SynAPS with `pip install -e ".[dev]"`, then run the Node test/build steps.
 
 ## Python Bridge
 
@@ -70,6 +80,9 @@ By default the control plane tries to locate a Python executable in this order:
 1. `SYNAPS_PYTHON_BIN`
 2. nearest ancestor `.venv`
 3. `python` on Windows or `python3` on POSIX
+
+Set `SYNAPS_PYTHON_BIN` explicitly when CI or local tooling should use a specific
+interpreter instead of the nearest ancestor virtual environment.
 
 The BFF executes:
 

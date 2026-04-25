@@ -33,10 +33,12 @@ What is implemented and verified in this repository:
 - Python requirement: `>=3.12` (`pyproject.toml`)
 - Core runtime dependencies: `ortools`, `highspy`, `pydantic`, `numpy`
 - Stable solve/repair JSON contracts (`synaps/contracts.py`)
+- Dedicated reproducible 50K compare rail plus a staged 500K study harness (`benchmark/study_rhc_50k.py`, `benchmark/study_rhc_500k.py`)
 - Separate feasibility checker (`synaps/solvers/feasibility_checker.py`)
 - ALNS can accept partial warm starts, complete missing assignments, and recompute setups before local search
 - RHC can carry unfinished overlap tails into the next ALNS window and exposes warm-start metadata in solver output
 - RHC candidate scoring is wired through the NumPy/native batch seam when acceleration is available
+- The TypeScript control-plane validates JSON contracts, executes the real Python kernel for solve/repair, and CI bootstraps the Python runtime before `control-plane` integration tests
 
 What is not claimed:
 
@@ -127,6 +129,17 @@ Run tests:
 python -m pytest tests -q
 ```
 
+Run the TypeScript control-plane boundary tests:
+
+```bash
+cd control-plane
+npm install
+npm test
+```
+
+The control-plane package shells out to `python -m synaps`, so keep the repository
+Python package installed in the active interpreter first (`python -m pip install -e ".[dev]"`).
+
 ## Native Acceleration
 
 SynAPS includes an optional Rust-based acceleration kernel (`synaps_native` v0.3.0) for hot-path scheduling computations via PyO3.
@@ -166,6 +179,7 @@ See: [HPC Silicon-Level Optimization Roadmap](docs/architecture/08_HPC_SILICON_O
 - `synaps/problem_profile.py` - instance profiling
 - `synaps/validation.py` - solve-result verification path
 - `benchmark/` - benchmark harness and studies
+- `control-plane/` - minimal TypeScript BFF over the checked-in solve/repair contracts
 - `tests/` - test suite
 - `docs/` - architecture, audits, publication drafts
 

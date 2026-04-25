@@ -52,14 +52,24 @@ Control-plane теперь поддерживает:
 - `../technical/monitoring/grafana/synaps-control-plane-slo.dashboard.json`
 - `../technical/monitoring/prometheus/synaps-control-plane-alerts.yml`
 
-## Локальные команды
+## Локальная подготовка
+
+Этот пакет не является самостоятельным Node-сервисом. `npm test`, `npm run dev` и живые
+маршруты `solve/repair` вызывают Python CLI `synaps`, поэтому пакет SynAPS из корня
+репозитория должен быть установлен в тот интерпретатор, который использует bridge.
 
 ```bash
+cd ..
+python -m pip install -e ".[dev]"
+cd control-plane
 npm install
 npm run test
 npm run build
 npm run dev
 ```
+
+GitHub Actions job `control-plane` теперь повторяет тот же порядок: сначала Python,
+затем `pip install -e ".[dev]"`, после этого Node build/test шаги.
 
 ## Связь с Python
 
@@ -68,6 +78,9 @@ npm run dev
 1. `SYNAPS_PYTHON_BIN`
 2. ближайший ancestor `.venv`
 3. `python` на Windows или `python3` на POSIX
+
+Если в CI или локальной среде нужен конкретный интерпретатор, задайте его явно через
+`SYNAPS_PYTHON_BIN`, чтобы не зависеть от ближайшего ancestor virtualenv.
 
 BFF выполняет:
 
