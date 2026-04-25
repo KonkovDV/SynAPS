@@ -1233,6 +1233,11 @@ class TestRhcSolver:
 
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
         assert result.metadata["preprocessing_ms"] >= 0
+        assert result.metadata["preprocessing_phase_ms"]["earliest_starts"] >= 0
+        assert result.metadata["preprocessing_phase_ms"]["due_offsets"] >= 0
+        assert result.metadata["preprocessing_phase_ms"]["operation_stats"] >= 0
+        assert result.metadata["preprocessing_phase_ms"]["admission_offsets"] >= 0
+        assert result.metadata["preprocessing_phase_ms"]["candidate_orderings"] >= 0
         assert result.metadata["peak_window_candidate_count"] >= 1
         assert result.metadata["due_pressure_selected_ops"] > 0
         assert result.metadata["candidate_pressure_mean"] > 0

@@ -244,15 +244,23 @@ class RhcSolver(BaseSolver):
             hybrid_inner_solver = self._make_inner_solver(hybrid_inner_solver_name)
 
         preprocess_t0 = time.monotonic()
+        preprocess_phase_ms: dict[str, int] = {}
+        phase_t0 = preprocess_t0
 
         # Compute "earliest possible start" for each operation based on precedence depth
         op_earliest: dict[UUID, float] = {}
         self._compute_earliest_starts(problem, op_earliest)
+        phase_now = time.monotonic()
+        preprocess_phase_ms["earliest_starts"] = int((phase_now - phase_t0) * 1000)
+        phase_t0 = phase_now
 
         # Build due-date offsets for order prioritization
         order_due_offsets: dict[UUID, float] = {}
         for order in problem.orders:
             order_due_offsets[order.id] = (order.due_date - horizon_start).total_seconds() / 60.0
+        phase_now = time.monotonic()
+        preprocess_phase_ms["due_offsets"] = int((phase_now - phase_t0) * 1000)
+        phase_t0 = phase_now
 
         op_positions = {op.id: index for index, op in enumerate(problem.operations)}
         all_work_center_ids = {work_center.id for work_center in problem.work_centers}
@@ -284,6 +292,9 @@ class RhcSolver(BaseSolver):
                 1e-6,
             )
             op_min_duration_by_id[op.id] = max(min(effective_durations), 1e-6)
+        phase_now = time.monotonic()
+        preprocess_phase_ms["operation_stats"] = int((phase_now - phase_t0) * 1000)
+        phase_t0 = phase_now
 
         rms_processing = math.sqrt(
             sum(duration * duration for duration in op_mean_duration_by_id.values())
@@ -302,12 +313,13 @@ class RhcSolver(BaseSolver):
             else 0.0
         )
 
-        order_ops_sorted: dict[UUID, list[Operation]] = {}
-        for order in problem.orders:
-            order_ops_sorted[order.id] = sorted(
-                [op for op in problem.operations if op.order_id == order.id],
-                key=lambda op: op.seq_in_order,
-            )
+        _ops_by_order: dict[UUID, list[Operation]] = {}
+        for op in problem.operations:
+            _ops_by_order.setdefault(op.order_id, []).append(op)
+        order_ops_sorted: dict[UUID, list[Operation]] = {
+            order_id: sorted(ops, key=lambda op: op.seq_in_order)
+            for order_id, ops in _ops_by_order.items()
+        }
 
         op_tail_rpt_by_id: dict[UUID, float] = {}
         for _order_id, order_ops in order_ops_sorted.items():
@@ -332,6 +344,9 @@ class RhcSolver(BaseSolver):
                 op_earliest.get(op.id, 0.0),
                 due_release_offset,
             )
+        phase_now = time.monotonic()
+        preprocess_phase_ms["admission_offsets"] = int((phase_now - phase_t0) * 1000)
+        phase_t0 = phase_now
 
         ops_sorted_by_admission = sorted(
             problem.operations,
@@ -358,6 +373,8 @@ class RhcSolver(BaseSolver):
                 op_positions[op.id],
             ),
         )
+        phase_now = time.monotonic()
+        preprocess_phase_ms["candidate_orderings"] = int((phase_now - phase_t0) * 1000)
         preprocessing_ms = int((time.monotonic() - preprocess_t0) * 1000)
         effective_window_op_cap = max_ops_per_window
         if len(problem.operations) > max_ops_per_window:
@@ -2295,6 +2312,7 @@ class RhcSolver(BaseSolver):
                 "inner_fallback_kpi_threshold": inner_fallback_kpi_threshold,
                 "inner_fallback_kpi_passed": inner_fallback_ratio <= inner_fallback_kpi_threshold,
                 "preprocessing_ms": preprocessing_ms,
+                "preprocessing_phase_ms": dict(preprocess_phase_ms),
                 "peak_window_candidate_count": peak_window_candidate_count,
                 "peak_raw_window_candidate_count": peak_raw_window_candidate_count,
                 "due_pressure_selected_ops": len(due_pressure_selected_ids),
