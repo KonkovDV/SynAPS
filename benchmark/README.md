@@ -255,29 +255,29 @@ April 2026 hardening note:
 
 The baseline artifact is [studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json](studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json).
 
-The latest live stress-matrix artifact is [studies/test-50k-academic-matrix-v1/rhc_50k_study.json](studies/test-50k-academic-matrix-v1/rhc_50k_study.json).
+The latest pre-fix live stress-matrix artifact is [studies/test-50k-academic-matrix-v1/rhc_50k_study.json](studies/test-50k-academic-matrix-v1/rhc_50k_study.json).
 
-It is useful because it preserves the current limit instead of hiding it:
+The latest post-fix guarded artifact is [studies/2026-04-26-rhc-alns-postfix-canonical-v4/rhc_50k_study.json](studies/2026-04-26-rhc-alns-postfix-canonical-v4/rhc_50k_study.json).
 
-- `RHC-GREEDY` stops after `120.115s` with `6959` committed assignments across `11` solved windows.
-- `RHC-ALNS` stops after `366.23s` with `1078` committed assignments across `3` solved windows.
-- both runs report `status=error` and `feasible=false`
-- peak candidate-pool pressure still reaches `49,931` and `49,993`
+Read them together rather than collapsing them into one story:
 
-The live stress-matrix makes the current split explicit:
+- the pre-fix stress matrix preserves the old ALNS failure shape, where coverage was weak but some windows did enter search;
+- the post-fix guarded artifact preserves the new operational rule, where oversized ALNS windows are skipped before costly seed generation can burn the whole per-window budget;
+- both runs still report `status=error` and `feasible=false`, so neither should be read as a solved industrial benchmark.
 
-- `RHC-GREEDY` has the better coverage profile (`mean_scheduled_ratio = 0.3547`).
-- `RHC-ALNS` has the better partial-plan objective profile (`mean_makespan_minutes = 4652.77`) but much lower coverage (`0.1134`).
-- both solver families still fail the feasibility gate at 50K in this artifact.
+The current split is now more precise:
 
-So the public 50K path is real and reproducible, but it remains a profiling surface rather than a solved industrial benchmark. The latest live artifact is best read as bottleneck evidence, including pre-fix examples of zero-iteration ALNS windows that motivated the explicit `inner_time_limit_exhausted_before_search` fallback guard now present in code.
+- pre-fix `RHC-ALNS|throughput` reported `mean_scheduled_ratio = 0.0946`, `mean_makespan_minutes = 4985.85`, and `mean_inner_fallback_ratio = 0.1`;
+- post-fix guarded `RHC-ALNS|throughput` reports `mean_scheduled_ratio = 0.3028`, `mean_makespan_minutes = 9675.18`, and `mean_inner_fallback_ratio = 1.0`;
+- post-fix `RHC-GREEDY|throughput` remains the stronger pure-coverage baseline at `mean_scheduled_ratio = 0.37` with zero inner fallback.
 
-Post-audit (2026-04-25) solver hardening now includes:
+So the public 50K path remains real and reproducible, but the latest evidence says something narrower than "ALNS is fixed": the repository now prevents pathological ALNS pre-search budget burn on oversized windows, yet the 50K throughput lane still lacks a window geometry where ALNS can enter destroy-repair search and beat guarded fallback on coverage.
+
+Post-audit (2026-04-26) solver hardening now includes:
 
 - full-frontier escalation for underfilled admission windows (`admission_full_scan_*` metadata);
-- dynamic ALNS repair-budget scaling tied to effective destroy envelope (`alns_effective_repair_time_limit_s`).
-
-Re-run `benchmark.study_rhc_50k` to refresh this section with post-audit metrics.
+- dynamic ALNS repair-budget scaling tied to effective destroy envelope (`alns_effective_repair_time_limit_s`);
+- explicit pre-search short-circuiting for oversized ALNS windows (`budget_guard_skipped_initial_search`).
 
 ## Staged 500K Study
 

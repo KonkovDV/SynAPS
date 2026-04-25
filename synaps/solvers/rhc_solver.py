@@ -133,6 +133,15 @@ class RhcSolver(BaseSolver):
             alns_dynamic_repair_time_limit_min_s,
             float(kwargs.get("alns_dynamic_repair_time_limit_max_s", 5.0)),
         )
+        alns_presearch_budget_guard_enabled: bool = bool(
+            kwargs.get("alns_presearch_budget_guard_enabled", True)
+        )
+        alns_presearch_max_window_ops: int = int(
+            kwargs.get("alns_presearch_max_window_ops", 1000)
+        )
+        alns_presearch_min_time_limit_s: float = float(
+            kwargs.get("alns_presearch_min_time_limit_s", 240.0)
+        )
         max_ops_per_window: int = int(kwargs.get("max_ops_per_window", 5000))
         window_load_factor: float = float(kwargs.get("window_load_factor", 1.25))
         max_windows_raw = kwargs.get("max_windows")
@@ -463,6 +472,7 @@ class RhcSolver(BaseSolver):
         adaptive_window_expansions = 0
         adaptive_window_expansion_factors: list[float] = []
         alns_budget_scaled_windows = 0
+        alns_presearch_budget_guard_skipped_windows = 0
         alns_effective_max_iterations_values: list[int] = []
         alns_effective_max_destroy_values: list[int] = []
         alns_effective_repair_time_limit_values: list[float] = []
@@ -509,6 +519,7 @@ class RhcSolver(BaseSolver):
             "warm_start_supplied_assignments",
             "warm_start_completed_assignments",
             "warm_start_rejected_reason",
+            "budget_guard_skipped_initial_search",
         )
 
         def append_inner_window_summary(
@@ -1745,11 +1756,41 @@ class RhcSolver(BaseSolver):
                                 if bool(alns_budget_profile["scaled"]):
                                     alns_budget_scaled_windows += 1
 
-                        inner_result = selected_inner_solver.solve(
-                            sub_problem,
-                            time_limit_s=per_window_limit,
-                            **effective_inner_kwargs,
+                        should_skip_alns_presearch = (
+                            selected_inner_solver_name == "alns"
+                            and alns_presearch_budget_guard_enabled
+                            and len(clean_window_ops) > alns_presearch_max_window_ops
+                            and per_window_limit <= alns_presearch_min_time_limit_s
                         )
+                        if should_skip_alns_presearch:
+                            alns_presearch_budget_guard_skipped_windows += 1
+                            logger.info(
+                                "RHC window %d skipped ALNS pre-search: %d ops exceed guard "
+                                "limit=%d at per-window budget %.2fs",
+                                window_count,
+                                len(clean_window_ops),
+                                alns_presearch_max_window_ops,
+                                per_window_limit,
+                            )
+                            inner_result = ScheduleResult(
+                                solver_name="alns",
+                                status=SolverStatus.FEASIBLE,
+                                assignments=[],
+                                duration_ms=0,
+                                metadata={
+                                    "time_limit_exhausted_before_search": True,
+                                    "iterations_completed": 0,
+                                    "improvements": 0,
+                                    "initial_solution_ms": 0,
+                                    "budget_guard_skipped_initial_search": True,
+                                },
+                            )
+                        else:
+                            inner_result = selected_inner_solver.solve(
+                                sub_problem,
+                                time_limit_s=per_window_limit,
+                                **effective_inner_kwargs,
+                            )
                         assert inner_result is not None
 
                     alns_budget_exhausted_before_search = bool(
@@ -2455,6 +2496,14 @@ class RhcSolver(BaseSolver):
                     alns_dynamic_repair_time_limit_max_s
                 ),
                 "alns_budget_scaled_windows": alns_budget_scaled_windows,
+                "alns_presearch_budget_guard_enabled": (
+                    alns_presearch_budget_guard_enabled
+                ),
+                "alns_presearch_max_window_ops": alns_presearch_max_window_ops,
+                "alns_presearch_min_time_limit_s": alns_presearch_min_time_limit_s,
+                "alns_presearch_budget_guard_skipped_windows": (
+                    alns_presearch_budget_guard_skipped_windows
+                ),
                 "alns_budget_mean_effective_max_iterations": round(
                     sum(alns_effective_max_iterations_values)
                     / len(alns_effective_max_iterations_values),

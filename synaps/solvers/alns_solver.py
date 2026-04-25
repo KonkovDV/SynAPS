@@ -881,6 +881,12 @@ class AlnsSolver(BaseSolver):
         )
         seed: int = int(kwargs.get("random_seed", 42))
         initial_beam_op_limit: int = int(kwargs.get("initial_beam_op_limit", 60))
+        frozen_initial_repair_max_ops: int = int(
+            kwargs.get("frozen_initial_repair_max_ops", 512)
+        )
+        frozen_initial_repair_min_remaining_time_s: float = float(
+            kwargs.get("frozen_initial_repair_min_remaining_time_s", 30.0)
+        )
         use_cpsat_repair: bool = bool(kwargs.get("use_cpsat_repair", True))
         cpsat_max_destroy_ops: int = int(
             kwargs.get("cpsat_max_destroy_ops", min(20, max_destroy))
@@ -962,6 +968,27 @@ class AlnsSolver(BaseSolver):
         checker = FeasibilityChecker()
         dispatch_context = build_dispatch_context(problem)
         lower_bound = compute_relaxed_makespan_lower_bound(problem)
+
+        def _initial_generation_error_result(error_message: str) -> ScheduleResult:
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            return ScheduleResult(
+                solver_name=self.name,
+                status=SolverStatus.ERROR,
+                duration_ms=elapsed_ms,
+                metadata={
+                    "error": error_message,
+                    "initial_solver": initial_solver_name,
+                    "warm_start_used": warm_start_used,
+                    "warm_start_supplied_assignments": warm_start_supplied_assignments,
+                    "warm_start_completed_assignments": warm_start_completed_assignments,
+                    "warm_start_rejected_reason": warm_start_rejected_reason,
+                    "initial_solution_ms": elapsed_ms,
+                    "time_limit_exhausted_before_search": (
+                        (time.monotonic() - t0) > time_limit_s
+                    ),
+                    "iterations_completed": 0,
+                },
+            )
 
         def _reanchor_against_frozen(
             assignments: list[Assignment],
@@ -1213,6 +1240,39 @@ class AlnsSolver(BaseSolver):
             elif warm_start_rejected_reason is None:
                 warm_start_rejected_reason = "warm_start_incomplete"
 
+        if initial_result is None and frozen_assignments:
+            # For RHC inner windows, prefer a frozen-compatible constructive seed
+            # instead of a standalone greedy seed that may become infeasible after
+            # re-anchoring against committed assignments.
+            remaining_budget_s = max(0.0, time_limit_s - (time.monotonic() - t0))
+            if (
+                n_ops <= frozen_initial_repair_max_ops
+                and remaining_budget_s >= frozen_initial_repair_min_remaining_time_s
+            ):
+                frozen_seed_outcome = _repair_greedy_outcome(
+                    problem,
+                    frozen_assignments,
+                    set(problem_op_ids),
+                )
+                if frozen_seed_outcome.status == RepairStatus.FEASIBLE:
+                    frozen_seed_candidate = list(frozen_seed_outcome.assignments)
+                    if _is_valid_complete_schedule(frozen_seed_candidate):
+                        recompute_assignment_setups(frozen_seed_candidate, dispatch_context)
+                        initial_solver_name = "frozen_greedy_repair"
+                        initial_result = ScheduleResult(
+                            solver_name=self.name,
+                            status=SolverStatus.FEASIBLE,
+                            assignments=frozen_seed_candidate,
+                        )
+                    elif warm_start_rejected_reason is None:
+                        warm_start_rejected_reason = "frozen_greedy_seed_infeasible"
+                elif warm_start_rejected_reason is None:
+                    warm_start_rejected_reason = (
+                        f"frozen_greedy_seed_{frozen_seed_outcome.reason}"
+                    )
+            elif warm_start_rejected_reason is None:
+                warm_start_rejected_reason = "frozen_greedy_seed_skipped_budget_or_size"
+
         if initial_result is None:
             if n_ops <= initial_beam_op_limit:
                 initial_solver_name = "beam"
@@ -1226,18 +1286,8 @@ class AlnsSolver(BaseSolver):
                 initial_solver_name = "greedy"
                 initial_result = GreedyDispatch().solve(problem)
                 if not _is_valid_complete_schedule(list(initial_result.assignments)):
-                    elapsed_ms = int((time.monotonic() - t0) * 1000)
-                    return ScheduleResult(
-                        solver_name=self.name,
-                        status=SolverStatus.ERROR,
-                        duration_ms=elapsed_ms,
-                        metadata={
-                            "error": "initial solution generation failed",
-                            "warm_start_used": warm_start_used,
-                            "warm_start_supplied_assignments": warm_start_supplied_assignments,
-                            "warm_start_completed_assignments": warm_start_completed_assignments,
-                            "warm_start_rejected_reason": warm_start_rejected_reason,
-                        },
+                    return _initial_generation_error_result(
+                        "initial solution generation failed"
                     )
 
         if initial_result is not None and frozen_assignments:
@@ -1253,18 +1303,8 @@ class AlnsSolver(BaseSolver):
                     update={"assignments": reanchored_initial_assignments}
                 )
             else:
-                elapsed_ms = int((time.monotonic() - t0) * 1000)
-                return ScheduleResult(
-                    solver_name=self.name,
-                    status=SolverStatus.ERROR,
-                    duration_ms=elapsed_ms,
-                    metadata={
-                        "error": "initial solution generation failed",
-                        "warm_start_used": warm_start_used,
-                        "warm_start_supplied_assignments": warm_start_supplied_assignments,
-                        "warm_start_completed_assignments": warm_start_completed_assignments,
-                        "warm_start_rejected_reason": warm_start_rejected_reason,
-                    },
+                return _initial_generation_error_result(
+                    "initial solution generation failed"
                 )
 
         initial_solution_ms = int((time.monotonic() - initial_solution_t0) * 1000)
@@ -1644,6 +1684,10 @@ class AlnsSolver(BaseSolver):
                 "warm_start_completed_assignments": warm_start_completed_assignments,
                 "warm_start_rejected_reason": warm_start_rejected_reason,
                 "initial_beam_op_limit": initial_beam_op_limit,
+                "frozen_initial_repair_max_ops": frozen_initial_repair_max_ops,
+                "frozen_initial_repair_min_remaining_time_s": (
+                    frozen_initial_repair_min_remaining_time_s
+                ),
                 "cpsat_max_destroy_ops": cpsat_max_destroy_ops,
                 "repair_num_workers": repair_num_workers,
                 "initial_solution_ms": initial_solution_ms,

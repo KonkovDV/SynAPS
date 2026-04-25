@@ -43,6 +43,7 @@ What is implemented and verified in this repository:
 - Post-audit RHC hardening adds full-frontier fallback for underfilled admission windows (`admission_full_scan_*` metadata)
 - Post-audit RHC hardening also auto-scales ALNS repair budget per window (`alns_effective_repair_time_limit_s` telemetry)
 - RHC now treats `time_limit_exhausted_before_search && iterations_completed == 0` on the ALNS lane as an explicit fallback condition (`inner_time_limit_exhausted_before_search`) instead of accepting a zero-search inner result
+- RHC now records `budget_guard_skipped_initial_search` when oversized ALNS windows are short-circuited into explicit fallback rather than burning the whole window budget in phase-1 seed generation
 - RHC candidate scoring is wired through the NumPy/native batch seam when acceleration is available
 - The TypeScript control-plane validates JSON contracts, executes the real Python kernel for solve/repair, and CI bootstraps the Python runtime before `control-plane` integration tests
 - Pinned GitHub Actions security workflows cover Python, TypeScript, and Rust surfaces via CodeQL, and publish OSSF Scorecards SARIF results
@@ -54,32 +55,32 @@ What is not claimed:
 
 ## 50K Snapshot (industrial-50k)
 
-Canonical artifact:
+Canonical artifacts:
 
 - `benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json`
-- Latest live stress artifact: `benchmark/studies/test-50k-academic-matrix-v1/rhc_50k_study.json`
+- Pre-fix live stress artifact: `benchmark/studies/test-50k-academic-matrix-v1/rhc_50k_study.json`
+- Latest post-fix guarded artifact: `benchmark/studies/2026-04-26-rhc-alns-postfix-canonical-v4/rhc_50k_study.json`
 
-Summary from that artifact:
+Summary from the latest post-fix guarded artifact:
 
-| Solver | Wall time (s) | Feasibility rate | Assignments |
-|---|---:|---:|---:|
-| `RHC-GREEDY` | 120.115 | 0.0 | 6,959 / 50,000 |
-| `RHC-ALNS` | 366.23 | 0.0 | 1,078 / 50,000 |
+| Solver | Wall time (s) | Feasibility rate | Mean scheduled ratio | Mean makespan (min) | Mean inner fallback ratio |
+|---|---:|---:|---:|---:|---:|
+| `RHC-ALNS` | 1201.146 | 0.0 | 0.3028 | 9675.18 | 1.0 |
 
 Interpretation:
 
-- This is a profiling/evidence slice, not a "50K solved" claim.
-- The artifact captures an honest boundary: partial progress with explicit stop reasons.
-- Candidate-pool pressure and ALNS inner-window throughput remain the main bottlenecks at this stage.
-- The April 25, 2026 live stress audit also isolated two ALNS-specific failure modes: infeasible initial-seed recovery and full budget burn in phase-1 seed generation before the first LNS iteration.
-- Post-audit mitigations for both bottlenecks are now wired in solver code; rerun the 50K study to refresh public metrics.
+- This is still a profiling/evidence slice, not a "50K solved" claim.
+- The pre-fix stress matrix remains the honest evidence surface for ALNS objective improvement under weak throughput.
+- The latest post-fix artifact shows a different regime: oversized ALNS windows are now explicitly short-circuited before expensive phase-1 seed generation can burn the whole window budget.
+- On `industrial-50k`, that guard materially improves throughput versus the failing post-fix reruns (`mean_scheduled_ratio` recovered to `0.3028`), but it does so by admitting that the ALNS lane is not entering destroy-repair search on these windows.
+- So the current `RHC-ALNS` throughput lane should be read as a guarded fallback controller, not as evidence that large-window ALNS search is already effective at 50K.
 
-Latest live stress-matrix takeaways from `test-50k-academic-matrix-v1`:
+Key comparison points:
 
-- `RHC-GREEDY` still dominates on coverage: mean scheduled ratio `0.3547` vs `0.1134` for `RHC-ALNS`.
-- `RHC-ALNS` still dominates on partial-plan objective: mean makespan `4652.77` vs `11240.8` for `RHC-GREEDY`.
-- Both lanes remain non-feasible at 50K (`feasibility_rate = 0.0`), so the comparison is useful for bottleneck diagnosis, not for production-readiness claims.
-- The live artifact preserved pre-fix evidence of the zero-iteration ALNS window mode; the repository code now routes that condition through explicit fallback instead of accepting it as a normal inner solve.
+- Pre-fix `RHC-ALNS|throughput` in `test-50k-academic-matrix-v1` reported `mean_scheduled_ratio = 0.0946`, `mean_makespan_minutes = 4985.85`, and `mean_inner_fallback_ratio = 0.1`.
+- Post-fix guarded `RHC-ALNS|throughput` in `2026-04-26-rhc-alns-postfix-canonical-v4` reports `mean_scheduled_ratio = 0.3028`, `mean_makespan_minutes = 9675.18`, and `mean_inner_fallback_ratio = 1.0`.
+- Post-fix `RHC-GREEDY|throughput` in `test-50k-after-fix` remains the stronger pure-coverage baseline at `mean_scheduled_ratio = 0.37` with `mean_inner_fallback_ratio = 0.0`.
+- The unresolved research problem is now narrower: create a window geometry and routing policy where ALNS can actually enter search within budget, instead of spending the whole budget on phase-1 seed generation or being guarded into fallback.
 
 ## Solver Portfolio
 

@@ -616,6 +616,105 @@ class TestAlnsSolver:
         assert result.metadata["cpsat_repair_skips_large_destroy"] > 0
         assert result.metadata["greedy_repairs"] > 0
 
+    def test_alns_prefers_frozen_greedy_seed_before_plain_greedy(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """ALNS should prefer a frozen-compatible initial seed when frozen context exists."""
+        from synaps.model import Assignment
+        import synaps.solvers.alns_solver as alns_module
+        from synaps.solvers.greedy_dispatch import GreedyDispatch
+
+        problem = _make_3state_problem(n_orders=2, ops_per_order=2)
+        greedy_seed = GreedyDispatch().solve(problem)
+        frozen_assignment = Assignment(
+            operation_id=uuid4(),
+            work_center_id=WC1,
+            start_time=HORIZON_END + timedelta(minutes=30),
+            end_time=HORIZON_END + timedelta(minutes=60),
+            setup_minutes=0,
+            aux_resource_ids=[],
+        )
+
+        def fake_repair(problem, frozen_assignments, destroyed_op_ids):
+            assert frozen_assignments
+            assert destroyed_op_ids == {operation.id for operation in problem.operations}
+            return alns_module.RepairOutcome(
+                status=alns_module.RepairStatus.FEASIBLE,
+                assignments=tuple(greedy_seed.assignments),
+                reason="ok",
+            )
+
+        def fail_if_plain_greedy_called(self, problem, **kwargs):
+            raise AssertionError("plain greedy seed path must be bypassed")
+
+        monkeypatch.setattr(alns_module, "_repair_greedy_outcome", fake_repair)
+        monkeypatch.setattr(
+            "synaps.solvers.greedy_dispatch.GreedyDispatch.solve",
+            fail_if_plain_greedy_called,
+        )
+
+        result = alns_module.AlnsSolver().solve(
+            problem,
+            max_iterations=0,
+            time_limit_s=10,
+            initial_beam_op_limit=1,
+            frozen_initial_repair_min_remaining_time_s=0,
+            frozen_assignments=[frozen_assignment],
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert result.metadata["initial_solver"] == "frozen_greedy_repair"
+
+    def test_alns_initial_generation_error_reports_pre_search_budget_flags(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Early initial-seed failures should expose zero-iteration budget metadata."""
+        import synaps.solvers.alns_solver as alns_module
+        from synaps.model import ScheduleResult
+
+        problem = _make_3state_problem(n_orders=2, ops_per_order=2)
+
+        def fake_seed_failure(self, problem, **kwargs):
+            return ScheduleResult(
+                solver_name="seed",
+                status=SolverStatus.ERROR,
+                assignments=[],
+                duration_ms=1,
+                metadata={"error": "seed_failure"},
+            )
+
+        monotonic_marks = iter([0.0, 0.0, 10.0, 10.0, 10.0, 10.0, 10.0])
+
+        def fake_monotonic() -> float:
+            try:
+                return next(monotonic_marks)
+            except StopIteration:
+                return 10.0
+
+        monkeypatch.setattr(
+            "synaps.solvers.greedy_dispatch.BeamSearchDispatch.solve",
+            fake_seed_failure,
+        )
+        monkeypatch.setattr(
+            "synaps.solvers.greedy_dispatch.GreedyDispatch.solve",
+            fake_seed_failure,
+        )
+        monkeypatch.setattr(alns_module.time, "monotonic", fake_monotonic)
+
+        result = alns_module.AlnsSolver().solve(
+            problem,
+            max_iterations=5,
+            time_limit_s=5,
+            initial_beam_op_limit=100,
+        )
+
+        assert result.status == SolverStatus.ERROR
+        assert result.metadata["iterations_completed"] == 0
+        assert result.metadata["time_limit_exhausted_before_search"] is True
+        assert result.metadata["initial_solution_ms"] >= 0
+
     def test_alns_uses_greedy_initial_solution_for_large_instances(self) -> None:
         """ALNS should avoid beam search as the initial seed on large instances."""
         from synaps.solvers.alns_solver import AlnsSolver
@@ -2494,6 +2593,53 @@ class TestRhcInnerSolver:
         assert first_window["inner_status"] == "feasible"
         assert first_window["time_limit_exhausted_before_search"] is True
         assert first_window["iterations_completed"] == 0
+        assert result.metadata["inner_fallback_reason_counts"][
+            "inner_time_limit_exhausted_before_search"
+        ] >= 1
+
+        verification = verify_schedule_result(problem, result)
+        assert verification.feasible, f"Violations: {verification.violations}"
+
+    def test_rhc_presearch_budget_guard_skips_alns_for_oversized_window(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """RHC should bypass ALNS when window size exceeds configured pre-search guard."""
+        from synaps.solvers.rhc_solver import RhcSolver
+        from synaps.validation import verify_schedule_result
+
+        problem = _make_3state_problem(n_orders=4, ops_per_order=2)
+
+        def fail_if_alns_called(self, problem, **kwargs):
+            raise AssertionError("ALNS should be skipped by pre-search budget guard")
+
+        monkeypatch.setattr(
+            "synaps.solvers.alns_solver.AlnsSolver.solve",
+            fail_if_alns_called,
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=480,
+            overlap_minutes=60,
+            inner_solver="alns",
+            time_limit_s=30,
+            max_ops_per_window=50,
+            alns_presearch_budget_guard_enabled=True,
+            alns_presearch_max_window_ops=1,
+            alns_presearch_min_time_limit_s=180,
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        first_window = result.metadata["inner_window_summaries"][0]
+        assert first_window["resolution_mode"] == "fallback_greedy"
+        assert (
+            first_window["fallback_reason"]
+            == "inner_time_limit_exhausted_before_search"
+        )
+        assert first_window["budget_guard_skipped_initial_search"] is True
+        assert result.metadata["alns_presearch_budget_guard_enabled"] is True
+        assert result.metadata["alns_presearch_budget_guard_skipped_windows"] >= 1
         assert result.metadata["inner_fallback_reason_counts"][
             "inner_time_limit_exhausted_before_search"
         ] >= 1

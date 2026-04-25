@@ -22,6 +22,22 @@
 
 Следовательно, академически корректная интерпретация current 50K state такова: `RHC-ALNS` уже полезен как локальный objective improver внутри частичного плана, но ещё не проходит как large-scale coverage solver без дополнительного контроля phase-1 seed cost и per-window admission geometry.
 
+## Addendum (2026-04-26): Guarded Post-Fix Re-Run
+
+Повторный канонический прогон `benchmark/studies/2026-04-26-rhc-alns-postfix-canonical-v4/rhc_50k_study.json` уточнил картину после фиксов.
+
+1. Исторический `inner_status_error` path действительно удалось локализовать и частично закрыть: `RHC` больше не тратит сотни секунд на заведомо проигрышный ALNS pre-search на oversized окнах.
+2. Вместо этого в коде появился явный guard `budget_guard_skipped_initial_search`, который short-circuit'ит ALNS до fallback, если окно слишком велико для заданного per-window budget.
+3. Это резко меняет интерпретацию метрик: рост throughput больше нельзя приписывать "успешному ALNS search", если `mean_inner_fallback_ratio = 1.0`.
+
+На `v4` артефакте это видно напрямую:
+
+- `RHC-ALNS|throughput` дал `mean_scheduled_ratio = 0.3028` и `mean_makespan_minutes = 9675.18`.
+- Но одновременно `mean_inner_fallback_ratio = 1.0`, а окна массово помечены `budget_guard_skipped_initial_search = true`.
+- Значит, observed throughput recovery получен не за счёт эффективной large-neighborhood search, а за счёт честного отказа от неё на неподходящих окнах.
+
+Практический вывод стал жёстче и чище: на `industrial-50k` текущая научная задача уже не в том, чтобы "починить очередной exception", а в том, чтобы найти такую window geometry, admission policy или hybrid routing strategy, при которой ALNS вообще успевает войти в destroy-repair loop внутри выделенного бюджета. До этого момента линия `RHC-ALNS` на 50K должна интерпретироваться как guarded greedy controller with ALNS diagnostics, а не как зрелый ALNS large-scale solver.
+
 ---
 
 ## 1. Деконструкция архитектурных пределов
