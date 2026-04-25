@@ -242,6 +242,15 @@ For benchmark claims, publish the exact command line, seed list, solver profile,
 - If citing benchmark outcomes, include repository URL, commit SHA, artifact path, and execution date.
 - When comparing against external methods, report both feasibility and wall-time boundaries to avoid selective reporting.
 
+## Governance
+
+- `SUPPORT.md`
+- `CONTRIBUTING.md`
+- `SECURITY.md`
+- `MAINTAINERS.md`
+- `RELEASE_POLICY.md`
+- `CITATION.cff`
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

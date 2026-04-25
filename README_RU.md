@@ -233,6 +233,15 @@ python -m synaps list-solver-configs
 - При ссылке на benchmark-результаты указывайте URL репозитория, commit SHA, путь к артефакту и дату исполнения.
 - При сравнении с внешними методами обязательно фиксируйте обе границы: feasibility и wall-time.
 
+## Governance
+
+- `SUPPORT.md`
+- `CONTRIBUTING.md`
+- `SECURITY.md`
+- `MAINTAINERS.md`
+- `RELEASE_POLICY.md`
+- `CITATION.cff`
+
 ## Лицензия
 
 MIT. См. [LICENSE](LICENSE).
