@@ -226,3 +226,12 @@ def test_study_rhc_500k_lane_both_profiles_workers(
         assert kwargs["solver_kwargs"]["backtracking_enabled"] is True
         assert kwargs["solver_kwargs"]["backtracking_tail_minutes"] == 60
         assert kwargs["solver_kwargs"]["backtracking_max_ops"] == 24
+        assert kwargs["solver_kwargs"]["progressive_admission_relaxation_enabled"] is True
+        assert kwargs["solver_kwargs"]["admission_relaxation_min_fill_ratio"] == 0.30
+        assert kwargs["solver_kwargs"]["alns_budget_auto_scaling_enabled"] is True
+        assert (
+            kwargs["solver_kwargs"]["alns_budget_estimated_repair_s_per_destroyed_op"]
+            == 0.125
+        )
+        assert kwargs["solver_kwargs"]["hybrid_due_pressure_threshold"] == 0.35
+        assert kwargs["solver_kwargs"]["hybrid_candidate_pressure_threshold"] == 4.0

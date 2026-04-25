@@ -8,17 +8,22 @@ under `benchmark/` so large-instance evidence is preserved alongside the code.
 from __future__ import annotations
 
 import argparse
-from copy import deepcopy
 import json
 import math
 import statistics
 import sys
+import time
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Literal
 
 from benchmark.generate_instances import preset_spec, write_problem_instance
 from benchmark.run_benchmark import run_benchmark
+from synaps.benchmarks.instance_generator import generate_large_instance
 from synaps.benchmarks.run_scaling_benchmark import run_benchmark as run_scaling_case
+from synaps.solvers.rhc_solver import RhcSolver
+from synaps.solvers.sdst_matrix import SdstMatrix
+from synaps.validation import verify_schedule_result
 
 LaneMode = Literal["throughput", "strict", "both"]
 
@@ -49,7 +54,7 @@ def _apply_lane_profile(
     """Apply reproducibility lane profile to solver kwargs."""
 
     profiled = deepcopy(solver_kwargs)
-    if solver_name == "RHC-ALNS":
+    if solver_name in {"RHC-ALNS", "RHC-ALNS-REFINE"}:
         # Fix top-level random stream so window-level deterministic offsets are stable.
         profiled.setdefault("random_seed", seed)
         inner_kwargs = profiled.setdefault("inner_kwargs", {})
@@ -62,6 +67,92 @@ def _apply_lane_profile(
             hybrid_kwargs["num_workers"] = 1 if lane == "strict" else 4
 
     return profiled
+
+
+def _run_two_phase_refinement_case(
+    *,
+    n_ops: int,
+    n_machines: int,
+    n_states: int,
+    seed: int,
+    baseline_solver_name: str,
+    baseline_solver_kwargs: dict[str, Any],
+    refinement_solver_name: str,
+    refinement_solver_kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    """Run a greedy RHC baseline pass, then warm-start an ALNS refinement pass."""
+
+    t_gen = time.monotonic()
+    problem = generate_large_instance(
+        n_operations=n_ops,
+        n_machines=n_machines,
+        n_states=n_states,
+        setup_density=0.5,
+        seed=seed,
+    )
+    gen_ms = int((time.monotonic() - t_gen) * 1000)
+
+    sdst = SdstMatrix.from_problem(problem)
+
+    baseline_solver = RhcSolver()
+    t_baseline = time.monotonic()
+    baseline_result = baseline_solver.solve(problem, **deepcopy(baseline_solver_kwargs))
+    baseline_solve_ms = int((time.monotonic() - t_baseline) * 1000)
+
+    refinement_kwargs = deepcopy(refinement_solver_kwargs)
+    refinement_kwargs["warm_start_assignments"] = list(baseline_result.assignments)
+
+    refinement_solver = RhcSolver()
+    t_refinement = time.monotonic()
+    result = refinement_solver.solve(problem, **refinement_kwargs)
+    refinement_solve_ms = int((time.monotonic() - t_refinement) * 1000)
+
+    t_verify = time.monotonic()
+    verification = verify_schedule_result(problem, result)
+    verify_ms = int((time.monotonic() - t_verify) * 1000)
+
+    metadata = dict(result.metadata)
+    metadata.update(
+        {
+            "two_phase_refinement_enabled": True,
+            "two_phase_baseline_solver": baseline_solver_name,
+            "two_phase_baseline_status": str(baseline_result.status),
+            "two_phase_baseline_assigned_ops": len(baseline_result.assignments),
+            "two_phase_baseline_makespan_min": round(
+                baseline_result.objective.makespan_minutes,
+                2,
+            ),
+            "two_phase_baseline_solve_ms": baseline_solve_ms,
+            "two_phase_refinement_solve_ms": refinement_solve_ms,
+            "two_phase_assignment_delta": len(result.assignments)
+            - len(baseline_result.assignments),
+            "two_phase_makespan_improvement_min": round(
+                baseline_result.objective.makespan_minutes
+                - result.objective.makespan_minutes,
+                2,
+            ),
+        }
+    )
+
+    return {
+        "n_ops": n_ops,
+        "n_machines": n_machines,
+        "n_states": n_states,
+        "solver": refinement_solver_name,
+        "status": str(result.status),
+        "feasible": verification.feasible,
+        "violations": verification.violation_count,
+        "makespan_min": round(result.objective.makespan_minutes, 2),
+        "total_setup_min": round(result.objective.total_setup_minutes, 2),
+        "total_tardiness_min": round(result.objective.total_tardiness_minutes, 2),
+        "total_material_loss": round(result.objective.total_material_loss, 2),
+        "assigned_ops": len(result.assignments),
+        "solve_ms": baseline_solve_ms + refinement_solve_ms,
+        "gen_ms": gen_ms,
+        "verify_ms": verify_ms,
+        "sdst_memory_bytes": sdst.memory_bytes(),
+        "metadata": metadata,
+    }
 
 
 def _evaluate_quality_gate(
@@ -110,7 +201,10 @@ def _evaluate_quality_gate(
 
         checks = {
             "feasibility": feasibility_ok,
-            "scheduled_ratio": float(summary.get("mean_scheduled_ratio", 0.0)) >= min_scheduled_ratio,
+            "scheduled_ratio": (
+                float(summary.get("mean_scheduled_ratio", 0.0))
+                >= min_scheduled_ratio
+            ),
             "fallback_ratio": fallback_ok,
             "objective_degradation": objective_ok,
         }
@@ -266,57 +360,71 @@ def _study_industrial_50k(
     artifact_dir = write_dir or Path("benchmark") / "studies" / "rhc_50k"
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
+    rhc_greedy_kwargs = {
+        "window_minutes": 480,
+        "overlap_minutes": 60,
+        "inner_solver": "greedy",
+        "time_limit_s": 600,
+        "max_ops_per_window": 10_000,
+    }
+    rhc_alns_kwargs = {
+        "window_minutes": 480,
+        "overlap_minutes": 120,
+        "inner_solver": "alns",
+        "time_limit_s": 1200,
+        "alns_inner_window_time_cap_s": 180,
+        "max_ops_per_window": 5_000,
+        "progressive_admission_relaxation_enabled": True,
+        "admission_relaxation_min_fill_ratio": 0.30,
+        "alns_budget_auto_scaling_enabled": True,
+        "alns_budget_estimated_repair_s_per_destroyed_op": 0.125,
+        "hybrid_inner_routing_enabled": True,
+        "hybrid_inner_solver": "cpsat",
+        "hybrid_due_pressure_threshold": 0.35,
+        "hybrid_candidate_pressure_threshold": 4.0,
+        "hybrid_max_ops": 1_500,
+        "backtracking_enabled": True,
+        "backtracking_tail_minutes": 60,
+        "backtracking_max_ops": 24,
+        "hybrid_inner_kwargs": {
+            "num_workers": 4,
+        },
+        "inner_fallback_kpi_threshold": 0.10,
+        "inner_kwargs": {
+            "max_iterations": 100,
+            "destroy_fraction": 0.03,
+            "min_destroy": 10,
+            "max_destroy": 40,
+            "max_no_improve_iters": 30,
+            "use_cpsat_repair": True,
+            "repair_time_limit_s": 5,
+            "repair_num_workers": 1,
+            "cpsat_max_destroy_ops": 32,
+            "sa_auto_calibration_enabled": True,
+            "dynamic_sa_enabled": True,
+            "sa_due_alpha": 0.35,
+            "sa_candidate_beta": 0.15,
+            "sa_pressure_cooling_gamma": 0.0015,
+            "sa_temp_min": 50.0,
+            "sa_temp_max": 500.0,
+        },
+    }
+
     solver_specs = {
         "RHC-GREEDY": {
             "solver_name": "rhc-greedy",
-            "solver_kwargs": {
-                "window_minutes": 480,
-                "overlap_minutes": 60,
-                "inner_solver": "greedy",
-                "time_limit_s": 600,
-                "max_ops_per_window": 10_000,
-            },
+            "solver_kwargs": deepcopy(rhc_greedy_kwargs),
         },
         "RHC-ALNS": {
             "solver_name": "rhc-alns",
-            "solver_kwargs": {
-                "window_minutes": 480,
-                "overlap_minutes": 120,
-                "inner_solver": "alns",
-                "time_limit_s": 1200,
-                "alns_inner_window_time_cap_s": 180,
-                "max_ops_per_window": 5_000,
-                "hybrid_inner_routing_enabled": True,
-                "hybrid_inner_solver": "cpsat",
-                "hybrid_due_pressure_threshold": 0.35,
-                "hybrid_candidate_pressure_threshold": 1.75,
-                "hybrid_max_ops": 1_500,
-                "backtracking_enabled": True,
-                "backtracking_tail_minutes": 60,
-                "backtracking_max_ops": 24,
-                "hybrid_inner_kwargs": {
-                    "num_workers": 4,
-                },
-                "inner_fallback_kpi_threshold": 0.10,
-                "inner_kwargs": {
-                    "max_iterations": 100,
-                    "destroy_fraction": 0.03,
-                    "min_destroy": 10,
-                    "max_destroy": 40,
-                    "max_no_improve_iters": 30,
-                    "use_cpsat_repair": True,
-                    "repair_time_limit_s": 5,
-                    "repair_num_workers": 1,
-                    "cpsat_max_destroy_ops": 32,
-                    "sa_auto_calibration_enabled": True,
-                    "dynamic_sa_enabled": True,
-                    "sa_due_alpha": 0.35,
-                    "sa_candidate_beta": 0.15,
-                    "sa_pressure_cooling_gamma": 0.0015,
-                    "sa_temp_min": 50.0,
-                    "sa_temp_max": 500.0,
-                },
-            },
+            "solver_kwargs": deepcopy(rhc_alns_kwargs),
+        },
+        "RHC-ALNS-REFINE": {
+            "solver_name": "rhc-alns-refine",
+            "baseline_solver_name": "rhc-greedy",
+            "baseline_solver_kwargs": deepcopy(rhc_greedy_kwargs),
+            "solver_kwargs": deepcopy(rhc_alns_kwargs),
+            "two_phase_refinement": True,
         },
     }
 
@@ -340,14 +448,26 @@ def _study_industrial_50k(
                     lane=lane_name,
                     seed=seed,
                 )
-                raw_result = run_scaling_case(
-                    n_ops=50_000,
-                    n_machines=100,
-                    n_states=20,
-                    solver_name=spec["solver_name"],
-                    solver_kwargs=solver_kwargs,
-                    seed=seed,
-                )
+                if spec.get("two_phase_refinement"):
+                    raw_result = _run_two_phase_refinement_case(
+                        n_ops=50_000,
+                        n_machines=100,
+                        n_states=20,
+                        seed=seed,
+                        baseline_solver_name=spec["baseline_solver_name"],
+                        baseline_solver_kwargs=spec["baseline_solver_kwargs"],
+                        refinement_solver_name=spec["solver_name"],
+                        refinement_solver_kwargs=solver_kwargs,
+                    )
+                else:
+                    raw_result = run_scaling_case(
+                        n_ops=50_000,
+                        n_machines=100,
+                        n_states=20,
+                        solver_name=spec["solver_name"],
+                        solver_kwargs=solver_kwargs,
+                        seed=seed,
+                    )
                 comparison = {
                     "solver_config": solver_name,
                     "selected_solver_config": solver_name,
@@ -478,7 +598,7 @@ def _summarize_solver_records(
     ]
     scheduled_ratios = [
         assigned / max(1.0, total)
-        for assigned, total in zip(assigned_counts, total_ops)
+        for assigned, total in zip(assigned_counts, total_ops, strict=True)
     ]
     preprocessing = [
         float(record.get("solver_metadata", {}).get("preprocessing_ms", 0.0))
@@ -681,7 +801,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--write-dir",
         type=Path,
-        help="Artifact directory under benchmark/ where the report and materialized instances are written",
+        help=(
+            "Artifact directory under benchmark/ where the report and "
+            "materialized instances are written"
+        ),
     )
     return parser
 

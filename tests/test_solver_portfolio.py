@@ -104,6 +104,12 @@ def test_create_solver_rhc_alns_defaults_to_bounded_cpsat_inner_repair() -> None
 
     assert solver.name == "rhc"
     assert solve_kwargs["inner_solver"] == "alns"
+    assert solve_kwargs["progressive_admission_relaxation_enabled"] is True
+    assert solve_kwargs["admission_relaxation_min_fill_ratio"] == 0.30
+    assert solve_kwargs["alns_budget_auto_scaling_enabled"] is True
+    assert solve_kwargs["alns_budget_estimated_repair_s_per_destroyed_op"] == 0.125
+    assert solve_kwargs["hybrid_due_pressure_threshold"] == 0.35
+    assert solve_kwargs["hybrid_candidate_pressure_threshold"] == 4.0
     assert solve_kwargs["inner_kwargs"]["use_cpsat_repair"] is True
     assert solve_kwargs["inner_kwargs"]["max_no_improve_iters"] == 30
     assert solve_kwargs["inner_kwargs"]["repair_num_workers"] == 1

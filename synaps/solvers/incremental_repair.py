@@ -293,8 +293,14 @@ class IncrementalRepair(BaseSolver):
         for work_center_id, machine_assignments in by_machine.items():
             machine_assignments.sort(key=lambda assignment: assignment.start_time)
             for index in range(1, len(machine_assignments)):
-                previous_state = ops_by_id[machine_assignments[index - 1].operation_id].state_id
-                current_state = ops_by_id[machine_assignments[index].operation_id].state_id
+                previous_operation = ops_by_id.get(
+                    machine_assignments[index - 1].operation_id
+                )
+                current_operation = ops_by_id.get(machine_assignments[index].operation_id)
+                if previous_operation is None or current_operation is None:
+                    continue
+                previous_state = previous_operation.state_id
+                current_state = current_operation.state_id
                 total_material_loss += dispatch_context.material_loss.get(
                     (work_center_id, previous_state, current_state),
                     0.0,

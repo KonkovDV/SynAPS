@@ -108,10 +108,15 @@ class MachineIndex:
                 if previous is None:
                     result[assignment.operation_id] = start_offset
                 else:
-                    prev_state = ctx.ops_by_id[previous.operation_id].state_id
-                    cur_state = ctx.ops_by_id[assignment.operation_id].state_id
-                    setup_before = ctx.setup_minutes.get(
-                        (assignment.work_center_id, prev_state, cur_state), 0,
+                    prev_state = _assignment_state_id(ctx, previous)
+                    cur_state = _assignment_state_id(ctx, assignment)
+                    setup_before = (
+                        ctx.setup_minutes.get(
+                            (assignment.work_center_id, prev_state, cur_state),
+                            0,
+                        )
+                        if prev_state is not None and cur_state is not None
+                        else 0
                     )
                     result[assignment.operation_id] = start_offset - setup_before
                 previous = assignment
@@ -160,10 +165,15 @@ def recompute_assignment_setups(
             if previous is None:
                 assignment.setup_minutes = 0
             else:
-                prev_state = context.ops_by_id[previous.operation_id].state_id
-                cur_state = context.ops_by_id[assignment.operation_id].state_id
-                assignment.setup_minutes = context.setup_minutes.get(
-                    (assignment.work_center_id, prev_state, cur_state), 0
+                prev_state = _assignment_state_id(context, previous)
+                cur_state = _assignment_state_id(context, assignment)
+                assignment.setup_minutes = (
+                    context.setup_minutes.get(
+                        (assignment.work_center_id, prev_state, cur_state),
+                        0,
+                    )
+                    if prev_state is not None and cur_state is not None
+                    else 0
                 )
             total_setup += assignment.setup_minutes
             previous = assignment
@@ -198,6 +208,16 @@ def _offset_minutes(context: DispatchContext, assignment: Assignment, *, end: bo
     return float((anchor - context.horizon_start).total_seconds() / 60.0)
 
 
+def _assignment_state_id(
+    context: DispatchContext,
+    assignment: Assignment | None,
+) -> Any | None:
+    if assignment is None:
+        return None
+    operation = context.ops_by_id.get(assignment.operation_id)
+    return operation.state_id if operation is not None else None
+
+
 def _assignment_setup_window_starts(
     context: DispatchContext,
     scheduled_assignments: list[Assignment],
@@ -215,11 +235,15 @@ def _assignment_setup_window_starts(
             if previous_assignment is None:
                 setup_window_starts[assignment.operation_id] = start_offset
             else:
-                previous_state = context.ops_by_id[previous_assignment.operation_id].state_id
-                current_state = context.ops_by_id[assignment.operation_id].state_id
-                setup_before = context.setup_minutes.get(
-                    (assignment.work_center_id, previous_state, current_state),
-                    0,
+                previous_state = _assignment_state_id(context, previous_assignment)
+                current_state = _assignment_state_id(context, assignment)
+                setup_before = (
+                    context.setup_minutes.get(
+                        (assignment.work_center_id, previous_state, current_state),
+                        0,
+                    )
+                    if previous_state is not None and current_state is not None
+                    else 0
                 )
                 setup_window_starts[assignment.operation_id] = start_offset - setup_before
             previous_assignment = assignment
@@ -376,9 +400,7 @@ def find_earliest_feasible_slot(
         previous: Assignment | None, following: Assignment | None
     ) -> SlotCandidate | None:
         previous_end = _offset_minutes(context, previous, end=True) if previous is not None else 0.0
-        previous_state = (
-            context.ops_by_id[previous.operation_id].state_id if previous is not None else None
-        )
+        previous_state = _assignment_state_id(context, previous)
         setup_before = (
             context.setup_minutes.get((work_center_id, previous_state, operation.state_id), 0)
             if previous_state is not None
@@ -393,10 +415,14 @@ def find_earliest_feasible_slot(
 
         if following is not None:
             following_start = _offset_minutes(context, following, end=False)
-            following_state = context.ops_by_id[following.operation_id].state_id
-            setup_after = context.setup_minutes.get(
-                (work_center_id, operation.state_id, following_state),
-                0,
+            following_state = _assignment_state_id(context, following)
+            setup_after = (
+                context.setup_minutes.get(
+                    (work_center_id, operation.state_id, following_state),
+                    0,
+                )
+                if following_state is not None
+                else 0
             )
             latest_start = following_start - setup_after - duration
         else:

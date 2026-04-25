@@ -240,6 +240,66 @@ class TestIncrementalRepair:
         violations = checker.check(problem, result.assignments)
         assert violations == [], f"Violations after repair: {violations}"
 
+    def test_repair_treats_unknown_base_assignment_ids_as_external_blockers(
+        self, simple_problem: ScheduleProblem
+    ) -> None:
+        problem_data = simple_problem.model_dump()
+        work_center_1 = simple_problem.work_centers[0].id
+        problem_data["operations"][1]["eligible_wc_ids"] = [work_center_1]
+        problem = ScheduleProblem.model_validate(problem_data)
+
+        op_a, op_b, op_c, op_d = problem.operations
+        work_center_2 = problem.work_centers[1].id
+        external_blocker = Assignment(
+            operation_id=uuid4(),
+            work_center_id=work_center_1,
+            start_time=HORIZON_START + timedelta(minutes=30),
+            end_time=HORIZON_START + timedelta(minutes=70),
+            setup_minutes=0,
+        )
+        base_assignments = [
+            Assignment(
+                operation_id=op_a.id,
+                work_center_id=work_center_1,
+                start_time=HORIZON_START,
+                end_time=HORIZON_START + timedelta(minutes=30),
+                setup_minutes=0,
+            ),
+            Assignment(
+                operation_id=op_b.id,
+                work_center_id=work_center_1,
+                start_time=HORIZON_START + timedelta(minutes=40),
+                end_time=HORIZON_START + timedelta(minutes=80),
+                setup_minutes=10,
+            ),
+            Assignment(
+                operation_id=op_c.id,
+                work_center_id=work_center_2,
+                start_time=HORIZON_START,
+                end_time=HORIZON_START + timedelta(minutes=30),
+                setup_minutes=0,
+            ),
+            Assignment(
+                operation_id=op_d.id,
+                work_center_id=work_center_2,
+                start_time=HORIZON_START + timedelta(minutes=38),
+                end_time=HORIZON_START + timedelta(minutes=78),
+                setup_minutes=8,
+            ),
+            external_blocker,
+        ]
+
+        result = IncrementalRepair().solve(
+            problem,
+            base_assignments=base_assignments,
+            disrupted_op_ids=[op_b.id],
+            radius=0,
+        )
+
+        assert result.status == SolverStatus.FEASIBLE
+        repaired_assignment = next(a for a in result.assignments if a.operation_id == op_b.id)
+        assert repaired_assignment.start_time >= external_blocker.end_time
+
     def test_repair_computes_nonzero_tardiness_for_tight_due_dates(self) -> None:
         horizon_start = datetime(2026, 4, 1, 8, 0, tzinfo=UTC)
         horizon_end = horizon_start + timedelta(hours=4)

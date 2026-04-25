@@ -12,11 +12,11 @@ It is designed for scientific benchmarking and safe industrial stress-testing.
 from __future__ import annotations
 
 import argparse
-from copy import deepcopy
 import json
 import math
 import statistics
 import sys
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Literal
 
@@ -75,10 +75,14 @@ def _default_solver_specs() -> dict[str, dict[str, Any]]:
                 "time_limit_s": 1_200,
                 "alns_inner_window_time_cap_s": 180,
                 "max_ops_per_window": 5_000,
+                "progressive_admission_relaxation_enabled": True,
+                "admission_relaxation_min_fill_ratio": 0.30,
+                "alns_budget_auto_scaling_enabled": True,
+                "alns_budget_estimated_repair_s_per_destroyed_op": 0.125,
                 "hybrid_inner_routing_enabled": True,
                 "hybrid_inner_solver": "cpsat",
                 "hybrid_due_pressure_threshold": 0.35,
-                "hybrid_candidate_pressure_threshold": 1.75,
+                "hybrid_candidate_pressure_threshold": 4.0,
                 "hybrid_max_ops": 1_500,
                 "backtracking_enabled": True,
                 "backtracking_tail_minutes": 60,
@@ -282,11 +286,12 @@ def _summarize_runs(runs: list[dict[str, Any]], *, cvar_alpha: float) -> dict[st
     assigned_ops = [int(run["results"]["assigned_ops"]) for run in completed]
     total_ops = [int(run["results"]["n_ops"]) for run in completed]
     scheduled_ratios = [
-        assigned / max(1, n_ops) for assigned, n_ops in zip(assigned_ops, total_ops)
+        assigned / max(1, n_ops)
+        for assigned, n_ops in zip(assigned_ops, total_ops, strict=True)
     ]
     throughput_ops_s = [
         assigned / max(1e-9, solve_s)
-        for assigned, solve_s in zip(assigned_ops, wall_time_s)
+        for assigned, solve_s in zip(assigned_ops, wall_time_s, strict=True)
     ]
 
     fallback_ratios = [
@@ -368,7 +373,10 @@ def _evaluate_quality_gate(
         checks = {
             "summary_ok": summary.get("status") == "ok",
             "feasibility": float(summary.get("feasibility_rate", 0.0)) >= 1.0,
-            "scheduled_ratio": float(summary.get("mean_scheduled_ratio", 0.0)) >= min_scheduled_ratio,
+            "scheduled_ratio": (
+                float(summary.get("mean_scheduled_ratio", 0.0))
+                >= min_scheduled_ratio
+            ),
             "fallback_ratio": (
                 True
                 if "mean_inner_fallback_ratio" not in summary
@@ -610,7 +618,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run staged RHC stress-study up to 500K+ operations"
     )
-    parser.add_argument("--scales", nargs="+", type=int, default=[50_000, 100_000, 200_000, 300_000, 500_000])
+    parser.add_argument(
+        "--scales",
+        nargs="+",
+        type=int,
+        default=[50_000, 100_000, 200_000, 300_000, 500_000],
+    )
     parser.add_argument("--seeds", nargs="+", type=int, default=[1])
     parser.add_argument("--solvers", nargs="+", default=["RHC-GREEDY", "RHC-ALNS"])
     parser.add_argument("--lane", choices=["throughput", "strict", "both"], default="both")

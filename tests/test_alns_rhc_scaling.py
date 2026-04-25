@@ -14,11 +14,11 @@ import math
 import random
 import time
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-import pytest
 
 from synaps.model import (
     Operation,
@@ -131,7 +131,10 @@ def _make_3state_problem(n_orders: int = 10, ops_per_order: int = 3) -> Schedule
 
 
 def _make_due_pressure_chain_problem() -> ScheduleProblem:
-    """Build a chain where due-date pressure should pull deep successors into the first RHC window."""
+    """Build a chain where due-date pressure should pull deep successors.
+
+    The expected effect is that they enter the first RHC window.
+    """
     state_id = uuid4()
     work_center_id = uuid4()
     order_id = uuid4()
@@ -328,6 +331,101 @@ def _make_bootstrap_frontier_problem(n_orders: int = 200) -> ScheduleProblem:
         setup_matrix=[],
         planning_horizon_start=HORIZON_START,
         planning_horizon_end=HORIZON_START + timedelta(days=40),
+    )
+
+
+def _make_adaptive_admission_chain_problem(n_ops: int = 12) -> ScheduleProblem:
+    """Build a chain whose first window is under-filled without look-ahead expansion."""
+    state_id = uuid4()
+    work_center_id = uuid4()
+    order_id = uuid4()
+    operations: list[Operation] = []
+    predecessor_op_id = None
+
+    for seq in range(n_ops):
+        op_id = uuid4()
+        operations.append(
+            Operation(
+                id=op_id,
+                order_id=order_id,
+                seq_in_order=seq,
+                state_id=state_id,
+                base_duration_min=10,
+                eligible_wc_ids=[work_center_id],
+                predecessor_op_id=predecessor_op_id,
+            )
+        )
+        predecessor_op_id = op_id
+
+    return ScheduleProblem(
+        states=[State(id=state_id, code="ADAPT", label="Adaptive Window")],
+        orders=[
+            Order(
+                id=order_id,
+                external_ref=f"ADAPT-{n_ops}",
+                due_date=HORIZON_START + timedelta(minutes=110),
+                priority=250,
+            )
+        ],
+        operations=operations,
+        work_centers=[
+            WorkCenter(
+                id=work_center_id,
+                code="ADAPT-M1",
+                capability_group="adaptive",
+                speed_factor=1.0,
+            )
+        ],
+        setup_matrix=[],
+        planning_horizon_start=HORIZON_START,
+        planning_horizon_end=HORIZON_START + timedelta(hours=8),
+    )
+
+
+def _make_due_dense_starved_frontier_problem(n_ops: int = 20) -> ScheduleProblem:
+    """Build an early-due fixture where admission offsets can starve a rich frontier."""
+    state_id = uuid4()
+    work_center_id = uuid4()
+
+    orders: list[Order] = []
+    operations: list[Operation] = []
+    for index in range(n_ops):
+        order_id = uuid4()
+        orders.append(
+            Order(
+                id=order_id,
+                external_ref=f"RELAX-{index:04d}",
+                due_date=HORIZON_START + timedelta(minutes=30),
+                priority=900,
+            )
+        )
+        operations.append(
+            Operation(
+                id=uuid4(),
+                order_id=order_id,
+                seq_in_order=0,
+                state_id=state_id,
+                base_duration_min=10,
+                eligible_wc_ids=[work_center_id],
+                predecessor_op_id=None,
+            )
+        )
+
+    return ScheduleProblem(
+        states=[State(id=state_id, code="RELAX", label="Admission Relax")],
+        orders=orders,
+        operations=operations,
+        work_centers=[
+            WorkCenter(
+                id=work_center_id,
+                code="RELAX-M1",
+                capability_group="relax",
+                speed_factor=1.0,
+            )
+        ],
+        setup_matrix=[],
+        planning_horizon_start=HORIZON_START,
+        planning_horizon_end=HORIZON_START + timedelta(hours=8),
     )
 
 
@@ -669,7 +767,10 @@ class TestAlnsSolver:
         assert result.metadata["effective_sa_cooling_rate"] == pytest.approx(0.995975)
 
     def test_alns_segment_weight_update_blends_towards_uniform(self) -> None:
-        """Operator segment refresh should retain exploration pressure instead of collapsing to one arm."""
+        """Operator segment refresh should retain exploration pressure.
+
+        It should not collapse completely to a single arm.
+        """
         import synaps.solvers.alns_solver as alns_module
 
         refreshed = alns_module._update_operator_weights_for_segment(
@@ -802,7 +903,10 @@ class TestAlnsSolver:
         partial_warm_start = [
             assignment
             for assignment in baseline.assignments
-            if next(op for op in problem.operations if op.id == assignment.operation_id).seq_in_order == 0
+            if next(
+                op for op in problem.operations if op.id == assignment.operation_id
+            ).seq_in_order
+            == 0
         ]
 
         warmed = solver.solve(
@@ -819,6 +923,52 @@ class TestAlnsSolver:
         assert warmed.metadata["warm_start_supplied_assignments"] == len(partial_warm_start)
         assert warmed.metadata["warm_start_completed_assignments"] > 0
         assert warmed.metadata["initial_solver"] == "warm_start"
+
+    def test_alns_reanchors_complete_warm_start_against_frozen_occupancy(self) -> None:
+        """ALNS should not accept a complete warm start that overlaps frozen machine usage."""
+        from datetime import timedelta
+
+        from synaps.model import Assignment
+        from synaps.solvers.alns_solver import AlnsSolver
+
+        problem = _make_due_pressure_chain_problem()
+        work_center_id = problem.work_centers[0].id
+        ops_by_seq = sorted(problem.operations, key=lambda op: op.seq_in_order)
+
+        frozen_assignment = Assignment(
+            operation_id=uuid4(),
+            work_center_id=work_center_id,
+            start_time=problem.planning_horizon_start,
+            end_time=problem.planning_horizon_start + timedelta(minutes=20),
+            setup_minutes=0,
+            aux_resource_ids=[],
+        )
+        overlapping_warm_start = [
+            Assignment(
+                operation_id=op.id,
+                work_center_id=work_center_id,
+                start_time=problem.planning_horizon_start
+                + timedelta(minutes=index * 10),
+                end_time=problem.planning_horizon_start
+                + timedelta(minutes=(index + 1) * 10),
+                setup_minutes=0,
+                aux_resource_ids=[],
+            )
+            for index, op in enumerate(ops_by_seq)
+        ]
+
+        result = AlnsSolver().solve(
+            problem,
+            max_iterations=0,
+            time_limit_s=5,
+            use_cpsat_repair=False,
+            warm_start_assignments=overlapping_warm_start,
+            frozen_assignments=[frozen_assignment],
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert result.assignments
+        assert result.assignments[0].start_time >= frozen_assignment.end_time
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -892,7 +1042,10 @@ class TestRhcSolver:
                 successors_by_op.setdefault(op.predecessor_op_id, []).append(op.id)
 
         terminal_op = max(problem.operations, key=lambda op: op.seq_in_order)
-        expanded = alns_module._expand_successor_closure({problem.operations[0].id}, successors_by_op)
+        expanded = alns_module._expand_successor_closure(
+            {problem.operations[0].id},
+            successors_by_op,
+        )
         assert expanded == {op.id for op in problem.operations}
 
         capped = alns_module._cap_destroy_set_preserving_successor_closure(
@@ -1185,6 +1338,79 @@ class TestRhcSolver:
         assert result.metadata["candidate_pool_clamped_windows"] == 0
         assert result.metadata["candidate_pool_filtered_ops"] == 0
 
+    def test_rhc_adaptive_window_expands_starved_frontier_before_bootstrap(self) -> None:
+        """Adaptive look-ahead should widen a starved first window before bootstrap fallback."""
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_adaptive_admission_chain_problem(n_ops=12)
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=60,
+            overlap_minutes=0,
+            inner_solver="greedy",
+            time_limit_s=20,
+            max_ops_per_window=4,
+            max_windows=1,
+            candidate_pool_factor=2.0,
+            adaptive_window_enabled=True,
+            adaptive_window_min_fill_ratio=0.5,
+            adaptive_window_max_multiplier=2.0,
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL, SolverStatus.ERROR)
+        assert result.metadata["candidate_pool_limit"] == 8
+        assert result.metadata["adaptive_window_expansions"] == 1
+        assert result.metadata["adaptive_window_max_multiplier_applied"] == pytest.approx(2.0)
+        assert (
+            result.metadata["peak_raw_window_candidate_count"]
+            >= result.metadata["candidate_pool_limit"]
+        )
+        assert result.metadata["candidate_pool_clamped_windows"] >= 1
+        assert result.metadata["admission_starvation_count"] == 0
+
+    def test_rhc_progressive_admission_relaxation_recovers_due_frontier_capacity(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Low-fill admitted pools should temporarily fall back to the raw due/admission frontier."""
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_due_dense_starved_frontier_problem(n_ops=20)
+        earliest_ids = {op.id for op in problem.operations[:2]}
+
+        def fake_compute_earliest_starts(problem, result) -> None:
+            for op in problem.operations:
+                result[op.id] = 0.0 if op.id in earliest_ids else 300.0
+
+        monkeypatch.setattr(
+            RhcSolver,
+            "_compute_earliest_starts",
+            staticmethod(fake_compute_earliest_starts),
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=60,
+            overlap_minutes=0,
+            inner_solver="greedy",
+            time_limit_s=20,
+            max_ops_per_window=10,
+            max_windows=1,
+            candidate_pool_factor=1.0,
+            adaptive_window_enabled=False,
+            progressive_admission_relaxation_enabled=True,
+            admission_relaxation_min_fill_ratio=0.5,
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL, SolverStatus.ERROR)
+        assert result.metadata["peak_raw_window_candidate_count"] == 20
+        assert result.metadata["peak_window_candidate_count"] == result.metadata[
+            "candidate_pool_limit"
+        ]
+        assert result.metadata["peak_window_candidate_count"] > len(earliest_ids)
+        assert result.metadata["admission_relaxation_windows"] == 1
+        assert result.metadata["admission_relaxation_recovered_ops"] >= 8
+
     def test_rhc_window_cap_selection_is_deterministic_under_ties(self) -> None:
         """RHC should produce identical schedules under tie-heavy window ranking."""
         from synaps.solvers.rhc_solver import RhcSolver
@@ -1241,7 +1467,9 @@ class TestRhcSolver:
                 return 1.0
 
         def fail_if_slot_search_runs(*args: object, **kwargs: object) -> None:
-            raise AssertionError("fallback slot search should be skipped after time limit exhaustion")
+            raise AssertionError(
+                "fallback slot search should be skipped after time limit exhaustion"
+            )
 
         monkeypatch.setattr(rhc_module.time, "monotonic", fake_monotonic)
         monkeypatch.setattr(rhc_module, "find_earliest_feasible_slot", fail_if_slot_search_runs)
@@ -1514,6 +1742,58 @@ class TestRhcInnerSolver:
         assert float(first_call["candidate_pressure"]) >= 0.0
         assert first_call["max_no_improve_iters"] == 7
 
+    def test_rhc_auto_scales_alns_budget_before_inner_window_call(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """RHC should shrink ALNS iteration and destroy budgets when the window budget is tight."""
+        from synaps.solvers.greedy_dispatch import GreedyDispatch
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_3state_problem(n_orders=6, ops_per_order=2)
+        captured_inner_kwargs: list[dict[str, object]] = []
+
+        def fake_alns_solve(self, problem, **kwargs):
+            captured_inner_kwargs.append(dict(kwargs))
+            return GreedyDispatch().solve(problem)
+
+        monkeypatch.setattr(
+            "synaps.solvers.alns_solver.AlnsSolver.solve",
+            fake_alns_solve,
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=240,
+            overlap_minutes=0,
+            inner_solver="alns",
+            time_limit_s=10,
+            alns_inner_window_time_cap_s=10,
+            max_ops_per_window=50,
+            max_windows=1,
+            alns_budget_auto_scaling_enabled=True,
+            alns_budget_estimated_repair_s_per_destroyed_op=0.5,
+            inner_kwargs={
+                "max_iterations": 100,
+                "destroy_fraction": 0.5,
+                "min_destroy": 1,
+                "max_destroy": 10,
+                "use_cpsat_repair": False,
+            },
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert captured_inner_kwargs
+        first_call = captured_inner_kwargs[0]
+        assert first_call["time_limit_s"] == pytest.approx(10.0)
+        assert first_call["max_iterations"] == 20
+        assert first_call["max_destroy"] == 1
+        assert result.metadata["alns_budget_scaled_windows"] == 1
+        first_window = result.metadata["inner_window_summaries"][0]
+        assert first_window["alns_budget_auto_scaled"] is True
+        assert first_window["alns_effective_max_iterations"] == 20
+        assert first_window["alns_effective_max_destroy"] == 1
+
     def test_rhc_passes_overlap_tail_into_next_alns_window(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -1585,6 +1865,77 @@ class TestRhcInnerSolver:
         assert {
             assignment.operation_id for assignment in captured_warm_starts[1]
         } == expected_tail_ids
+
+    def test_rhc_passes_external_warm_start_into_first_alns_window(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """RHC should pass external warm start assignments.
+
+        The first inner window should receive them as a refinement seed.
+        """
+        from datetime import timedelta
+
+        from synaps.model import Assignment
+        from synaps.solvers.greedy_dispatch import GreedyDispatch
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_due_pressure_chain_problem()
+        work_center_id = problem.work_centers[0].id
+        ops_by_seq = sorted(problem.operations, key=lambda op: op.seq_in_order)
+        captured_warm_starts: list[list[Assignment]] = []
+
+        external_warm_start = [
+            Assignment(
+                operation_id=ops_by_seq[0].id,
+                work_center_id=work_center_id,
+                start_time=problem.planning_horizon_start,
+                end_time=problem.planning_horizon_start + timedelta(minutes=10),
+                setup_minutes=0,
+                aux_resource_ids=[],
+            ),
+            Assignment(
+                operation_id=ops_by_seq[1].id,
+                work_center_id=work_center_id,
+                start_time=problem.planning_horizon_start + timedelta(minutes=10),
+                end_time=problem.planning_horizon_start + timedelta(minutes=20),
+                setup_minutes=0,
+                aux_resource_ids=[],
+            ),
+        ]
+
+        def fake_alns_solve(self, sub_problem, **kwargs):
+            supplied_warm_start = list(kwargs.get("warm_start_assignments", []) or [])
+            captured_warm_starts.append(supplied_warm_start)
+            return GreedyDispatch().solve(sub_problem)
+
+        monkeypatch.setattr(
+            "synaps.solvers.alns_solver.AlnsSolver.solve",
+            fake_alns_solve,
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=240,
+            overlap_minutes=30,
+            inner_solver="alns",
+            time_limit_s=30,
+            max_ops_per_window=20,
+            max_windows=1,
+            warm_start_assignments=external_warm_start,
+            inner_kwargs={
+                "max_iterations": 5,
+                "use_cpsat_repair": False,
+            },
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert captured_warm_starts
+        assert {
+            assignment.operation_id for assignment in captured_warm_starts[0]
+        } == {ops_by_seq[0].id, ops_by_seq[1].id}
+        assert result.metadata["external_warm_start_supplied_assignments"] == 2
+        assert result.metadata["external_warm_start_used_windows"] == 1
 
     def test_rhc_retains_boundary_crossing_assignments_for_next_window(
         self,
@@ -1726,7 +2077,9 @@ class TestRhcInnerSolver:
         assert captured_time_limits
         assert captured_time_limits[0] == pytest.approx(180.0)
         assert result.metadata["inner_window_summaries"]
-        assert result.metadata["inner_window_summaries"][0]["inner_time_limit_s"] == pytest.approx(180.0)
+        assert result.metadata["inner_window_summaries"][0][
+            "inner_time_limit_s"
+        ] == pytest.approx(180.0)
 
     def test_rhc_uses_numpy_candidate_metrics_path(
         self,
@@ -2038,6 +2391,147 @@ class TestRhcInnerSolver:
         # The key invariant: solver ran without TypeError
         assert result.metadata["inner_solver"] == "alns"
 
+    def test_rhc_reanchors_inner_assignments_before_freeze_merge(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Inner-window schedules should be re-anchored against frozen machine occupancy."""
+        from datetime import timedelta
+
+        from synaps.model import Assignment, ScheduleResult
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_long_chain_problem(12)
+        work_center_id = problem.work_centers[0].id
+
+        def fake_alns_solve(self, sub_problem, **kwargs):
+            assignments = []
+            for local_index, op in enumerate(
+                sorted(sub_problem.operations, key=lambda op: op.seq_in_order)
+            ):
+                start_time = problem.planning_horizon_start + timedelta(
+                    minutes=local_index * 10
+                )
+                assignments.append(
+                    Assignment(
+                        operation_id=op.id,
+                        work_center_id=work_center_id,
+                        start_time=start_time,
+                        end_time=start_time + timedelta(minutes=10),
+                        setup_minutes=0,
+                        aux_resource_ids=[],
+                    )
+                )
+
+            return ScheduleResult(
+                solver_name="alns",
+                status=SolverStatus.FEASIBLE,
+                assignments=assignments,
+                duration_ms=1,
+                metadata={"initial_solver": "greedy"},
+            )
+
+        monkeypatch.setattr(
+            "synaps.solvers.alns_solver.AlnsSolver.solve",
+            fake_alns_solve,
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=30,
+            overlap_minutes=0,
+            inner_solver="alns",
+            time_limit_s=30,
+            max_ops_per_window=12,
+            max_windows=2,
+            candidate_admission_enabled=False,
+            inner_kwargs={
+                "max_iterations": 5,
+                "use_cpsat_repair": False,
+            },
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL, SolverStatus.ERROR)
+        assert result.metadata["boundary_reanchor_windows"] >= 1
+        assert result.metadata["boundary_reanchor_changed_ops_total"] >= 1
+        assert result.metadata["temporal_stabilization"]["machine_shifts"] == 0
+        assert result.metadata["inner_window_summaries"]
+        second_window = result.metadata["inner_window_summaries"][1]
+        assert second_window["resolution_mode"] == "inner"
+        assert second_window["boundary_reanchor_ops"] >= 1
+        assert second_window["boundary_reanchor_changed_ops"] >= 1
+
+    def test_rhc_passes_frozen_context_into_followup_alns_window(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Follow-up ALNS windows should receive committed-prefix context directly."""
+        from datetime import timedelta
+
+        from synaps.model import Assignment, ScheduleResult
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_long_chain_problem(12)
+        work_center_id = problem.work_centers[0].id
+        captured_calls: list[dict[str, object]] = []
+
+        def fake_alns_solve(self, sub_problem, **kwargs):
+            captured_calls.append(dict(kwargs))
+            assignments = []
+            for local_index, op in enumerate(
+                sorted(sub_problem.operations, key=lambda op: op.seq_in_order)
+            ):
+                start_time = problem.planning_horizon_start + timedelta(
+                    minutes=local_index * 10
+                )
+                assignments.append(
+                    Assignment(
+                        operation_id=op.id,
+                        work_center_id=work_center_id,
+                        start_time=start_time,
+                        end_time=start_time + timedelta(minutes=10),
+                        setup_minutes=0,
+                        aux_resource_ids=[],
+                    )
+                )
+
+            return ScheduleResult(
+                solver_name="alns",
+                status=SolverStatus.FEASIBLE,
+                assignments=assignments,
+                duration_ms=1,
+                metadata={"initial_solver": "greedy"},
+            )
+
+        monkeypatch.setattr(
+            "synaps.solvers.alns_solver.AlnsSolver.solve",
+            fake_alns_solve,
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=30,
+            overlap_minutes=0,
+            inner_solver="alns",
+            time_limit_s=30,
+            max_ops_per_window=12,
+            max_windows=2,
+            candidate_admission_enabled=False,
+            inner_kwargs={
+                "max_iterations": 5,
+                "use_cpsat_repair": False,
+            },
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL, SolverStatus.ERROR)
+        assert len(captured_calls) >= 2
+        second_call = captured_calls[1]
+        frozen_assignments = second_call["frozen_assignments"]
+        assert frozen_assignments
+        assert {
+            assignment.operation_id for assignment in frozen_assignments
+        } <= {assignment.operation_id for assignment in result.assignments}
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 7. ALNS CP-SAT repair integration tests (BUG-3 regression)
@@ -2288,7 +2782,11 @@ class TestAlnsCpsatRepair:
         )
 
         assert outcome.status == alns_module.RepairStatus.FEASIBLE
-        expected_order = [problem.operations[0].id, problem.operations[1].id, problem.operations[2].id]
+        expected_order = [
+            problem.operations[0].id,
+            problem.operations[1].id,
+            problem.operations[2].id,
+        ]
         assert call_args["disrupted_op_ids"] == expected_order
 
     def test_repair_cpsat_outcome_sorts_assignments_by_operation_order(

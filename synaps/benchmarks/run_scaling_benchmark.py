@@ -142,6 +142,15 @@ BENCHMARK_SUITE: list[BenchmarkConfig] = [
         "solver_name": "rhc-alns", "solver_kwargs": {
         "window_minutes": 480, "overlap_minutes": 120, "inner_solver": "alns",
         "time_limit_s": 300, "alns_inner_window_time_cap_s": 180, "max_ops_per_window": 5000,
+        "progressive_admission_relaxation_enabled": True,
+        "admission_relaxation_min_fill_ratio": 0.30,
+        "alns_budget_auto_scaling_enabled": True,
+        "alns_budget_estimated_repair_s_per_destroyed_op": 0.125,
+        "hybrid_inner_routing_enabled": True,
+        "hybrid_inner_solver": "cpsat",
+        "hybrid_due_pressure_threshold": 0.35,
+        "hybrid_candidate_pressure_threshold": 4.0,
+        "hybrid_max_ops": 1500,
         "inner_kwargs": {
             "max_iterations": 100,
             "destroy_fraction": 0.03,

@@ -14,6 +14,7 @@ Academic basis:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from enum import Enum
 import logging
 import math
@@ -30,7 +31,9 @@ from synaps.model import (
 )
 from synaps.solvers import BaseSolver
 from synaps.solvers._dispatch_support import (
+    MachineIndex,
     build_dispatch_context,
+    find_earliest_feasible_slot,
     recompute_assignment_setups,
 )
 from synaps.solvers.feasibility_checker import FeasibilityChecker
@@ -889,6 +892,17 @@ class AlnsSolver(BaseSolver):
             )
         )
         warm_start_assignments_raw = kwargs.get("warm_start_assignments")
+        frozen_assignments_raw = kwargs.get("frozen_assignments")
+        frozen_assignments: list[Assignment] = list(frozen_assignments_raw or [])
+        frozen_assignments_by_op = {
+            assignment.operation_id: assignment for assignment in frozen_assignments
+        }
+        frozen_predecessor_end_offsets = {
+            op_id: float(offset)
+            for op_id, offset in dict(
+                kwargs.get("frozen_predecessor_end_offsets", {})
+            ).items()
+        }
 
         max_no_improve_iters = max_no_improve_base_iters
         if dynamic_no_improve_enabled and max_no_improve_base_iters > 0:
@@ -949,6 +963,162 @@ class AlnsSolver(BaseSolver):
         dispatch_context = build_dispatch_context(problem)
         lower_bound = compute_relaxed_makespan_lower_bound(problem)
 
+        def _reanchor_against_frozen(
+            assignments: list[Assignment],
+        ) -> tuple[list[Assignment], int]:
+            if not assignments or not frozen_assignments:
+                return list(assignments), 0
+
+            original_by_op = {
+                assignment.operation_id: assignment for assignment in assignments
+            }
+            scheduled_assignments = [
+                assignment
+                for assignment in frozen_assignments
+                if assignment.operation_id in ops_by_id
+            ]
+            external_frozen_blockers = sorted(
+                [
+                    (
+                        assignment,
+                        (
+                            assignment.start_time - problem.planning_horizon_start
+                        ).total_seconds()
+                        / 60.0,
+                        (
+                            assignment.end_time - problem.planning_horizon_start
+                        ).total_seconds()
+                        / 60.0,
+                        set(assignment.aux_resource_ids),
+                    )
+                    for assignment in frozen_assignments
+                    if assignment.operation_id not in ops_by_id
+                ],
+                key=lambda blocker: blocker[1],
+            )
+            machine_index = MachineIndex(dispatch_context)
+            for assignment in scheduled_assignments:
+                machine_index.add(assignment)
+
+            anchored_by_op = dict(frozen_assignments_by_op)
+            pending_assignments = sorted(
+                assignments,
+                key=lambda assignment: (
+                    assignment.start_time,
+                    op_positions[assignment.operation_id],
+                ),
+            )
+            reanchored_assignments: list[Assignment] = []
+
+            for _ in range(len(pending_assignments) + 1):
+                if not pending_assignments:
+                    break
+
+                progress_made = False
+                next_pending: list[Assignment] = []
+
+                for assignment in pending_assignments:
+                    operation = ops_by_id[assignment.operation_id]
+                    earliest_start = 0.0
+                    required_resource_ids = {
+                        requirement.aux_resource_id
+                        for requirement in dispatch_context.requirements_by_op.get(
+                            operation.id,
+                            [],
+                        )
+                    }
+                    if operation.predecessor_op_id is not None:
+                        predecessor_assignment = anchored_by_op.get(
+                            operation.predecessor_op_id
+                        )
+                        if predecessor_assignment is not None:
+                            predecessor_end = (
+                                predecessor_assignment.end_time
+                                - problem.planning_horizon_start
+                            ).total_seconds() / 60.0
+                            earliest_start = max(earliest_start, predecessor_end)
+                        elif operation.predecessor_op_id in original_by_op:
+                            next_pending.append(assignment)
+                            continue
+                        else:
+                            earliest_start = max(
+                                earliest_start,
+                                frozen_predecessor_end_offsets.get(operation.id, 0.0),
+                            )
+
+                    slot = None
+                    current_earliest_start = earliest_start
+                    while True:
+                        slot = find_earliest_feasible_slot(
+                            dispatch_context,
+                            scheduled_assignments,
+                            operation,
+                            assignment.work_center_id,
+                            current_earliest_start,
+                            machine_index=machine_index,
+                        )
+                        if slot is None:
+                            break
+
+                        conflicting_blocker_end = next(
+                            (
+                                blocker_end
+                                for blocker_assignment, blocker_start, blocker_end, blocker_resources in external_frozen_blockers
+                                if (
+                                    blocker_assignment.work_center_id == assignment.work_center_id
+                                    or required_resource_ids & blocker_resources
+                                )
+                                and slot.start_offset < blocker_end
+                                and slot.end_offset > blocker_start
+                            ),
+                            None,
+                        )
+                        if conflicting_blocker_end is None:
+                            break
+                        current_earliest_start = max(
+                            current_earliest_start,
+                            conflicting_blocker_end,
+                        )
+                    if slot is None:
+                        next_pending.append(assignment)
+                        continue
+
+                    anchored_assignment = Assignment(
+                        operation_id=operation.id,
+                        work_center_id=assignment.work_center_id,
+                        start_time=problem.planning_horizon_start
+                        + timedelta(minutes=slot.start_offset),
+                        end_time=problem.planning_horizon_start
+                        + timedelta(minutes=slot.end_offset),
+                        setup_minutes=slot.setup_minutes,
+                        aux_resource_ids=slot.aux_resource_ids,
+                    )
+                    scheduled_assignments.append(anchored_assignment)
+                    machine_index.add(anchored_assignment)
+                    anchored_by_op[operation.id] = anchored_assignment
+                    reanchored_assignments.append(anchored_assignment)
+                    progress_made = True
+
+                if not progress_made:
+                    return list(assignments), 0
+                pending_assignments = next_pending
+
+            if pending_assignments:
+                return list(assignments), 0
+
+            changed_assignment_count = sum(
+                1
+                for assignment in reanchored_assignments
+                if original_by_op[assignment.operation_id].start_time != assignment.start_time
+                or original_by_op[assignment.operation_id].end_time != assignment.end_time
+                or original_by_op[assignment.operation_id].work_center_id
+                != assignment.work_center_id
+            )
+            return sorted(
+                reanchored_assignments,
+                key=lambda assignment: assignment.start_time,
+            ), changed_assignment_count
+
         # ------- Phase 1: Initial solution -------
         from synaps.solvers.greedy_dispatch import BeamSearchDispatch
         from synaps.solvers.greedy_dispatch import GreedyDispatch
@@ -971,11 +1141,19 @@ class AlnsSolver(BaseSolver):
             warm_start_supplied_assignments = len(warm_start_assignments)
 
         def _is_valid_complete_schedule(assignments: list[Assignment]) -> bool:
+            combined_assignments = (
+                frozen_assignments + assignments if frozen_assignments else assignments
+            )
             return (
                 len(assignments) == n_ops
                 and len({assignment.operation_id for assignment in assignments}) == n_ops
-                and not _has_machine_overlap(assignments)
+                and not _has_machine_overlap(combined_assignments)
                 and not _has_precedence_violation(assignments, ops_by_id)
+                and not _violates_frozen_precedence(
+                    assignments,
+                    frozen_assignments_by_op,
+                    ops_by_id,
+                )
             )
 
         initial_solver_name = "greedy"
@@ -1013,6 +1191,20 @@ class AlnsSolver(BaseSolver):
                     status=SolverStatus.FEASIBLE,
                     assignments=warm_candidate,
                 )
+            elif frozen_assignments:
+                reanchored_warm_candidate, _ = _reanchor_against_frozen(warm_candidate)
+                if _is_valid_complete_schedule(reanchored_warm_candidate):
+                    recompute_assignment_setups(
+                        reanchored_warm_candidate,
+                        dispatch_context,
+                    )
+                    initial_solver_name = "warm_start"
+                    warm_start_used = True
+                    initial_result = ScheduleResult(
+                        solver_name=self.name,
+                        status=SolverStatus.FEASIBLE,
+                        assignments=reanchored_warm_candidate,
+                    )
             elif warm_start_rejected_reason is None:
                 warm_start_rejected_reason = "warm_start_incomplete"
 
@@ -1042,6 +1234,19 @@ class AlnsSolver(BaseSolver):
                             "warm_start_rejected_reason": warm_start_rejected_reason,
                         },
                     )
+
+        if initial_result is not None and frozen_assignments:
+            reanchored_initial_assignments, _ = _reanchor_against_frozen(
+                list(initial_result.assignments)
+            )
+            if _is_valid_complete_schedule(reanchored_initial_assignments):
+                recompute_assignment_setups(
+                    reanchored_initial_assignments,
+                    dispatch_context,
+                )
+                initial_result = initial_result.model_copy(
+                    update={"assignments": reanchored_initial_assignments}
+                )
 
         initial_solution_ms = int((time.monotonic() - initial_solution_t0) * 1000)
         time_limit_exhausted_before_search = (time.monotonic() - t0) > time_limit_s
@@ -1161,8 +1366,19 @@ class AlnsSolver(BaseSolver):
                 )
 
                 # Frozen assignments (everything not destroyed)
-                frozen = [a for a in current_assignments if a.operation_id not in destroyed_ids]
-                frozen_by_op = {assignment.operation_id: assignment for assignment in frozen}
+                internal_frozen = [
+                    assignment
+                    for assignment in current_assignments
+                    if assignment.operation_id not in destroyed_ids
+                ]
+                frozen = frozen_assignments + internal_frozen
+                frozen_by_op = dict(frozen_assignments_by_op)
+                frozen_by_op.update(
+                    {
+                        assignment.operation_id: assignment
+                        for assignment in internal_frozen
+                    }
+                )
 
                 # Repair — primary depends on use_cpsat_repair flag
                 # CP-SAT repair (Laborie & Godard 2007) when enabled, greedy fallback otherwise
@@ -1248,7 +1464,7 @@ class AlnsSolver(BaseSolver):
                     continue  # repair failed, discard this iteration
 
                 # Assemble candidate solution
-                candidate = frozen + new_assignments
+                candidate = internal_frozen + new_assignments
 
                 # Quick feasibility sanity check (only check completeness)
                 candidate_op_ids = {a.operation_id for a in candidate}
@@ -1256,6 +1472,16 @@ class AlnsSolver(BaseSolver):
                     feasibility_failures += 1
                     continue
                 if _has_precedence_violation(candidate, ops_by_id):
+                    feasibility_failures += 1
+                    continue
+                if _violates_frozen_precedence(
+                    candidate,
+                    frozen_assignments_by_op,
+                    ops_by_id,
+                ):
+                    feasibility_failures += 1
+                    continue
+                if _has_machine_overlap(frozen_assignments + candidate):
                     feasibility_failures += 1
                     continue
 
