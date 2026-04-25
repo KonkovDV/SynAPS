@@ -42,3 +42,11 @@ The publication baseline for this repository assumes:
 1. GitHub Private Vulnerability Reporting is enabled;
 2. maintainers watch `Security alerts` notifications;
 3. secret scanning and push protection are enabled for the public repository.
+
+## Workflow Counterpart
+
+The checked-in repository automation also includes:
+
+1. pinned CodeQL advanced setup for Python, TypeScript, and Rust repository surfaces;
+2. OSSF Scorecards SARIF uploads into GitHub code scanning;
+3. dependency review on pull requests.

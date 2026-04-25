@@ -39,6 +39,7 @@ What is implemented and verified in this repository:
 - RHC can carry unfinished overlap tails into the next ALNS window and exposes warm-start metadata in solver output
 - RHC candidate scoring is wired through the NumPy/native batch seam when acceleration is available
 - The TypeScript control-plane validates JSON contracts, executes the real Python kernel for solve/repair, and CI bootstraps the Python runtime before `control-plane` integration tests
+- Pinned GitHub Actions security workflows cover Python, TypeScript, and Rust surfaces via CodeQL, and publish OSSF Scorecards SARIF results
 
 What is not claimed:
 
