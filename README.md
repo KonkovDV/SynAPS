@@ -213,6 +213,35 @@ See: [HPC Silicon-Level Optimization Roadmap](docs/architecture/08_HPC_SILICON_O
 - Contributing: `CONTRIBUTING.md`
 - Security policy: `SECURITY.md`
 
+## Scientific Reporting Standard
+
+### Claim Boundary
+
+This README distinguishes verified repository evidence from future intent.
+
+- Verified claims are tied to executable artifacts, checked-in contracts, benchmark outputs, or CI-visible checks.
+- Planned items are explicitly labeled as roadmap work and are not presented as delivered capabilities.
+- Performance numbers are context-bound to the referenced artifact and hardware profile, not universal guarantees.
+
+### Reproducibility Baseline
+
+Use this minimal protocol when validating or citing results:
+
+```bash
+python -m pip install -e ".[dev]"
+python -m pytest tests -q
+python -m mypy synaps --strict --no-error-summary
+python -m synaps list-solver-configs
+```
+
+For benchmark claims, publish the exact command line, seed list, solver profile, and resulting JSON artifact path under `benchmark/studies/`.
+
+### Citation and Research Reuse
+
+- Preferred citation metadata: `CITATION.cff`
+- If citing benchmark outcomes, include repository URL, commit SHA, artifact path, and execution date.
+- When comparing against external methods, report both feasibility and wall-time boundaries to avoid selective reporting.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
