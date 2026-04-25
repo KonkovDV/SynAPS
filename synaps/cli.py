@@ -18,7 +18,7 @@ from synaps.contracts import (
 )
 from synaps.model import ScheduleProblem, ScheduleResult, normalize_schedule_problem_data
 from synaps.replay import build_runtime_replay_artifact, write_replay_artifact
-from synaps.solvers.registry import available_solver_configs
+from synaps.solvers.registry import available_solver_configs, build_solver_registry_manifest
 from synaps.solvers.router import SolveRegime, SolverRoutingContext
 
 
@@ -163,6 +163,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Directory where contract schema files will be written",
     )
 
+    registry_parser = subparsers.add_parser(
+        "list-solver-configs",
+        help="Emit the public solver portfolio as machine-readable JSON",
+    )
+    registry_parser.add_argument(
+        "--output-file",
+        type=Path,
+        help="Optional path where the JSON manifest should be written instead of stdout",
+    )
+
     return parser
 
 
@@ -268,6 +278,10 @@ def main(argv: list[str] | None = None) -> int:
         written = write_contract_schemas(args.output_dir)
         json.dump([str(path) for path in written], sys.stdout, indent=2)
         sys.stdout.write("\n")
+        return 0
+
+    elif args.command == "list-solver-configs":
+        _write_json_output(build_solver_registry_manifest(), args.output_file)
         return 0
 
     parser.error(f"Unsupported command: {args.command}")

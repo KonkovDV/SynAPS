@@ -120,6 +120,19 @@ def test_cli_write_contract_schemas_writes_bundle(
     assert (output_dir / "solve-response.schema.json").exists()
 
 
+def test_cli_list_solver_configs_emits_manifest(capsys: pytest.CaptureFixture[str]) -> None:
+    exit_code = main(["list-solver-configs"])
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert isinstance(payload, list)
+    assert payload
+    assert payload[0]["solver_config"] == "GREED"
+    assert "description" in payload[0]
+    assert "default_solve_kwargs" in payload[0]
+
+
 def test_cli_solve_request_can_write_runtime_replay_artifact(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

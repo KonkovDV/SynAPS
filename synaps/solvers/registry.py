@@ -390,9 +390,26 @@ def create_solver(name: str) -> tuple[BaseSolver, dict[str, object]]:
     return registration.factory(), dict(registration.solve_kwargs)
 
 
+def build_solver_registry_manifest() -> list[dict[str, object]]:
+    """Return a JSON-friendly manifest of the public solver portfolio."""
+
+    manifest: list[dict[str, object]] = []
+    for solver_config in available_solver_configs():
+        registration = get_solver_registration(solver_config)
+        manifest.append(
+            {
+                "solver_config": solver_config,
+                "description": registration.description,
+                "default_solve_kwargs": dict(registration.solve_kwargs),
+            }
+        )
+    return manifest
+
+
 __all__ = [
     "SolverRegistration",
     "available_solver_configs",
+    "build_solver_registry_manifest",
     "create_solver",
     "get_solver_registration",
 ]

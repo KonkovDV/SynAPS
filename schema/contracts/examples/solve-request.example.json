@@ -1,0 +1,174 @@
+{
+  "contract_version": "2026-04-03",
+  "request_id": "example-solve-1",
+  "problem": {
+    "states": [
+      {
+        "id": "c7051e9a-318c-422c-8c23-caa8f4099f93",
+        "code": "STATE-A",
+        "label": "State A",
+        "domain_attributes": {}
+      },
+      {
+        "id": "02e90892-354e-481f-ac7a-5cf1a7126625",
+        "code": "STATE-B",
+        "label": "State B",
+        "domain_attributes": {}
+      }
+    ],
+    "orders": [
+      {
+        "id": "3b2cb9b4-44bb-4a22-9523-c43f49fa24a3",
+        "external_ref": "ORD-0000",
+        "due_date": "2026-04-01T14:00:00Z",
+        "priority": 500,
+        "quantity": 1.0,
+        "unit": "pcs",
+        "domain_attributes": {}
+      },
+      {
+        "id": "b4b3a835-7433-4fc7-ab42-2ace99b1bdc9",
+        "external_ref": "ORD-0001",
+        "due_date": "2026-04-01T15:00:00Z",
+        "priority": 600,
+        "quantity": 1.0,
+        "unit": "pcs",
+        "domain_attributes": {}
+      }
+    ],
+    "operations": [
+      {
+        "id": "a0d8b2e6-41e7-4f3a-a2cd-59604b72846c",
+        "order_id": "3b2cb9b4-44bb-4a22-9523-c43f49fa24a3",
+        "seq_in_order": 0,
+        "state_id": "c7051e9a-318c-422c-8c23-caa8f4099f93",
+        "base_duration_min": 30,
+        "eligible_wc_ids": [
+          "ebddc7a1-1b25-462e-8f10-ab16d748cffd",
+          "ef1b7024-36cb-4624-9737-44f95b5e556a"
+        ],
+        "predecessor_op_id": null,
+        "domain_attributes": {}
+      },
+      {
+        "id": "acabc694-9981-4188-8ab1-90cb5697861b",
+        "order_id": "3b2cb9b4-44bb-4a22-9523-c43f49fa24a3",
+        "seq_in_order": 1,
+        "state_id": "02e90892-354e-481f-ac7a-5cf1a7126625",
+        "base_duration_min": 40,
+        "eligible_wc_ids": [
+          "ebddc7a1-1b25-462e-8f10-ab16d748cffd",
+          "ef1b7024-36cb-4624-9737-44f95b5e556a"
+        ],
+        "predecessor_op_id": "a0d8b2e6-41e7-4f3a-a2cd-59604b72846c",
+        "domain_attributes": {}
+      },
+      {
+        "id": "f5d440e6-0603-44e4-a2c6-d825f21b1ed8",
+        "order_id": "b4b3a835-7433-4fc7-ab42-2ace99b1bdc9",
+        "seq_in_order": 0,
+        "state_id": "c7051e9a-318c-422c-8c23-caa8f4099f93",
+        "base_duration_min": 30,
+        "eligible_wc_ids": [
+          "ebddc7a1-1b25-462e-8f10-ab16d748cffd",
+          "ef1b7024-36cb-4624-9737-44f95b5e556a"
+        ],
+        "predecessor_op_id": null,
+        "domain_attributes": {}
+      },
+      {
+        "id": "7c15e8cb-3868-48b3-a47f-e841ad1e08b1",
+        "order_id": "b4b3a835-7433-4fc7-ab42-2ace99b1bdc9",
+        "seq_in_order": 1,
+        "state_id": "02e90892-354e-481f-ac7a-5cf1a7126625",
+        "base_duration_min": 40,
+        "eligible_wc_ids": [
+          "ebddc7a1-1b25-462e-8f10-ab16d748cffd",
+          "ef1b7024-36cb-4624-9737-44f95b5e556a"
+        ],
+        "predecessor_op_id": "f5d440e6-0603-44e4-a2c6-d825f21b1ed8",
+        "domain_attributes": {}
+      }
+    ],
+    "work_centers": [
+      {
+        "id": "ebddc7a1-1b25-462e-8f10-ab16d748cffd",
+        "code": "WC-1",
+        "capability_group": "machining",
+        "speed_factor": 1.0,
+        "max_parallel": 1,
+        "domain_attributes": {}
+      },
+      {
+        "id": "ef1b7024-36cb-4624-9737-44f95b5e556a",
+        "code": "WC-2",
+        "capability_group": "machining",
+        "speed_factor": 1.2,
+        "max_parallel": 1,
+        "domain_attributes": {}
+      }
+    ],
+    "setup_matrix": [
+      {
+        "id": "c9f98eac-3e47-4671-a2f9-0682614832d9",
+        "work_center_id": "ebddc7a1-1b25-462e-8f10-ab16d748cffd",
+        "from_state_id": "c7051e9a-318c-422c-8c23-caa8f4099f93",
+        "to_state_id": "02e90892-354e-481f-ac7a-5cf1a7126625",
+        "setup_minutes": 10,
+        "material_loss": 0.0,
+        "energy_kwh": 0.0,
+        "domain_attributes": {}
+      },
+      {
+        "id": "0ba90256-d5ee-4e46-92d6-2631704aefe7",
+        "work_center_id": "ebddc7a1-1b25-462e-8f10-ab16d748cffd",
+        "from_state_id": "02e90892-354e-481f-ac7a-5cf1a7126625",
+        "to_state_id": "c7051e9a-318c-422c-8c23-caa8f4099f93",
+        "setup_minutes": 15,
+        "material_loss": 0.0,
+        "energy_kwh": 0.0,
+        "domain_attributes": {}
+      },
+      {
+        "id": "5b2a7a8f-9c08-4d0c-a04e-03e908f19686",
+        "work_center_id": "ef1b7024-36cb-4624-9737-44f95b5e556a",
+        "from_state_id": "c7051e9a-318c-422c-8c23-caa8f4099f93",
+        "to_state_id": "02e90892-354e-481f-ac7a-5cf1a7126625",
+        "setup_minutes": 8,
+        "material_loss": 0.0,
+        "energy_kwh": 0.0,
+        "domain_attributes": {}
+      },
+      {
+        "id": "98122ba5-41cc-47be-be89-1433461b57f4",
+        "work_center_id": "ef1b7024-36cb-4624-9737-44f95b5e556a",
+        "from_state_id": "02e90892-354e-481f-ac7a-5cf1a7126625",
+        "to_state_id": "c7051e9a-318c-422c-8c23-caa8f4099f93",
+        "setup_minutes": 12,
+        "material_loss": 0.0,
+        "energy_kwh": 0.0,
+        "domain_attributes": {}
+      }
+    ],
+    "auxiliary_resources": [],
+    "aux_requirements": [],
+    "planning_horizon_start": "2026-04-01T08:00:00Z",
+    "planning_horizon_end": "2026-04-01T20:00:00Z"
+  },
+  "context": {
+    "regime": "nominal",
+    "preferred_max_latency_s": null,
+    "exact_required": false
+  },
+  "solver_config": null,
+  "verify_feasibility": true,
+  "solve_options": {
+    "time_limit_s": null,
+    "random_seed": null,
+    "num_workers": null,
+    "max_iterations": null,
+    "material_loss_scale": null,
+    "objective_weights": null,
+    "epsilon_constraints": null
+  }
+}

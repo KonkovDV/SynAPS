@@ -9,6 +9,10 @@ runtime invocation contract.
 - `solve-response.schema.json` — response contract for deterministic plan generation
 - `repair-request.schema.json` — request contract for bounded repair execution
 - `repair-response.schema.json` — response contract for bounded repair execution
+- `examples/solve-request.example.json` — minimal end-to-end solve request payload
+- `examples/solve-response.example.json` — corresponding solve response payload
+- `examples/repair-request.example.json` — minimal end-to-end repair request payload
+- `examples/repair-response.example.json` — corresponding repair response payload
 
 ## Regeneration
 
@@ -29,6 +33,9 @@ Recommended flow:
 2. invoke the Python kernel via `python -m synaps solve-request` or `python -m synaps repair-request`;
 3. validate outbound payloads against the corresponding response schema;
 4. keep network transport concerns outside the deterministic kernel.
+
+You can start from the `examples/` payloads for smoke tests and external integration
+prototypes.
 
 ## Boundary
 

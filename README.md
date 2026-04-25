@@ -10,6 +10,7 @@ Language: **EN** | [RU](README_RU.md)
 SynAPS is for teams that need not just a schedule, but an explainable and reproducible schedule.
 
 - Explicit solver portfolio with named configurations
+- Machine-readable solver portfolio manifest via CLI (`python -m synaps list-solver-configs`)
 - Deterministic routing and auditable metadata
 - Independent feasibility validation surface
 - Reproducible benchmark harness (including a dedicated 50K study)
@@ -33,6 +34,7 @@ What is implemented and verified in this repository:
 - Python requirement: `>=3.12` (`pyproject.toml`)
 - Core runtime dependencies: `ortools`, `highspy`, `pydantic`, `numpy`
 - Stable solve/repair JSON contracts (`synaps/contracts.py`)
+- End-to-end contract examples (`schema/contracts/examples/`)
 - Dedicated reproducible 50K compare rail plus a staged 500K study harness (`benchmark/study_rhc_50k.py`, `benchmark/study_rhc_500k.py`)
 - Separate feasibility checker (`synaps/solvers/feasibility_checker.py`)
 - ALNS can accept partial warm starts, complete missing assignments, and recompute setups before local search
@@ -114,6 +116,12 @@ python -m benchmark.run_benchmark benchmark/instances/tiny_3x3.json \
   --solvers GREED CPSAT-30 --compare
 ```
 
+Export the public solver portfolio for external control-plane/UI integration:
+
+```bash
+python -m synaps list-solver-configs
+```
+
 Run the dedicated 50K study:
 
 ```bash
@@ -183,6 +191,7 @@ See: [HPC Silicon-Level Optimization Roadmap](docs/architecture/08_HPC_SILICON_O
 - `synaps/solvers/` - solver implementations and registry
 - `synaps/model.py` - core Pydantic models
 - `synaps/contracts.py` - stable JSON contracts
+- `schema/contracts/examples/` - solve/repair example payloads for integration smoke tests
 - `synaps/problem_profile.py` - instance profiling
 - `synaps/validation.py` - solve-result verification path
 - `benchmark/` - benchmark harness and studies

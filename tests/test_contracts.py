@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 from synaps.contracts import (
     RepairRequest,
+    RepairResponse,
     RoutingContextContract,
     SolveOptions,
     SolveRequest,
+    SolveResponse,
     build_contract_schema_bundle,
     execute_repair_request,
     execute_solve_request,
@@ -19,9 +21,6 @@ from synaps.replay import build_runtime_replay_artifact
 from synaps.solvers.greedy_dispatch import GreedyDispatch
 from synaps.solvers.router import SolveRegime
 from tests.conftest import make_simple_problem
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def test_execute_solve_request_returns_contract_response() -> None:
@@ -112,3 +111,23 @@ def test_write_contract_schemas_writes_schema_files(tmp_path: Path) -> None:
         "repair-response.schema.json",
     }
     assert all(path.exists() for path in written)
+
+
+def test_contract_examples_are_valid_models() -> None:
+    examples_dir = Path("schema/contracts/examples")
+
+    solve_request = SolveRequest.model_validate_json(
+        (examples_dir / "solve-request.example.json").read_text(encoding="utf-8")
+    )
+    solve_response = SolveResponse.model_validate_json(
+        (examples_dir / "solve-response.example.json").read_text(encoding="utf-8")
+    )
+    repair_request = RepairRequest.model_validate_json(
+        (examples_dir / "repair-request.example.json").read_text(encoding="utf-8")
+    )
+    repair_response = RepairResponse.model_validate_json(
+        (examples_dir / "repair-response.example.json").read_text(encoding="utf-8")
+    )
+
+    assert solve_request.contract_version == solve_response.contract_version
+    assert repair_request.contract_version == repair_response.contract_version
