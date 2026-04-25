@@ -21,6 +21,12 @@ from pathlib import Path
 from typing import Any, Literal
 
 from benchmark.study_rhc_50k import _apply_lane_profile
+from synaps.model import (
+    MAX_SCHEDULE_OPERATIONS,
+    MAX_SCHEDULE_ORDERS,
+    MAX_SCHEDULE_SETUP_ENTRIES,
+    MAX_SCHEDULE_WORK_CENTERS,
+)
 from synaps.benchmarks.run_scaling_benchmark import run_benchmark as run_scaling_case
 
 LaneMode = Literal["throughput", "strict", "both"]
@@ -204,6 +210,10 @@ def _estimate_instance_footprint(
 def _resource_gate(
     projection: dict[str, Any],
     *,
+    n_ops: int,
+    n_orders: int,
+    n_machines: int,
+    expected_setup_entries: int,
     max_estimated_memory_gb: float,
     max_setup_entries: int,
     max_eligible_links: int,
@@ -218,6 +228,15 @@ def _resource_gate(
     if int(projection.get("eligible_links", 0)) > max_eligible_links:
         reasons.append("eligible_links_exceed_limit")
 
+    if n_ops > MAX_SCHEDULE_OPERATIONS:
+        reasons.append("operations_exceed_model_limit")
+    if n_orders > MAX_SCHEDULE_ORDERS:
+        reasons.append("orders_exceed_model_limit")
+    if n_machines > MAX_SCHEDULE_WORK_CENTERS:
+        reasons.append("work_centers_exceed_model_limit")
+    if expected_setup_entries > MAX_SCHEDULE_SETUP_ENTRIES:
+        reasons.append("setup_entries_exceed_model_schema_limit")
+
     return {
         "allowed": not reasons,
         "reasons": reasons,
@@ -225,6 +244,12 @@ def _resource_gate(
             "max_estimated_memory_gb": max_estimated_memory_gb,
             "max_setup_entries": max_setup_entries,
             "max_eligible_links": max_eligible_links,
+        },
+        "model_limits": {
+            "max_operations": MAX_SCHEDULE_OPERATIONS,
+            "max_orders": MAX_SCHEDULE_ORDERS,
+            "max_work_centers": MAX_SCHEDULE_WORK_CENTERS,
+            "max_setup_entries": MAX_SCHEDULE_SETUP_ENTRIES,
         },
     }
 
@@ -238,6 +263,7 @@ def _scale_solver_kwargs(
     time_limit_growth_power: float,
     max_window_growth_power: float,
     max_window_cap: int,
+    time_limit_cap_s: int | None,
 ) -> dict[str, Any]:
     """Scale time/window controls from base profile to larger instances."""
 
@@ -247,6 +273,8 @@ def _scale_solver_kwargs(
     base_time_limit = float(base_kwargs.get("time_limit_s", 600))
     scaled_time_limit = int(round(base_time_limit * (ratio ** time_limit_growth_power)))
     scaled["time_limit_s"] = max(60, scaled_time_limit)
+    if time_limit_cap_s is not None:
+        scaled["time_limit_s"] = max(60, min(int(time_limit_cap_s), scaled["time_limit_s"]))
 
     if "max_ops_per_window" in base_kwargs:
         base_window_cap = int(base_kwargs["max_ops_per_window"])
@@ -435,6 +463,7 @@ def study_rhc_500k(
     time_limit_growth_power: float = 0.5,
     max_window_growth_power: float = 0.35,
     max_window_cap: int = 25_000,
+    time_limit_cap_s: int | None = None,
 ) -> dict[str, Any]:
     """Run staged RHC benchmark up to 500K+ operations with safety gating."""
 
@@ -481,6 +510,10 @@ def study_rhc_500k(
         )
         gate = _resource_gate(
             projection,
+            n_ops=topology["n_ops"],
+            n_orders=int(projection.get("n_orders", 0)),
+            n_machines=topology["n_machines"],
+            expected_setup_entries=int(projection.get("expected_setup_entries", 0)),
             max_estimated_memory_gb=max_estimated_memory_gb,
             max_setup_entries=max_setup_entries,
             max_eligible_links=max_eligible_links,
@@ -516,6 +549,7 @@ def study_rhc_500k(
                     time_limit_growth_power=time_limit_growth_power,
                     max_window_growth_power=max_window_growth_power,
                     max_window_cap=max_window_cap,
+                    time_limit_cap_s=time_limit_cap_s,
                 )
 
                 for seed in study_seeds:
@@ -657,6 +691,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--time-limit-growth-power", type=float, default=0.5)
     parser.add_argument("--max-window-growth-power", type=float, default=0.35)
     parser.add_argument("--max-window-cap", type=int, default=25_000)
+    parser.add_argument("--time-limit-cap-s", type=int)
     return parser
 
 
@@ -693,6 +728,7 @@ def main(argv: list[str] | None = None) -> int:
         time_limit_growth_power=args.time_limit_growth_power,
         max_window_growth_power=args.max_window_growth_power,
         max_window_cap=args.max_window_cap,
+        time_limit_cap_s=args.time_limit_cap_s,
     )
     json.dump(report, sys.stdout, indent=2)
     sys.stdout.write("\n")

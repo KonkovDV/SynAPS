@@ -235,3 +235,99 @@ def test_study_rhc_500k_lane_both_profiles_workers(
         )
         assert kwargs["solver_kwargs"]["hybrid_due_pressure_threshold"] == 0.35
         assert kwargs["solver_kwargs"]["hybrid_candidate_pressure_threshold"] == 4.0
+
+
+def test_study_rhc_500k_applies_time_limit_cap(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import benchmark.study_rhc_500k as study_module
+
+    captured_time_limits: list[int] = []
+
+    def fake_run_scaling_case(*, n_ops, n_machines, n_states, solver_name, solver_kwargs, seed):
+        captured_time_limits.append(int(solver_kwargs["time_limit_s"]))
+        return {
+            "status": "feasible",
+            "feasible": True,
+            "solver": solver_name,
+            "makespan_min": 100.0,
+            "total_setup_min": 20.0,
+            "total_tardiness_min": 0.0,
+            "total_material_loss": 0.0,
+            "assigned_ops": n_ops,
+            "violations": 0,
+            "solve_ms": 1,
+            "gen_ms": 1,
+            "verify_ms": 0,
+            "n_ops": n_ops,
+            "n_machines": n_machines,
+            "n_states": n_states,
+            "sdst_memory_bytes": 0,
+            "metadata": {},
+        }
+
+    monkeypatch.setattr(study_module, "run_scaling_case", fake_run_scaling_case)
+
+    study_module.study_rhc_500k(
+        execution_mode="gated",
+        scales=[100_000],
+        seeds=[1],
+        solver_names=["RHC-GREEDY"],
+        lane="throughput",
+        time_limit_growth_power=0.5,
+        time_limit_cap_s=120,
+        write_dir=tmp_path,
+    )
+
+    assert captured_time_limits == [120]
+
+
+def test_study_rhc_500k_blocks_execution_above_model_operation_limit(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import benchmark.study_rhc_500k as study_module
+
+    call_count = 0
+
+    def fake_run_scaling_case(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        return {
+            "status": "feasible",
+            "feasible": True,
+            "solver": kwargs["solver_name"],
+            "makespan_min": 100.0,
+            "total_setup_min": 20.0,
+            "total_tardiness_min": 0.0,
+            "total_material_loss": 0.0,
+            "assigned_ops": kwargs["n_ops"],
+            "violations": 0,
+            "solve_ms": 1,
+            "gen_ms": 1,
+            "verify_ms": 0,
+            "n_ops": kwargs["n_ops"],
+            "n_machines": kwargs["n_machines"],
+            "n_states": kwargs["n_states"],
+            "sdst_memory_bytes": 0,
+            "metadata": {},
+        }
+
+    monkeypatch.setattr(study_module, "run_scaling_case", fake_run_scaling_case)
+
+    report = study_module.study_rhc_500k(
+        execution_mode="gated",
+        scales=[500_000],
+        seeds=[1],
+        solver_names=["RHC-GREEDY"],
+        lane="throughput",
+        write_dir=tmp_path,
+    )
+
+    assert call_count == 0
+    record = report["scale_records"][0]
+    assert record["resource_gate"]["allowed"] is False
+    assert "operations_exceed_model_limit" in record["resource_gate"]["reasons"]
+    assert record["execution"] == "skipped"
+    assert record["skip_reason"] == "resource_gate"
