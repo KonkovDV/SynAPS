@@ -88,7 +88,7 @@ class MachineIndex:
     ) -> dict[Any, ResourceWindowSeries]:
         key = frozenset(required_resource_ids)
         if key not in self._resource_windows_cache:
-            self._resource_windows_cache[key] = _resource_windows_by_resource(
+                        prev_state = _assignment_state_id(ctx, previous)
                 self._context,
                 self._all,
                 self.get_setup_window_starts(),
