@@ -501,6 +501,10 @@ class RhcSolver(BaseSolver):
             "no_improve_early_stop",
             "no_improve_streak_final",
             "final_violations",
+            "final_violations_before_recovery",
+            "final_violation_recovery_attempted",
+            "final_violation_recovered",
+            "final_violation_recovery_source",
             "warm_start_used",
             "warm_start_supplied_assignments",
             "warm_start_completed_assignments",
@@ -1124,7 +1128,7 @@ class RhcSolver(BaseSolver):
                             )
                         ),
                     )
-                    if len(window_candidate_ids) < full_scan_target_count:
+                    if len(window_candidate_ids) <= full_scan_target_count:
                         full_scan_candidate_ids = {
                             op.id
                             for op in problem.operations
@@ -1748,9 +1752,23 @@ class RhcSolver(BaseSolver):
                         )
                         assert inner_result is not None
 
+                    alns_budget_exhausted_before_search = bool(
+                        selected_inner_solver_name == "alns"
+                        and inner_result is not None
+                        and bool((inner_result.metadata or {}).get(
+                            "time_limit_exhausted_before_search"
+                        ))
+                        and int((inner_result.metadata or {}).get(
+                            "iterations_completed",
+                            0,
+                        ))
+                        == 0
+                    )
+
                     if inner_result is not None and (
                         inner_result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
                         and inner_result.assignments
+                        and not alns_budget_exhausted_before_search
                     ):
                         boundary_aware_assignments, boundary_reanchor_changed_ops = (
                             reanchor_inner_assignments(
@@ -1868,6 +1886,8 @@ class RhcSolver(BaseSolver):
                     else:
                         if inner_result is None:
                             inner_rejection_reason = inner_rejection_reason or "inner_not_run"
+                        elif alns_budget_exhausted_before_search:
+                            inner_rejection_reason = "inner_time_limit_exhausted_before_search"
                         elif inner_result.status not in (
                             SolverStatus.FEASIBLE,
                             SolverStatus.OPTIMAL,

@@ -38,9 +38,11 @@ What is implemented and verified in this repository:
 - Dedicated reproducible 50K compare rail plus a staged 500K study harness (`benchmark/study_rhc_50k.py`, `benchmark/study_rhc_500k.py`)
 - Separate feasibility checker (`synaps/solvers/feasibility_checker.py`)
 - ALNS can accept partial warm starts, complete missing assignments, and recompute setups before local search
+- ALNS now rejects infeasible full seeds and reanchored warm starts before local search, so final recovery cannot silently fall back to an invalid initial baseline
 - RHC can carry unfinished overlap tails into the next ALNS window and exposes warm-start metadata in solver output
 - Post-audit RHC hardening adds full-frontier fallback for underfilled admission windows (`admission_full_scan_*` metadata)
 - Post-audit RHC hardening also auto-scales ALNS repair budget per window (`alns_effective_repair_time_limit_s` telemetry)
+- RHC now treats `time_limit_exhausted_before_search && iterations_completed == 0` on the ALNS lane as an explicit fallback condition (`inner_time_limit_exhausted_before_search`) instead of accepting a zero-search inner result
 - RHC candidate scoring is wired through the NumPy/native batch seam when acceleration is available
 - The TypeScript control-plane validates JSON contracts, executes the real Python kernel for solve/repair, and CI bootstraps the Python runtime before `control-plane` integration tests
 - Pinned GitHub Actions security workflows cover Python, TypeScript, and Rust surfaces via CodeQL, and publish OSSF Scorecards SARIF results
@@ -55,6 +57,7 @@ What is not claimed:
 Canonical artifact:
 
 - `benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json`
+- Latest live stress artifact: `benchmark/studies/test-50k-academic-matrix-v1/rhc_50k_study.json`
 
 Summary from that artifact:
 
@@ -68,7 +71,15 @@ Interpretation:
 - This is a profiling/evidence slice, not a "50K solved" claim.
 - The artifact captures an honest boundary: partial progress with explicit stop reasons.
 - Candidate-pool pressure and ALNS inner-window throughput remain the main bottlenecks at this stage.
+- The April 25, 2026 live stress audit also isolated two ALNS-specific failure modes: infeasible initial-seed recovery and full budget burn in phase-1 seed generation before the first LNS iteration.
 - Post-audit mitigations for both bottlenecks are now wired in solver code; rerun the 50K study to refresh public metrics.
+
+Latest live stress-matrix takeaways from `test-50k-academic-matrix-v1`:
+
+- `RHC-GREEDY` still dominates on coverage: mean scheduled ratio `0.3547` vs `0.1134` for `RHC-ALNS`.
+- `RHC-ALNS` still dominates on partial-plan objective: mean makespan `4652.77` vs `11240.8` for `RHC-GREEDY`.
+- Both lanes remain non-feasible at 50K (`feasibility_rate = 0.0`), so the comparison is useful for bottleneck diagnosis, not for production-readiness claims.
+- The live artifact preserved pre-fix evidence of the zero-iteration ALNS window mode; the repository code now routes that condition through explicit fallback instead of accepting it as a normal inner solve.
 
 ## Solver Portfolio
 

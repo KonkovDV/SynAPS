@@ -675,6 +675,45 @@ class TestAlnsSolver:
         assert result.metadata["cpsat_repair_attempts"] == 0
         assert result.metadata["greedy_repair_attempts"] == 0
 
+    def test_alns_rejects_infeasible_beam_seed_before_search(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """ALNS should not keep an initial seed that fails full feasibility validation."""
+        import synaps.solvers.alns_solver as alns_module
+        from synaps.solvers.greedy_dispatch import GreedyDispatch
+
+        problem = _make_3state_problem(n_orders=2, ops_per_order=2)
+        valid_seed = GreedyDispatch().solve(problem)
+        check_calls = {"count": 0}
+
+        def fake_beam_solve(self, problem, **kwargs):
+            return valid_seed
+
+        def fake_check(self, problem, assignments):
+            check_calls["count"] += 1
+            if check_calls["count"] == 1:
+                return ["forced_seed_violation"]
+            return []
+
+        monkeypatch.setattr(
+            "synaps.solvers.greedy_dispatch.BeamSearchDispatch.solve",
+            fake_beam_solve,
+        )
+        monkeypatch.setattr(alns_module.FeasibilityChecker, "check", fake_check)
+
+        result = alns_module.AlnsSolver().solve(
+            problem,
+            max_iterations=5,
+            time_limit_s=10,
+            initial_beam_op_limit=100,
+            use_cpsat_repair=False,
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert result.metadata["initial_solver"] == "greedy"
+        assert check_calls["count"] >= 2
+
     def test_alns_stops_early_on_no_improvement_streak(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -865,7 +904,7 @@ class TestAlnsSolver:
 
         def fake_check(self, problem, assignments):
             check_calls["count"] += 1
-            if check_calls["count"] == 1:
+            if check_calls["count"] == 2:
                 return ["forced_final_violation"]
             return []
 
@@ -1540,6 +1579,10 @@ class TestRhcSolver:
         assert result.metadata["fallback_repair_attempted"] is False
         assert result.metadata["fallback_repair_skipped"] is True
         assert result.metadata["ops_unscheduled"] > 0
+        assert (
+            "upper_bound" not in result.metadata
+            or result.metadata["upper_bound"] < result.metadata["lower_bound"]
+        )
         assert result.metadata["lower_bound_upper_bound_comparable"] is False
         assert result.metadata["gap"] is None
 
@@ -1749,6 +1792,10 @@ class TestRhcInnerSolver:
         assert "no_improve_early_stop" in first_window
         assert "no_improve_streak_final" in first_window
         assert "feasibility_failures" in first_window
+        assert "final_violations_before_recovery" in first_window
+        assert "final_violation_recovery_attempted" in first_window
+        assert "final_violation_recovered" in first_window
+        assert "final_violation_recovery_source" in first_window
         assert first_window["cpsat_repair_attempts"] >= first_window["cpsat_repairs"]
         assert first_window["greedy_repair_attempts"] >= first_window["greedy_repairs"]
 
@@ -2393,6 +2440,63 @@ class TestRhcInnerSolver:
         assert result.metadata["inner_fallback_reason_counts"]["inner_status_error"] >= 1
         assert result.metadata["inner_status_counts"]["error"] >= 1
         assert result.metadata["inner_resolution_counts"]["fallback_greedy"] >= 1
+
+        verification = verify_schedule_result(problem, result)
+        assert verification.feasible, f"Violations: {verification.violations}"
+
+    def test_rhc_falls_back_when_inner_alns_exhausts_budget_before_search(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A zero-iteration ALNS result should not bypass fallback greedy in RHC."""
+        from synaps.model import ScheduleResult
+        from synaps.solvers.greedy_dispatch import GreedyDispatch
+        from synaps.solvers.rhc_solver import RhcSolver
+        from synaps.validation import verify_schedule_result
+
+        problem = _make_3state_problem(n_orders=4, ops_per_order=2)
+
+        def fake_alns_solve(self, problem, **kwargs):
+            seed_result = GreedyDispatch().solve(problem)
+            return ScheduleResult(
+                solver_name="alns",
+                status=SolverStatus.FEASIBLE,
+                assignments=seed_result.assignments,
+                duration_ms=5,
+                metadata={
+                    "time_limit_exhausted_before_search": True,
+                    "iterations_completed": 0,
+                    "initial_solution_ms": 250,
+                },
+            )
+
+        monkeypatch.setattr(
+            "synaps.solvers.alns_solver.AlnsSolver.solve",
+            fake_alns_solve,
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=480,
+            overlap_minutes=60,
+            inner_solver="alns",
+            time_limit_s=30,
+            max_ops_per_window=50,
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        first_window = result.metadata["inner_window_summaries"][0]
+        assert first_window["resolution_mode"] == "fallback_greedy"
+        assert (
+            first_window["fallback_reason"]
+            == "inner_time_limit_exhausted_before_search"
+        )
+        assert first_window["inner_status"] == "feasible"
+        assert first_window["time_limit_exhausted_before_search"] is True
+        assert first_window["iterations_completed"] == 0
+        assert result.metadata["inner_fallback_reason_counts"][
+            "inner_time_limit_exhausted_before_search"
+        ] >= 1
 
         verification = verify_schedule_result(problem, result)
         assert verification.feasible, f"Violations: {verification.violations}"

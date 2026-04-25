@@ -245,9 +245,17 @@ python -m benchmark.study_rhc_50k \
 
 The study writes materialized instances under `instances/` and a top-level `rhc_50k_study.json` artifact with aggregated wall-clock, verification time, makespan, setup totals, and RHC-specific metadata such as preprocessing time and candidate-pool pressure.
 
-### Current artifact
+April 2026 hardening note:
 
-The current materialized artifact is [studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json](studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json).
+- ALNS initial seeds are now full-feasibility validated before local search and before being reused as a final recovery baseline.
+- On the RHC-ALNS lane, a window that exhausts its budget before the first LNS iteration is now recorded as `inner_time_limit_exhausted_before_search` and routed through the existing fallback-greedy path.
+- When auditing a fresh `rhc_50k_study.json`, inspect both solver-level KPIs and `inner_window_summaries` for `initial_solution_ms`, `time_limit_exhausted_before_search`, and `final_violation_recovery_*`.
+
+### Current artifacts
+
+The baseline artifact is [studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json](studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json).
+
+The latest live stress-matrix artifact is [studies/test-50k-academic-matrix-v1/rhc_50k_study.json](studies/test-50k-academic-matrix-v1/rhc_50k_study.json).
 
 It is useful because it preserves the current limit instead of hiding it:
 
@@ -256,7 +264,13 @@ It is useful because it preserves the current limit instead of hiding it:
 - both runs report `status=error` and `feasible=false`
 - peak candidate-pool pressure still reaches `49,931` and `49,993`
 
-So the public 50K path is real and reproducible, and the latest optimization pass materially improved greedy throughput. It is still a profiling surface rather than a solved industrial benchmark, and the current bottleneck has shifted toward inner-solver throughput on the `RHC-ALNS` path.
+The live stress-matrix makes the current split explicit:
+
+- `RHC-GREEDY` has the better coverage profile (`mean_scheduled_ratio = 0.3547`).
+- `RHC-ALNS` has the better partial-plan objective profile (`mean_makespan_minutes = 4652.77`) but much lower coverage (`0.1134`).
+- both solver families still fail the feasibility gate at 50K in this artifact.
+
+So the public 50K path is real and reproducible, but it remains a profiling surface rather than a solved industrial benchmark. The latest live artifact is best read as bottleneck evidence, including pre-fix examples of zero-iteration ALNS windows that motivated the explicit `inner_time_limit_exhausted_before_search` fallback guard now present in code.
 
 Post-audit (2026-04-25) solver hardening now includes:
 

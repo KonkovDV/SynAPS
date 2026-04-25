@@ -1154,6 +1154,7 @@ class AlnsSolver(BaseSolver):
                     frozen_assignments_by_op,
                     ops_by_id,
                 )
+                and not checker.check(problem, assignments)
             )
 
         initial_solver_name = "greedy"
@@ -1205,6 +1206,10 @@ class AlnsSolver(BaseSolver):
                         status=SolverStatus.FEASIBLE,
                         assignments=reanchored_warm_candidate,
                     )
+                elif warm_start_rejected_reason is None:
+                    warm_start_rejected_reason = "warm_start_reanchored_infeasible"
+            elif warm_start_rejected_reason is None:
+                warm_start_rejected_reason = "warm_start_infeasible"
             elif warm_start_rejected_reason is None:
                 warm_start_rejected_reason = "warm_start_incomplete"
 
@@ -1216,11 +1221,11 @@ class AlnsSolver(BaseSolver):
                 initial_solver_name = "greedy"
                 initial_result = GreedyDispatch().solve(problem)
 
-            if not initial_result.assignments or len(initial_result.assignments) != n_ops:
+            if not _is_valid_complete_schedule(list(initial_result.assignments)):
                 # Fall back to greedy if beam failed to cover the full instance.
                 initial_solver_name = "greedy"
                 initial_result = GreedyDispatch().solve(problem)
-                if not initial_result.assignments or len(initial_result.assignments) != n_ops:
+                if not _is_valid_complete_schedule(list(initial_result.assignments)):
                     elapsed_ms = int((time.monotonic() - t0) * 1000)
                     return ScheduleResult(
                         solver_name=self.name,
@@ -1246,6 +1251,20 @@ class AlnsSolver(BaseSolver):
                 )
                 initial_result = initial_result.model_copy(
                     update={"assignments": reanchored_initial_assignments}
+                )
+            else:
+                elapsed_ms = int((time.monotonic() - t0) * 1000)
+                return ScheduleResult(
+                    solver_name=self.name,
+                    status=SolverStatus.ERROR,
+                    duration_ms=elapsed_ms,
+                    metadata={
+                        "error": "initial solution generation failed",
+                        "warm_start_used": warm_start_used,
+                        "warm_start_supplied_assignments": warm_start_supplied_assignments,
+                        "warm_start_completed_assignments": warm_start_completed_assignments,
+                        "warm_start_rejected_reason": warm_start_rejected_reason,
+                    },
                 )
 
         initial_solution_ms = int((time.monotonic() - initial_solution_t0) * 1000)

@@ -5,6 +5,23 @@
 
 **Дисклеймер:** Всё ниже — аналитика и план. Код не написан. Числа до 500 ops — измеренные, свыше — экстраполяции и теоретические оценки.
 
+## Addendum (2026-04-25): Live 50K Stress Audit
+
+По итогам live stress-matrix для `RHC-GREEDY` vs `RHC-ALNS` были зафиксированы два конкретных ALNS-режима деградации, которые теперь закрыты на уровне solver guardrails.
+
+1. `initial seed` мог быть полным по покрытию операций, но не проходить полную feasibility-проверку. Это делало recovery-to-initial недостаточно строгим.
+2. На части окон весь per-window budget выгорал ещё в phase-1 initial solution generation, то есть `ALNS` возвращал `iterations_completed = 0` и фактически не входил в destroy-repair loop.
+
+Практический вывод: для честной 50K-оценки недостаточно смотреть только на solver-level makespan и scheduled ratio. Нужно отдельно анализировать `inner_window_summaries`, где теперь критичны поля `initial_solution_ms`, `time_limit_exhausted_before_search` и `final_violation_recovery_*`.
+
+На завершённом артефакте `benchmark/studies/test-50k-academic-matrix-v1/rhc_50k_study.json` это видно напрямую:
+
+- `RHC-GREEDY` дал `mean_scheduled_ratio = 0.3547`, но `mean_makespan_minutes = 11240.8`.
+- `RHC-ALNS` дал `mean_scheduled_ratio = 0.1134`, но `mean_makespan_minutes = 4652.77`.
+- В live-артефакте присутствуют окна с `iterations_completed = 0` и `time_limit_exhausted_before_search = true`, то есть solver-level objective у `RHC-ALNS` улучшался ценой слабого покрытия и деградации throughput.
+
+Следовательно, академически корректная интерпретация current 50K state такова: `RHC-ALNS` уже полезен как локальный objective improver внутри частичного плана, но ещё не проходит как large-scale coverage solver без дополнительного контроля phase-1 seed cost и per-window admission geometry.
+
 ---
 
 ## 1. Деконструкция архитектурных пределов
