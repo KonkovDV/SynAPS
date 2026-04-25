@@ -1411,6 +1411,51 @@ class TestRhcSolver:
         assert result.metadata["admission_relaxation_windows"] == 1
         assert result.metadata["admission_relaxation_recovered_ops"] >= 8
 
+    def test_rhc_admission_full_scan_recovers_when_frontier_is_still_underfilled(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """RHC should escalate to all-uncommitted scan when relaxed frontier is still too small."""
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_adaptive_admission_chain_problem(n_ops=12)
+        earliest_ids = {op.id for op in problem.operations[:2]}
+
+        def fake_compute_earliest_starts(problem, result) -> None:
+            for op in problem.operations:
+                result[op.id] = 0.0 if op.id in earliest_ids else 300.0
+
+        monkeypatch.setattr(
+            RhcSolver,
+            "_compute_earliest_starts",
+            staticmethod(fake_compute_earliest_starts),
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=60,
+            overlap_minutes=0,
+            inner_solver="greedy",
+            time_limit_s=20,
+            max_ops_per_window=4,
+            max_windows=1,
+            candidate_pool_factor=1.0,
+            adaptive_window_enabled=False,
+            progressive_admission_relaxation_enabled=True,
+            admission_relaxation_min_fill_ratio=0.5,
+            admission_full_scan_enabled=True,
+            admission_full_scan_min_fill_ratio=0.5,
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL, SolverStatus.ERROR)
+        assert result.metadata["candidate_pool_limit"] == 4
+        assert result.metadata["admission_full_scan_windows"] == 1
+        assert result.metadata["admission_full_scan_recovered_ops"] >= 8
+        assert result.metadata["peak_window_candidate_count"] == result.metadata[
+            "candidate_pool_limit"
+        ]
+        assert result.metadata["peak_window_candidate_count"] > len(earliest_ids)
+
     def test_rhc_window_cap_selection_is_deterministic_under_ties(self) -> None:
         """RHC should produce identical schedules under tie-heavy window ranking."""
         from synaps.solvers.rhc_solver import RhcSolver
@@ -1788,11 +1833,72 @@ class TestRhcInnerSolver:
         assert first_call["time_limit_s"] == pytest.approx(10.0)
         assert first_call["max_iterations"] == 20
         assert first_call["max_destroy"] == 1
+        assert first_call["repair_time_limit_s"] == pytest.approx(1.0)
         assert result.metadata["alns_budget_scaled_windows"] == 1
+        assert result.metadata["alns_dynamic_repair_budget_enabled"] is True
+        assert result.metadata["alns_budget_mean_effective_repair_time_limit_s"] == pytest.approx(
+            1.0,
+        )
         first_window = result.metadata["inner_window_summaries"][0]
         assert first_window["alns_budget_auto_scaled"] is True
         assert first_window["alns_effective_max_iterations"] == 20
         assert first_window["alns_effective_max_destroy"] == 1
+        assert first_window["alns_effective_repair_time_limit_s"] == pytest.approx(1.0)
+
+    def test_rhc_dynamic_repair_budget_tracks_effective_destroy_size(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Dynamic ALNS repair budget should scale with the effective destroy envelope."""
+        from synaps.solvers.greedy_dispatch import GreedyDispatch
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_3state_problem(n_orders=6, ops_per_order=2)
+        captured_inner_kwargs: list[dict[str, object]] = []
+
+        def fake_alns_solve(self, problem, **kwargs):
+            captured_inner_kwargs.append(dict(kwargs))
+            return GreedyDispatch().solve(problem)
+
+        monkeypatch.setattr(
+            "synaps.solvers.alns_solver.AlnsSolver.solve",
+            fake_alns_solve,
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=240,
+            overlap_minutes=0,
+            inner_solver="alns",
+            time_limit_s=10,
+            alns_inner_window_time_cap_s=10,
+            max_ops_per_window=50,
+            max_windows=1,
+            alns_budget_auto_scaling_enabled=True,
+            alns_budget_estimated_repair_s_per_destroyed_op=0.1,
+            alns_dynamic_repair_budget_enabled=True,
+            alns_dynamic_repair_s_per_destroyed_op=0.4,
+            alns_dynamic_repair_time_limit_min_s=1.0,
+            alns_dynamic_repair_time_limit_max_s=5.0,
+            inner_kwargs={
+                "max_iterations": 4,
+                "destroy_fraction": 0.5,
+                "min_destroy": 1,
+                "max_destroy": 10,
+                "repair_time_limit_s": 9,
+                "use_cpsat_repair": False,
+            },
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert captured_inner_kwargs
+        first_call = captured_inner_kwargs[0]
+        assert first_call["max_destroy"] == 10
+        assert first_call["repair_time_limit_s"] == pytest.approx(4.0)
+
+        first_window = result.metadata["inner_window_summaries"][0]
+        assert first_window["alns_effective_max_destroy"] == 10
+        assert first_window["alns_effective_repair_time_limit_s"] == pytest.approx(4.0)
 
     def test_rhc_passes_overlap_tail_into_next_alns_window(
         self,

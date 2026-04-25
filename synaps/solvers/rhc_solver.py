@@ -118,6 +118,21 @@ class RhcSolver(BaseSolver):
         alns_budget_estimated_repair_s_per_destroyed_op_raw = kwargs.get(
             "alns_budget_estimated_repair_s_per_destroyed_op"
         )
+        alns_dynamic_repair_budget_enabled: bool = bool(
+            kwargs.get("alns_dynamic_repair_budget_enabled", True)
+        )
+        alns_dynamic_repair_s_per_destroyed_op: float = max(
+            0.01,
+            float(kwargs.get("alns_dynamic_repair_s_per_destroyed_op", 0.1)),
+        )
+        alns_dynamic_repair_time_limit_min_s: float = max(
+            0.1,
+            float(kwargs.get("alns_dynamic_repair_time_limit_min_s", 1.0)),
+        )
+        alns_dynamic_repair_time_limit_max_s: float = max(
+            alns_dynamic_repair_time_limit_min_s,
+            float(kwargs.get("alns_dynamic_repair_time_limit_max_s", 5.0)),
+        )
         max_ops_per_window: int = int(kwargs.get("max_ops_per_window", 5000))
         window_load_factor: float = float(kwargs.get("window_load_factor", 1.25))
         max_windows_raw = kwargs.get("max_windows")
@@ -178,6 +193,13 @@ class RhcSolver(BaseSolver):
         admission_relaxation_min_fill_ratio: float = min(
             1.0,
             max(0.0, float(kwargs.get("admission_relaxation_min_fill_ratio", 0.3))),
+        )
+        admission_full_scan_enabled: bool = bool(
+            kwargs.get("admission_full_scan_enabled", True)
+        )
+        admission_full_scan_min_fill_ratio: float = min(
+            1.0,
+            max(0.0, float(kwargs.get("admission_full_scan_min_fill_ratio", 0.3))),
         )
         hybrid_inner_routing_enabled: bool = bool(
             kwargs.get("hybrid_inner_routing_enabled", False)
@@ -397,6 +419,8 @@ class RhcSolver(BaseSolver):
         admission_starvation_count = 0
         admission_relaxation_windows = 0
         admission_relaxation_recovered_ops = 0
+        admission_full_scan_windows = 0
+        admission_full_scan_recovered_ops = 0
         due_frontier_advances = 0
         candidate_pressure_values: list[float] = []
         due_pressure_values: list[float] = []
@@ -424,6 +448,7 @@ class RhcSolver(BaseSolver):
         alns_budget_scaled_windows = 0
         alns_effective_max_iterations_values: list[int] = []
         alns_effective_max_destroy_values: list[int] = []
+        alns_effective_repair_time_limit_values: list[float] = []
         boundary_reanchor_windows = 0
         boundary_reanchor_ops_total = 0
         boundary_reanchor_changed_ops_total = 0
@@ -1072,6 +1097,40 @@ class RhcSolver(BaseSolver):
                             admitted_candidate_count,
                             len(raw_window_candidate_ids),
                         )
+
+                if admission_full_scan_enabled:
+                    full_scan_target_count = max(
+                        1,
+                        int(
+                            math.ceil(
+                                effective_window_op_cap * admission_full_scan_min_fill_ratio
+                            )
+                        ),
+                    )
+                    if len(window_candidate_ids) < full_scan_target_count:
+                        full_scan_candidate_ids = {
+                            op.id
+                            for op in problem.operations
+                            if op.id not in committed_op_ids
+                        }
+                        full_scan_recovered_ops = max(
+                            0,
+                            len(full_scan_candidate_ids) - len(window_candidate_ids),
+                        )
+                        if full_scan_recovered_ops > 0:
+                            window_candidate_ids = full_scan_candidate_ids
+                            window_admission_relaxed = True
+                            window_admission_relaxation_recovered_ops += (
+                                full_scan_recovered_ops
+                            )
+                            admission_full_scan_windows += 1
+                            admission_full_scan_recovered_ops += full_scan_recovered_ops
+                            filtered_by_admission = 0
+                            logger.info(
+                                "RHC window %d escalated to full uncommitted frontier scan: %d candidates recovered",
+                                window_count,
+                                full_scan_recovered_ops,
+                            )
                 candidate_pool_filtered_ops += filtered_by_admission
 
             if len(window_candidate_ids) > candidate_pool_limit:
@@ -1494,11 +1553,22 @@ class RhcSolver(BaseSolver):
                     requested_max_iterations,
                     max(1, int(per_window_limit / estimated_iteration_seconds)),
                 )
+                effective_repair_time_limit_s = max(
+                    0.1,
+                    min(
+                        alns_dynamic_repair_time_limit_max_s,
+                        max(
+                            alns_dynamic_repair_time_limit_min_s,
+                            effective_max_destroy * alns_dynamic_repair_s_per_destroyed_op,
+                        ),
+                    ),
+                )
                 return {
                     "requested_max_iterations": requested_max_iterations,
                     "requested_max_destroy": requested_max_destroy,
                     "effective_max_iterations": effective_max_iterations,
                     "effective_max_destroy": effective_max_destroy,
+                    "effective_repair_time_limit_s": effective_repair_time_limit_s,
                     "estimated_repair_s_per_destroyed_op": (
                         estimated_repair_s_per_destroyed_op
                     ),
@@ -1632,11 +1702,24 @@ class RhcSolver(BaseSolver):
                                 effective_inner_kwargs["max_destroy"] = int(
                                     alns_budget_profile["effective_max_destroy"]
                                 )
+                                if alns_dynamic_repair_budget_enabled:
+                                    effective_inner_kwargs["repair_time_limit_s"] = float(
+                                        alns_budget_profile[
+                                            "effective_repair_time_limit_s"
+                                        ]
+                                    )
                                 alns_effective_max_iterations_values.append(
                                     int(alns_budget_profile["effective_max_iterations"])
                                 )
                                 alns_effective_max_destroy_values.append(
                                     int(alns_budget_profile["effective_max_destroy"])
+                                )
+                                alns_effective_repair_time_limit_values.append(
+                                    float(
+                                        alns_budget_profile[
+                                            "effective_repair_time_limit_s"
+                                        ]
+                                    )
                                 )
                                 if bool(alns_budget_profile["scaled"]):
                                     alns_budget_scaled_windows += 1
@@ -1711,6 +1794,10 @@ class RhcSolver(BaseSolver):
                             inner_window_summaries[-1][
                                 "admission_relaxation_recovered_ops"
                             ] = window_admission_relaxation_recovered_ops
+                            if admission_full_scan_enabled:
+                                inner_window_summaries[-1][
+                                    "admission_full_scan_enabled"
+                                ] = True
                         inner_window_summaries[-1]["boundary_reanchor_ops"] = len(
                             boundary_aware_assignments
                         )
@@ -1735,6 +1822,12 @@ class RhcSolver(BaseSolver):
                                         "estimated_repair_s_per_destroyed_op"
                                     ]
                                 ),
+                                4,
+                            )
+                            inner_window_summaries[-1][
+                                "alns_effective_repair_time_limit_s"
+                            ] = round(
+                                float(alns_budget_profile["effective_repair_time_limit_s"]),
                                 4,
                             )
                         if rewound_assignments:
@@ -1951,6 +2044,10 @@ class RhcSolver(BaseSolver):
                         inner_window_summaries[-1][
                             "admission_relaxation_recovered_ops"
                         ] = window_admission_relaxation_recovered_ops
+                        if admission_full_scan_enabled:
+                            inner_window_summaries[-1][
+                                "admission_full_scan_enabled"
+                            ] = True
                     if alns_budget_profile is not None:
                         inner_window_summaries[-1]["alns_budget_auto_scaled"] = bool(
                             alns_budget_profile["scaled"]
@@ -1969,6 +2066,12 @@ class RhcSolver(BaseSolver):
                                     "estimated_repair_s_per_destroyed_op"
                                 ]
                             ),
+                            4,
+                        )
+                        inner_window_summaries[-1][
+                            "alns_effective_repair_time_limit_s"
+                        ] = round(
+                            float(alns_budget_profile["effective_repair_time_limit_s"]),
                             4,
                         )
                     if rewound_assignments:
@@ -2230,6 +2333,10 @@ class RhcSolver(BaseSolver):
                 "admission_relaxation_min_fill_ratio": admission_relaxation_min_fill_ratio,
                 "admission_relaxation_windows": admission_relaxation_windows,
                 "admission_relaxation_recovered_ops": admission_relaxation_recovered_ops,
+                "admission_full_scan_enabled": admission_full_scan_enabled,
+                "admission_full_scan_min_fill_ratio": admission_full_scan_min_fill_ratio,
+                "admission_full_scan_windows": admission_full_scan_windows,
+                "admission_full_scan_recovered_ops": admission_full_scan_recovered_ops,
                 "candidate_pressure_mean": round(
                     sum(candidate_pressure_values) / len(candidate_pressure_values),
                     4,
@@ -2290,6 +2397,16 @@ class RhcSolver(BaseSolver):
                     if alns_budget_estimated_repair_s_per_destroyed_op_raw is not None
                     else None
                 ),
+                "alns_dynamic_repair_budget_enabled": alns_dynamic_repair_budget_enabled,
+                "alns_dynamic_repair_s_per_destroyed_op": (
+                    alns_dynamic_repair_s_per_destroyed_op
+                ),
+                "alns_dynamic_repair_time_limit_min_s": (
+                    alns_dynamic_repair_time_limit_min_s
+                ),
+                "alns_dynamic_repair_time_limit_max_s": (
+                    alns_dynamic_repair_time_limit_max_s
+                ),
                 "alns_budget_scaled_windows": alns_budget_scaled_windows,
                 "alns_budget_mean_effective_max_iterations": round(
                     sum(alns_effective_max_iterations_values)
@@ -2304,6 +2421,13 @@ class RhcSolver(BaseSolver):
                     2,
                 )
                 if alns_effective_max_destroy_values
+                else 0.0,
+                "alns_budget_mean_effective_repair_time_limit_s": round(
+                    sum(alns_effective_repair_time_limit_values)
+                    / len(alns_effective_repair_time_limit_values),
+                    4,
+                )
+                if alns_effective_repair_time_limit_values
                 else 0.0,
                 "boundary_reanchor_windows": boundary_reanchor_windows,
                 "boundary_reanchor_ops_total": boundary_reanchor_ops_total,

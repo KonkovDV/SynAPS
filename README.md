@@ -39,6 +39,8 @@ What is implemented and verified in this repository:
 - Separate feasibility checker (`synaps/solvers/feasibility_checker.py`)
 - ALNS can accept partial warm starts, complete missing assignments, and recompute setups before local search
 - RHC can carry unfinished overlap tails into the next ALNS window and exposes warm-start metadata in solver output
+- Post-audit RHC hardening adds full-frontier fallback for underfilled admission windows (`admission_full_scan_*` metadata)
+- Post-audit RHC hardening also auto-scales ALNS repair budget per window (`alns_effective_repair_time_limit_s` telemetry)
 - RHC candidate scoring is wired through the NumPy/native batch seam when acceleration is available
 - The TypeScript control-plane validates JSON contracts, executes the real Python kernel for solve/repair, and CI bootstraps the Python runtime before `control-plane` integration tests
 - Pinned GitHub Actions security workflows cover Python, TypeScript, and Rust surfaces via CodeQL, and publish OSSF Scorecards SARIF results
@@ -65,7 +67,8 @@ Interpretation:
 
 - This is a profiling/evidence slice, not a "50K solved" claim.
 - The artifact captures an honest boundary: partial progress with explicit stop reasons.
-- Candidate-pool pressure remains the main bottleneck at this stage.
+- Candidate-pool pressure and ALNS inner-window throughput remain the main bottlenecks at this stage.
+- Post-audit mitigations for both bottlenecks are now wired in solver code; rerun the 50K study to refresh public metrics.
 
 ## Solver Portfolio
 
@@ -204,6 +207,7 @@ See: [HPC Silicon-Level Optimization Roadmap](docs/architecture/08_HPC_SILICON_O
 - Habr draft (RU): `docs/habr/synaps-open-source-habr-v3.md`
 - Publication pack: `docs/habr/synaps-open-source-habr-v3-pack.md`
 - Benchmark guide: `benchmark/README.md`
+- Post-audit implementation note: `docs/audit/SYNAPS_UPDATE_AUDIT_2026_04_25.md`
 - HPC optimization roadmap: `docs/architecture/08_HPC_SILICON_OPTIMIZATION_ROADMAP.md`
 - Reproducibility and robustness protocol: `docs/architecture/06_BENCHMARK_REPRODUCIBILITY_AND_ROBUSTNESS.md`
 - Contributing: `CONTRIBUTING.md`

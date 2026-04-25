@@ -258,6 +258,13 @@ It is useful because it preserves the current limit instead of hiding it:
 
 So the public 50K path is real and reproducible, and the latest optimization pass materially improved greedy throughput. It is still a profiling surface rather than a solved industrial benchmark, and the current bottleneck has shifted toward inner-solver throughput on the `RHC-ALNS` path.
 
+Post-audit (2026-04-25) solver hardening now includes:
+
+- full-frontier escalation for underfilled admission windows (`admission_full_scan_*` metadata);
+- dynamic ALNS repair-budget scaling tied to effective destroy envelope (`alns_effective_repair_time_limit_s`).
+
+Re-run `benchmark.study_rhc_50k` to refresh this section with post-audit metrics.
+
 ## Staged 500K Study
 
 `benchmark.study_rhc_500k` is the stress-study harness for 500K+ operation scenarios.

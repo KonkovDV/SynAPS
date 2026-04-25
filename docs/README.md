@@ -50,6 +50,7 @@ Speculative blueprint narratives are no longer part of the active public researc
 
 - [ACADEMIC_TECHNICAL_REPORT_2026_04.md](audit/ACADEMIC_TECHNICAL_REPORT_2026_04.md) — comprehensive academic-level audit: formal problem classification, solver portfolio analysis, competitive positioning, and actionable recommendations.
 - [SYNAPS_AUDIT_DELTA_EXECUTION_PLAN_2026_04_25.md](audit/SYNAPS_AUDIT_DELTA_EXECUTION_PLAN_2026_04_25.md) — audit delta that reconciles April 2026 report claims with the live repository and records the executed next-step plan.
+- [SYNAPS_UPDATE_AUDIT_2026_04_25.md](audit/SYNAPS_UPDATE_AUDIT_2026_04_25.md) — post-audit implementation note for RHC admission escalation and ALNS repair-budget autoscaling.
 - [SYNAPS_UPDATED_STRATEGIC_RECOMMENDATIONS_2026_04.md](audit/SYNAPS_UPDATED_STRATEGIC_RECOMMENDATIONS_2026_04.md) — updated strategic recommendations aligned with April 2026 trends, with explicit implemented/target boundaries, KPI, and kill-switch policy.
 - [SYNAPS_ACADEMIC_AUDIT_COMPREHENSIVE_RU.md](audit/SYNAPS_ACADEMIC_AUDIT_COMPREHENSIVE_RU.md) — architecture audit: incremental repair, feasibility checker, ML advisory, target OSS/OSH stack (RU).
 - [SYNAPS_CRITICAL_GAPS_AND_OPTIMIZATIONS_RU.md](audit/SYNAPS_CRITICAL_GAPS_AND_OPTIMIZATIONS_RU.md) — 5 architectural gaps with academic refs and optimization roadmap (RU). Gap #1 (LBBD parallelism) already closed.
