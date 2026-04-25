@@ -1248,6 +1248,8 @@ class TestRhcSolver:
         assert result.metadata["spillover_count"] >= 0
         assert result.metadata["lower_bound"] >= 0
         assert result.metadata["upper_bound"] >= result.metadata["lower_bound"]
+        assert result.metadata["lower_bound_upper_bound_comparable"] is True
+        assert result.metadata["gap"] is not None
         assert result.metadata["lower_bound_method"] == "relaxed_precedence_capacity"
         assert result.metadata["lower_bound_components"]["precedence_critical_path_lb"] >= 0
         assert result.metadata["earliest_frontier_advances"] <= len(problem.operations)
@@ -1537,6 +1539,9 @@ class TestRhcSolver:
         assert result.metadata["time_limit_reached"] is True
         assert result.metadata["fallback_repair_attempted"] is False
         assert result.metadata["fallback_repair_skipped"] is True
+        assert result.metadata["ops_unscheduled"] > 0
+        assert result.metadata["lower_bound_upper_bound_comparable"] is False
+        assert result.metadata["gap"] is None
 
     def test_rhc_backtracking_rewinds_recent_boundary_assignments_into_next_window(
         self,

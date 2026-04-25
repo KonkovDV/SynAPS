@@ -2233,6 +2233,8 @@ class RhcSolver(BaseSolver):
                     "fallback_repair_skipped": fallback_repair_skipped,
                     "fallback_repair_time_limited": fallback_repair_time_limited,
                     "ops_unscheduled": len(problem.operations),
+                    "lower_bound_upper_bound_comparable": False,
+                    "gap": None,
                     "temporal_stabilization": temporal_stabilization,
                 },
             )
@@ -2242,6 +2244,16 @@ class RhcSolver(BaseSolver):
         scheduled_count = len(committed_op_ids)
         total_ops = len(problem.operations)
         status = SolverStatus.FEASIBLE if scheduled_count == total_ops else SolverStatus.ERROR
+        bounds_comparable = scheduled_count == total_ops
+        gap_ratio = (
+            round(
+                max(final_obj.makespan_minutes - global_lower_bound.value, 0.0)
+                / max(final_obj.makespan_minutes, 1e-9),
+                6,
+            )
+            if bounds_comparable
+            else None
+        )
 
         elapsed_ms = int((time.monotonic() - t0) * 1000)
 
@@ -2285,11 +2297,8 @@ class RhcSolver(BaseSolver):
                 "ops_total": total_ops,
                 "lower_bound": round(global_lower_bound.value, 4),
                 "upper_bound": round(final_obj.makespan_minutes, 4),
-                "gap": round(
-                    max(final_obj.makespan_minutes - global_lower_bound.value, 0.0)
-                    / max(final_obj.makespan_minutes, 1e-9),
-                    6,
-                ),
+                "gap": gap_ratio,
+                "lower_bound_upper_bound_comparable": bounds_comparable,
                 "lower_bound_method": "relaxed_precedence_capacity",
                 "lower_bound_components": global_lower_bound.as_metadata(),
                 "inner_solver": inner_solver_name,
