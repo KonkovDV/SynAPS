@@ -55,6 +55,43 @@ def test_run_benchmark_compare_mode_returns_all_configs(tmp_path: Path) -> None:
     assert report["instance"] == instance_path.name
     assert len(report["comparisons"]) == 2
     assert {item["solver_config"] for item in report["comparisons"]} == {"GREED", "CPSAT-10"}
+    assert report["comparison_statistics"]["study_design"]["paired_by_run_index"] is True
+    assert "CPSAT-10" in report["comparison_statistics"]["paired_comparisons"]
+    assert "GREED" in report["comparison_statistics"]["performance_profile"]
+
+
+def test_run_benchmark_emits_repeated_run_statistics_with_confidence_intervals(
+    tmp_path: Path,
+) -> None:
+    instance_path = _write_instance(tmp_path)
+
+    report = run_benchmark(instance_path=instance_path, solver_names=["GREED"], runs=3)
+
+    stats = report["statistics"]
+    assert len(stats["wall_time_s_samples"]) == 3
+    assert len(stats["weighted_sum_samples"]) == 3
+    assert len(stats["makespan_minutes_samples"]) == 3
+    assert stats["wall_time_s_mean_ci"]["confidence_level"] == 0.95
+    assert stats["weighted_sum_mean_ci"]["confidence_level"] == 0.95
+    assert stats["makespan_minutes_mean_ci"]["confidence_level"] == 0.95
+
+
+def test_run_benchmark_compare_mode_emits_paired_effects(tmp_path: Path) -> None:
+    instance_path = _write_instance(tmp_path)
+
+    report = run_benchmark(
+        instance_path=instance_path,
+        solver_names=["GREED", "CPSAT-10"],
+        runs=3,
+        compare=True,
+    )
+
+    paired = report["comparison_statistics"]["paired_comparisons"]["CPSAT-10"]
+    assert paired["against"] == "GREED"
+    assert paired["wall_time"]["pairs"] == 3
+    assert "difference_confidence_interval" in paired["wall_time"]
+    assert paired["weighted_sum"]["pairs"] == 3
+    assert report["comparison_statistics"]["performance_profile"]["GREED"]["tau_1.00"] >= 0.0
 
 
 def test_run_benchmark_auto_mode_reports_selected_solver(tmp_path: Path) -> None:

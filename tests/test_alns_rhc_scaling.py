@@ -2267,12 +2267,15 @@ class TestRhcInnerSolver:
         first_window = result.metadata["inner_window_summaries"][0]
         assert first_window["resolution_mode"] == "fallback_greedy"
         assert first_window["fallback_reason"] == "inner_status_error"
+        assert first_window["fallback_reason_code"] == "inner_status_error"
         assert first_window["inner_status"] == "error"
         assert first_window["final_violations"] == 1
         assert first_window["fallback_iterations"] > 0
         assert first_window["ops_committed"] > 0
         assert result.metadata["inner_fallback_windows"] >= 1
         assert result.metadata["inner_fallback_ratio"] > 0.0
+        assert result.metadata["inner_fallback_reason_counts"]["inner_status_error"] >= 1
+        assert result.metadata["inner_status_counts"]["error"] >= 1
         assert result.metadata["inner_resolution_counts"]["fallback_greedy"] >= 1
 
         verification = verify_schedule_result(problem, result)
@@ -2327,6 +2330,43 @@ class TestRhcInnerSolver:
         assert result.metadata["inner_window_summaries"][0]["inner_solver_selected"] == "cpsat"
         assert captured_cpsat_kwargs
         assert captured_cpsat_kwargs[0]["auto_greedy_warm_start"] is False
+
+    def test_rhc_records_inner_exception_reason_counts(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Inner exceptions should remain fallback-safe and visible in metadata."""
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_3state_problem(n_orders=4, ops_per_order=2)
+
+        def explode(self, problem, **kwargs):
+            raise RuntimeError("simulated inner failure")
+
+        monkeypatch.setattr(
+            "synaps.solvers.alns_solver.AlnsSolver.solve",
+            explode,
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=480,
+            overlap_minutes=60,
+            inner_solver="alns",
+            time_limit_s=30,
+            max_ops_per_window=50,
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        first_window = result.metadata["inner_window_summaries"][0]
+        assert first_window["resolution_mode"] == "fallback_greedy"
+        assert first_window["fallback_reason"] == "inner_exception"
+        assert first_window["fallback_reason_code"] == "inner_exception"
+        assert first_window["inner_exception_message"].startswith("RuntimeError:")
+        assert result.metadata["inner_fallback_reason_counts"]["inner_exception"] >= 1
+        assert result.metadata["inner_exception_windows"] >= 1
+        assert result.metadata["inner_exception_logs_emitted"] >= 1
+        assert result.metadata["inner_exception_message_samples"]
 
     def test_rhc_skips_inner_alns_when_budget_below_minimum(
         self,

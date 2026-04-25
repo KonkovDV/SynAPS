@@ -764,66 +764,10 @@ def _solve_subproblems(
     if assigned_ops != all_ops:
         return None, 0.0
 
-    # Post-assembly precedence and setup enforcement: cross-cluster
-    # predecessor timing may diverge because each cluster solves external
-    # predecessors independently.  Iterate until both precedence and
-    # machine-level setup gaps are satisfied.
-    setup_lookup = {
-        (e.work_center_id, e.from_state_id, e.to_state_id): timedelta(minutes=e.setup_minutes)
-        for e in problem.setup_matrix
-    }
-    assignment_by_op = {a.operation_id: a for a in all_assignments}
-
-    changed = True
-    max_passes = len(problem.operations) * 3  # prevent infinite loops
-    passes = 0
-    while changed and passes < max_passes:
-        changed = False
-        passes += 1
-
-        # 1) Precedence: successor must start after predecessor ends
-        for op in problem.operations:
-            if op.predecessor_op_id is None:
-                continue
-            pred_a = assignment_by_op.get(op.predecessor_op_id)
-            cur_a = assignment_by_op.get(op.id)
-            if pred_a is None or cur_a is None:
-                continue
-            if cur_a.start_time < pred_a.end_time:
-                shift = pred_a.end_time - cur_a.start_time
-                cur_a.start_time = cur_a.start_time + shift
-                cur_a.end_time = cur_a.end_time + shift
-                changed = True
-
-        # 2) Machine setup gaps: consecutive ops on same machine need
-        #    sufficient gap for state-dependent setup time.
-        by_machine: dict[UUID, list[Assignment]] = defaultdict(list)
-        for a in all_assignments:
-            by_machine[a.work_center_id].append(a)
-
-        for wc_id, machine_assignments in by_machine.items():
-            machine_assignments.sort(key=lambda a: a.start_time)
-            for idx in range(len(machine_assignments) - 1):
-                cur = machine_assignments[idx]
-                nxt = machine_assignments[idx + 1]
-                cur_state = ops_by_id[cur.operation_id].state_id
-                nxt_state = ops_by_id[nxt.operation_id].state_id
-                required_setup = setup_lookup.get(
-                    (wc_id, cur_state, nxt_state),
-                    timedelta(0),
-                )
-                earliest_next_start = cur.end_time + required_setup
-                if nxt.start_time < earliest_next_start:
-                    shift = earliest_next_start - nxt.start_time
-                    nxt.start_time = nxt.start_time + shift
-                    nxt.end_time = nxt.end_time + shift
-                    changed = True
-
-    # Recompute overall makespan after shifts
-    overall_makespan = (
-        max((a.end_time - horizon_start).total_seconds() / 60.0 for a in all_assignments)
-        if all_assignments
-        else 0.0
+    all_assignments, overall_makespan = _post_assemble_assignments(
+        problem,
+        all_assignments,
+        ops_by_id,
     )
 
     return all_assignments, overall_makespan
@@ -1147,4 +1091,73 @@ def _solve_subproblems_parallel(
     if assigned_ops != all_ops:
         return None, 0.0
 
+    all_assignments, overall_makespan = _post_assemble_assignments(
+        problem,
+        all_assignments,
+        ops_by_id,
+    )
+
     return all_assignments, overall_makespan
+
+
+def _post_assemble_assignments(
+    problem: ScheduleProblem,
+    assignments: list[Assignment],
+    ops_by_id: dict[UUID, Operation],
+) -> tuple[list[Assignment], float]:
+    """Enforce cross-cluster precedence and setup gaps after subproblem merge."""
+    setup_lookup = {
+        (e.work_center_id, e.from_state_id, e.to_state_id): timedelta(minutes=e.setup_minutes)
+        for e in problem.setup_matrix
+    }
+    assignment_by_op = {assignment.operation_id: assignment for assignment in assignments}
+
+    changed = True
+    max_passes = len(problem.operations) * 3  # prevent infinite loops
+    passes = 0
+    while changed and passes < max_passes:
+        changed = False
+        passes += 1
+
+        for op in problem.operations:
+            if op.predecessor_op_id is None:
+                continue
+            pred_assignment = assignment_by_op.get(op.predecessor_op_id)
+            cur_assignment = assignment_by_op.get(op.id)
+            if pred_assignment is None or cur_assignment is None:
+                continue
+            if cur_assignment.start_time < pred_assignment.end_time:
+                shift = pred_assignment.end_time - cur_assignment.start_time
+                cur_assignment.start_time = cur_assignment.start_time + shift
+                cur_assignment.end_time = cur_assignment.end_time + shift
+                changed = True
+
+        by_machine: dict[UUID, list[Assignment]] = defaultdict(list)
+        for assignment in assignments:
+            by_machine[assignment.work_center_id].append(assignment)
+
+        for work_center_id, machine_assignments in by_machine.items():
+            machine_assignments.sort(key=lambda assignment: assignment.start_time)
+            for idx in range(len(machine_assignments) - 1):
+                current_assignment = machine_assignments[idx]
+                next_assignment = machine_assignments[idx + 1]
+                current_state = ops_by_id[current_assignment.operation_id].state_id
+                next_state = ops_by_id[next_assignment.operation_id].state_id
+                required_setup = setup_lookup.get(
+                    (work_center_id, current_state, next_state),
+                    timedelta(0),
+                )
+                earliest_next_start = current_assignment.end_time + required_setup
+                if next_assignment.start_time < earliest_next_start:
+                    shift = earliest_next_start - next_assignment.start_time
+                    next_assignment.start_time = next_assignment.start_time + shift
+                    next_assignment.end_time = next_assignment.end_time + shift
+                    changed = True
+
+    horizon_start = problem.planning_horizon_start
+    makespan = (
+        max((assignment.end_time - horizon_start).total_seconds() / 60.0 for assignment in assignments)
+        if assignments
+        else 0.0
+    )
+    return assignments, makespan

@@ -405,6 +405,13 @@ class RhcSolver(BaseSolver):
         hybrid_route_attempts = 0
         hybrid_route_activations = 0
         inner_fallback_windows = 0
+        inner_fallback_reason_counts: dict[str, int] = defaultdict(int)
+        inner_status_counts: dict[str, int] = defaultdict(int)
+        inner_exception_windows = 0
+        inner_exception_messages_sample: list[str] = []
+        inner_exception_logs_emitted = 0
+        max_inner_exception_logs = 3
+        max_inner_exception_message_samples = 5
         backtracking_windows = 0
         backtracking_ops_total = 0
         horizon_clipped_assignments = 0
@@ -495,6 +502,7 @@ class RhcSolver(BaseSolver):
                 summary["spillover_ops"] = spillover_ops
             if fallback_reason is not None:
                 summary["fallback_reason"] = fallback_reason
+                summary["fallback_reason_code"] = fallback_reason
             if fallback_iterations is not None:
                 summary["fallback_iterations"] = fallback_iterations
             if exception_message is not None:
@@ -510,6 +518,8 @@ class RhcSolver(BaseSolver):
                     else str(inner_result.status)
                 )
                 summary["inner_duration_ms"] = inner_result.duration_ms
+                if hasattr(inner_result.error_category, "value"):
+                    summary["inner_error_category"] = inner_result.error_category.value
                 for key in inner_summary_metadata_keys:
                     if key in (inner_result.metadata or {}):
                         summary[key] = inner_result.metadata[key]
@@ -1759,14 +1769,23 @@ class RhcSolver(BaseSolver):
                             )
                         else:
                             inner_rejection_reason = "inner_empty_assignments"
-                except Exception:
+                except Exception as exc:
                     inner_rejection_reason = "inner_exception"
-                    inner_exception_message = "inner solver raised exception"
-                    logger.warning(
-                        "RHC window %d: inner solver '%s' failed, falling back to greedy",
-                        window_count, selected_inner_solver_name,
-                        exc_info=True,
-                    )
+                    inner_exception_message = f"{type(exc).__name__}: {exc}"
+                    if len(inner_exception_messages_sample) < max_inner_exception_message_samples:
+                        inner_exception_messages_sample.append(inner_exception_message)
+                    if inner_exception_logs_emitted < max_inner_exception_logs:
+                        logger.warning(
+                            "RHC window %d: inner solver '%s' failed, falling back to greedy",
+                            window_count, selected_inner_solver_name,
+                            exc_info=True,
+                        )
+                        inner_exception_logs_emitted += 1
+                    elif inner_exception_logs_emitted == max_inner_exception_logs:
+                        logger.warning(
+                            "RHC inner solver exception log sample cap reached; suppressing additional stack traces"
+                        )
+                        inner_exception_logs_emitted += 1
 
             # ------ Fallback: greedy dispatch (original behavior) ------
             if not window_solved_via_inner:
@@ -1899,6 +1918,19 @@ class RhcSolver(BaseSolver):
 
                 if inner_solver_name != "greedy":
                     inner_fallback_windows += 1
+                    fallback_reason_code = inner_rejection_reason or "inner_not_accepted"
+                    inner_fallback_reason_counts[fallback_reason_code] += 1
+                    if fallback_reason_code == "inner_exception":
+                        inner_exception_windows += 1
+                    if inner_result is None:
+                        inner_status_counts["not_run"] += 1
+                    else:
+                        inner_status = (
+                            inner_result.status.value
+                            if hasattr(inner_result.status, "value")
+                            else str(inner_result.status)
+                        )
+                        inner_status_counts[inner_status] += 1
                     append_inner_window_summary(
                         window=window_count,
                         ops_in_window=len(clean_window_ops),
@@ -1910,7 +1942,7 @@ class RhcSolver(BaseSolver):
                         due_pressure=window_due_pressure,
                         due_drift_minutes=window_due_drift_minutes,
                         spillover_ops=window_spillover,
-                        fallback_reason=inner_rejection_reason or "inner_not_accepted",
+                        fallback_reason=fallback_reason_code,
                         fallback_iterations=fallback_iterations,
                         exception_message=inner_exception_message,
                     )
@@ -2145,6 +2177,18 @@ class RhcSolver(BaseSolver):
                 "inner_fallback_windows": inner_fallback_windows,
                 "inner_fallback_ratio": round(inner_fallback_ratio, 4),
                 "inner_resolution_counts": inner_resolution_counts,
+                "inner_fallback_reason_counts": dict(sorted(inner_fallback_reason_counts.items())),
+                "inner_status_counts": dict(sorted(inner_status_counts.items())),
+                "inner_exception_windows": inner_exception_windows,
+                "inner_exception_message_samples": list(inner_exception_messages_sample),
+                "inner_exception_logs_emitted": min(
+                    inner_exception_logs_emitted,
+                    max_inner_exception_logs,
+                ),
+                "inner_exception_logs_suppressed": max(
+                    inner_exception_logs_emitted - max_inner_exception_logs,
+                    0,
+                ),
                 "inner_fallback_kpi_threshold": inner_fallback_kpi_threshold,
                 "inner_fallback_kpi_passed": inner_fallback_ratio <= inner_fallback_kpi_threshold,
                 "preprocessing_ms": preprocessing_ms,

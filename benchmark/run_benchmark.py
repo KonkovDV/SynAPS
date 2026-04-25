@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import statistics
 import sys
 import time
 from pathlib import Path
+from statistics import NormalDist
 from typing import Any
 
 from synaps import solve_schedule
@@ -32,6 +34,179 @@ def available_solvers() -> list[str]:
     """Return registered solver configuration names."""
 
     return ["AUTO", *available_solver_configs()]
+
+
+_T_CRITICAL_95: dict[int, float] = {
+    1: 12.706,
+    2: 4.303,
+    3: 3.182,
+    4: 2.776,
+    5: 2.571,
+    6: 2.447,
+    7: 2.365,
+    8: 2.306,
+    9: 2.262,
+    10: 2.228,
+    11: 2.201,
+    12: 2.179,
+    13: 2.16,
+    14: 2.145,
+    15: 2.131,
+    16: 2.12,
+    17: 2.11,
+    18: 2.101,
+    19: 2.093,
+    20: 2.086,
+    21: 2.08,
+    22: 2.074,
+    23: 2.069,
+    24: 2.064,
+    25: 2.06,
+    26: 2.056,
+    27: 2.052,
+    28: 2.048,
+    29: 2.045,
+    30: 2.042,
+}
+
+
+def _mean_confidence_interval(samples: list[float], confidence_level: float = 0.95) -> dict[str, float] | None:
+    """Return a mean confidence interval for repeated benchmark samples."""
+    if len(samples) < 2:
+        return None
+
+    mean_value = statistics.mean(samples)
+    std_dev = statistics.stdev(samples)
+    if std_dev == 0:
+        return {
+            "confidence_level": confidence_level,
+            "low": round(mean_value, 6),
+            "high": round(mean_value, 6),
+            "half_width": 0.0,
+        }
+
+    df = len(samples) - 1
+    alpha = 1.0 - confidence_level
+    critical = _T_CRITICAL_95.get(df)
+    if critical is None:
+        critical = NormalDist().inv_cdf(1.0 - alpha / 2.0)
+    half_width = critical * std_dev / math.sqrt(len(samples))
+    return {
+        "confidence_level": confidence_level,
+        "low": round(mean_value - half_width, 6),
+        "high": round(mean_value + half_width, 6),
+        "half_width": round(half_width, 6),
+    }
+
+
+def _two_sided_sign_test_pvalue(differences: list[float]) -> float | None:
+    """Exact two-sided paired sign test p-value using wins/losses only."""
+    wins = sum(1 for diff in differences if diff < 0)
+    losses = sum(1 for diff in differences if diff > 0)
+    trials = wins + losses
+    if trials == 0:
+        return None
+    tail = min(wins, losses)
+    cumulative = sum(math.comb(trials, k) for k in range(tail + 1)) / (2 ** trials)
+    return round(min(1.0, 2.0 * cumulative), 6)
+
+
+def _build_paired_metric_summary(candidate: list[float], baseline: list[float]) -> dict[str, Any] | None:
+    """Summarize paired repeated-run differences between two solver metrics."""
+    pair_count = min(len(candidate), len(baseline))
+    if pair_count == 0:
+        return None
+
+    candidate_values = candidate[:pair_count]
+    baseline_values = baseline[:pair_count]
+    differences = [cand - base for cand, base in zip(candidate_values, baseline_values)]
+    wins = sum(1 for diff in differences if diff < 0)
+    losses = sum(1 for diff in differences if diff > 0)
+    ties = pair_count - wins - losses
+    mean_difference = statistics.mean(differences)
+    ratio_samples = [
+        cand / max(abs(base), 1e-9)
+        for cand, base in zip(candidate_values, baseline_values)
+    ]
+    summary: dict[str, Any] = {
+        "pairs": pair_count,
+        "mean_difference": round(mean_difference, 6),
+        "mean_ratio": round(statistics.mean(ratio_samples), 6),
+        "wins": wins,
+        "losses": losses,
+        "ties": ties,
+        "win_rate": round(wins / pair_count, 6),
+        "sign_test_pvalue": _two_sided_sign_test_pvalue(differences),
+    }
+    ci = _mean_confidence_interval(differences)
+    if ci is not None:
+        summary["difference_confidence_interval"] = ci
+    return summary
+
+
+def _build_performance_profile(
+    comparisons: list[dict[str, Any]],
+    metric_key: str = "wall_time_s_samples",
+    taus: tuple[float, ...] = (1.0, 1.05, 1.1, 1.25, 1.5, 2.0),
+) -> dict[str, dict[str, float]]:
+    """Compute Dolan-More-style performance profile ratios over repeated runs."""
+    if not comparisons:
+        return {}
+
+    sample_lists = [
+        comparison.get("statistics", {}).get(metric_key, [])
+        for comparison in comparisons
+    ]
+    run_count = min((len(samples) for samples in sample_lists), default=0)
+    if run_count == 0:
+        return {}
+
+    profile: dict[str, dict[str, float]] = {}
+    for comparison in comparisons:
+        solver_name = comparison["solver_config"]
+        profile[solver_name] = {}
+        solver_samples = comparison["statistics"][metric_key][:run_count]
+        for tau in taus:
+            good_runs = 0
+            for run_idx in range(run_count):
+                best_run_value = min(samples[run_idx] for samples in sample_lists)
+                if solver_samples[run_idx] <= (best_run_value * tau) + 1e-12:
+                    good_runs += 1
+            profile[solver_name][f"tau_{tau:.2f}"] = round(good_runs / run_count, 6)
+    return profile
+
+
+def _build_compare_statistics(comparisons: list[dict[str, Any]]) -> dict[str, Any]:
+    """Create paired repeated-run statistics across solver reports."""
+    if len(comparisons) < 2:
+        return {}
+
+    baseline = comparisons[0]
+    baseline_name = baseline["solver_config"]
+    paired_comparisons: dict[str, dict[str, Any]] = {}
+    for candidate in comparisons[1:]:
+        paired_comparisons[candidate["solver_config"]] = {
+            "against": baseline_name,
+            "wall_time": _build_paired_metric_summary(
+                candidate.get("statistics", {}).get("wall_time_s_samples", []),
+                baseline.get("statistics", {}).get("wall_time_s_samples", []),
+            ),
+            "weighted_sum": _build_paired_metric_summary(
+                candidate.get("statistics", {}).get("weighted_sum_samples", []),
+                baseline.get("statistics", {}).get("weighted_sum_samples", []),
+            ),
+        }
+
+    return {
+        "study_design": {
+            "paired_by_run_index": True,
+            "confidence_level": 0.95,
+            "baseline_solver": baseline_name,
+            "effect_size_note": "Negative mean_difference favors the candidate solver.",
+        },
+        "paired_comparisons": paired_comparisons,
+        "performance_profile": _build_performance_profile(comparisons),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +248,8 @@ def _run_single(
         solver, solve_kwargs = create_solver(solver_name)
 
     wall_times: list[float] = []
+    weighted_sum_samples: list[float] = []
+    makespan_samples: list[float] = []
     last_result: ScheduleResult | None = None
     peak_rss_kb = 0
 
@@ -88,6 +265,8 @@ def _run_single(
             assert solver is not None
             result = solver.solve(problem, **solve_kwargs)
         wall_times.append(time.perf_counter() - t0)
+        weighted_sum_samples.append(result.objective.weighted_sum)
+        makespan_samples.append(result.objective.makespan_minutes)
         last_result = result
         try:
             getrusage = getattr(_resource, "getrusage", None) if _resource is not None else None
@@ -132,11 +311,23 @@ def _run_single(
         "wall_time_s_min": round(min(wall_times), 4),
         "wall_time_s_max": round(max(wall_times), 4),
         "verification_time_ms": verification_time_ms,
+        "wall_time_s_samples": [round(value, 6) for value in wall_times],
+        "weighted_sum_samples": [round(value, 6) for value in weighted_sum_samples],
+        "makespan_minutes_samples": [round(value, 6) for value in makespan_samples],
     }
     if runs > 1:
         statistics_block["wall_time_s_median"] = round(statistics.median(wall_times), 4)
         if runs >= 3:
             statistics_block["wall_time_s_stdev"] = round(statistics.stdev(wall_times), 4)
+        wall_time_ci = _mean_confidence_interval(wall_times)
+        if wall_time_ci is not None:
+            statistics_block["wall_time_s_mean_ci"] = wall_time_ci
+        weighted_sum_ci = _mean_confidence_interval(weighted_sum_samples)
+        if weighted_sum_ci is not None:
+            statistics_block["weighted_sum_mean_ci"] = weighted_sum_ci
+        makespan_ci = _mean_confidence_interval(makespan_samples)
+        if makespan_ci is not None:
+            statistics_block["makespan_minutes_mean_ci"] = makespan_ci
     if peak_rss_mb is not None:
         statistics_block["peak_rss_mb"] = peak_rss_mb
 
@@ -243,6 +434,7 @@ def run_benchmark(
             "instance": instance_path.name,
             "problem_profile": problem_profile,
             "comparisons": comparisons,
+            "comparison_statistics": _build_compare_statistics(comparisons),
         }
 
     # Single-solver mode (first name only)

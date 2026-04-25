@@ -11,12 +11,18 @@ from synaps.model import (
     OperationAuxRequirement,
     Order,
     ScheduleProblem,
+    SetupEntry,
     SolverStatus,
     State,
     WorkCenter,
 )
 from synaps.solvers.feasibility_checker import FeasibilityChecker
-from synaps.solvers.lbbd_solver import LbbdSolver, _build_subproblem
+from synaps.solvers.lbbd_solver import (
+    LbbdSolver,
+    _build_subproblem,
+    _solve_subproblems,
+    _solve_subproblems_parallel,
+)
 
 
 class TestLbbdSolver:
@@ -300,3 +306,327 @@ class TestLbbdGreedyWarmStart:
         )
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
         assert result.metadata.get("parallel_subproblems") is False
+
+
+def _build_parallel_post_assembly_problem() -> tuple[
+    ScheduleProblem,
+    dict,
+    list,
+    dict,
+    dict,
+    dict,
+]:
+    horizon_start = datetime(2026, 4, 1, 8, 0, tzinfo=UTC)
+    horizon_end = horizon_start + timedelta(hours=8)
+
+    state_a = State(id=uuid4(), code="ST-A")
+    state_b = State(id=uuid4(), code="ST-B")
+    state_c = State(id=uuid4(), code="ST-C")
+    state_d = State(id=uuid4(), code="ST-D")
+
+    wc_a = WorkCenter(id=uuid4(), code="WC-A", capability_group="machining")
+    wc_b = WorkCenter(id=uuid4(), code="WC-B", capability_group="machining")
+    wc_c = WorkCenter(id=uuid4(), code="WC-C", capability_group="machining")
+    wc_d = WorkCenter(id=uuid4(), code="WC-D", capability_group="machining")
+
+    order_chain = Order(
+        id=uuid4(),
+        external_ref="ORD-CHAIN",
+        due_date=horizon_start + timedelta(hours=6),
+    )
+    order_blocker = Order(
+        id=uuid4(),
+        external_ref="ORD-BLOCKER",
+        due_date=horizon_start + timedelta(hours=6),
+    )
+
+    op_a = Operation(
+        id=uuid4(),
+        order_id=order_chain.id,
+        seq_in_order=0,
+        state_id=state_a.id,
+        base_duration_min=30,
+        eligible_wc_ids=[wc_a.id],
+    )
+    blocker_b = Operation(
+        id=uuid4(),
+        order_id=order_blocker.id,
+        seq_in_order=0,
+        state_id=state_b.id,
+        base_duration_min=120,
+        eligible_wc_ids=[wc_b.id],
+    )
+    op_b = Operation(
+        id=uuid4(),
+        order_id=order_chain.id,
+        seq_in_order=1,
+        state_id=state_b.id,
+        base_duration_min=20,
+        eligible_wc_ids=[wc_b.id],
+        predecessor_op_id=op_a.id,
+    )
+    op_c = Operation(
+        id=uuid4(),
+        order_id=order_chain.id,
+        seq_in_order=2,
+        state_id=state_c.id,
+        base_duration_min=25,
+        eligible_wc_ids=[wc_c.id],
+        predecessor_op_id=op_b.id,
+    )
+    op_d = Operation(
+        id=uuid4(),
+        order_id=order_chain.id,
+        seq_in_order=3,
+        state_id=state_d.id,
+        base_duration_min=15,
+        eligible_wc_ids=[wc_d.id],
+        predecessor_op_id=op_c.id,
+    )
+
+    problem = ScheduleProblem(
+        states=[state_a, state_b, state_c, state_d],
+        orders=[order_chain, order_blocker],
+        operations=[op_a, blocker_b, op_b, op_c, op_d],
+        work_centers=[wc_a, wc_b, wc_c, wc_d],
+        setup_matrix=[],
+        planning_horizon_start=horizon_start,
+        planning_horizon_end=horizon_end,
+    )
+
+    assignment_map = {
+        op_a.id: wc_a.id,
+        blocker_b.id: wc_b.id,
+        op_b.id: wc_b.id,
+        op_c.id: wc_c.id,
+        op_d.id: wc_d.id,
+    }
+    clusters = [{wc_a.id}, {wc_b.id}, {wc_c.id}, {wc_d.id}]
+    wc_by_id = {wc.id: wc for wc in problem.work_centers}
+    ops_by_id = {op.id: op for op in problem.operations}
+    orders_by_id = {order.id: order for order in problem.orders}
+    return problem, assignment_map, clusters, wc_by_id, ops_by_id, orders_by_id
+
+
+def _build_parallel_setup_gap_problem() -> tuple[
+    ScheduleProblem,
+    dict,
+    list,
+    dict,
+    dict,
+    dict,
+]:
+    horizon_start = datetime(2026, 4, 1, 8, 0, tzinfo=UTC)
+    horizon_end = horizon_start + timedelta(hours=8)
+
+    state_a = State(id=uuid4(), code="ST-A")
+    state_b = State(id=uuid4(), code="ST-B")
+    state_c = State(id=uuid4(), code="ST-C")
+
+    wc_a = WorkCenter(id=uuid4(), code="WC-A", capability_group="machining")
+    wc_b = WorkCenter(id=uuid4(), code="WC-B", capability_group="machining")
+    wc_c = WorkCenter(id=uuid4(), code="WC-C", capability_group="machining")
+    wc_d = WorkCenter(id=uuid4(), code="WC-D", capability_group="machining")
+
+    chain_order = Order(
+        id=uuid4(),
+        external_ref="ORD-CHAIN",
+        due_date=horizon_start + timedelta(hours=6),
+    )
+    sibling_order = Order(
+        id=uuid4(),
+        external_ref="ORD-SIBLING",
+        due_date=horizon_start + timedelta(hours=6),
+    )
+    blocker_order = Order(
+        id=uuid4(),
+        external_ref="ORD-BLOCKER",
+        due_date=horizon_start + timedelta(hours=6),
+    )
+
+    op_b0 = Operation(
+        id=uuid4(),
+        order_id=chain_order.id,
+        seq_in_order=0,
+        state_id=state_a.id,
+        base_duration_min=20,
+        eligible_wc_ids=[wc_b.id],
+    )
+    blocker_c = Operation(
+        id=uuid4(),
+        order_id=blocker_order.id,
+        seq_in_order=0,
+        state_id=state_c.id,
+        base_duration_min=120,
+        eligible_wc_ids=[wc_c.id],
+    )
+    op_a1 = Operation(
+        id=uuid4(),
+        order_id=chain_order.id,
+        seq_in_order=1,
+        state_id=state_b.id,
+        base_duration_min=30,
+        eligible_wc_ids=[wc_a.id],
+        predecessor_op_id=op_b0.id,
+    )
+    op_a2 = Operation(
+        id=uuid4(),
+        order_id=sibling_order.id,
+        seq_in_order=0,
+        state_id=state_c.id,
+        base_duration_min=20,
+        eligible_wc_ids=[wc_a.id],
+    )
+    tail_d = Operation(
+        id=uuid4(),
+        order_id=chain_order.id,
+        seq_in_order=2,
+        state_id=state_c.id,
+        base_duration_min=10,
+        eligible_wc_ids=[wc_d.id],
+        predecessor_op_id=op_a1.id,
+    )
+
+    problem = ScheduleProblem(
+        states=[state_a, state_b, state_c],
+        orders=[chain_order, sibling_order, blocker_order],
+        operations=[op_b0, blocker_c, op_a1, op_a2, tail_d],
+        work_centers=[wc_a, wc_b, wc_c, wc_d],
+        setup_matrix=[
+            SetupEntry(
+                work_center_id=wc_a.id,
+                from_state_id=state_b.id,
+                to_state_id=state_c.id,
+                setup_minutes=40,
+            )
+        ],
+        planning_horizon_start=horizon_start,
+        planning_horizon_end=horizon_end,
+    )
+
+    assignment_map = {
+        op_b0.id: wc_b.id,
+        blocker_c.id: wc_c.id,
+        op_a1.id: wc_a.id,
+        op_a2.id: wc_a.id,
+        tail_d.id: wc_d.id,
+    }
+    clusters = [{wc_a.id}, {wc_b.id}, {wc_c.id}, {wc_d.id}]
+    wc_by_id = {wc.id: wc for wc in problem.work_centers}
+    ops_by_id = {op.id: op for op in problem.operations}
+    orders_by_id = {order.id: order for order in problem.orders}
+    return problem, assignment_map, clusters, wc_by_id, ops_by_id, orders_by_id
+
+
+class TestLbbdParallelPostAssemblyRegressions:
+    def test_parallel_subproblems_preserve_cross_cluster_precedence(self) -> None:
+        (
+            problem,
+            assignment_map,
+            clusters,
+            wc_by_id,
+            ops_by_id,
+            orders_by_id,
+        ) = _build_parallel_post_assembly_problem()
+
+        sequential_assignments, _ = _solve_subproblems(
+            problem,
+            assignment_map,
+            {},
+            wc_by_id,
+            ops_by_id,
+            orders_by_id,
+            5,
+            42,
+        )
+        parallel_assignments, _ = _solve_subproblems_parallel(
+            problem,
+            assignment_map,
+            clusters,
+            wc_by_id,
+            ops_by_id,
+            orders_by_id,
+            5,
+            42,
+            num_workers=2,
+        )
+
+        checker = FeasibilityChecker()
+        assert sequential_assignments is not None
+        assert parallel_assignments is not None
+        assert checker.check(problem, sequential_assignments) == []
+        assert checker.check(problem, parallel_assignments) == []
+
+    def test_parallel_subproblems_preserve_setup_gap_after_precedence_shifts(self) -> None:
+        (
+            problem,
+            assignment_map,
+            clusters,
+            wc_by_id,
+            ops_by_id,
+            orders_by_id,
+        ) = _build_parallel_setup_gap_problem()
+
+        sequential_assignments, _ = _solve_subproblems(
+            problem,
+            assignment_map,
+            {},
+            wc_by_id,
+            ops_by_id,
+            orders_by_id,
+            5,
+            42,
+        )
+        parallel_assignments, _ = _solve_subproblems_parallel(
+            problem,
+            assignment_map,
+            clusters,
+            wc_by_id,
+            ops_by_id,
+            orders_by_id,
+            5,
+            42,
+            num_workers=2,
+        )
+
+        checker = FeasibilityChecker()
+        assert sequential_assignments is not None
+        assert parallel_assignments is not None
+        assert checker.check(problem, sequential_assignments) == []
+        assert checker.check(problem, parallel_assignments) == []
+
+    def test_parallel_subproblems_do_not_understate_makespan_after_post_assembly(self) -> None:
+        (
+            problem,
+            assignment_map,
+            clusters,
+            wc_by_id,
+            ops_by_id,
+            orders_by_id,
+        ) = _build_parallel_setup_gap_problem()
+
+        sequential_assignments, sequential_makespan = _solve_subproblems(
+            problem,
+            assignment_map,
+            {},
+            wc_by_id,
+            ops_by_id,
+            orders_by_id,
+            5,
+            42,
+        )
+        parallel_assignments, parallel_makespan = _solve_subproblems_parallel(
+            problem,
+            assignment_map,
+            clusters,
+            wc_by_id,
+            ops_by_id,
+            orders_by_id,
+            5,
+            42,
+            num_workers=2,
+        )
+
+        assert sequential_assignments is not None
+        assert parallel_assignments is not None
+        assert parallel_makespan == sequential_makespan
