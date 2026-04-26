@@ -126,22 +126,23 @@ def generate_large_instance(
 
     # Pre-compute eligible machines per operation as indices
     n_eligible = max(1, int(n_machines * machine_flexibility))
+    work_center_ids = [work_center.id for work_center in work_centers]
+    max_speed_factor = max(
+        max(work_center.speed_factor, 1e-6)
+        for work_center in work_centers
+    )
 
     for order_idx in range(n_orders):
         if ops_created >= n_operations:
             break
 
         order_id = uuid4()
-        # Stagger due dates across the horizon
-        due_offset_hours = rng.uniform(horizon_hours * 0.3, horizon_hours * 0.95)
-        orders.append(
-            Order(
-                id=order_id,
-                external_ref=f"ORD-{order_idx:06d}",
-                due_date=horizon_start + timedelta(hours=due_offset_hours),
-                priority=rng.randint(*priority_range),
-            )
-        )
+        # Sample releases with an early-skewed long tail.
+        # Pure uniform sampling over a wide span starves short first-window
+        # smoke studies and hides admission-pressure behavior.
+        release_span_hours = horizon_hours * 0.55
+        release_offset_hours = release_span_hours * (rng.random() ** 3.0)
+        release_datetime = horizon_start + timedelta(hours=release_offset_hours)
 
         # Determine ops for this order
         this_order_ops = min(
@@ -150,13 +151,16 @@ def generate_large_instance(
         )
 
         prev_op_id = None
+        order_min_duration_minutes = 0.0
         for seq in range(this_order_ops):
             op_id = uuid4()
             state = rng.choice(states)
             eligible = rng.sample(
-                [wc.id for wc in work_centers],
+                work_center_ids,
                 min(n_eligible, n_machines),
             )
+            base_duration_min = rng.randint(*duration_range)
+            order_min_duration_minutes += base_duration_min / max_speed_factor
 
             operations.append(
                 Operation(
@@ -164,7 +168,7 @@ def generate_large_instance(
                     order_id=order_id,
                     seq_in_order=seq,
                     state_id=state.id,
-                    base_duration_min=rng.randint(*duration_range),
+                    base_duration_min=base_duration_min,
                     eligible_wc_ids=eligible,
                     predecessor_op_id=prev_op_id,
                 )
@@ -182,6 +186,35 @@ def generate_large_instance(
                         quantity_needed=1,
                     )
                 )
+
+        min_process_hours = max(order_min_duration_minutes / 60.0, 0.25)
+        due_flow_factor = rng.uniform(1.25, 2.10)
+        due_slack_hours = rng.uniform(2.0, 36.0)
+        due_offset_hours = (
+            release_offset_hours
+            + (min_process_hours * due_flow_factor)
+            + due_slack_hours
+        )
+        due_offset_hours = min(due_offset_hours, horizon_hours)
+
+        due_datetime = horizon_start + timedelta(hours=due_offset_hours)
+        if due_datetime <= release_datetime:
+            due_datetime = min(
+                horizon_end,
+                release_datetime + timedelta(hours=max(min_process_hours, 0.5)),
+            )
+
+        orders.append(
+            Order(
+                id=order_id,
+                external_ref=f"ORD-{order_idx:06d}",
+                due_date=due_datetime,
+                priority=rng.randint(*priority_range),
+                domain_attributes={
+                    "release_offset_min": round(release_offset_hours * 60.0, 2),
+                },
+            )
+        )
 
     return ScheduleProblem(
         states=states,

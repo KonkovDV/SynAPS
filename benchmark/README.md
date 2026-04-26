@@ -233,6 +233,18 @@ It does four things in one command:
 3. preserves per-instance records, solver metadata, and verification timing;
 4. writes a JSON artifact under the chosen `benchmark/` directory so README and audit claims can point to a stable evidence surface.
 
+`industrial-50k` temporal generation note (2026-04-26):
+
+- orders now carry explicit `release_offset_min` in `domain_attributes`;
+- release offsets are sampled with an early-skewed long-tail law over `0..0.55*horizon`;
+- this preserves first-window admission signal for short geometry-smoke DOE while keeping late-release diversity for larger staged runs.
+
+Short-smoke evidence checkpoint:
+
+- artifact [studies/2026-04-26-rhc-alns-geometry-doe-postfix-smoke-v4/rhc_alns_geometry_doe.json](studies/2026-04-26-rhc-alns-geometry-doe-postfix-smoke-v4/rhc_alns_geometry_doe.json)
+  recovered non-zero admission pressure (`peak_raw_window_candidate_count=2670` vs smoke-v2 zero-frontier collapse);
+- coverage is still below historical baseline in this constrained 10s/1-window slice, so treat this as admission-recovery hardening rather than full throughput closure.
+
 Example:
 
 ```bash

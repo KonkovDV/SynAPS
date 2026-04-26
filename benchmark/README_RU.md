@@ -228,6 +228,18 @@ python -m benchmark.study_solver_scaling \
 3. сохраняет per-instance records, solver metadata и время верификации;
 4. пишет JSON-артефакт в выбранную директорию под `benchmark/`, чтобы README и audit-утверждения ссылались на устойчивую поверхность подтверждений.
 
+Примечание по temporal-модели `industrial-50k` (2026-04-26):
+
+- заказы теперь несут явный `release_offset_min` в `domain_attributes`;
+- release offsets семплируются ранне-смещенным long-tail законом на диапазоне `0..0.55*horizon`;
+- это сохраняет admission-сигнал в первом окне для короткого geometry-smoke DOE и одновременно оставляет реалистичное распределение поздних релизов для staged-run сценариев.
+
+Короткий smoke-checkpoint:
+
+- артефакт [studies/2026-04-26-rhc-alns-geometry-doe-postfix-smoke-v4/rhc_alns_geometry_doe.json](studies/2026-04-26-rhc-alns-geometry-doe-postfix-smoke-v4/rhc_alns_geometry_doe.json)
+  восстановил ненулевое admission-давление (`peak_raw_window_candidate_count=2670` против zero-frontier collapse в smoke-v2);
+- покрытие в этом жестко ограниченном срезе 10s/1-window все еще ниже исторического baseline, поэтому это следует трактовать как admission-recovery hardening, а не как полное закрытие throughput-задачи.
+
 Пример:
 
 ```bash

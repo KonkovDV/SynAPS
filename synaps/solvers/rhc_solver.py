@@ -20,7 +20,7 @@ import logging
 import math
 import time
 from collections import defaultdict, deque
-from datetime import timedelta
+from datetime import datetime, timedelta
 from heapq import heappop, heappush
 from typing import TYPE_CHECKING, Any
 
@@ -73,6 +73,7 @@ class RhcSolver(BaseSolver):
 
     def solve(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
         t0 = time.monotonic()
+        time_budget_t0 = t0
         acceleration_status = get_acceleration_status()
         global_lower_bound = compute_relaxed_makespan_lower_bound(problem)
 
@@ -200,6 +201,9 @@ class RhcSolver(BaseSolver):
         progressive_admission_relaxation_enabled: bool = bool(
             kwargs.get("progressive_admission_relaxation_enabled", True)
         )
+        precedence_ready_candidate_filter_enabled: bool = bool(
+            kwargs.get("precedence_ready_candidate_filter_enabled", False)
+        )
         admission_relaxation_min_fill_ratio: float = min(
             1.0,
             max(0.0, float(kwargs.get("admission_relaxation_min_fill_ratio", 0.3))),
@@ -257,19 +261,26 @@ class RhcSolver(BaseSolver):
         preprocess_phase_ms: dict[str, int] = {}
         phase_t0 = preprocess_t0
 
-        # Compute "earliest possible start" for each operation based on precedence depth
+        # Build due-date and release offsets for order prioritization
+        order_due_offsets: dict[UUID, float] = {}
+        order_release_offsets: dict[UUID, float] = {}
+        for order in problem.orders:
+            order_due_offsets[order.id] = (order.due_date - horizon_start).total_seconds() / 60.0
+            order_release_offsets[order.id] = self._extract_order_release_offset_minutes(
+                order,
+                horizon_start=horizon_start,
+                horizon_minutes=horizon_minutes,
+            )
+        phase_now = time.monotonic()
+        preprocess_phase_ms["due_offsets"] = int((phase_now - phase_t0) * 1000)
+        phase_t0 = phase_now
+
+        # Compute precedence-constrained earliest offsets, then tighten them
+        # with release-aware and machine-speed-aware lower bounds.
         op_earliest: dict[UUID, float] = {}
         self._compute_earliest_starts(problem, op_earliest)
         phase_now = time.monotonic()
         preprocess_phase_ms["earliest_starts"] = int((phase_now - phase_t0) * 1000)
-        phase_t0 = phase_now
-
-        # Build due-date offsets for order prioritization
-        order_due_offsets: dict[UUID, float] = {}
-        for order in problem.orders:
-            order_due_offsets[order.id] = (order.due_date - horizon_start).total_seconds() / 60.0
-        phase_now = time.monotonic()
-        preprocess_phase_ms["due_offsets"] = int((phase_now - phase_t0) * 1000)
         phase_t0 = phase_now
 
         op_positions = {op.id: index for index, op in enumerate(problem.operations)}
@@ -302,6 +313,12 @@ class RhcSolver(BaseSolver):
                 1e-6,
             )
             op_min_duration_by_id[op.id] = max(min(effective_durations), 1e-6)
+        self._propagate_earliest_starts_with_release_and_duration(
+            problem,
+            op_earliest,
+            op_duration_by_id=op_min_duration_by_id,
+            order_release_offsets=order_release_offsets,
+        )
         phase_now = time.monotonic()
         preprocess_phase_ms["operation_stats"] = int((phase_now - phase_t0) * 1000)
         phase_t0 = phase_now
@@ -386,6 +403,9 @@ class RhcSolver(BaseSolver):
         phase_now = time.monotonic()
         preprocess_phase_ms["candidate_orderings"] = int((phase_now - phase_t0) * 1000)
         preprocessing_ms = int((time.monotonic() - preprocess_t0) * 1000)
+        # Start the global budget after static preprocessing so short smoke
+        # limits reflect window scheduling behavior instead of setup overhead.
+        time_budget_t0 = time.monotonic()
         effective_window_op_cap = max_ops_per_window
         if len(problem.operations) > max_ops_per_window:
             effective_window_op_cap = min(
@@ -441,6 +461,7 @@ class RhcSolver(BaseSolver):
         peak_raw_window_candidate_count = 0
         candidate_pool_clamped_windows = 0
         candidate_pool_filtered_ops = 0
+        precedence_ready_filtered_ops = 0
         due_pressure_selected_ids: set[UUID] = set()
         admission_frontier_advances = 0
         admission_starvation_count = 0
@@ -602,7 +623,7 @@ class RhcSolver(BaseSolver):
             inner_window_summaries.append(summary)
 
         def global_time_exceeded() -> bool:
-            return (time.monotonic() - t0) > time_limit_s
+            return (time.monotonic() - time_budget_t0) > time_limit_s
 
         def extend_candidate_frontiers(window_boundary: float) -> None:
             nonlocal admission_cursor
@@ -637,6 +658,55 @@ class RhcSolver(BaseSolver):
                 for op_id in (admission_candidate_ids | due_candidate_ids)
                 if op_id not in committed_op_ids
             }
+
+        def filter_precedence_ready_candidate_ids(
+            candidate_ids: set[UUID],
+            *,
+            window_boundary: float,
+            resolved_predecessor_ids: set[UUID],
+        ) -> set[UUID]:
+            nonlocal precedence_ready_filtered_ops
+
+            if not precedence_ready_candidate_filter_enabled or not candidate_ids:
+                return candidate_ids
+
+            filtered_ids = {
+                op_id
+                for op_id in candidate_ids
+                if op_earliest.get(op_id, 0.0) < window_boundary
+            }
+            if not filtered_ids:
+                precedence_ready_filtered_ops += len(candidate_ids)
+                return filtered_ids
+
+            # Keep only operations whose unresolved predecessors are reachable in
+            # the same candidate set (or already resolved by commits/tail carry-over).
+            predecessor_closed_ids = set(filtered_ids)
+            changed = True
+            while changed:
+                changed = False
+                for op_id in tuple(predecessor_closed_ids):
+                    operation = ops_by_id.get(op_id)
+                    predecessor_id = (
+                        operation.predecessor_op_id
+                        if operation is not None
+                        else None
+                    )
+                    if predecessor_id is None:
+                        continue
+                    if (
+                        predecessor_id in predecessor_closed_ids
+                        or predecessor_id in resolved_predecessor_ids
+                    ):
+                        continue
+                    predecessor_closed_ids.remove(op_id)
+                    changed = True
+
+            precedence_ready_filtered_ops += max(
+                0,
+                len(candidate_ids) - len(predecessor_closed_ids),
+            )
+            return predecessor_closed_ids
 
         def effective_candidate_count(
             raw_candidate_ids: set[UUID],
@@ -990,8 +1060,20 @@ class RhcSolver(BaseSolver):
             )
             window_count += 1
 
+            resolved_predecessor_ids = committed_op_ids | (
+                {
+                    assignment.operation_id
+                    for assignment in previous_window_tail_assignments
+                    if assignment.operation_id in ops_by_id
+                }
+            )
+
             extend_candidate_frontiers(window_end_offset)
-            raw_window_candidate_ids = collect_raw_window_candidate_ids()
+            raw_window_candidate_ids = filter_precedence_ready_candidate_ids(
+                collect_raw_window_candidate_ids(),
+                window_boundary=window_end_offset,
+                resolved_predecessor_ids=resolved_predecessor_ids,
+            )
             peak_raw_window_candidate_count = max(
                 peak_raw_window_candidate_count,
                 len(raw_window_candidate_ids),
@@ -1036,7 +1118,11 @@ class RhcSolver(BaseSolver):
                             / base_window_span_minutes
                         )
                         extend_candidate_frontiers(window_end_offset)
-                        raw_window_candidate_ids = collect_raw_window_candidate_ids()
+                        raw_window_candidate_ids = filter_precedence_ready_candidate_ids(
+                            collect_raw_window_candidate_ids(),
+                            window_boundary=window_end_offset,
+                            resolved_predecessor_ids=resolved_predecessor_ids,
+                        )
                         peak_raw_window_candidate_count = max(
                             peak_raw_window_candidate_count,
                             len(raw_window_candidate_ids),
@@ -1158,11 +1244,15 @@ class RhcSolver(BaseSolver):
                         ),
                     )
                     if len(window_candidate_ids) <= full_scan_target_count:
-                        full_scan_candidate_ids = {
-                            op.id
-                            for op in problem.operations
-                            if op.id not in committed_op_ids
-                        }
+                        full_scan_candidate_ids = filter_precedence_ready_candidate_ids(
+                            {
+                                op.id
+                                for op in problem.operations
+                                if op.id not in committed_op_ids
+                            },
+                            window_boundary=window_end_offset,
+                            resolved_predecessor_ids=resolved_predecessor_ids,
+                        )
                         full_scan_recovered_ops = max(
                             0,
                             len(full_scan_candidate_ids) - len(window_candidate_ids),
@@ -2444,6 +2534,10 @@ class RhcSolver(BaseSolver):
                 "candidate_pool_filtered_ops": candidate_pool_filtered_ops,
                 "candidate_admission_enabled": candidate_admission_active,
                 "candidate_admission_configured": candidate_admission_enabled,
+                "precedence_ready_candidate_filter_enabled": (
+                    precedence_ready_candidate_filter_enabled
+                ),
+                "precedence_ready_filtered_ops": precedence_ready_filtered_ops,
                 "due_admission_horizon_factor": due_admission_horizon_factor,
                 "admission_tail_weight": admission_tail_weight,
                 "progressive_admission_relaxation_enabled": (
@@ -2636,6 +2730,88 @@ class RhcSolver(BaseSolver):
                 indegree[succ_id] -= 1
                 if indegree[succ_id] == 0:
                     queue.append(succ_id)
+
+    @staticmethod
+    def _propagate_earliest_starts_with_release_and_duration(
+        problem: ScheduleProblem,
+        result: dict[UUID, float],
+        *,
+        op_duration_by_id: dict[UUID, float],
+        order_release_offsets: dict[UUID, float],
+    ) -> None:
+        """Tighten earliest offsets with order release times and feasible min durations."""
+
+        ops_by_id = {op.id: op for op in problem.operations}
+        indegree = {op.id: 0 for op in problem.operations}
+        successors: dict[UUID, list[UUID]] = {}
+        for op in problem.operations:
+            if op.predecessor_op_id is None:
+                continue
+            successors.setdefault(op.predecessor_op_id, []).append(op.id)
+            indegree[op.id] += 1
+
+        queue: deque[UUID] = deque()
+        for op in problem.operations:
+            if indegree[op.id] != 0:
+                continue
+            release_offset = order_release_offsets.get(op.order_id, 0.0)
+            result[op.id] = max(result.get(op.id, 0.0), release_offset)
+            queue.append(op.id)
+
+        while queue:
+            current_id = queue.popleft()
+            current_op = ops_by_id[current_id]
+            current_duration = max(op_duration_by_id.get(current_id, 0.0), 1e-6)
+            current_end = result.get(current_id, 0.0) + current_duration
+            for succ_id in successors.get(current_id, []):
+                successor = ops_by_id.get(succ_id)
+                release_offset = (
+                    order_release_offsets.get(successor.order_id, 0.0)
+                    if successor is not None
+                    else 0.0
+                )
+                required_start = max(current_end, release_offset)
+                if required_start > result.get(succ_id, 0.0):
+                    result[succ_id] = required_start
+                indegree[succ_id] -= 1
+                if indegree[succ_id] == 0:
+                    queue.append(succ_id)
+
+    @staticmethod
+    def _extract_order_release_offset_minutes(
+        order: Any,
+        *,
+        horizon_start: datetime,
+        horizon_minutes: float,
+    ) -> float:
+        """Parse optional order release metadata into horizon-relative minutes."""
+
+        domain_attributes = getattr(order, "domain_attributes", None) or {}
+        direct_keys = (
+            "release_offset_min",
+            "release_offset_minutes",
+            "release_offset",
+        )
+        for key in direct_keys:
+            value = domain_attributes.get(key)
+            if isinstance(value, (int, float)):
+                return max(0.0, min(float(value), horizon_minutes))
+
+        absolute_keys = ("release_at", "release_datetime", "release_date")
+        for key in absolute_keys:
+            value = domain_attributes.get(key)
+            if isinstance(value, datetime):
+                offset = (value - horizon_start).total_seconds() / 60.0
+                return max(0.0, min(offset, horizon_minutes))
+            if isinstance(value, str) and value:
+                try:
+                    parsed = datetime.fromisoformat(value)
+                except ValueError:
+                    continue
+                offset = (parsed - horizon_start).total_seconds() / 60.0
+                return max(0.0, min(offset, horizon_minutes))
+
+        return 0.0
 
     @staticmethod
     def _expand_predecessor_closure(

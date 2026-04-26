@@ -1513,6 +1513,108 @@ class TestRhcSolver:
         assert result.metadata["candidate_pool_clamped_windows"] >= 1
         assert result.metadata["admission_starvation_count"] == 0
 
+    def test_rhc_precedence_ready_filter_caps_due_frontier_to_window_reachable_prefix(
+        self,
+    ) -> None:
+        """Optional precedence-ready filtering should drop due-frontier chain ops beyond the window."""
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_adaptive_admission_chain_problem(n_ops=12)
+        problem.orders[0].due_date = HORIZON_START + timedelta(minutes=30)
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=60,
+            overlap_minutes=0,
+            inner_solver="greedy",
+            time_limit_s=20,
+            max_ops_per_window=20,
+            max_windows=1,
+            candidate_pool_factor=1.0,
+            adaptive_window_enabled=False,
+            precedence_ready_candidate_filter_enabled=True,
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL, SolverStatus.ERROR)
+        assert result.metadata["peak_raw_window_candidate_count"] == 6
+        assert result.metadata["peak_window_candidate_count"] == 6
+
+    def test_rhc_precedence_ready_filter_drops_candidates_with_unresolved_predecessor(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Precedence-ready filtering must reject successors whose predecessor is not window-reachable."""
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        order_id = uuid4()
+        op_a = Operation(
+            id=uuid4(),
+            order_id=order_id,
+            seq_in_order=0,
+            state_id=SA,
+            base_duration_min=45,
+            eligible_wc_ids=[WC1],
+            predecessor_op_id=None,
+        )
+        op_b = Operation(
+            id=uuid4(),
+            order_id=order_id,
+            seq_in_order=1,
+            state_id=SB,
+            base_duration_min=30,
+            eligible_wc_ids=[WC1],
+            predecessor_op_id=op_a.id,
+        )
+        problem = ScheduleProblem(
+            states=[
+                State(id=SA, code="A", label="Alpha"),
+                State(id=SB, code="B", label="Beta"),
+            ],
+            orders=[
+                Order(
+                    external_ref="ORD-EARLY",
+                    id=order_id,
+                    due_date=HORIZON_START + timedelta(minutes=30),
+                    priority=700,
+                ),
+            ],
+            operations=[op_a, op_b],
+            work_centers=[
+                WorkCenter(id=WC1, code="M1", capability_group="grp", speed_factor=1.0),
+            ],
+            setup_matrix=[],
+            auxiliary_resources=[],
+            aux_requirements=[],
+            planning_horizon_start=HORIZON_START,
+            planning_horizon_end=HORIZON_END,
+        )
+
+        def fake_compute_earliest_starts(problem, result) -> None:
+            result[op_a.id] = 180.0
+            result[op_b.id] = 0.0
+
+        monkeypatch.setattr(
+            RhcSolver,
+            "_compute_earliest_starts",
+            staticmethod(fake_compute_earliest_starts),
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=60,
+            overlap_minutes=0,
+            inner_solver="greedy",
+            time_limit_s=10,
+            max_ops_per_window=8,
+            max_windows=1,
+            candidate_pool_factor=1.0,
+            adaptive_window_enabled=False,
+            precedence_ready_candidate_filter_enabled=True,
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL, SolverStatus.ERROR)
+        assert result.metadata["precedence_ready_filtered_ops"] >= 1
+
     def test_rhc_progressive_admission_relaxation_recovers_due_frontier_capacity(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -1772,6 +1874,58 @@ class TestInstanceGenerator:
         elapsed = time.monotonic() - t0
         assert len(problem.operations) >= 49_900  # approximate due to rounding
         assert elapsed < 60.0, f"Generation took {elapsed:.1f}s — too slow"
+
+    def test_generate_large_instance_emits_release_aware_order_temporal_semantics(self) -> None:
+        from synaps.benchmarks.instance_generator import generate_large_instance
+
+        problem = generate_large_instance(
+            n_operations=1200,
+            n_machines=20,
+            n_states=8,
+            seed=99,
+        )
+
+        op_duration_by_order: dict[UUID, float] = {}
+        for op in problem.operations:
+            op_duration_by_order[op.order_id] = op_duration_by_order.get(op.order_id, 0.0) + (
+                op.base_duration_min
+            )
+
+        for order in problem.orders:
+            release_offset = float(order.domain_attributes.get("release_offset_min", 0.0))
+            due_offset = (order.due_date - problem.planning_horizon_start).total_seconds() / 60.0
+
+            assert release_offset >= 0.0
+            assert due_offset >= release_offset
+            # Generated due dates should include at least a minimal processing + slack buffer.
+            assert due_offset - release_offset >= min(op_duration_by_order.get(order.id, 0.0), 15.0)
+
+    def test_generate_large_instance_keeps_early_release_signal_for_rhc_smoke(self) -> None:
+        from synaps.benchmarks.instance_generator import generate_large_instance
+
+        problem = generate_large_instance(
+            n_operations=5000,
+            n_machines=40,
+            n_states=12,
+            seed=1,
+        )
+
+        release_offsets = [
+            float(order.domain_attributes.get("release_offset_min", 0.0))
+            for order in problem.orders
+        ]
+        assert release_offsets, "release offsets must be emitted for generated orders"
+
+        first_window_minutes = 480 + 120
+        early_ratio = sum(1 for offset in release_offsets if offset < first_window_minutes) / len(
+            release_offsets
+        )
+        # Guard rail: short-window smoke must still observe meaningful admission pressure.
+        assert early_ratio >= 0.10
+
+        p95_offset = sorted(release_offsets)[int(0.95 * len(release_offsets)) - 1]
+        # Keep long-tail realism; releases should not collapse into only early-horizon orders.
+        assert p95_offset >= 6_000.0
 
     def test_generated_problem_passes_validation(self) -> None:
         from synaps.benchmarks.instance_generator import generate_large_instance
