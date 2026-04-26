@@ -462,12 +462,18 @@ class RhcSolver(BaseSolver):
         candidate_pool_clamped_windows = 0
         candidate_pool_filtered_ops = 0
         precedence_ready_filtered_ops = 0
+        precedence_ready_candidate_ops_total = 0
+        precedence_ready_candidate_ready_total = 0
+        precedence_blocked_by_precedence_count = 0
         due_pressure_selected_ids: set[UUID] = set()
         admission_frontier_advances = 0
         admission_starvation_count = 0
         admission_relaxation_windows = 0
         admission_relaxation_recovered_ops = 0
         admission_full_scan_windows = 0
+        admission_full_scan_triggered_windows = 0
+        admission_full_scan_added_ops = 0
+        admission_full_scan_final_pool_peak = 0
         admission_full_scan_recovered_ops = 0
         due_frontier_advances = 0
         candidate_pressure_values: list[float] = []
@@ -666,10 +672,14 @@ class RhcSolver(BaseSolver):
             resolved_predecessor_ids: set[UUID],
         ) -> set[UUID]:
             nonlocal precedence_ready_filtered_ops
+            nonlocal precedence_ready_candidate_ops_total
+            nonlocal precedence_ready_candidate_ready_total
+            nonlocal precedence_blocked_by_precedence_count
 
             if not precedence_ready_candidate_filter_enabled or not candidate_ids:
                 return candidate_ids
 
+            precedence_ready_candidate_ops_total += len(candidate_ids)
             filtered_ids = {
                 op_id
                 for op_id in candidate_ids
@@ -702,6 +712,9 @@ class RhcSolver(BaseSolver):
                     predecessor_closed_ids.remove(op_id)
                     changed = True
 
+            blocked_by_precedence = max(0, len(filtered_ids) - len(predecessor_closed_ids))
+            precedence_blocked_by_precedence_count += blocked_by_precedence
+            precedence_ready_candidate_ready_total += len(predecessor_closed_ids)
             precedence_ready_filtered_ops += max(
                 0,
                 len(candidate_ids) - len(predecessor_closed_ids),
@@ -1184,6 +1197,9 @@ class RhcSolver(BaseSolver):
             window_candidate_ids = raw_window_candidate_ids
             window_admission_relaxed = False
             window_admission_relaxation_recovered_ops = 0
+            window_full_scan_triggered = False
+            window_full_scan_added_ops = 0
+            window_full_scan_final_pool = 0
             if candidate_admission_active:
                 admitted_window_candidate_ids = {
                     op_id
@@ -1244,15 +1260,32 @@ class RhcSolver(BaseSolver):
                         ),
                     )
                     if len(window_candidate_ids) <= full_scan_target_count:
+                        window_full_scan_triggered = True
+                        admission_full_scan_triggered_windows += 1
+                        full_scan_seed_ids = set(window_candidate_ids)
+                        for op in ops_sorted_by_earliest:
+                            if op.id in committed_op_ids or op.id in full_scan_seed_ids:
+                                continue
+                            full_scan_seed_ids.add(op.id)
+                            if len(full_scan_seed_ids) >= candidate_pool_limit:
+                                break
+
+                        window_full_scan_added_ops = max(
+                            0,
+                            len(full_scan_seed_ids) - len(window_candidate_ids),
+                        )
+                        admission_full_scan_added_ops += window_full_scan_added_ops
                         full_scan_candidate_ids = filter_precedence_ready_candidate_ids(
-                            {
-                                op.id
-                                for op in problem.operations
-                                if op.id not in committed_op_ids
-                            },
+                            full_scan_seed_ids,
                             window_boundary=window_end_offset,
                             resolved_predecessor_ids=resolved_predecessor_ids,
                         )
+                        window_full_scan_final_pool = len(full_scan_candidate_ids)
+                        admission_full_scan_final_pool_peak = max(
+                            admission_full_scan_final_pool_peak,
+                            window_full_scan_final_pool,
+                        )
+
                         full_scan_recovered_ops = max(
                             0,
                             len(full_scan_candidate_ids) - len(window_candidate_ids),
@@ -1267,9 +1300,10 @@ class RhcSolver(BaseSolver):
                             admission_full_scan_recovered_ops += full_scan_recovered_ops
                             filtered_by_admission = 0
                             logger.info(
-                                "RHC window %d escalated to full uncommitted frontier scan: %d candidates recovered",
+                                "RHC window %d escalated to capped full-scan frontier: +%d candidates (final pool=%d)",
                                 window_count,
                                 full_scan_recovered_ops,
+                                window_full_scan_final_pool,
                             )
                 candidate_pool_filtered_ops += filtered_by_admission
 
@@ -1984,6 +2018,14 @@ class RhcSolver(BaseSolver):
                                 inner_window_summaries[-1][
                                     "admission_full_scan_enabled"
                                 ] = True
+                        if window_full_scan_triggered:
+                            inner_window_summaries[-1]["full_scan_triggered"] = True
+                            inner_window_summaries[-1][
+                                "full_scan_added_ops"
+                            ] = window_full_scan_added_ops
+                            inner_window_summaries[-1][
+                                "full_scan_final_pool"
+                            ] = window_full_scan_final_pool
                         inner_window_summaries[-1]["boundary_reanchor_ops"] = len(
                             boundary_aware_assignments
                         )
@@ -2240,6 +2282,14 @@ class RhcSolver(BaseSolver):
                             inner_window_summaries[-1][
                                 "admission_full_scan_enabled"
                             ] = True
+                    if window_full_scan_triggered:
+                        inner_window_summaries[-1]["full_scan_triggered"] = True
+                        inner_window_summaries[-1][
+                            "full_scan_added_ops"
+                        ] = window_full_scan_added_ops
+                        inner_window_summaries[-1][
+                            "full_scan_final_pool"
+                        ] = window_full_scan_final_pool
                     if alns_budget_profile is not None:
                         inner_window_summaries[-1]["alns_budget_auto_scaled"] = bool(
                             alns_budget_profile["scaled"]
@@ -2538,6 +2588,14 @@ class RhcSolver(BaseSolver):
                     precedence_ready_candidate_filter_enabled
                 ),
                 "precedence_ready_filtered_ops": precedence_ready_filtered_ops,
+                "precedence_ready_blocked_by_precedence_count": (
+                    precedence_blocked_by_precedence_count
+                ),
+                "precedence_ready_ratio": round(
+                    precedence_ready_candidate_ready_total
+                    / max(precedence_ready_candidate_ops_total, 1),
+                    4,
+                ),
                 "due_admission_horizon_factor": due_admission_horizon_factor,
                 "admission_tail_weight": admission_tail_weight,
                 "progressive_admission_relaxation_enabled": (
@@ -2549,6 +2607,9 @@ class RhcSolver(BaseSolver):
                 "admission_full_scan_enabled": admission_full_scan_enabled,
                 "admission_full_scan_min_fill_ratio": admission_full_scan_min_fill_ratio,
                 "admission_full_scan_windows": admission_full_scan_windows,
+                "admission_full_scan_triggered_windows": admission_full_scan_triggered_windows,
+                "admission_full_scan_added_ops": admission_full_scan_added_ops,
+                "admission_full_scan_final_pool_peak": admission_full_scan_final_pool_peak,
                 "admission_full_scan_recovered_ops": admission_full_scan_recovered_ops,
                 "candidate_pressure_mean": round(
                     sum(candidate_pressure_values) / len(candidate_pressure_values),

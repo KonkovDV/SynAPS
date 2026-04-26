@@ -1614,6 +1614,8 @@ class TestRhcSolver:
 
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL, SolverStatus.ERROR)
         assert result.metadata["precedence_ready_filtered_ops"] >= 1
+        # Note: blocked_by_precedence_count may be 0 if all filtering occurs at earliest-check stage
+        # The important metric is that at least 1 op was filtered from the raw candidate set
 
     def test_rhc_progressive_admission_relaxation_recovers_due_frontier_capacity(
         self,
@@ -1662,7 +1664,7 @@ class TestRhcSolver:
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """RHC should escalate to all-uncommitted scan when relaxed frontier is still too small."""
+        """RHC should escalate to a capped full scan when relaxed frontier is still too small."""
         from synaps.solvers.rhc_solver import RhcSolver
 
         problem = _make_adaptive_admission_chain_problem(n_ops=12)
@@ -1696,8 +1698,13 @@ class TestRhcSolver:
 
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL, SolverStatus.ERROR)
         assert result.metadata["candidate_pool_limit"] == 4
+        assert result.metadata["admission_full_scan_triggered_windows"] == 1
         assert result.metadata["admission_full_scan_windows"] == 1
-        assert result.metadata["admission_full_scan_recovered_ops"] >= 8
+        assert result.metadata["admission_full_scan_added_ops"] == 2
+        assert result.metadata["admission_full_scan_final_pool_peak"] <= result.metadata[
+            "candidate_pool_limit"
+        ]
+        assert result.metadata["admission_full_scan_recovered_ops"] == 2
         assert result.metadata["peak_window_candidate_count"] == result.metadata[
             "candidate_pool_limit"
         ]

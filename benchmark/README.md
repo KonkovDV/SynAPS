@@ -297,6 +297,18 @@ Post-audit (2026-04-26) solver hardening now includes:
 - dynamic ALNS repair-budget scaling tied to effective destroy envelope (`alns_effective_repair_time_limit_s`);
 - explicit pre-search short-circuiting for oversized ALNS windows (`budget_guard_skipped_initial_search`).
 
+RHC-ALNS profile update (April 2026):
+
+- `due_admission_horizon_factor=2.0` (was 1.0): tuned via geometry DOE v6 to maintain non-zero admission pressure in short ALNS windows;
+- `alns_presearch_max_window_ops=5000`: synchronized with effective window cap to align presearch guard with candidate-pool semantics;
+- `admission_full_scan_enabled=False`: capped full-scan semantics (adds candidates up to `candidate_pool_limit` only, not all uncommitted ops) now prevents runaway candidate sets in underfilled windows;
+- new telemetry fields added to metadata:
+  - `precedence_ready_blocked_by_precedence_count`: count of ops rejected due to unresolved predecessor constraints;
+  - `precedence_ready_ratio`: ratio of precedence-ready ops among those evaluated (0–1);
+  - `admission_full_scan_triggered_windows`: count of windows where full-scan path was activated;
+  - `admission_full_scan_added_ops`: count of ops added during full-scan path;
+  - `admission_full_scan_final_pool_peak`: peak candidate-pool size after full-scan phase.
+
 ## Staged 500K Study
 
 `benchmark.study_rhc_500k` is the stress-study harness for 500K+ operation scenarios.

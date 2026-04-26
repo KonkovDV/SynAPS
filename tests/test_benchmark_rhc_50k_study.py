@@ -295,8 +295,12 @@ def test_study_rhc_50k_uses_tuned_alns_window_budget_profile(
     profile = captured_kwargs[0]["solver_kwargs"]
     assert profile["alns_inner_window_time_cap_s"] == 180
     assert profile["progressive_admission_relaxation_enabled"] is True
+    assert profile["precedence_ready_candidate_filter_enabled"] is True
+    assert profile["due_admission_horizon_factor"] == 2.0
     assert profile["admission_relaxation_min_fill_ratio"] == 0.30
+    assert profile["admission_full_scan_enabled"] is False
     assert profile["alns_budget_auto_scaling_enabled"] is True
+    assert profile["alns_presearch_max_window_ops"] == 5_000
     assert profile["alns_budget_estimated_repair_s_per_destroyed_op"] == 0.125
     assert profile["hybrid_due_pressure_threshold"] == 0.35
     assert profile["hybrid_candidate_pressure_threshold"] == 4.0
