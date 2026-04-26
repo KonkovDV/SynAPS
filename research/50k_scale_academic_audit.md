@@ -97,6 +97,28 @@
 - Результат остаётся bounded-режимным evidence (не production-scale proof качества на полном горизонте 50K).
 - Это строгий reproducible-доказательный шаг, что режим `guard-short-circuit` может сменяться на реальный ALNS search выбором geometry, но эксплуатационный KPI при этом может ухудшаться.
 
+## Addendum (2026-04-26): ALNS Tuning Slice After Admission Stabilization
+
+После стабилизации admission-frontier был выполнен следующий reproducible DOE-срез для ALNS-тюнинга:
+
+- script: `benchmark/study_rhc_alns_geometry_doe.py`
+- artifact: `benchmark/studies/2026-04-26-rhc-alns-geometry-doe-v6-alns-tuning/rhc_alns_geometry_doe.json`
+- protocol: `industrial-50k`, `throughput`, seeds=`[1]`, `max_windows=1`, `time_limit_s=10`, `per_run_timeout_s=180`
+
+Ключевая настройка этого среза:
+
+- в canonical DOE profile зафиксирован `due_admission_horizon_factor=2.0`.
+
+Наблюдение по v6:
+
+- `480/120` сохранил ненулевой frontier (`peak_raw_window_candidate_count=6637`) и дал лучший в этом срезе `scheduled_ratio=0.0147`;
+- `240/60`, `300/90`, `360/90` в данном 10s/1-window бюджете ушли в `solver_error/no assignments produced`.
+
+Интерпретация:
+
+- admission-pressure в этом протоколе стабилизирован (frontier ненулевой), но ALNS-путь остается guard-dominated (`inner_time_limit_exhausted_before_search`), то есть это ещё не доказательство реального destroy-repair режима на коротком бюджете.
+- therefore, дальнейший ALNS-тюнинг должен оптимизировать не только `scheduled_ratio`, но и вероятность входа в search-active окна без потери frontier.
+
 ## Addendum (2026-04-26): 100K+ Scaling Audit and Mathematical Corrections
 
 После bounded 50K DOE был проведён следующий аудит на staged 100K+ harness (`benchmark/study_rhc_500k.py`) с двумя целями:

@@ -245,6 +245,12 @@ Short-smoke evidence checkpoint:
   recovered non-zero admission pressure (`peak_raw_window_candidate_count=2670` vs smoke-v2 zero-frontier collapse);
 - coverage is still below historical baseline in this constrained 10s/1-window slice, so treat this as admission-recovery hardening rather than full throughput closure.
 
+ALNS tuning checkpoint (geometry DOE v6, 2026-04-26):
+
+- canonical DOE profile now fixes `due_admission_horizon_factor=2.0` to keep admission pressure non-zero before ALNS budget guards;
+- artifact [studies/2026-04-26-rhc-alns-geometry-doe-v6-alns-tuning/rhc_alns_geometry_doe.json](studies/2026-04-26-rhc-alns-geometry-doe-v6-alns-tuning/rhc_alns_geometry_doe.json) is the current tuning evidence surface;
+- in the strict 10s/1-window slice, `480/120` is the only geometry with non-zero scheduled coverage (`scheduled_ratio=0.0147`) and non-zero frontier (`peak_raw_window_candidate_count=6637`), while `240/60`, `300/90`, and `360/90` collapse to `no assignments produced` under this budget.
+
 Example:
 
 ```bash

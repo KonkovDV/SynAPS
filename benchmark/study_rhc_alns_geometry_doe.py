@@ -67,6 +67,9 @@ def _canonical_solver_kwargs() -> dict[str, Any]:
         "fallback_repair_enabled": False,
         "alns_inner_window_time_cap_s": 180,
         "max_ops_per_window": 5000,
+        # Admission-pressure stabilization: widen due-release horizon so
+        # short-window DOE keeps a non-zero frontier before ALNS budget guards.
+        "due_admission_horizon_factor": 2.0,
         "progressive_admission_relaxation_enabled": True,
         "admission_relaxation_min_fill_ratio": 0.30,
         "alns_budget_auto_scaling_enabled": True,

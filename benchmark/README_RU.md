@@ -240,6 +240,12 @@ python -m benchmark.study_solver_scaling \
   восстановил ненулевое admission-давление (`peak_raw_window_candidate_count=2670` против zero-frontier collapse в smoke-v2);
 - покрытие в этом жестко ограниченном срезе 10s/1-window все еще ниже исторического baseline, поэтому это следует трактовать как admission-recovery hardening, а не как полное закрытие throughput-задачи.
 
+ALNS tuning checkpoint (geometry DOE v6, 2026-04-26):
+
+- в каноническом DOE-профиле зафиксирован `due_admission_horizon_factor=2.0`, чтобы сохранить ненулевое admission-давление до ALNS budget guard;
+- артефакт [studies/2026-04-26-rhc-alns-geometry-doe-v6-alns-tuning/rhc_alns_geometry_doe.json](studies/2026-04-26-rhc-alns-geometry-doe-v6-alns-tuning/rhc_alns_geometry_doe.json) является текущей tuning-surface;
+- в жестком срезе 10s/1-window только `480/120` сохранил ненулевое покрытие (`scheduled_ratio=0.0147`) и ненулевой frontier (`peak_raw_window_candidate_count=6637`), тогда как `240/60`, `300/90` и `360/90` в этом бюджете ушли в `no assignments produced`.
+
 Пример:
 
 ```bash
