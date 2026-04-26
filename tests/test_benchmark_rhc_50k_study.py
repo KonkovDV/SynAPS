@@ -129,6 +129,59 @@ def test_study_rhc_50k_both_lanes_apply_worker_profiles(
     assert lanes == ["strict", "throughput"]
 
 
+def test_study_rhc_50k_both_lanes_emit_outcome_rates_and_evidence(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Both-lane reports should expose completion rates and evidence taxonomy."""
+    import benchmark.study_rhc_50k as study_module
+
+    def fake_run_scaling_case(*, n_ops, n_machines, n_states, solver_name, solver_kwargs, seed):
+        return {
+            "status": "error",
+            "feasible": False,
+            "solver": solver_name,
+            "makespan_min": 100.0,
+            "total_setup_min": 20.0,
+            "total_tardiness_min": 0.0,
+            "total_material_loss": 0.0,
+            "assigned_ops": n_ops // 2,
+            "violations": 0,
+            "solve_ms": 1,
+            "gen_ms": 1,
+            "verify_ms": 0,
+            "n_ops": n_ops,
+            "n_machines": n_machines,
+            "n_states": n_states,
+            "sdst_memory_bytes": 0,
+            "metadata": {},
+        }
+
+    monkeypatch.setattr(study_module, "run_scaling_case", fake_run_scaling_case)
+
+    report = study_module.study_rhc_50k(
+        preset_name="industrial-50k",
+        seeds=[11],
+        solver_names=["RHC-ALNS"],
+        lane="both",
+        quality_gate_enabled=False,
+        write_dir=tmp_path,
+    )
+
+    throughput_summary = report["summary_by_solver_lane"]["RHC-ALNS|throughput"]
+    strict_summary = report["summary_by_solver_lane"]["RHC-ALNS|strict"]
+    assert throughput_summary["process_completed_rate"] == 1.0
+    assert throughput_summary["solve_completed_rate"] == 0.0
+    assert strict_summary["process_completed_rate"] == 1.0
+    assert strict_summary["solve_completed_rate"] == 0.0
+
+    evidence = report["evidence"]
+    assert evidence["outcome_taxonomy"]["version"] == "rhc-50k-v1"
+    assert evidence["outcome_taxonomy"]["process_outcomes"] == ["completed"]
+    assert "solver_error" in evidence["outcome_taxonomy"]["solve_outcomes"]
+    assert evidence["lane_outcome_summary"]["RHC-ALNS|throughput"]["solve_completed_rate"] == 0.0
+
+
 def test_study_rhc_50k_reports_cvar_and_quality_gate(
     monkeypatch,
     tmp_path: Path,
@@ -306,6 +359,57 @@ def test_study_rhc_50k_quality_gate_flags_partial_schedule(
     assert gate_result["passed"] is False
     assert gate_result["checks"]["feasibility"] is False
     assert gate_result["checks"]["scheduled_ratio"] is False
+
+
+def test_study_rhc_50k_reports_process_and_solve_outcomes(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Study report should keep process completion separate from solve outcome."""
+    import benchmark.study_rhc_50k as study_module
+
+    def fake_run_scaling_case(*, n_ops, n_machines, n_states, solver_name, solver_kwargs, seed):
+        return {
+            "status": "error",
+            "feasible": False,
+            "solver": solver_name,
+            "makespan_min": 123.0,
+            "total_setup_min": 10.0,
+            "total_tardiness_min": 0.0,
+            "total_material_loss": 0.0,
+            "assigned_ops": n_ops // 10,
+            "violations": 0,
+            "solve_ms": 10,
+            "gen_ms": 1,
+            "verify_ms": 1,
+            "n_ops": n_ops,
+            "n_machines": n_machines,
+            "n_states": n_states,
+            "sdst_memory_bytes": 0,
+            "metadata": {},
+        }
+
+    monkeypatch.setattr(study_module, "run_scaling_case", fake_run_scaling_case)
+
+    report = study_module.study_rhc_50k(
+        preset_name="industrial-50k",
+        seeds=[1],
+        solver_names=["RHC-GREEDY"],
+        lane="throughput",
+        quality_gate_enabled=False,
+        write_dir=tmp_path,
+    )
+
+    comparison = report["records"][0]["comparisons"][0]
+    assert comparison["process_outcome"] == "completed"
+    assert comparison["solve_outcome"] == "solver_error"
+    assert comparison["results"]["process_outcome"] == "completed"
+    assert comparison["results"]["solve_outcome"] == "solver_error"
+
+    summary = report["summary_by_solver"]["RHC-GREEDY"]
+    assert summary["process_completed_count"] == 1
+    assert summary["solve_completed_count"] == 0
+    assert summary["solver_error_count"] == 1
 
 
 def test_study_rhc_50k_reports_optimization_signals(

@@ -38,6 +38,131 @@
 
 Практический вывод стал жёстче и чище: на `industrial-50k` текущая научная задача уже не в том, чтобы "починить очередной exception", а в том, чтобы найти такую window geometry, admission policy или hybrid routing strategy, при которой ALNS вообще успевает войти в destroy-repair loop внутри выделенного бюджета. До этого момента линия `RHC-ALNS` на 50K должна интерпретироваться как guarded greedy controller with ALNS diagnostics, а не как зрелый ALNS large-scale solver.
 
+## Addendum (2026-04-26): Bounded Geometry DOE (Admission Regime)
+
+Для проверки admission-гипотезы был выделен отдельный воспроизводимый study-runner:
+
+- `benchmark/study_rhc_alns_geometry_doe.py`
+
+Он фиксирует ALNS-профиль и варьирует только geometry окна RHC. Ключевая метрика этой серии — не абсолютный throughput, а признак входа в реальный ALNS search:
+
+- `budget_guard_skipped_initial_search`
+- `iterations_completed`
+- `inner_fallback_ratio`
+
+### Протокол bounded pilot
+
+- preset: `industrial-50k`
+- lane: `throughput`
+- seeds: `1`
+- `max_windows = 2`
+- `time_limit_s = 80`
+
+### Финальный protocol-hardening (2026-04-26)
+
+После pilot-итераций был зафиксирован более строгий протокол для честного завершения DOE и устранения tail-confounder:
+
+- в `RhcSolver` добавлен флаг `fallback_repair_enabled` и для DOE он выключен (`window-only` режим);
+- в harness добавлен per-run watchdog (`--per-run-timeout-s`), чтобы каждый geometry-run завершался детерминированно как completed или timeout-censored;
+- финальный синхронный артефакт:
+  - `benchmark/studies/2026-04-26-rhc-alns-geometry-doe-v5-windowonly-timeboxed-sync/rhc_alns_geometry_doe.json`
+  - `benchmark/studies/2026-04-26-rhc-alns-geometry-doe-v5-windowonly-timeboxed-sync/summary.md`
+
+### Наблюдаемая таблица (50K, bounded, window-only)
+
+| geometry | inner fallback ratio | guard-skipped windows | search-active rate | total iterations completed | assigned ops | scheduled ratio | wall-time s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 240/60 | 0.0000 | 0.0 | 1.0000 | 72.0 | 228 | 0.0046 | 58.63 |
+| 360/90 | 0.0000 | 0.0 | 1.0000 | 64.0 | 350 | 0.0070 | 65.71 |
+| 480/120 | 1.0000 | 2.0 | 0.0000 | 0.0 | 1531 | 0.0306 | 4.49 |
+| 300/90 | 1.0000 | 0.0 | 0.0000 | 0.0 | 456 | 0.0091 | 168.05 |
+
+### Критическая интерпретация
+
+1. Geometry определяет режим работы ALNS, а не только скорость.
+   - `240/60` и `360/90` входят в реальный ALNS search (`search-active=1.0`, `fallback=0.0`).
+   - `480/120` и `300/90` остаются в fallback-доминируемом режиме (`search-active=0.0`, `fallback=1.0`).
+
+2. На bounded window-only протоколе активный ALNS search не гарантирует лучший coverage.
+   - search-active точки показали меньший `scheduled_ratio`, чем `480/120` fallback-only.
+   - Это указывает на текущий trade-off: время на initial/destroy-repair внутри окна против быстрой fallback-коммитизации.
+
+3. Методологически важное следствие.
+   - `inner_fallback_ratio`, `guard-skipped` и `iterations_completed` — первичные режимные метрики admission-перехода.
+   - `scheduled_ratio` в этом эксперименте должен читаться совместно с режимными метриками, а не как самостоятельный KPI «качества ALNS».
+
+### Методологический статус
+
+- Финальный 4-geometry DOE завершён полностью (`completed_seed_count=1`, `censored_seed_count=0` для всех точек).
+- Результат остаётся bounded-режимным evidence (не production-scale proof качества на полном горизонте 50K).
+- Это строгий reproducible-доказательный шаг, что режим `guard-short-circuit` может сменяться на реальный ALNS search выбором geometry, но эксплуатационный KPI при этом может ухудшаться.
+
+## Addendum (2026-04-26): 100K+ Scaling Audit and Mathematical Corrections
+
+После bounded 50K DOE был проведён следующий аудит на staged 100K+ harness (`benchmark/study_rhc_500k.py`) с двумя целями:
+
+1. проверить, корректно ли переносится 50K guard-математика на 100K+;
+2. отделить реальные модельные пределы от артефактов harness-level parameterization.
+
+### Выявленный математический дефект
+
+В исходном staged 500K harness значения:
+
+- `alns_presearch_max_window_ops = 1000`
+- `alns_presearch_min_time_limit_s = 240`
+
+были effectively constant across scale. Это приводило к систематическому перекосу:
+
+- topology и `max_ops_per_window` масштабировались вверх;
+- но ALNS pre-search guard оставался на 50K-порогах;
+- в результате на 100K+ большие окна чаще переходили в режим `not_run_budget_guard`, чем это следовало из выделенного времени и window geometry.
+
+Иными словами, часть observed 100K+ деградации объяснялась не только комбинаторной сложностью, но и несогласованностью между scaling policy окна и scaling policy guard.
+
+### Исправление
+
+В `benchmark/study_rhc_500k.py` введено scale-aware обновление guard-параметров для `RHC-ALNS`:
+
+- `alns_presearch_max_window_ops` теперь растёт с масштабом задачи;
+- `alns_presearch_min_time_limit_s` теперь убывает с масштабом задачи, но не ниже безопасного пола;
+- добавлен harness-only `max_windows_override` для bounded 100K+ academic runs.
+
+Это изменение intentionally локализовано в harness, а не в core solver: цель — не «переписать общую политику RHC», а обеспечить математически согласованную и воспроизводимую study-surface для 100K+ аудита.
+
+### Фактический результат staged 100K+
+
+1. `study_rhc_500k` regression suite полностью зелёный.
+2. Консолидированный пакет `50k + 500k + rhc-scaling` остаётся зелёным.
+3. Plan-run для 200K/300K/500K дал важное boundary observation:
+
+- `200000` операций — допустимый режим по текущему schema/model limit;
+- `300000` и `500000` блокируются не по памяти, а по `operations_exceed_model_limit`.
+
+Следовательно, ближайший жёсткий теоретико-инженерный предел текущей публичной модели SynAPS — не RAM, а schema-level upper bound на количество операций.
+
+### Академически корректная интерпретация
+
+На текущем состоянии проекта `100K+` означает:
+
+- рабочий staged research harness,
+- воспроизводимая topology/resource projection,
+- частично выполненный runtime path,
+- и явное разделение между `feasible-to-study` и `blocked-by-model-limit` scales.
+
+Это сильнее, чем просто «у нас есть скрипт на 500K», но слабее, чем claim о production-ready 500K solve.
+
+### Внешние открытые источники, реально использованные в этом цикле
+
+1. ALNS documentation (Wouda et al., 2019-2025) — acceptance criteria, operator selection, stopping rules.
+2. Pisinger and Ropke (2019) — handbook framing ALNS/LNS as large-neighborhood metaheuristic baseline.
+3. Santini, Ropke, and Hvattum (2018) — comparison of acceptance criteria for ALNS.
+4. Hendel (2022) — $\alpha$-UCB operator-pair selection for ALNS-style search.
+5. Google OR-Tools CP-SAT docs — solver time-limit discipline for large-scale runs.
+6. Araujo, Birgin, Ronconi (2024) — local search and neighborhood reduction for large flexible job shop variants.
+7. de Puiseau et al. (2025) — learned local-search control improves quality when longer runtimes are acceptable.
+
+Часть классических журнальных DOI-источников по ALNS и scheduling была недоступна из текущей среды по `HTTP 403`; поэтому этот addendum опирается на открытые первичные и author-maintained sources, а не на paywalled second-hand summaries.
+
 ---
 
 ## 1. Деконструкция архитектурных пределов

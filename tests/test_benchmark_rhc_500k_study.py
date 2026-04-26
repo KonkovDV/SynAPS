@@ -283,6 +283,73 @@ def test_study_rhc_500k_applies_time_limit_cap(
     assert captured_time_limits == [120]
 
 
+def test_study_rhc_500k_applies_max_windows_override(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import benchmark.study_rhc_500k as study_module
+
+    captured_max_windows: list[int | None] = []
+
+    def fake_run_scaling_case(*, n_ops, n_machines, n_states, solver_name, solver_kwargs, seed):
+        captured_max_windows.append(solver_kwargs.get("max_windows"))
+        return {
+            "status": "feasible",
+            "feasible": True,
+            "solver": solver_name,
+            "makespan_min": 100.0,
+            "total_setup_min": 20.0,
+            "total_tardiness_min": 0.0,
+            "total_material_loss": 0.0,
+            "assigned_ops": n_ops,
+            "violations": 0,
+            "solve_ms": 1,
+            "gen_ms": 1,
+            "verify_ms": 0,
+            "n_ops": n_ops,
+            "n_machines": n_machines,
+            "n_states": n_states,
+            "sdst_memory_bytes": 0,
+            "metadata": {},
+        }
+
+    monkeypatch.setattr(study_module, "run_scaling_case", fake_run_scaling_case)
+
+    study_module.study_rhc_500k(
+        execution_mode="gated",
+        scales=[50_000],
+        seeds=[1],
+        solver_names=["RHC-ALNS"],
+        lane="throughput",
+        max_windows_override=2,
+        write_dir=tmp_path,
+    )
+
+    assert captured_max_windows == [2]
+
+
+def test_scale_solver_kwargs_relaxes_alns_presearch_guard_for_100k_plus() -> None:
+    import benchmark.study_rhc_500k as study_module
+
+    base_kwargs = study_module._default_solver_specs()["RHC-ALNS"]["solver_kwargs"]
+    scaled = study_module._scale_solver_kwargs(
+        "RHC-ALNS",
+        base_kwargs,
+        n_ops=200_000,
+        base_ops=50_000,
+        time_limit_growth_power=0.5,
+        max_window_growth_power=0.35,
+        max_window_cap=25_000,
+        time_limit_cap_s=120,
+    )
+
+    assert scaled["alns_presearch_budget_guard_enabled"] is True
+    assert scaled["alns_presearch_max_window_ops"] > 1_000
+    assert scaled["alns_presearch_max_window_ops"] <= scaled["max_ops_per_window"]
+    assert scaled["alns_presearch_min_time_limit_s"] < 240.0
+    assert scaled["alns_presearch_min_time_limit_s"] >= 30.0
+
+
 def test_study_rhc_500k_blocks_execution_above_model_operation_limit(
     monkeypatch,
     tmp_path: Path,

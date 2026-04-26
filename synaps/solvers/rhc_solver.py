@@ -85,6 +85,7 @@ class RhcSolver(BaseSolver):
         # RHC computes its own per-window budget.
         inner_kwargs.pop("time_limit_s", None)
         time_limit_s: float = float(kwargs.get("time_limit_s", 600))
+        fallback_repair_enabled: bool = bool(kwargs.get("fallback_repair_enabled", True))
         inner_solver_min_budget_s: float = float(kwargs.get("inner_solver_min_budget_s", 0.0))
         backtracking_enabled: bool = bool(kwargs.get("backtracking_enabled", False))
         backtracking_tail_minutes: float = max(
@@ -520,6 +521,8 @@ class RhcSolver(BaseSolver):
             "warm_start_completed_assignments",
             "warm_start_rejected_reason",
             "budget_guard_skipped_initial_search",
+            "inner_status_override",
+            "inner_solver_executed",
         )
 
         def append_inner_window_summary(
@@ -549,6 +552,11 @@ class RhcSolver(BaseSolver):
                 summary["lower_bound"] = round(lower_bound, 4)
             if inner_time_limit_s is not None:
                 summary["inner_time_limit_s"] = round(inner_time_limit_s, 2)
+                # RHC passes a budget target into the inner solver but does not
+                # enforce a hard kill boundary at process level.
+                summary["inner_time_budget_s"] = round(inner_time_limit_s, 2)
+                summary["inner_time_budget_mode"] = "advisory_soft"
+                summary["inner_time_budget_hard_enforced"] = False
             if candidate_pressure is not None:
                 summary["candidate_pressure"] = round(candidate_pressure, 4)
             if due_pressure is not None:
@@ -569,12 +577,22 @@ class RhcSolver(BaseSolver):
                 summary["inner_status"] = "not_run"
                 summary["inner_duration_ms"] = 0
             else:
-                summary["inner_status"] = (
+                computed_inner_status = (
                     inner_result.status.value
                     if hasattr(inner_result.status, "value")
                     else str(inner_result.status)
                 )
+                override_status = (inner_result.metadata or {}).get("inner_status_override")
+                if isinstance(override_status, str) and override_status:
+                    computed_inner_status = override_status
+                summary["inner_status"] = computed_inner_status
                 summary["inner_duration_ms"] = inner_result.duration_ms
+                if inner_time_limit_s is not None:
+                    budget_ms = int(round(inner_time_limit_s * 1000.0))
+                    if inner_result.duration_ms > budget_ms:
+                        summary["inner_time_budget_overrun_ms"] = (
+                            inner_result.duration_ms - budget_ms
+                        )
                 if hasattr(inner_result.error_category, "value"):
                     summary["inner_error_category"] = inner_result.error_category.value
                 for key in inner_summary_metadata_keys:
@@ -1760,7 +1778,7 @@ class RhcSolver(BaseSolver):
                             selected_inner_solver_name == "alns"
                             and alns_presearch_budget_guard_enabled
                             and len(clean_window_ops) > alns_presearch_max_window_ops
-                            and per_window_limit <= alns_presearch_min_time_limit_s
+                            and per_window_limit < alns_presearch_min_time_limit_s
                         )
                         if should_skip_alns_presearch:
                             alns_presearch_budget_guard_skipped_windows += 1
@@ -1774,7 +1792,7 @@ class RhcSolver(BaseSolver):
                             )
                             inner_result = ScheduleResult(
                                 solver_name="alns",
-                                status=SolverStatus.FEASIBLE,
+                                status=SolverStatus.ERROR,
                                 assignments=[],
                                 duration_ms=0,
                                 metadata={
@@ -1783,6 +1801,8 @@ class RhcSolver(BaseSolver):
                                     "improvements": 0,
                                     "initial_solution_ms": 0,
                                     "budget_guard_skipped_initial_search": True,
+                                    "inner_status_override": "not_run_budget_guard",
+                                    "inner_solver_executed": False,
                                 },
                             )
                         else:
@@ -2096,11 +2116,15 @@ class RhcSolver(BaseSolver):
                     if inner_result is None:
                         inner_status_counts["not_run"] += 1
                     else:
-                        inner_status = (
-                            inner_result.status.value
-                            if hasattr(inner_result.status, "value")
-                            else str(inner_result.status)
+                        inner_status = (inner_result.metadata or {}).get(
+                            "inner_status_override"
                         )
+                        if not isinstance(inner_status, str) or not inner_status:
+                            inner_status = (
+                                inner_result.status.value
+                                if hasattr(inner_result.status, "value")
+                                else str(inner_result.status)
+                            )
                         inner_status_counts[inner_status] += 1
                     append_inner_window_summary(
                         window=window_count,
@@ -2176,6 +2200,13 @@ class RhcSolver(BaseSolver):
                 logger.warning(
                     "RHC: %d operations unscheduled after all windows; "
                     "skipping fallback greedy repair because the global time limit is exhausted",
+                    len(unscheduled_ids),
+                )
+            elif not fallback_repair_enabled:
+                fallback_repair_skipped = True
+                logger.info(
+                    "RHC: %d operations unscheduled after all windows; "
+                    "skipping fallback greedy repair because fallback_repair_enabled=false",
                     len(unscheduled_ids),
                 )
             else:

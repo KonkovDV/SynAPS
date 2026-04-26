@@ -245,3 +245,94 @@ def test_run_rhc_alns_doe_generates_ranked_report(monkeypatch, tmp_path: Path) -
     assert "cvar_makespan_minutes" in first["summary"]
     assert "mean_inner_fallback_ratio" in first["summary"]
     assert "passed" in first["quality_gate"]
+
+
+def test_geometry_doe_separates_process_and_solve_outcomes(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import benchmark.study_rhc_alns_geometry_doe as geometry_module
+
+    def fake_run_with_timeout(*, n_ops, n_machines, n_states, solver_name, solver_kwargs, seed, timeout_s):
+        if seed == 2:
+            return None, True, None
+        return (
+            {
+                "status": "error",
+                "feasible": False,
+                "assigned_ops": 10,
+                "n_ops": n_ops,
+                "makespan_min": 5.0,
+                "solve_ms": 100,
+                "metadata": {
+                    "inner_fallback_ratio": 1.0,
+                    "alns_presearch_budget_guard_skipped_windows": 1,
+                    "inner_window_summaries": [],
+                },
+            },
+            False,
+            None,
+        )
+
+    monkeypatch.setattr(
+        geometry_module,
+        "_run_scaling_case_with_timeout",
+        fake_run_with_timeout,
+    )
+
+    report = geometry_module.run_rhc_alns_geometry_doe(
+        geometries=[(480, 120)],
+        seeds=[1, 2],
+        write_dir=tmp_path,
+    )
+
+    summary = report["config_summaries"][0]["summary"]
+    assert summary["seed_count"] == 2
+    assert summary["process_completed_seed_count"] == 1
+    assert summary["solve_completed_seed_count"] == 0
+    assert summary["completed_seed_count"] == 0
+    assert summary["solver_error_seed_count"] == 1
+    assert summary["censored_seed_count"] == 1
+
+    runs = report["config_summaries"][0]["runs"]
+    assert runs[0]["process_outcome"] == "completed"
+    assert runs[0]["solve_outcome"] == "solver_error"
+    assert runs[1]["process_outcome"] == "timeout_censored"
+    assert runs[1]["solve_outcome"] == "not_executed"
+
+    markdown = (tmp_path / "summary.md").read_text(encoding="utf-8")
+    assert "proc-completed" in markdown
+    assert "solve-completed" in markdown
+    assert "solver-errors" in markdown
+    assert "censored" in markdown
+
+
+def test_geometry_doe_subprocess_failure_includes_stdio(monkeypatch) -> None:
+    import benchmark.study_rhc_alns_geometry_doe as geometry_module
+
+    def fake_subprocess_run(*args, **kwargs):
+        raise geometry_module.subprocess.CalledProcessError(
+            returncode=3,
+            cmd=args[0],
+            output="fake stdout",
+            stderr="fake stderr",
+        )
+
+    monkeypatch.setattr(geometry_module.subprocess, "run", fake_subprocess_run)
+
+    raw_result, timed_out, run_error = geometry_module._run_scaling_case_with_timeout(
+        n_ops=100,
+        n_machines=2,
+        n_states=2,
+        solver_name="rhc-alns",
+        solver_kwargs={},
+        seed=1,
+        timeout_s=1.0,
+    )
+
+    assert raw_result is None
+    assert timed_out is False
+    assert run_error is not None
+    assert "returncode=3" in run_error
+    assert "stderr: fake stderr" in run_error
+    assert "stdout: fake stdout" in run_error

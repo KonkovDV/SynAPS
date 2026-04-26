@@ -288,6 +288,26 @@ def _scale_solver_kwargs(
             max_iterations = int(inner_kwargs.get("max_iterations", 100))
             inner_kwargs["max_iterations"] = min(180, max_iterations)
 
+        # Relax ALNS pre-search guard as scale grows to avoid permanent "not_run_budget_guard"
+        # behavior on 100k+ instances while preserving conservative lower bounds.
+        base_guard_ops = int(base_kwargs.get("alns_presearch_max_window_ops", 1000))
+        base_guard_time_s = float(base_kwargs.get("alns_presearch_min_time_limit_s", 240.0))
+        scaled_window_cap = int(scaled.get("max_ops_per_window", base_guard_ops))
+
+        guard_from_ratio = int(round(base_guard_ops * (ratio ** 0.35)))
+        guard_from_window_cap = int(round(scaled_window_cap * 0.5))
+        effective_guard_ops = max(base_guard_ops, guard_from_ratio, guard_from_window_cap)
+        scaled["alns_presearch_max_window_ops"] = min(scaled_window_cap, effective_guard_ops)
+
+        effective_guard_time_s = max(30.0, base_guard_time_s * (ratio ** -0.35))
+        scaled["alns_presearch_min_time_limit_s"] = round(
+            min(base_guard_time_s, effective_guard_time_s),
+            2,
+        )
+        scaled["alns_presearch_budget_guard_enabled"] = bool(
+            scaled.get("alns_presearch_budget_guard_enabled", True)
+        )
+
     return scaled
 
 
@@ -464,6 +484,7 @@ def study_rhc_500k(
     max_window_growth_power: float = 0.35,
     max_window_cap: int = 25_000,
     time_limit_cap_s: int | None = None,
+    max_windows_override: int | None = None,
 ) -> dict[str, Any]:
     """Run staged RHC benchmark up to 500K+ operations with safety gating."""
 
@@ -559,6 +580,8 @@ def study_rhc_500k(
                         lane=lane_name,
                         seed=seed,
                     )
+                    if max_windows_override is not None:
+                        profiled_kwargs["max_windows"] = int(max_windows_override)
 
                     run_record: dict[str, Any] = {
                         "scale": scale,
@@ -692,6 +715,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-window-growth-power", type=float, default=0.35)
     parser.add_argument("--max-window-cap", type=int, default=25_000)
     parser.add_argument("--time-limit-cap-s", type=int)
+    parser.add_argument("--max-windows-override", type=int)
     return parser
 
 
@@ -729,6 +753,7 @@ def main(argv: list[str] | None = None) -> int:
         max_window_growth_power=args.max_window_growth_power,
         max_window_cap=args.max_window_cap,
         time_limit_cap_s=args.time_limit_cap_s,
+        max_windows_override=args.max_windows_override,
     )
     json.dump(report, sys.stdout, indent=2)
     sys.stdout.write("\n")

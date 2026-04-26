@@ -69,6 +69,73 @@ def _apply_lane_profile(
     return profiled
 
 
+def _classify_solve_outcome(status: Any, *, feasible: bool) -> str:
+    """Normalize solver status into a stable study-level outcome taxonomy."""
+
+    status_text = str(status).strip().lower()
+    if feasible or status_text in {"optimal", "feasible"}:
+        return "completed"
+    if status_text in {"timeout", "timed_out"}:
+        return "solver_timeout"
+    if status_text in {"cancelled", "canceled"}:
+        return "solver_cancelled"
+    if status_text in {"infeasible", "error", "not_run"}:
+        return "solver_error"
+    return "solver_error"
+
+
+def _build_study_evidence(
+    *,
+    records: list[dict[str, Any]],
+    summary_snapshot: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Build a compact evidence section for reproducibility and publication rails."""
+
+    process_outcomes: set[str] = set()
+    solve_outcomes: set[str] = set()
+
+    for record in records:
+        for comparison in record.get("comparisons", []):
+            process_outcomes.add(
+                str(
+                    comparison.get(
+                        "process_outcome",
+                        comparison.get("results", {}).get("process_outcome", "completed"),
+                    )
+                )
+            )
+            solve_outcomes.add(
+                str(
+                    comparison.get(
+                        "solve_outcome",
+                        comparison.get("results", {}).get("solve_outcome", "solver_error"),
+                    )
+                )
+            )
+
+    lane_outcome_summary: dict[str, dict[str, Any]] = {}
+    for key, summary in summary_snapshot.items():
+        lane_outcome_summary[key] = {
+            "instance_count": int(summary.get("instance_count", 0)),
+            "process_completed_count": int(summary.get("process_completed_count", 0)),
+            "process_completed_rate": float(summary.get("process_completed_rate", 0.0)),
+            "solve_completed_count": int(summary.get("solve_completed_count", 0)),
+            "solve_completed_rate": float(summary.get("solve_completed_rate", 0.0)),
+            "solver_timeout_count": int(summary.get("solver_timeout_count", 0)),
+            "solver_cancelled_count": int(summary.get("solver_cancelled_count", 0)),
+            "solver_error_count": int(summary.get("solver_error_count", 0)),
+        }
+
+    return {
+        "outcome_taxonomy": {
+            "version": "rhc-50k-v1",
+            "process_outcomes": sorted(process_outcomes),
+            "solve_outcomes": sorted(solve_outcomes),
+        },
+        "lane_outcome_summary": lane_outcome_summary,
+    }
+
+
 def _run_two_phase_refinement_case(
     *,
     n_ops: int,
@@ -337,6 +404,16 @@ def study_rhc_50k(
     else:
         report["quality_gate"] = {"enabled": False}
 
+    evidence_scope = (
+        report["summary_by_solver_lane"]
+        if lane == "both"
+        else report["summary_by_solver"]
+    )
+    report["evidence"] = _build_study_evidence(
+        records=records,
+        summary_snapshot=evidence_scope,
+    )
+
     report_path = artifact_dir / "rhc_50k_study.json"
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     report["artifact_path"] = str(report_path)
@@ -469,10 +546,20 @@ def _study_industrial_50k(
                         seed=seed,
                     )
                 comparison = {
+                    "process_outcome": "completed",
+                    "solve_outcome": _classify_solve_outcome(
+                        raw_result["status"],
+                        feasible=bool(raw_result["feasible"]),
+                    ),
                     "solver_config": solver_name,
                     "selected_solver_config": solver_name,
                     "lane": lane_name,
                     "results": {
+                        "process_outcome": "completed",
+                        "solve_outcome": _classify_solve_outcome(
+                            raw_result["status"],
+                            feasible=bool(raw_result["feasible"]),
+                        ),
                         "status": raw_result["status"],
                         "feasible": raw_result["feasible"],
                         "solver_name": raw_result["solver"],
@@ -568,6 +655,16 @@ def _study_industrial_50k(
     else:
         report["quality_gate"] = {"enabled": False}
 
+    evidence_scope = (
+        report["summary_by_solver_lane"]
+        if lane == "both"
+        else report["summary_by_solver"]
+    )
+    report["evidence"] = _build_study_evidence(
+        records=records,
+        summary_snapshot=evidence_scope,
+    )
+
     report_path = artifact_dir / "rhc_50k_study.json"
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     report["artifact_path"] = str(report_path)
@@ -579,6 +676,15 @@ def _summarize_solver_records(
     *,
     cvar_alpha: float,
 ) -> dict[str, Any]:
+    process_outcomes = [
+        str(record.get("process_outcome", record.get("results", {}).get("process_outcome", "completed")))
+        for record in records
+    ]
+    solve_outcomes = [
+        str(record.get("solve_outcome", record.get("results", {}).get("solve_outcome", "solver_error")))
+        for record in records
+    ]
+
     wall_times = [record["statistics"]["wall_time_s_mean"] for record in records]
     verification_times = [record["statistics"]["verification_time_ms"] for record in records]
     makespans = [record["results"]["makespan_minutes"] for record in records]
@@ -654,6 +760,11 @@ def _summarize_solver_records(
 
     summary: dict[str, Any] = {
         "instance_count": len(records),
+        "process_completed_count": sum(1 for value in process_outcomes if value == "completed"),
+        "solve_completed_count": sum(1 for value in solve_outcomes if value == "completed"),
+        "solver_timeout_count": sum(1 for value in solve_outcomes if value == "solver_timeout"),
+        "solver_cancelled_count": sum(1 for value in solve_outcomes if value == "solver_cancelled"),
+        "solver_error_count": sum(1 for value in solve_outcomes if value == "solver_error"),
         "mean_wall_time_s": round(statistics.mean(wall_times), 4),
         "median_wall_time_s": round(statistics.median(wall_times), 4),
         "mean_verification_time_ms": round(statistics.mean(verification_times), 2),
@@ -672,6 +783,14 @@ def _summarize_solver_records(
         "cvar_alpha": round(cvar_alpha, 4),
         "cvar_makespan_minutes": round(_tail_cvar(makespans, cvar_alpha), 2),
     }
+    summary["process_completed_rate"] = round(
+        summary["process_completed_count"] / max(1, summary["instance_count"]),
+        4,
+    )
+    summary["solve_completed_rate"] = round(
+        summary["solve_completed_count"] / max(1, summary["instance_count"]),
+        4,
+    )
     if len(wall_times) >= 2:
         wall_quartiles = statistics.quantiles(wall_times, n=4, method="inclusive")
         q1_wall, q3_wall = wall_quartiles[0], wall_quartiles[2]

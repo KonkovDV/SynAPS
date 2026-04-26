@@ -36,6 +36,7 @@ What is implemented and verified in this repository:
 - Stable solve/repair JSON contracts (`synaps/contracts.py`)
 - End-to-end contract examples (`schema/contracts/examples/`)
 - Dedicated reproducible 50K compare rail plus a staged 500K study harness (`benchmark/study_rhc_50k.py`, `benchmark/study_rhc_500k.py`)
+- The staged 500K harness now includes scale-aware ALNS pre-search guard scaling and an optional bounded `max_windows_override` for 100K+ academic runs
 - Separate feasibility checker (`synaps/solvers/feasibility_checker.py`)
 - ALNS can accept partial warm starts, complete missing assignments, and recompute setups before local search
 - ALNS now rejects infeasible full seeds and reanchored warm starts before local search, so final recovery cannot silently fall back to an invalid initial baseline
@@ -81,6 +82,23 @@ Key comparison points:
 - Post-fix guarded `RHC-ALNS|throughput` in `2026-04-26-rhc-alns-postfix-canonical-v4` reports `mean_scheduled_ratio = 0.3028`, `mean_makespan_minutes = 9675.18`, and `mean_inner_fallback_ratio = 1.0`.
 - Post-fix `RHC-GREEDY|throughput` in `test-50k-after-fix` remains the stronger pure-coverage baseline at `mean_scheduled_ratio = 0.37` with `mean_inner_fallback_ratio = 0.0`.
 - The unresolved research problem is now narrower: create a window geometry and routing policy where ALNS can actually enter search within budget, instead of spending the whole budget on phase-1 seed generation or being guarded into fallback.
+
+## 100K+ Snapshot (staged harness)
+
+Current 100K+ status is a staged research surface, not a production-readiness claim.
+
+What is now implemented and verified:
+
+- `benchmark.study_rhc_500k` has a scale ladder (`50k -> 100k -> 200k -> 300k -> 500k`)
+- resource projection and gated execution are active
+- ALNS pre-search guard parameters are now scaled with problem size in the harness instead of staying frozen at 50K thresholds
+- a bounded academic run can be forced with `--max-windows-override` for reproducible 100K+ evidence slices
+
+What the latest audit established:
+
+- `200k` is still within the current public model operation limit
+- `300k` and `500k` are presently blocked by `operations_exceed_model_limit`, not by projected RAM pressure
+- so the next hard engineering boundary is model/schema capacity, not workstation memory
 
 ## Solver Portfolio
 
@@ -145,6 +163,20 @@ python -m benchmark.study_rhc_50k \
   --seeds 1 \
   --solvers RHC-GREEDY RHC-ALNS \
   --write-dir benchmark/studies/_local-rhc-50k
+```
+
+Run a bounded 100K ALNS audit slice:
+
+```bash
+python -m benchmark.study_rhc_500k \
+  --execution-mode gated \
+  --scales 100000 \
+  --solvers RHC-ALNS \
+  --lane throughput \
+  --seeds 1 \
+  --time-limit-cap-s 90 \
+  --max-windows-override 2 \
+  --write-dir benchmark/studies/_local-rhc-100k
 ```
 
 Run tests:

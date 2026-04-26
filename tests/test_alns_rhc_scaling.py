@@ -2543,6 +2543,48 @@ class TestRhcInnerSolver:
         verification = verify_schedule_result(problem, result)
         assert verification.feasible, f"Violations: {verification.violations}"
 
+    def test_rhc_marks_inner_time_budget_as_soft_and_reports_overrun(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Inner window summaries must expose advisory budget semantics explicitly."""
+        from synaps.model import ScheduleResult
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_3state_problem(n_orders=4, ops_per_order=2)
+
+        def fake_alns_solve(self, problem, **kwargs):
+            return ScheduleResult(
+                solver_name="alns",
+                status=SolverStatus.TIMEOUT,
+                assignments=[],
+                duration_ms=120_000,
+                metadata={},
+            )
+
+        monkeypatch.setattr(
+            "synaps.solvers.alns_solver.AlnsSolver.solve",
+            fake_alns_solve,
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=480,
+            overlap_minutes=60,
+            inner_solver="alns",
+            time_limit_s=30,
+            max_ops_per_window=50,
+        )
+
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        first_window = result.metadata["inner_window_summaries"][0]
+        assert first_window["inner_time_budget_mode"] == "advisory_soft"
+        assert first_window["inner_time_budget_hard_enforced"] is False
+        assert first_window["inner_time_budget_s"] == pytest.approx(
+            first_window["inner_time_limit_s"]
+        )
+        assert first_window["inner_time_budget_overrun_ms"] > 0
+
     def test_rhc_falls_back_when_inner_alns_exhausts_budget_before_search(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -2646,6 +2688,58 @@ class TestRhcInnerSolver:
 
         verification = verify_schedule_result(problem, result)
         assert verification.feasible, f"Violations: {verification.violations}"
+
+    def test_rhc_presearch_budget_guard_does_not_skip_at_equal_budget_threshold(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """RHC should execute ALNS when per-window budget is exactly at guard threshold."""
+        from synaps.model import ScheduleResult
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_3state_problem(n_orders=4, ops_per_order=2)
+        alns_call_count = 0
+
+        def fake_alns(self, problem, **kwargs):
+            nonlocal alns_call_count
+            alns_call_count += 1
+            return ScheduleResult(
+                solver_name="alns",
+                status=SolverStatus.ERROR,
+                assignments=[],
+                duration_ms=0,
+                metadata={
+                    "time_limit_exhausted_before_search": True,
+                    "iterations_completed": 0,
+                    "improvements": 0,
+                    "initial_solution_ms": 0,
+                    "budget_guard_skipped_initial_search": False,
+                    "inner_status_override": "budget_exhausted_before_search",
+                    "inner_solver_executed": True,
+                },
+            )
+
+        monkeypatch.setattr(
+            "synaps.solvers.alns_solver.AlnsSolver.solve",
+            fake_alns,
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=480,
+            overlap_minutes=60,
+            inner_solver="alns",
+            time_limit_s=30,
+            max_ops_per_window=50,
+            alns_presearch_budget_guard_enabled=True,
+            alns_presearch_max_window_ops=1,
+            alns_presearch_min_time_limit_s=15,
+        )
+
+        assert alns_call_count >= 1
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert result.metadata["alns_presearch_budget_guard_enabled"] is True
+        assert result.metadata["alns_presearch_budget_guard_skipped_windows"] == 0
 
     def test_rhc_hybrid_routes_dense_window_to_cpsat(
         self,
