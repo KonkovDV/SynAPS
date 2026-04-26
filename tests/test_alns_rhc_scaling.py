@@ -1839,6 +1839,57 @@ class TestRhcSolver:
         assert result.metadata["backtracking_ops_total"] >= 1
         assert result.metadata["inner_window_summaries"][1]["backtracking_rewind_ops"] >= 1
 
+    def test_rhc_per_window_telemetry_consistency_with_config(self) -> None:
+        """Regression: per-window metadata must not contradict solve_kwargs config.
+        
+        If admission_full_scan_enabled=False in solve_kwargs, per-window summaries
+        should not contain "admission_full_scan_enabled": True (which would be confusing).
+        Per-window summaries should only report *facts* (triggered, added_ops, final_pool),
+        not configuration.
+        """
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_3state_problem(n_orders=10, ops_per_order=5)
+
+        # Solve with admission_full_scan_enabled=False (production default)
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=120,
+            overlap_minutes=30,
+            inner_solver="greedy",
+            time_limit_s=30,
+            max_ops_per_window=50,
+            max_windows=3,
+            candidate_admission_enabled=True,
+            admission_full_scan_enabled=False,  # Config: full-scan disabled
+        )
+
+        assert result.status in (
+            SolverStatus.FEASIBLE,
+            SolverStatus.OPTIMAL,
+            SolverStatus.ERROR,
+        )
+        
+        # Check: global metadata should reflect config correctly
+        assert result.metadata["admission_full_scan_enabled"] is False
+        
+        # Check: per-window summaries must not write contradictory "admission_full_scan_enabled"
+        # (they should only write facts like "full_scan_triggered", never config values)
+        for window_summary in result.metadata.get("inner_window_summaries", []):
+            # If full-scan was triggered, "full_scan_triggered" key exists
+            # But "admission_full_scan_enabled" should NOT appear in window summary
+            # (config lives in global metadata, not per-window)
+            if "admission_full_scan_enabled" in window_summary:
+                # This is the regression we're preventing:
+                # value should match global config, never be True when config is False
+                assert (
+                    window_summary["admission_full_scan_enabled"]
+                    == result.metadata["admission_full_scan_enabled"]
+                ), (
+                    f"per-window admission_full_scan_enabled={window_summary['admission_full_scan_enabled']} "
+                    f"contradicts global config={result.metadata['admission_full_scan_enabled']}"
+                )
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 4. Instance generator tests

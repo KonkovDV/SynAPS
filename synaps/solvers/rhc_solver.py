@@ -2014,10 +2014,6 @@ class RhcSolver(BaseSolver):
                             inner_window_summaries[-1][
                                 "admission_relaxation_recovered_ops"
                             ] = window_admission_relaxation_recovered_ops
-                            if admission_full_scan_enabled:
-                                inner_window_summaries[-1][
-                                    "admission_full_scan_enabled"
-                                ] = True
                         if window_full_scan_triggered:
                             inner_window_summaries[-1]["full_scan_triggered"] = True
                             inner_window_summaries[-1][
@@ -2278,10 +2274,6 @@ class RhcSolver(BaseSolver):
                         inner_window_summaries[-1][
                             "admission_relaxation_recovered_ops"
                         ] = window_admission_relaxation_recovered_ops
-                        if admission_full_scan_enabled:
-                            inner_window_summaries[-1][
-                                "admission_full_scan_enabled"
-                            ] = True
                     if window_full_scan_triggered:
                         inner_window_summaries[-1]["full_scan_triggered"] = True
                         inner_window_summaries[-1][
