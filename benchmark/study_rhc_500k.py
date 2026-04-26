@@ -82,6 +82,7 @@ def _default_solver_specs() -> dict[str, dict[str, Any]]:
                 "alns_inner_window_time_cap_s": 180,
                 "max_ops_per_window": 5_000,
                 "progressive_admission_relaxation_enabled": True,
+                "precedence_ready_candidate_filter_enabled": True,
                 "admission_relaxation_min_fill_ratio": 0.30,
                 "alns_budget_auto_scaling_enabled": True,
                 "alns_budget_estimated_repair_s_per_destroyed_op": 0.125,

@@ -403,9 +403,6 @@ class RhcSolver(BaseSolver):
         phase_now = time.monotonic()
         preprocess_phase_ms["candidate_orderings"] = int((phase_now - phase_t0) * 1000)
         preprocessing_ms = int((time.monotonic() - preprocess_t0) * 1000)
-        # Start the global budget after static preprocessing so short smoke
-        # limits reflect window scheduling behavior instead of setup overhead.
-        time_budget_t0 = time.monotonic()
         effective_window_op_cap = max_ops_per_window
         if len(problem.operations) > max_ops_per_window:
             effective_window_op_cap = min(
@@ -2813,7 +2810,6 @@ class RhcSolver(BaseSolver):
 
         while queue:
             current_id = queue.popleft()
-            current_op = ops_by_id[current_id]
             current_duration = max(op_duration_by_id.get(current_id, 0.0), 1e-6)
             current_end = result.get(current_id, 0.0) + current_duration
             for succ_id in successors.get(current_id, []):
