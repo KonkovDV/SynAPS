@@ -1,4 +1,4 @@
-# TypeScript-шлюз SynAPS
+﻿# TypeScript-шлюз SynAPS
 
 Language: [EN](README.md) | **RU**
 
@@ -27,7 +27,7 @@ Language: [EN](README.md) | **RU**
 
 `POST /api/v1/ui/gantt-model` возвращает read-only проекцию по дорожкам/блокам
 (с графом предшествования и дельтами к baseline), чтобы UI Gantt мог визуализировать
-перепланирование без разбора внутренних solver-структур.
+перепланирование без разбора внутренних структур решателя.
 
 ## Наблюдаемость и защитные барьеры
 
@@ -36,7 +36,7 @@ Control-plane теперь поддерживает:
 1. структурированные события (trace_id/span_id);
 2. OpenTelemetry-спаны (при включении);
 3. RED-метрики Prometheus через `/metrics` (duration, solver outcomes, limit-guard transitions, bridge errors, feasibility kinds, gap/windows);
-4. limit-guard fallback цепочку для `solve`.
+4. цепочку резервных переходов limit-guard для `solve`.
 
 Ключевые переменные окружения:
 
@@ -93,4 +93,5 @@ python -m synaps repair-request <request.json>
 
 Этот пакет намеренно остаётся тонким слоем.
 
-Это слой транспорта и проверки данных. Он не должен пересобирать модели CP-SAT или дублировать solver-логику из Python-ядра.
+Это слой транспорта и проверки данных. Он не должен пересобирать модели CP-SAT или дублировать логику решателя из Python-ядра.
+
