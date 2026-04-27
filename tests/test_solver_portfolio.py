@@ -99,7 +99,7 @@ def test_create_solver_supports_greedy_variant() -> None:
     assert solve_kwargs == {}
 
 
-def test_create_solver_rhc_alns_defaults_to_bounded_cpsat_inner_repair() -> None:
+def test_create_solver_rhc_alns_defaults_to_greedy_only_inner_repair() -> None:
     solver, solve_kwargs = create_solver("RHC-ALNS")
 
     assert solver.name == "rhc"
@@ -112,9 +112,10 @@ def test_create_solver_rhc_alns_defaults_to_bounded_cpsat_inner_repair() -> None
     assert solve_kwargs["alns_budget_auto_scaling_enabled"] is True
     assert solve_kwargs["alns_presearch_max_window_ops"] == 5000
     assert solve_kwargs["alns_budget_estimated_repair_s_per_destroyed_op"] == 0.125
+    assert solve_kwargs["hybrid_inner_routing_enabled"] is False
     assert solve_kwargs["hybrid_due_pressure_threshold"] == 0.35
     assert solve_kwargs["hybrid_candidate_pressure_threshold"] == 4.0
-    assert solve_kwargs["inner_kwargs"]["use_cpsat_repair"] is True
+    assert solve_kwargs["inner_kwargs"]["use_cpsat_repair"] is False
     assert solve_kwargs["inner_kwargs"]["max_no_improve_iters"] == 30
     assert solve_kwargs["inner_kwargs"]["repair_num_workers"] == 1
     assert solve_kwargs["inner_kwargs"]["sa_auto_calibration_enabled"] is True

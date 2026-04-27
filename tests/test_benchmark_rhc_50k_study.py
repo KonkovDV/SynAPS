@@ -51,8 +51,9 @@ def test_study_rhc_50k_propagates_seed_to_alns_inner_kwargs(monkeypatch, tmp_pat
     assert captured_kwargs
     forwarded = captured_kwargs[0]["solver_kwargs"]["inner_kwargs"]
     assert forwarded["random_seed"] == 7
+    assert forwarded["use_cpsat_repair"] is False
     assert forwarded["dynamic_sa_enabled"] is True
-    assert captured_kwargs[0]["solver_kwargs"]["hybrid_inner_routing_enabled"] is True
+    assert captured_kwargs[0]["solver_kwargs"]["hybrid_inner_routing_enabled"] is False
     assert captured_kwargs[0]["solver_kwargs"]["hybrid_inner_solver"] == "cpsat"
 
 
@@ -120,6 +121,8 @@ def test_study_rhc_50k_both_lanes_apply_worker_profiles(
     for kwargs in captured_kwargs:
         assert kwargs["solver_kwargs"]["random_seed"] == 11
         assert kwargs["solver_kwargs"]["inner_kwargs"]["random_seed"] == 11
+        assert kwargs["solver_kwargs"]["inner_kwargs"]["use_cpsat_repair"] is False
+        assert kwargs["solver_kwargs"]["hybrid_inner_routing_enabled"] is False
         assert kwargs["solver_kwargs"]["hybrid_inner_kwargs"]["random_seed"] == 11
 
     lanes = sorted(
@@ -302,9 +305,10 @@ def test_study_rhc_50k_uses_tuned_alns_window_budget_profile(
     assert profile["alns_budget_auto_scaling_enabled"] is True
     assert profile["alns_presearch_max_window_ops"] == 5_000
     assert profile["alns_budget_estimated_repair_s_per_destroyed_op"] == 0.125
+    assert profile["hybrid_inner_routing_enabled"] is False
     assert profile["hybrid_due_pressure_threshold"] == 0.35
     assert profile["hybrid_candidate_pressure_threshold"] == 4.0
-    assert profile["inner_kwargs"]["use_cpsat_repair"] is True
+    assert profile["inner_kwargs"]["use_cpsat_repair"] is False
     assert profile["inner_kwargs"]["repair_time_limit_s"] == 5
     assert profile["inner_kwargs"]["repair_num_workers"] == 1
     assert profile["inner_kwargs"]["cpsat_max_destroy_ops"] == 32

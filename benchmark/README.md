@@ -268,6 +268,7 @@ April 2026 hardening note:
 - ALNS initial seeds are now full-feasibility validated before local search and before being reused as a final recovery baseline.
 - On the RHC-ALNS lane, a window that exhausts its budget before the first LNS iteration is now recorded as `inner_time_limit_exhausted_before_search` and routed through the existing fallback-greedy path.
 - When auditing a fresh `rhc_50k_study.json`, inspect both solver-level KPIs and `inner_window_summaries` for `initial_solution_ms`, `time_limit_exhausted_before_search`, and `final_violation_recovery_*`.
+- For partial RHC outputs (`status=error` with `ops_scheduled < ops_total`), use `lower_bound_upper_bound_comparable` before reading `gap`: current code sets `gap` to `null` for committed-subset schedules because their raw `lower_bound` and `upper_bound` are not mathematically comparable.
 
 ### Current artifacts
 
@@ -275,21 +276,26 @@ The baseline artifact is [studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study
 
 The latest pre-fix live stress-matrix artifact is [studies/test-50k-academic-matrix-v1/rhc_50k_study.json](studies/test-50k-academic-matrix-v1/rhc_50k_study.json).
 
-The latest post-fix guarded artifact is [studies/2026-04-26-rhc-alns-postfix-canonical-v4/rhc_50k_study.json](studies/2026-04-26-rhc-alns-postfix-canonical-v4/rhc_50k_study.json).
+The retired guarded-profile artifact is [studies/2026-04-26-rhc-alns-postfix-canonical-v4/rhc_50k_study.json](studies/2026-04-26-rhc-alns-postfix-canonical-v4/rhc_50k_study.json).
+
+The fresh current-head audit before the profile refresh is [studies/2026-04-27-rhc-50k-audit-v1/rhc_50k_study.json](studies/2026-04-27-rhc-50k-audit-v1/rhc_50k_study.json).
 
 Read them together rather than collapsing them into one story:
 
 - the pre-fix stress matrix preserves the old ALNS failure shape, where coverage was weak but some windows did enter search;
-- the post-fix guarded artifact preserves the new operational rule, where oversized ALNS windows are skipped before costly seed generation can burn the whole per-window budget;
+- the guarded-profile artifact preserves the second regime, where oversized ALNS windows are skipped before costly seed generation can burn the whole per-window budget;
+- the fresh current-head audit preserves the mixed regime, where early windows do enter ALNS, but windows 2-3 burn budget on zero-yield CP-SAT repair and later windows fall back or time out under hybrid CP-SAT routing;
 - both runs still report `status=error` and `feasible=false`, so neither should be read as a solved industrial benchmark.
+- in that partial regime, compare coverage and fallback metrics first; do not interpret bound-gap quality unless `lower_bound_upper_bound_comparable=true`.
 
 The current split is now more precise:
 
 - pre-fix `RHC-ALNS|throughput` reported `mean_scheduled_ratio = 0.0946`, `mean_makespan_minutes = 4985.85`, and `mean_inner_fallback_ratio = 0.1`;
-- post-fix guarded `RHC-ALNS|throughput` reports `mean_scheduled_ratio = 0.3028`, `mean_makespan_minutes = 9675.18`, and `mean_inner_fallback_ratio = 1.0`;
+- guarded-profile `RHC-ALNS|throughput` reports `mean_scheduled_ratio = 0.3028`, `mean_makespan_minutes = 9675.18`, and `mean_inner_fallback_ratio = 1.0`;
+- fresh current-head `RHC-ALNS|throughput` reports `mean_scheduled_ratio = 0.1243`, `mean_makespan_minutes = 4134.84`, and `mean_inner_fallback_ratio = 0.625`;
 - post-fix `RHC-GREEDY|throughput` remains the stronger pure-coverage baseline at `mean_scheduled_ratio = 0.37` with zero inner fallback.
 
-So the public 50K path remains real and reproducible, but the latest evidence says something narrower than "ALNS is fixed": the repository now prevents pathological ALNS pre-search budget burn on oversized windows, yet the 50K throughput lane still lacks a window geometry where ALNS can enter destroy-repair search and beat guarded fallback on coverage.
+So the public 50K path remains real and reproducible, but the latest evidence now says something stricter than either the old stress-matrix story or the guarded-fallback story alone: ALNS can enter search, yet the retired public profile was still wasting too much budget in CP-SAT side paths. That is why the public `RHC-ALNS` default now disables hybrid CP-SAT routing and CP-SAT micro-repair, while the DOE harnesses keep those knobs exposed for controlled experiments.
 
 Post-audit (2026-04-26) solver hardening now includes:
 
@@ -302,12 +308,16 @@ RHC-ALNS profile update (April 2026):
 - `due_admission_horizon_factor=2.0` (was 1.0): tuned via geometry DOE v6 to maintain non-zero admission pressure in short ALNS windows;
 - `alns_presearch_max_window_ops=5000`: synchronized with effective window cap to align presearch guard with candidate-pool semantics;
 - `admission_full_scan_enabled=False`: capped full-scan semantics (adds candidates up to `candidate_pool_limit` only, not all uncommitted ops) now prevents runaway candidate sets in underfilled windows;
+- `hybrid_inner_routing_enabled=False`: the public benchmark default no longer routes due-pressure windows directly into CP-SAT after the 2026-04-27 audits showed timeout-heavy hybrid behavior on the retired profile;
+- `inner_kwargs.use_cpsat_repair=False`: the public benchmark default now uses greedy-only ALNS repair because the 2026-04-27 50K audit showed zero accepted CP-SAT repairs on the retired profile;
 - new telemetry fields added to metadata:
   - `precedence_ready_blocked_by_precedence_count`: count of ops rejected due to unresolved predecessor constraints;
   - `precedence_ready_ratio`: ratio of precedence-ready ops among those evaluated (0–1);
   - `admission_full_scan_triggered_windows`: count of windows where full-scan path was activated;
   - `admission_full_scan_added_ops`: count of ops added during full-scan path;
   - `admission_full_scan_final_pool_peak`: peak candidate-pool size after full-scan phase.
+
+Bounded 100K evidence for the retired profile is [studies/2026-04-27-rhc-100k-audit-v1/rhc_500k_study.json](studies/2026-04-27-rhc-100k-audit-v1/rhc_500k_study.json). It shows `RHC-GREEDY` scheduling `8144/100000` operations in `90.226s`, while `RHC-ALNS` schedules `0/100000` operations and exhausts `400518 ms` in initial solution generation before the first ALNS iteration. Treat that artifact as failure evidence for the retired profile, not as a claim that the refreshed default is already validated at 100K.
 
 ## Staged 500K Study
 

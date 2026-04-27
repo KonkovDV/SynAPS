@@ -60,28 +60,32 @@ Canonical artifacts:
 
 - `benchmark/studies/2026-04-13-rhc-50k-machine-index/rhc_50k_study.json`
 - Pre-fix live stress artifact: `benchmark/studies/test-50k-academic-matrix-v1/rhc_50k_study.json`
-- Latest post-fix guarded artifact: `benchmark/studies/2026-04-26-rhc-alns-postfix-canonical-v4/rhc_50k_study.json`
+- Retired guarded-profile artifact: `benchmark/studies/2026-04-26-rhc-alns-postfix-canonical-v4/rhc_50k_study.json`
+- Fresh current-head audit before the profile refresh: `benchmark/studies/2026-04-27-rhc-50k-audit-v1/rhc_50k_study.json`
 
-Summary from the latest post-fix guarded artifact:
+Summary from the fresh current-head audit before the profile refresh:
 
 | Solver | Wall time (s) | Feasibility rate | Mean scheduled ratio | Mean makespan (min) | Mean inner fallback ratio |
 |---|---:|---:|---:|---:|---:|
-| `RHC-ALNS` | 1201.146 | 0.0 | 0.3028 | 9675.18 | 1.0 |
+| `RHC-GREEDY` | 600.576 | 0.0 | 0.4185 | 13574.33 | 0.0 |
+| `RHC-ALNS` | 1226.475 | 0.0 | 0.1243 | 4134.84 | 0.625 |
 
 Interpretation:
 
 - This is still a profiling/evidence slice, not a "50K solved" claim.
-- The pre-fix stress matrix remains the honest evidence surface for ALNS objective improvement under weak throughput.
-- The latest post-fix artifact shows a different regime: oversized ALNS windows are now explicitly short-circuited before expensive phase-1 seed generation can burn the whole window budget.
-- On `industrial-50k`, that guard materially improves throughput versus the failing post-fix reruns (`mean_scheduled_ratio` recovered to `0.3028`), but it does so by admitting that the ALNS lane is not entering destroy-repair search on these windows.
-- So the current `RHC-ALNS` throughput lane should be read as a guarded fallback controller, not as evidence that large-window ALNS search is already effective at 50K.
+- The pre-fix stress matrix remains the honest evidence surface for the old ALNS failure shape, where coverage stayed weak but some windows did enter search.
+- The 2026-04-26 guarded artifact captured a second regime, where oversized windows were short-circuited before expensive seed generation could burn the full window budget.
+- The fresh 2026-04-27 audit established a third regime and corrected the old blanket claim that ALNS "never enters search": the early windows do enter ALNS, but windows 2-3 spend 100 repair attempts on zero-yield CP-SAT micro-repair, and later windows fall back or time out under hybrid CP-SAT routing.
+- Because of that current-head evidence, the public `RHC-ALNS` defaults were refreshed to disable hybrid CP-SAT routing and CP-SAT micro-repair. The 2026-04-26 and 2026-04-27 artifacts should now be read as failure evidence for the retired CP-SAT-heavy profile, not as performance claims for the refreshed default.
+- For partial RHC outputs (`status=error` with `ops_scheduled < ops_total`), treat `lower_bound_upper_bound_comparable` as the gate for bound interpretation: current code reports `gap = null` when only a committed subset is scheduled, and raw `lower_bound` / `upper_bound` values are not directly comparable in that regime.
 
 Key comparison points:
 
 - Pre-fix `RHC-ALNS|throughput` in `test-50k-academic-matrix-v1` reported `mean_scheduled_ratio = 0.0946`, `mean_makespan_minutes = 4985.85`, and `mean_inner_fallback_ratio = 0.1`.
-- Post-fix guarded `RHC-ALNS|throughput` in `2026-04-26-rhc-alns-postfix-canonical-v4` reports `mean_scheduled_ratio = 0.3028`, `mean_makespan_minutes = 9675.18`, and `mean_inner_fallback_ratio = 1.0`.
+- Guarded-profile `RHC-ALNS|throughput` in `2026-04-26-rhc-alns-postfix-canonical-v4` reports `mean_scheduled_ratio = 0.3028`, `mean_makespan_minutes = 9675.18`, and `mean_inner_fallback_ratio = 1.0`.
+- Fresh current-head `RHC-ALNS|throughput` in `2026-04-27-rhc-50k-audit-v1` reports `mean_scheduled_ratio = 0.1243`, `mean_makespan_minutes = 4134.84`, and `mean_inner_fallback_ratio = 0.625`.
 - Post-fix `RHC-GREEDY|throughput` in `test-50k-after-fix` remains the stronger pure-coverage baseline at `mean_scheduled_ratio = 0.37` with `mean_inner_fallback_ratio = 0.0`.
-- The unresolved research problem is now narrower: create a window geometry and routing policy where ALNS can actually enter search within budget, instead of spending the whole budget on phase-1 seed generation or being guarded into fallback.
+- The unresolved research problem is now split in two: the retired public profile wasted budget in CP-SAT side paths at 50K, and a separate initial-seed bottleneck is still visible at 100K+.
 
 ## 100K+ Snapshot (staged harness)
 
@@ -98,6 +102,8 @@ What the latest audit established:
 
 - `200k` is still within the current public model operation limit
 - `300k` and `500k` are presently blocked by `operations_exceed_model_limit`, not by projected RAM pressure
+- The bounded 2026-04-27 `100k` audit on the retired CP-SAT-heavy profile showed `RHC-GREEDY` scheduling `8144/100000` operations in `90.226s`, while `RHC-ALNS` scheduled `0/100000` operations and spent `400518 ms` in initial solution generation before the first ALNS iteration.
+- That 100K result is why the public `RHC-ALNS` defaults now disable hybrid CP-SAT routing and CP-SAT micro-repair, but it also shows that a deeper initial-seed bottleneck remains unresolved above the retired profile.
 - so the next hard engineering boundary is model/schema capacity, not workstation memory
 
 ## Solver Portfolio
@@ -248,8 +254,8 @@ See: [HPC Silicon-Level Optimization Roadmap](docs/architecture/08_HPC_SILICON_O
 
 ## Read Next
 
-- Habr draft (RU): `docs/habr/synaps-open-source-habr-v3.md`
-- Publication pack: `docs/habr/synaps-open-source-habr-v3-pack.md`
+- Habr draft (RU): `docs/habr/synaps-open-source-habr-v7.md`
+- Publication pack: `docs/habr/synaps-open-source-habr-v7-pack.md`
 - Benchmark guide: `benchmark/README.md`
 - Post-audit implementation note: `docs/audit/SYNAPS_UPDATE_AUDIT_2026_04_25.md`
 - HPC optimization roadmap: `docs/architecture/08_HPC_SILICON_OPTIMIZATION_ROADMAP.md`

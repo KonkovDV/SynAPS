@@ -292,7 +292,7 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
             "alns_budget_auto_scaling_enabled": True,
             "alns_presearch_max_window_ops": 5000,
             "alns_budget_estimated_repair_s_per_destroyed_op": 0.125,
-            "hybrid_inner_routing_enabled": True,
+            "hybrid_inner_routing_enabled": False,
             "hybrid_inner_solver": "cpsat",
             "hybrid_due_pressure_threshold": 0.35,
             "hybrid_candidate_pressure_threshold": 4.0,
@@ -310,7 +310,7 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
                 "min_destroy": 10,
                 "max_destroy": 40,
                 "max_no_improve_iters": 30,
-                "use_cpsat_repair": True,
+                "use_cpsat_repair": False,
                 "repair_time_limit_s": 5,
                 "repair_num_workers": 1,
                 "cpsat_max_destroy_ops": 32,
@@ -326,7 +326,7 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
         description=(
             "Receding Horizon Control with ALNS inner solver. "
             "8-hour windows, 2-hour overlap, max 5000 ops/window, "
-            "boundary-aware tail carry-over and micro CP-SAT repair. "
+            "boundary-aware tail carry-over and greedy-only repair. "
             "For ultra-large instances (50 000–100 000+ ops)."
         ),
     ),
