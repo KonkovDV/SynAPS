@@ -346,11 +346,62 @@ def test_scale_solver_kwargs_relaxes_alns_presearch_guard_for_100k_plus() -> Non
         time_limit_cap_s=120,
     )
 
+    assert scaled["window_minutes"] == 300
+    assert scaled["overlap_minutes"] == 90
     assert scaled["alns_presearch_budget_guard_enabled"] is True
     assert scaled["alns_presearch_max_window_ops"] > 1_000
     assert scaled["alns_presearch_max_window_ops"] <= scaled["max_ops_per_window"]
     assert scaled["alns_presearch_min_time_limit_s"] < 240.0
     assert scaled["alns_presearch_min_time_limit_s"] >= 30.0
+
+
+def test_study_rhc_500k_uses_narrower_alns_geometry_for_100k_plus(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import benchmark.study_rhc_500k as study_module
+
+    captured_geometries: list[tuple[int, int]] = []
+
+    def fake_run_scaling_case(*, n_ops, n_machines, n_states, solver_name, solver_kwargs, seed):
+        captured_geometries.append(
+            (
+                int(solver_kwargs["window_minutes"]),
+                int(solver_kwargs["overlap_minutes"]),
+            )
+        )
+        return {
+            "status": "feasible",
+            "feasible": True,
+            "solver": solver_name,
+            "makespan_min": 100.0,
+            "total_setup_min": 20.0,
+            "total_tardiness_min": 0.0,
+            "total_material_loss": 0.0,
+            "assigned_ops": n_ops,
+            "violations": 0,
+            "solve_ms": 1,
+            "gen_ms": 1,
+            "verify_ms": 0,
+            "n_ops": n_ops,
+            "n_machines": n_machines,
+            "n_states": n_states,
+            "sdst_memory_bytes": 0,
+            "metadata": {"inner_fallback_ratio": 0.0},
+        }
+
+    monkeypatch.setattr(study_module, "run_scaling_case", fake_run_scaling_case)
+
+    study_module.study_rhc_500k(
+        execution_mode="gated",
+        scales=[100_000],
+        seeds=[1],
+        solver_names=["RHC-ALNS"],
+        lane="throughput",
+        write_dir=tmp_path,
+    )
+
+    assert captured_geometries == [(300, 90)]
 
 
 def test_study_rhc_500k_blocks_execution_above_model_operation_limit(

@@ -307,6 +307,8 @@ RHC-ALNS profile обновление (Апрель 2026):
 
 Ограниченный 100K evidence для снятого с публикации профиля лежит в [studies/2026-04-27-rhc-100k-audit-v1/rhc_500k_study.json](studies/2026-04-27-rhc-100k-audit-v1/rhc_500k_study.json). Он показывает, что `RHC-GREEDY` успевает расписать `8144/100000` операций за `90.226s`, тогда как `RHC-ALNS` расписывает `0/100000` и тратит `400518 ms` на initial solution generation до первой ALNS-итерации. Этот артефакт нужно читать как evidence отказа старого профиля, а не как заявление, что обновлённый default уже верифицирован на 100K.
 
+Ограниченный 100K evidence для staged geometry-refresh harness лежит в [studies/2026-04-27-rhc-100k-audit-v3-geometry-refresh/rhc_500k_study.json](studies/2026-04-27-rhc-100k-audit-v3-geometry-refresh/rhc_500k_study.json). В этом срезе staged harness для `100k+` сужает first-window geometry `RHC-ALNS` до `300/90`, уменьшая первый inner slice до `760` операций. Прогон доходит до `ALNS starting`, выполняет `55` итераций с `43` улучшениями, показывает `0` inner fallback и заканчивает с `4678/100000` назначенными операциями за `90.118s`. Этот артефакт нужно читать как доказательство, что в staged harness ALNS на 100K теперь реально входит в search, а не как доказательство, что 100K path уже закрыт: run остаётся частичным и `feasible=false`.
+
 ## Staged 500K-исследование
 
 `benchmark.study_rhc_500k` - это stress-study harness для сценариев до 500K+ операций.

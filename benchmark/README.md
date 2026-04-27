@@ -319,6 +319,8 @@ RHC-ALNS profile update (April 2026):
 
 Bounded 100K evidence for the retired profile is [studies/2026-04-27-rhc-100k-audit-v1/rhc_500k_study.json](studies/2026-04-27-rhc-100k-audit-v1/rhc_500k_study.json). It shows `RHC-GREEDY` scheduling `8144/100000` operations in `90.226s`, while `RHC-ALNS` schedules `0/100000` operations and exhausts `400518 ms` in initial solution generation before the first ALNS iteration. Treat that artifact as failure evidence for the retired profile, not as a claim that the refreshed default is already validated at 100K.
 
+Bounded 100K evidence for the staged geometry-refresh harness is [studies/2026-04-27-rhc-100k-audit-v3-geometry-refresh/rhc_500k_study.json](studies/2026-04-27-rhc-100k-audit-v3-geometry-refresh/rhc_500k_study.json). In that slice, the staged `100k+` harness narrows `RHC-ALNS` first-window geometry to `300/90`, reducing the first inner slice to `760` ops. The run reaches `ALNS starting`, completes `55` iterations with `43` improvements, records `0` inner fallback, and finishes at `4678/100000` scheduled operations in `90.118s`. Read that artifact as proof that 100K ALNS can now enter search under the staged harness, not as proof that the 100K path is closed: the run still ends partial and `feasible=false`.
+
 ## Staged 500K Study
 
 `benchmark.study_rhc_500k` is the stress-study harness for 500K+ operation scenarios.

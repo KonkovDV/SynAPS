@@ -104,6 +104,8 @@ What the latest audit established:
 - `300k` and `500k` are presently blocked by `operations_exceed_model_limit`, not by projected RAM pressure
 - The bounded 2026-04-27 `100k` audit on the retired CP-SAT-heavy profile showed `RHC-GREEDY` scheduling `8144/100000` operations in `90.226s`, while `RHC-ALNS` scheduled `0/100000` operations and spent `400518 ms` in initial solution generation before the first ALNS iteration.
 - That 100K result is why the public `RHC-ALNS` defaults now disable hybrid CP-SAT routing and CP-SAT micro-repair, but it also shows that a deeper initial-seed bottleneck remains unresolved above the retired profile.
+- A second bounded 2026-04-27 `100k` slice on the staged geometry-refresh harness (`300/90` instead of the retired `480/120` first-window geometry for `100k+`) reached `ALNS starting`, completed `55` iterations with `43` improvements and `0` inner fallback, and finished at `4678/100000` scheduled operations in `90.118s`.
+- That staged `v3` result falsifies the older "100K ALNS never reaches search" reading: the controlling bottleneck was first-window geometry and seed construction pressure, not the later CP-SAT repair flag alone. It still does not establish production readiness, because the bounded run remains partial (`mean_scheduled_ratio = 0.0468`, `feasible = false`).
 - so the next hard engineering boundary is model/schema capacity, not workstation memory
 
 ## Solver Portfolio

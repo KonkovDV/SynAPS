@@ -283,6 +283,13 @@ def _scale_solver_kwargs(
         scaled["max_ops_per_window"] = max(1000, min(max_window_cap, scaled_window_cap))
 
     if solver_name == "RHC-ALNS":
+        # The 100K+ staged harness needs a narrower first-window geometry than the
+        # 50K public profile; otherwise ALNS can burn the full budget constructing
+        # the initial seed before search begins.
+        if ratio >= 2.0:
+            scaled["window_minutes"] = min(int(scaled.get("window_minutes", 480)), 300)
+            scaled["overlap_minutes"] = min(int(scaled.get("overlap_minutes", 120)), 90)
+
         inner_kwargs = scaled.get("inner_kwargs")
         if isinstance(inner_kwargs, dict):
             # Keep ALNS iteration budget bounded to avoid quadratic explosion per window.
