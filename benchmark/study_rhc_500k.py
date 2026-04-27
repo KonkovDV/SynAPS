@@ -608,6 +608,9 @@ def study_rhc_500k(
                             seed=seed,
                         )
                         metadata = raw.get("metadata", {})
+                        run_record["solver_metadata"] = (
+                            metadata if isinstance(metadata, dict) else {}
+                        )
                         run_record["results"] = {
                             "status": raw.get("status"),
                             "feasible": bool(raw.get("feasible", False)),

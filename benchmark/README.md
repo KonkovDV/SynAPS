@@ -358,6 +358,7 @@ python -m benchmark.study_rhc_500k --execution-mode gated --lane both --seeds 1 
 ```
 
 The script writes `rhc_500k_study.json` into the selected study directory.
+Each executed run now also preserves raw `solver_metadata`, including `inner_window_summaries`, so staged 100K+ audit slices can be reconstructed from the artifact JSON instead of relying on terminal-only traces.
 
 ## Instances
 

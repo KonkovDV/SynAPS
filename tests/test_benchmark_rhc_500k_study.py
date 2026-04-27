@@ -163,6 +163,77 @@ def test_study_rhc_500k_reports_summary_and_quality_gate(
     assert gate_result["passed"] is True
 
 
+def test_study_rhc_500k_preserves_solver_metadata_for_audit(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import benchmark.study_rhc_500k as study_module
+
+    def fake_run_scaling_case(*, n_ops, n_machines, n_states, solver_name, solver_kwargs, seed):
+        return {
+            "status": "error",
+            "feasible": False,
+            "solver": solver_name,
+            "makespan_min": 123.0,
+            "total_setup_min": 20.0,
+            "total_tardiness_min": 5.0,
+            "total_material_loss": 0.0,
+            "assigned_ops": 321,
+            "violations": 0,
+            "solve_ms": 1000,
+            "gen_ms": 1,
+            "verify_ms": 1,
+            "n_ops": n_ops,
+            "n_machines": n_machines,
+            "n_states": n_states,
+            "sdst_memory_bytes": 0,
+            "metadata": {
+                "ops_scheduled": 321,
+                "ops_total": n_ops,
+                "inner_resolution_counts": {
+                    "inner": 2,
+                    "fallback_greedy": 1,
+                },
+                "inner_fallback_reason_counts": {
+                    "inner_time_limit_exhausted_before_search": 1,
+                },
+                "inner_window_summaries": [
+                    {
+                        "window": 1,
+                        "resolution_mode": "inner",
+                        "iterations_completed": 12,
+                        "improvements": 7,
+                        "initial_solution_ms": 345,
+                        "time_limit_exhausted_before_search": False,
+                    }
+                ],
+            },
+        }
+
+    monkeypatch.setattr(study_module, "run_scaling_case", fake_run_scaling_case)
+
+    report = study_module.study_rhc_500k(
+        execution_mode="gated",
+        scales=[100_000],
+        seeds=[1],
+        solver_names=["RHC-ALNS"],
+        lane="throughput",
+        write_dir=tmp_path,
+    )
+
+    run = report["scale_records"][0]["runs"][0]
+    assert run["solver_metadata"]["ops_scheduled"] == 321
+    assert run["solver_metadata"]["inner_resolution_counts"] == {
+        "inner": 2,
+        "fallback_greedy": 1,
+    }
+    assert run["solver_metadata"]["inner_fallback_reason_counts"] == {
+        "inner_time_limit_exhausted_before_search": 1,
+    }
+    assert run["solver_metadata"]["inner_window_summaries"][0]["iterations_completed"] == 12
+    assert run["solver_metadata"]["inner_window_summaries"][0]["initial_solution_ms"] == 345
+
+
 def test_study_rhc_500k_lane_both_profiles_workers(
     monkeypatch,
     tmp_path: Path,

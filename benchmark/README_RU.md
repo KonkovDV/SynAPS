@@ -346,6 +346,7 @@ python -m benchmark.study_rhc_500k --execution-mode gated --lane both --seeds 1 
 ```
 
 Артефакт исследования: `rhc_500k_study.json` в выбранной study-директории.
+Для каждого выполненного run артефакт теперь сохраняет и raw `solver_metadata`, включая `inner_window_summaries`, чтобы staged 100K+ audit можно было читать из JSON, а не только из terminal traces.
 
 ## Примеры входных данных
 
