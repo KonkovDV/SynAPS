@@ -361,6 +361,7 @@ python -m benchmark.study_rhc_500k --execution-mode gated --lane both --seeds 1 
 The script writes `rhc_500k_study.json` into the selected study directory.
 Each executed run now also preserves raw `solver_metadata`, including `inner_window_summaries`, so staged 100K+ audit slices can be reconstructed from the artifact JSON instead of relying on terminal-only traces.
 The staged summary layer also promotes those window-level signals into `summary_by_config.*.inner_window_summary`, so audit consumers can read search-entry, seed-cost, commit-yield, and warm-start rejection patterns without manually folding raw per-window arrays.
+The staged `RHC-ALNS` profile now also inherits the tuned admission defaults from the validated 50K/public path: `due_admission_horizon_factor=2.0` and `admission_full_scan_enabled=False` stay aligned before geometry and time-budget scaling are applied for 100K+ runs.
 
 ## Instances
 

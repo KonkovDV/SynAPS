@@ -349,6 +349,7 @@ python -m benchmark.study_rhc_500k --execution-mode gated --lane both --seeds 1 
 Артефакт исследования: `rhc_500k_study.json` в выбранной study-директории.
 Для каждого выполненного run артефакт теперь сохраняет и raw `solver_metadata`, включая `inner_window_summaries`, чтобы staged 100K+ audit можно было читать из JSON, а не только из terminal traces.
 Staged summary-слой теперь также поднимает эти window-level сигналы в `summary_by_config.*.inner_window_summary`, чтобы search-entry, стоимость seed construction, commit-yield и warm-start rejection patterns читались без ручного сворачивания сырых массивов по окнам.
+Staged-профиль `RHC-ALNS` теперь также наследует настроенные admission-defaults из проверенного 50K/public path: `due_admission_horizon_factor=2.0` и `admission_full_scan_enabled=False` остаются синхронизированными до применения geometry/time-budget scaling для прогонов 100K+.
 
 ## Примеры входных данных
 

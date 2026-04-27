@@ -561,6 +561,53 @@ def test_study_rhc_500k_uses_narrower_alns_geometry_for_100k_plus(
     assert captured_geometries == [(300, 90)]
 
 
+def test_study_rhc_500k_inherits_tuned_alns_admission_profile(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import benchmark.study_rhc_500k as study_module
+
+    captured_kwargs: list[dict[str, object]] = []
+
+    def fake_run_scaling_case(*, n_ops, n_machines, n_states, solver_name, solver_kwargs, seed):
+        captured_kwargs.append(solver_kwargs)
+        return {
+            "status": "feasible",
+            "feasible": True,
+            "solver": solver_name,
+            "makespan_min": 100.0,
+            "total_setup_min": 20.0,
+            "total_tardiness_min": 0.0,
+            "total_material_loss": 0.0,
+            "assigned_ops": n_ops,
+            "violations": 0,
+            "solve_ms": 1,
+            "gen_ms": 1,
+            "verify_ms": 0,
+            "n_ops": n_ops,
+            "n_machines": n_machines,
+            "n_states": n_states,
+            "sdst_memory_bytes": 0,
+            "metadata": {"inner_fallback_ratio": 0.0},
+        }
+
+    monkeypatch.setattr(study_module, "run_scaling_case", fake_run_scaling_case)
+
+    study_module.study_rhc_500k(
+        execution_mode="gated",
+        scales=[100_000],
+        seeds=[1],
+        solver_names=["RHC-ALNS"],
+        lane="throughput",
+        write_dir=tmp_path,
+    )
+
+    assert captured_kwargs
+    profile = captured_kwargs[0]
+    assert profile["due_admission_horizon_factor"] == 2.0
+    assert profile["admission_full_scan_enabled"] is False
+
+
 def test_study_rhc_500k_blocks_execution_above_model_operation_limit(
     monkeypatch,
     tmp_path: Path,
