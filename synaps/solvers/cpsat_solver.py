@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import time
 from datetime import timedelta
 from typing import Any
@@ -17,6 +18,52 @@ from synaps.model import (
     SolverStatus,
 )
 from synaps.solvers import BaseSolver
+
+
+def _apply_sat_parameter_overrides(
+    solver: cp_model.CpSolver,
+    *,
+    time_limit_s: int,
+    random_seed: int,
+    num_workers: int,
+    overrides: Any,
+) -> dict[str, Any]:
+    """Apply explicit SatParameters overrides and return the effective audit snapshot."""
+
+    solver.parameters.max_time_in_seconds = time_limit_s
+    solver.parameters.random_seed = random_seed
+    solver.parameters.num_workers = num_workers
+
+    effective_parameters: dict[str, Any] = {
+        "max_time_in_seconds": float(solver.parameters.max_time_in_seconds),
+        "random_seed": int(solver.parameters.random_seed),
+        "num_workers": int(solver.parameters.num_workers),
+    }
+    if not isinstance(overrides, Mapping):
+        return effective_parameters
+
+    for key, raw_value in overrides.items():
+        if not hasattr(solver.parameters, key):
+            raise ValueError(f"Unknown CP-SAT parameter override: {key}")
+        try:
+            setattr(solver.parameters, key, raw_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Invalid CP-SAT parameter override {key}={raw_value!r}"
+            ) from exc
+
+        applied_value = getattr(solver.parameters, key)
+        if isinstance(applied_value, bool | int | float | str):
+            effective_parameters[key] = applied_value
+        elif isinstance(raw_value, bool | int | float | str):
+            effective_parameters[key] = raw_value
+        else:
+            effective_parameters[key] = str(applied_value)
+
+    effective_parameters["max_time_in_seconds"] = float(solver.parameters.max_time_in_seconds)
+    effective_parameters["random_seed"] = int(solver.parameters.random_seed)
+    effective_parameters["num_workers"] = int(solver.parameters.num_workers)
+    return effective_parameters
 
 
 class CpSatSolver(BaseSolver):
@@ -588,6 +635,7 @@ class CpSatSolver(BaseSolver):
         time_limit_s = int(kwargs.get("time_limit_s", 30))
         random_seed = int(kwargs.get("random_seed", 42))
         num_workers = int(kwargs.get("num_workers", 8))
+        sat_parameter_overrides = kwargs.get("sat_parameters")
         auto_greedy_warm_start = bool(kwargs.get("auto_greedy_warm_start", True))
         objective_weights = dict(kwargs.get("objective_weights", {}))
         material_loss_scale = int(kwargs.get("material_loss_scale", 1000))
@@ -787,9 +835,15 @@ class CpSatSolver(BaseSolver):
                         hint_count += 1
 
         solver = cp_model.CpSolver()
-        solver.parameters.max_time_in_seconds = time_limit_s
-        solver.parameters.random_seed = random_seed
-        solver.parameters.num_workers = num_workers
+        effective_sat_parameters = _apply_sat_parameter_overrides(
+            solver,
+            time_limit_s=time_limit_s,
+            random_seed=random_seed,
+            num_workers=num_workers,
+            overrides=sat_parameter_overrides,
+        )
+        random_seed = int(effective_sat_parameters["random_seed"])
+        num_workers = int(effective_sat_parameters["num_workers"])
 
         status_code = solver.solve(model)
         status_map = {
@@ -832,6 +886,7 @@ class CpSatSolver(BaseSolver):
                 "warm_started": warm_start_assignments is not None and not virtual_to_original,
                 "hint_count": hint_count,
                 "symmetry_breaking": enable_symmetry_breaking,
+                "sat_parameters": effective_sat_parameters,
                 "parallel_virtualization": {
                     "enabled": bool(virtual_to_original),
                     "virtual_lane_count": len(virtual_to_original),

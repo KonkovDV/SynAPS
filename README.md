@@ -140,6 +140,7 @@ For CP-SAT (OR-Tools), be explicit:
 
 - `num_workers > 1` can reduce bit-for-bit repeatability across runs/machines
 - for stricter reproducibility, pin `random_seed` and use single-thread mode (`num_workers = 1`)
+- the strict benchmark lane also disables variability-oriented CP-SAT knobs (`randomize_search`, `permute_variable_randomly`, `permute_presolve_constraint_order`, `use_absl_random`) and records the effective SatParameters snapshot in solver metadata for replay/audit
 
 ## Quick Start
 

@@ -28,6 +28,17 @@ from synaps.validation import verify_schedule_result
 LaneMode = Literal["throughput", "strict", "both"]
 
 
+def _strict_cpsat_replay_parameters() -> dict[str, bool]:
+    """Return a conservative CP-SAT replay profile for strict benchmark lanes."""
+
+    return {
+        "randomize_search": False,
+        "permute_variable_randomly": False,
+        "permute_presolve_constraint_order": False,
+        "use_absl_random": False,
+    }
+
+
 def _tail_cvar(values: list[float], alpha: float) -> float:
     """Compute empirical CVaR_alpha (tail mean beyond VaR_alpha)."""
 
@@ -167,6 +178,17 @@ def _apply_lane_profile(
         if isinstance(hybrid_kwargs, dict):
             hybrid_kwargs.setdefault("random_seed", seed)
             hybrid_kwargs["num_workers"] = 1 if lane == "strict" else 4
+            if lane == "strict":
+                strict_profile = _strict_cpsat_replay_parameters()
+                existing_sat_parameters = hybrid_kwargs.get("sat_parameters")
+                hybrid_kwargs["sat_parameters"] = {
+                    **(
+                        dict(existing_sat_parameters)
+                        if isinstance(existing_sat_parameters, dict)
+                        else {}
+                    ),
+                    **strict_profile,
+                }
 
     return profiled
 

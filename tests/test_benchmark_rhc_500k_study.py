@@ -376,6 +376,25 @@ def test_study_rhc_500k_lane_both_profiles_workers(
     )
     assert workers == [1, 4]
 
+    strict_solver_kwargs = next(
+        kwargs["solver_kwargs"]
+        for kwargs in captured_kwargs
+        if kwargs["solver_kwargs"]["hybrid_inner_kwargs"]["num_workers"] == 1
+    )
+    throughput_solver_kwargs = next(
+        kwargs["solver_kwargs"]
+        for kwargs in captured_kwargs
+        if kwargs["solver_kwargs"]["hybrid_inner_kwargs"]["num_workers"] == 4
+    )
+
+    assert strict_solver_kwargs["hybrid_inner_kwargs"]["sat_parameters"] == {
+        "randomize_search": False,
+        "permute_variable_randomly": False,
+        "permute_presolve_constraint_order": False,
+        "use_absl_random": False,
+    }
+    assert "sat_parameters" not in throughput_solver_kwargs["hybrid_inner_kwargs"]
+
     for kwargs in captured_kwargs:
         assert kwargs["solver_kwargs"]["random_seed"] == 11
         assert kwargs["solver_kwargs"]["inner_kwargs"]["random_seed"] == 11

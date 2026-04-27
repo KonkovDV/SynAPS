@@ -25,6 +25,17 @@ Two execution lanes are maintained to separate throughput behavior from strict r
 - intended for deterministic replay and scientific comparison
 - single-worker CP-SAT in hybrid repair (`num_workers = 1`)
 - fixed random seeds for RHC, ALNS inner loop, and hybrid CP-SAT calls
+- explicit hybrid CP-SAT replay profile:
+	- `randomize_search = false`
+	- `permute_variable_randomly = false`
+	- `permute_presolve_constraint_order = false`
+	- `use_absl_random = false`
+- the effective CP-SAT SatParameters snapshot is recorded in solver metadata for audit and replay review
+
+This is intentionally conservative. As of the April 2026 OR-Tools parameter surface,
+`interleave_search` is documented as deterministic independently of `num_workers`, but
+SynAPS does not enable that mode in the strict lane until it is validated separately on
+the large-instance benchmark corpus.
 
 When `lane = both`, both lanes are executed per seed and summarized independently.
 

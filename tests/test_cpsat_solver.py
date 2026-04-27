@@ -91,6 +91,34 @@ def test_cpsat_respects_sequence_dependent_setups() -> None:
     assert violations == []
 
 
+def test_cpsat_records_explicit_sat_parameters_in_metadata() -> None:
+    problem = _make_setup_forced_problem()
+
+    result = CpSatSolver().solve(
+        problem,
+        time_limit_s=5,
+        random_seed=7,
+        num_workers=1,
+        sat_parameters={
+            "randomize_search": False,
+            "permute_variable_randomly": False,
+            "permute_presolve_constraint_order": False,
+            "use_absl_random": False,
+        },
+    )
+
+    assert result.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
+    assert result.metadata["sat_parameters"] == {
+        "max_time_in_seconds": 5.0,
+        "random_seed": 7,
+        "num_workers": 1,
+        "randomize_search": False,
+        "permute_variable_randomly": False,
+        "permute_presolve_constraint_order": False,
+        "use_absl_random": False,
+    }
+
+
 def _make_adjacent_setup_chain_problem() -> ScheduleProblem:
     state_a = State(id=uuid4(), code="STATE-A", label="State A")
     state_b = State(id=uuid4(), code="STATE-B", label="State B")
