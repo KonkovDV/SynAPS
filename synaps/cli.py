@@ -20,7 +20,7 @@ from synaps.contracts import (
 from synaps.model import ScheduleProblem, ScheduleResult, normalize_schedule_problem_data
 from synaps.replay import build_runtime_replay_artifact, write_replay_artifact
 from synaps.solvers.registry import available_solver_configs, build_solver_registry_manifest
-from synaps.solvers.router import SolveRegime, SolverRoutingContext
+from synaps.solvers.router import PortfolioPolicy, SolveRegime, SolverRoutingContext
 
 
 def _load_problem(path: Path) -> ScheduleProblem:
@@ -98,6 +98,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--exact-required",
         action="store_true",
         help="Prefer exact portfolio members where possible",
+    )
+    solve_parser.add_argument(
+        "--portfolio-policy",
+        choices=[policy.value for policy in PortfolioPolicy],
+        default=PortfolioPolicy.BALANCED.value,
+        help="Routing policy that biases the non-exact portfolio path",
     )
     solve_parser.add_argument(
         "--no-verify-feasibility",
@@ -193,6 +199,7 @@ def main(argv: list[str] | None = None) -> int:
             regime=SolveRegime(args.regime),
             preferred_max_latency_s=args.preferred_max_latency_s,
             exact_required=bool(args.exact_required),
+            portfolio_policy=PortfolioPolicy(args.portfolio_policy),
         )
         result = solve_schedule(
             problem,
@@ -212,6 +219,7 @@ def main(argv: list[str] | None = None) -> int:
                 "regime": args.regime,
                 "preferred_max_latency_s": args.preferred_max_latency_s,
                 "exact_required": bool(args.exact_required),
+                "portfolio_policy": args.portfolio_policy,
                 "verify_feasibility": verify_feasibility,
             },
             request_id=None,
@@ -250,6 +258,7 @@ def main(argv: list[str] | None = None) -> int:
                 "regime": solve_request.context.regime.value,
                 "preferred_max_latency_s": solve_request.context.preferred_max_latency_s,
                 "exact_required": solve_request.context.exact_required,
+                "portfolio_policy": solve_request.context.portfolio_policy.value,
                 "verify_feasibility": solve_request.verify_feasibility,
                 "problem_slice": (
                     solve_request.problem_slice.model_dump(mode="json", exclude_none=True)

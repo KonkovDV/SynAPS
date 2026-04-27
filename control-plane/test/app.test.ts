@@ -46,6 +46,7 @@ function createInstanceRefSolveRequest(): Record<string, unknown> {
       regime: "nominal",
       exact_required: false,
       preferred_max_latency_s: null,
+      portfolio_policy: "feasibility-first",
     },
     verify_feasibility: true,
     solve_options: {},
@@ -369,6 +370,60 @@ test("solve route accepts file-backed solve requests without inline problem", as
   assert.equal(response.statusCode, 200);
   assert.equal(seenProblemInstanceRef, "benchmark/instances/tiny_3x3.json");
   assert.deepEqual(seenProblemSlice, { max_operations: 2 });
+
+  await app.close();
+});
+
+test("solve route forwards feasibility-first runtime policy through the contract body", async () => {
+  let seenPolicy: string | undefined;
+  const executor: SynapsContractExecutor = {
+    async executeSolveRequest(payload: object): Promise<unknown> {
+      const request = payload as {
+        request_id?: string;
+        context?: { portfolio_policy?: string };
+      };
+      seenPolicy = request.context?.portfolio_policy;
+      return {
+        contract_version: "2026-04-03",
+        request_id: request.request_id,
+        result: {
+          solver_name: "greedy_dispatch",
+          status: "feasible",
+          assignments: [],
+          objective: {},
+          duration_ms: 1,
+          metadata: {
+            portfolio: {
+              solver_config: "GREED",
+              portfolio_policy: seenPolicy,
+            },
+          },
+          random_seed: null,
+        },
+      };
+    },
+    async executeRepairRequest(): Promise<unknown> {
+      throw new Error("unused");
+    },
+  };
+
+  const app = buildControlPlaneApp({ executor });
+  const request = createSolveRequest();
+  request.context = {
+    regime: "nominal",
+    exact_required: false,
+    preferred_max_latency_s: 900,
+    portfolio_policy: "feasibility-first",
+  };
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/v1/solve",
+    payload: request,
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(seenPolicy, "feasibility-first");
 
   await app.close();
 });

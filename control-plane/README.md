@@ -97,6 +97,11 @@ That file-backed path can pair `problem_instance_ref` with `problem_slice` to ma
 order-complete subset before the Python contract validates `ScheduleProblem`, which keeps
 300K/500K study flows off the JSON/Pydantic payload boundary.
 
+When callers need coverage-oriented runtime behavior rather than the default balanced router,
+set `context.portfolio_policy = "feasibility-first"`. The control plane validates and forwards
+that policy unchanged, and the Python router then biases nominal non-exact flows toward
+feasible-coverage portfolio members instead of exactness-heavy defaults.
+
 ## Boundary
 
 This package is intentionally thin.

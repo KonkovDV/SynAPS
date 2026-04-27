@@ -8,7 +8,8 @@
   "context": {
     "regime": "nominal",
     "preferred_max_latency_s": null,
-    "exact_required": false
+    "exact_required": false,
+    "portfolio_policy": "feasibility-first"
   },
   "solver_config": "GREED",
   "verify_feasibility": true,

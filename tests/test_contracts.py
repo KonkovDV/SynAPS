@@ -117,6 +117,24 @@ def test_execute_repair_request_returns_contract_response() -> None:
     assert response.result.metadata["portfolio"]["solver_config"] == "INCREMENTAL_REPAIR"
 
 
+def test_execute_solve_request_feasibility_first_policy_is_reflected_in_runtime_metadata() -> None:
+    problem = make_simple_problem(n_orders=40, ops_per_order=4)
+    request = SolveRequest(
+        request_id="req-feasibility-first-1",
+        problem=problem,
+        context=RoutingContextContract(
+            regime=SolveRegime.NOMINAL,
+            portfolio_policy="feasibility-first",
+        ),
+        verify_feasibility=False,
+    )
+
+    response = execute_solve_request(request)
+
+    assert response.result.metadata["portfolio"]["solver_config"] == "GREED"
+    assert response.result.metadata["portfolio"]["portfolio_policy"] == "feasibility-first"
+
+
 def test_runtime_replay_artifact_can_be_built_from_contract_response() -> None:
     problem = make_simple_problem()
     request = SolveRequest(

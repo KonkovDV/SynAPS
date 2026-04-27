@@ -31,6 +31,13 @@ class SolveRegime(StrEnum):
     WHAT_IF = "what_if"
 
 
+class PortfolioPolicy(StrEnum):
+    """Runtime portfolio policies that bias how non-exact routing behaves."""
+
+    BALANCED = "balanced"
+    FEASIBILITY_FIRST = "feasibility-first"
+
+
 @dataclass(frozen=True)
 class SolverRoutingContext:
     """High-level inputs used by the deterministic router."""
@@ -38,6 +45,7 @@ class SolverRoutingContext:
     regime: SolveRegime = SolveRegime.NOMINAL
     preferred_max_latency_s: int | None = None
     exact_required: bool = False
+    portfolio_policy: PortfolioPolicy = PortfolioPolicy.BALANCED
 
 
 @dataclass(frozen=True)
@@ -200,6 +208,64 @@ def route_solver_config(
             ),
         )
 
+    latency = ctx.preferred_max_latency_s
+
+    if (
+        ctx.portfolio_policy is PortfolioPolicy.FEASIBILITY_FIRST
+        and ctx.regime is SolveRegime.NOMINAL
+        and op_count > 120
+    ):
+        if latency is not None:
+            if op_count <= 10_000 and latency > 120:
+                return SolverRoutingDecision(
+                    solver_config="ALNS-300",
+                    reason=(
+                        "feasibility-first runtime policy prefers ALNS over exact nominal "
+                        f"routing for {op_count} ops when latency budget exceeds {latency}s"
+                    ),
+                )
+            if op_count <= 50_000 and latency > 300:
+                return SolverRoutingDecision(
+                    solver_config="ALNS-500",
+                    reason=(
+                        "feasibility-first runtime policy promotes extended ALNS for large "
+                        f"nominal instances ({op_count} ops) under a 5+ minute budget"
+                    ),
+                )
+            if op_count >= 100_000 and latency > 600:
+                return SolverRoutingDecision(
+                    solver_config="RHC-ALNS-100K",
+                    reason=(
+                        "feasibility-first runtime policy uses the named 100K RHC-ALNS "
+                        f"profile for {op_count} ops when the latency budget exceeds {latency}s"
+                    ),
+                )
+            if op_count > 50_000 and latency > 600:
+                return SolverRoutingDecision(
+                    solver_config="RHC-ALNS",
+                    reason=(
+                        "feasibility-first runtime policy prefers RHC-ALNS over LBBD-HD for "
+                        f"ultra-large nominal instances ({op_count} ops) under a 10+ minute budget"
+                    ),
+                )
+
+        if op_count > 50_000:
+            return SolverRoutingDecision(
+                solver_config="RHC-GREEDY",
+                reason=(
+                    "feasibility-first runtime policy uses the cheapest horizon-decomposed "
+                    f"coverage path for {op_count} nominal operations when no generous latency hint is present"
+                ),
+            )
+
+        return SolverRoutingDecision(
+            solver_config="GREED",
+            reason=(
+                "feasibility-first runtime policy trades objective optimality for the "
+                f"fastest nominal feasible coverage path at {op_count} operations"
+            ),
+        )
+
     if op_count <= 20 and wc_count <= 5 and not has_aux_constraints:
         return SolverRoutingDecision(
             solver_config="CPSAT-10",
@@ -254,8 +320,6 @@ def route_solver_config(
     # ---- ALNS / RHC routing for large NOMINAL instances ----
     # When the latency budget is generous, ALNS/RHC offer better anytime
     # behavior than LBBD-HD for non-exact solves.
-    latency = ctx.preferred_max_latency_s
-
     if not ctx.exact_required and latency is not None:
         if op_count <= 10_000 and latency > 120:
             return SolverRoutingDecision(
@@ -359,6 +423,7 @@ def select_solver(
 
 
 __all__ = [
+    "PortfolioPolicy",
     "SolveRegime",
     "SolverRoutingContext",
     "SolverRoutingDecision",

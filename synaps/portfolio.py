@@ -20,6 +20,7 @@ from synaps.problem_profile import build_problem_profile
 from synaps.solvers.incremental_repair import IncrementalRepair
 from synaps.solvers.registry import create_solver
 from synaps.solvers.router import (
+    PortfolioPolicy,
     SolveRegime,
     SolverRoutingContext,
     SolverRoutingDecision,
@@ -59,6 +60,7 @@ def _attach_portfolio_metadata(
     regime: SolveRegime,
     preferred_max_latency_s: int | None,
     exact_required: bool,
+    portfolio_policy: PortfolioPolicy,
     details: Mapping[str, object] | None = None,
 ) -> ScheduleResult:
     result.metadata = {
@@ -71,6 +73,7 @@ def _attach_portfolio_metadata(
             "regime": regime.value,
             "preferred_max_latency_s": preferred_max_latency_s,
             "exact_required": exact_required,
+            "portfolio_policy": portfolio_policy.value,
             **(dict(details) if details is not None else {}),
         },
     }
@@ -211,6 +214,7 @@ def solve_schedule(
         regime=ctx.regime,
         preferred_max_latency_s=ctx.preferred_max_latency_s,
         exact_required=ctx.exact_required,
+        portfolio_policy=ctx.portfolio_policy,
         details=verification_details,
     )
 
@@ -287,6 +291,7 @@ def repair_schedule(
         regime=regime,
         preferred_max_latency_s=None,
         exact_required=False,
+        portfolio_policy=PortfolioPolicy.BALANCED,
         details=verification_details,
     )
 

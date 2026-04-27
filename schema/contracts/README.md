@@ -42,6 +42,11 @@ Recommended flow:
 	`problem_slice` so order-complete subsets can be materialized before Pydantic enforces
 	the `MAX_SCHEDULE_OPERATIONS` ceiling.
 
+The routing context also exposes `portfolio_policy`. Keep `balanced` for the default
+exactness-vs-throughput trade-off, and use `feasibility-first` when runtime callers want
+coverage-oriented routing to become a first-class operational mode instead of a benchmark-only
+study gate.
+
 When `problem_instance_ref` is used, resolve it against an explicit instance root:
 
 ```bash

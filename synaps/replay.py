@@ -48,6 +48,7 @@ class ReplayRoutingSnapshot(BaseModel):
     regime: str = "nominal"
     preferred_max_latency_s: int | None = None
     exact_required: bool | None = None
+    portfolio_policy: str | None = None
 
 
 class ReplayBenchmarkArtifact(BaseModel):
@@ -300,6 +301,11 @@ def build_benchmark_replay_artifact(
             regime=regime,
             preferred_max_latency_s=_coerce_int_or_none(metadata.get("preferred_max_latency_s")),
             exact_required=_coerce_bool_or_none(metadata.get("exact_required")),
+            portfolio_policy=(
+                str(metadata.get("portfolio_policy"))
+                if metadata.get("portfolio_policy") is not None
+                else None
+            ),
         ),
         portfolio_metadata=metadata,
     )
@@ -360,6 +366,11 @@ def build_runtime_replay_artifact(
                 portfolio_metadata.get("preferred_max_latency_s")
             ),
             exact_required=_coerce_bool_or_none(portfolio_metadata.get("exact_required")),
+            portfolio_policy=(
+                str(portfolio_metadata.get("portfolio_policy"))
+                if portfolio_metadata.get("portfolio_policy") is not None
+                else None
+            ),
         ),
         request_summary=request_summary,
         portfolio_metadata=portfolio_metadata,

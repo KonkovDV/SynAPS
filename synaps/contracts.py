@@ -18,7 +18,7 @@ from synaps.model import (  # noqa: TC001
     normalize_schedule_problem_data,
 )
 from synaps.portfolio import repair_schedule, solve_schedule
-from synaps.solvers.router import SolveRegime, SolverRoutingContext
+from synaps.solvers.router import PortfolioPolicy, SolveRegime, SolverRoutingContext
 
 CONTRACT_VERSION: Final = "2026-04-03"
 
@@ -49,12 +49,14 @@ class RoutingContextContract(BaseModel):
     regime: SolveRegime = SolveRegime.NOMINAL
     preferred_max_latency_s: int | None = None
     exact_required: bool = False
+    portfolio_policy: PortfolioPolicy = PortfolioPolicy.BALANCED
 
     def to_runtime(self) -> SolverRoutingContext:
         return SolverRoutingContext(
             regime=self.regime,
             preferred_max_latency_s=self.preferred_max_latency_s,
             exact_required=self.exact_required,
+            portfolio_policy=self.portfolio_policy,
         )
 
 

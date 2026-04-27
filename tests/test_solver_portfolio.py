@@ -7,6 +7,7 @@ from synaps.solvers.greedy_dispatch import GreedyDispatch
 from synaps.solvers.lbbd_solver import LbbdSolver
 from synaps.solvers.registry import available_solver_configs, create_solver
 from synaps.solvers.router import (
+    PortfolioPolicy,
     SolveRegime,
     SolverRoutingContext,
     route_solver_config,
@@ -257,6 +258,36 @@ def test_route_solver_rhc_alns_for_60k_ops_with_latency_budget() -> None:
 
     assert decision.solver_config == "RHC-ALNS"
     assert "Receding Horizon" in decision.reason
+
+
+def test_route_solver_feasibility_first_prefers_greedy_over_lbbd_for_medium_nominal_instances() -> None:
+    problem = make_simple_problem(n_orders=40, ops_per_order=4)
+
+    decision = route_solver_config(
+        problem,
+        context=SolverRoutingContext(
+            regime=SolveRegime.NOMINAL,
+            portfolio_policy=PortfolioPolicy.FEASIBILITY_FIRST,
+        ),
+    )
+
+    assert decision.solver_config == "GREED"
+    assert "feasibility-first" in decision.reason
+
+
+def test_route_solver_feasibility_first_prefers_rhc_greedy_for_ultra_large_nominal_instances_without_latency_hint() -> None:
+    problem = make_simple_problem(n_orders=15000, ops_per_order=4)
+
+    decision = route_solver_config(
+        problem,
+        context=SolverRoutingContext(
+            regime=SolveRegime.NOMINAL,
+            portfolio_policy=PortfolioPolicy.FEASIBILITY_FIRST,
+        ),
+    )
+
+    assert decision.solver_config == "RHC-GREEDY"
+    assert "feasibility-first" in decision.reason
 
 
 def test_route_solver_rhc_alns_100k_profile_for_100k_ops_with_latency_budget() -> None:

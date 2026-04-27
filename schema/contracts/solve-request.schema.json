@@ -167,6 +167,15 @@
       "title": "Order",
       "type": "object"
     },
+    "PortfolioPolicy": {
+      "description": "Runtime portfolio policies that bias how non-exact routing behaves.",
+      "enum": [
+        "balanced",
+        "feasibility-first"
+      ],
+      "title": "PortfolioPolicy",
+      "type": "string"
+    },
     "ProblemInstanceSlice": {
       "description": "Order-complete slice descriptor applied before ScheduleProblem validation.",
       "properties": {
@@ -216,6 +225,10 @@
           "default": false,
           "title": "Exact Required",
           "type": "boolean"
+        },
+        "portfolio_policy": {
+          "$ref": "#/$defs/PortfolioPolicy",
+          "default": "balanced"
         },
         "preferred_max_latency_s": {
           "anyOf": [
