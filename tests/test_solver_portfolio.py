@@ -37,6 +37,7 @@ def test_available_solver_configs_matches_public_portfolio() -> None:
         "ALNS-500",
         "ALNS-1000",
         "RHC-ALNS",
+        "RHC-ALNS-100K",
         "RHC-CPSAT",
         "RHC-GREEDY",
     ]
@@ -122,6 +123,17 @@ def test_create_solver_rhc_alns_defaults_to_greedy_only_inner_repair() -> None:
     assert solve_kwargs["backtracking_enabled"] is True
     assert solve_kwargs["backtracking_tail_minutes"] == 60
     assert solve_kwargs["backtracking_max_ops"] == 24
+
+
+def test_create_solver_supports_named_rhc_alns_100k_profile() -> None:
+    solver, solve_kwargs = create_solver("RHC-ALNS-100K")
+
+    assert solver.name == "rhc"
+    assert solve_kwargs["inner_solver"] == "alns"
+    assert solve_kwargs["window_minutes"] == 300
+    assert solve_kwargs["overlap_minutes"] == 90
+    assert solve_kwargs["hybrid_inner_routing_enabled"] is False
+    assert solve_kwargs["inner_kwargs"]["use_cpsat_repair"] is False
 
 
 def test_create_solver_supports_academic_epsilon_profile() -> None:
@@ -245,6 +257,22 @@ def test_route_solver_rhc_alns_for_60k_ops_with_latency_budget() -> None:
 
     assert decision.solver_config == "RHC-ALNS"
     assert "Receding Horizon" in decision.reason
+
+
+def test_route_solver_rhc_alns_100k_profile_for_100k_ops_with_latency_budget() -> None:
+    """100K-op instance with >600s latency should route to the named 100K RHC profile."""
+    problem = make_simple_problem(n_orders=25000, ops_per_order=4)
+
+    decision = route_solver_config(
+        problem,
+        context=SolverRoutingContext(
+            regime=SolveRegime.NOMINAL,
+            preferred_max_latency_s=900,
+        ),
+    )
+
+    assert decision.solver_config == "RHC-ALNS-100K"
+    assert "100k" in decision.reason.lower() or "300/90" in decision.reason
 
 
 def test_route_solver_lbbd_for_large_ops_without_latency_budget() -> None:

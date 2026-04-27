@@ -274,6 +274,15 @@ def route_solver_config(
                     "benefits from extended ALNS (500 iterations, micro-CP-SAT repair)"
                 ),
             )
+        if op_count >= 100_000 and latency > 600:
+            return SolverRoutingDecision(
+                solver_config="RHC-ALNS-100K",
+                reason=(
+                    f"ultra-large nominal instance ({op_count} ops) with 10+ minute budget "
+                    "benefits from the named 100K RHC-ALNS profile "
+                    "(300/90 geometry, bounded search-entry settings)"
+                ),
+            )
         if op_count > 50_000 and latency > 600:
             return SolverRoutingDecision(
                 solver_config="RHC-ALNS",

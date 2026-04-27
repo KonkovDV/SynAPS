@@ -73,6 +73,57 @@ def _build_rhc() -> BaseSolver:
     return RhcSolver()
 
 
+def _rhc_alns_solve_kwargs(*, window_minutes: int, overlap_minutes: int) -> dict[str, object]:
+    return {
+        "window_minutes": window_minutes,
+        "overlap_minutes": overlap_minutes,
+        "inner_solver": "alns",
+        "time_limit_s": 600,
+        "alns_inner_window_time_cap_s": 180,
+        "max_ops_per_window": 5000,
+        "candidate_pool_factor": 2.0,
+        "due_admission_horizon_factor": 2.0,
+        "admission_tail_weight": 0.5,
+        "progressive_admission_relaxation_enabled": True,
+        "precedence_ready_candidate_filter_enabled": True,
+        "admission_relaxation_min_fill_ratio": 0.30,
+        "admission_full_scan_enabled": False,
+        "alns_budget_auto_scaling_enabled": True,
+        "alns_presearch_max_window_ops": 5000,
+        "alns_budget_estimated_repair_s_per_destroyed_op": 0.125,
+        "hybrid_inner_routing_enabled": False,
+        "hybrid_inner_solver": "cpsat",
+        "hybrid_due_pressure_threshold": 0.35,
+        "hybrid_candidate_pressure_threshold": 4.0,
+        "hybrid_max_ops": 1500,
+        "backtracking_enabled": True,
+        "backtracking_tail_minutes": 60,
+        "backtracking_max_ops": 24,
+        "hybrid_inner_kwargs": {
+            "num_workers": 4,
+        },
+        "inner_fallback_kpi_threshold": 0.10,
+        "inner_kwargs": {
+            "max_iterations": 100,
+            "destroy_fraction": 0.03,
+            "min_destroy": 10,
+            "max_destroy": 40,
+            "max_no_improve_iters": 30,
+            "use_cpsat_repair": False,
+            "repair_time_limit_s": 5,
+            "repair_num_workers": 1,
+            "cpsat_max_destroy_ops": 32,
+            "sa_auto_calibration_enabled": True,
+            "dynamic_sa_enabled": True,
+            "sa_due_alpha": 0.35,
+            "sa_candidate_beta": 0.15,
+            "sa_pressure_cooling_gamma": 0.0015,
+            "sa_temp_min": 50.0,
+            "sa_temp_max": 500.0,
+        },
+    }
+
+
 _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
     "GREED": SolverRegistration(
         factory=_build_greed_default,
@@ -275,59 +326,21 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
     # ---- RHC variants (10k–100k+ operations) ----
     "RHC-ALNS": SolverRegistration(
         factory=_build_rhc,
-        solve_kwargs={
-            "window_minutes": 480,
-            "overlap_minutes": 120,
-            "inner_solver": "alns",
-            "time_limit_s": 600,
-            "alns_inner_window_time_cap_s": 180,
-            "max_ops_per_window": 5000,
-            "candidate_pool_factor": 2.0,
-            "due_admission_horizon_factor": 2.0,
-            "admission_tail_weight": 0.5,
-            "progressive_admission_relaxation_enabled": True,
-            "precedence_ready_candidate_filter_enabled": True,
-            "admission_relaxation_min_fill_ratio": 0.30,
-            "admission_full_scan_enabled": False,
-            "alns_budget_auto_scaling_enabled": True,
-            "alns_presearch_max_window_ops": 5000,
-            "alns_budget_estimated_repair_s_per_destroyed_op": 0.125,
-            "hybrid_inner_routing_enabled": False,
-            "hybrid_inner_solver": "cpsat",
-            "hybrid_due_pressure_threshold": 0.35,
-            "hybrid_candidate_pressure_threshold": 4.0,
-            "hybrid_max_ops": 1500,
-            "backtracking_enabled": True,
-            "backtracking_tail_minutes": 60,
-            "backtracking_max_ops": 24,
-            "hybrid_inner_kwargs": {
-                "num_workers": 4,
-            },
-            "inner_fallback_kpi_threshold": 0.10,
-            "inner_kwargs": {
-                "max_iterations": 100,
-                "destroy_fraction": 0.03,
-                "min_destroy": 10,
-                "max_destroy": 40,
-                "max_no_improve_iters": 30,
-                "use_cpsat_repair": False,
-                "repair_time_limit_s": 5,
-                "repair_num_workers": 1,
-                "cpsat_max_destroy_ops": 32,
-                "sa_auto_calibration_enabled": True,
-                "dynamic_sa_enabled": True,
-                "sa_due_alpha": 0.35,
-                "sa_candidate_beta": 0.15,
-                "sa_pressure_cooling_gamma": 0.0015,
-                "sa_temp_min": 50.0,
-                "sa_temp_max": 500.0,
-            },
-        },
+        solve_kwargs=_rhc_alns_solve_kwargs(window_minutes=480, overlap_minutes=120),
         description=(
             "Receding Horizon Control with ALNS inner solver. "
             "8-hour windows, 2-hour overlap, max 5000 ops/window, "
             "boundary-aware tail carry-over and greedy-only repair. "
             "For ultra-large instances (50 000–100 000+ ops)."
+        ),
+    ),
+    "RHC-ALNS-100K": SolverRegistration(
+        factory=_build_rhc,
+        solve_kwargs=_rhc_alns_solve_kwargs(window_minutes=300, overlap_minutes=90),
+        description=(
+            "Named 100K+ RHC-ALNS search-entry profile. "
+            "5-hour windows, 90-minute overlap, greedy-only repair, and the April 2026 "
+            "geometry-refresh settings that re-entered ALNS search on bounded 100K runs."
         ),
     ),
     "RHC-CPSAT": SolverRegistration(

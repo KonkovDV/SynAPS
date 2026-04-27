@@ -30,7 +30,7 @@ SynAPS takes a white-box approach:
 
 What is implemented and verified in this repository:
 
-- 22 public solver configurations in the registry (`available_solver_configs()`)
+- 23 public solver configurations in the registry (`available_solver_configs()`)
 - Python requirement: `>=3.12` (`pyproject.toml`)
 - Core runtime dependencies: `ortools`, `highspy`, `pydantic`, `numpy`
 - Stable solve/repair JSON contracts (`synaps/contracts.py`)
@@ -108,6 +108,7 @@ What the latest audit established:
 - The bounded 2026-04-27 `100k` audit on the retired CP-SAT-heavy profile showed `RHC-GREEDY` scheduling `8144/100000` operations in `90.226s`, while `RHC-ALNS` scheduled `0/100000` operations and spent `400518 ms` in initial solution generation before the first ALNS iteration.
 - That 100K result is why the public `RHC-ALNS` defaults now disable hybrid CP-SAT routing and CP-SAT micro-repair, but it also shows that a deeper initial-seed bottleneck remains unresolved above the retired profile.
 - A second bounded 2026-04-27 `100k` slice on the staged geometry-refresh harness (`300/90` instead of the retired `480/120` first-window geometry for `100k+`) reached `ALNS starting`, completed `55` iterations with `43` improvements and `0` inner fallback, and finished at `4678/100000` scheduled operations in `90.118s`.
+- That geometry-refresh evidence is now promoted into the public portfolio as the named runtime profile `RHC-ALNS-100K`, so the `300/90` search-entry geometry is no longer trapped inside the staged harness.
 - The fresh same-run current-head comparison in `benchmark/studies/2026-04-27-rhc-100k-audit-v4-current-head/rhc_500k_study.json` keeps that search-entry result but puts it against a same-run baseline: `RHC-GREEDY` schedules `7852/100000` operations in `90.213s`, while `RHC-ALNS` schedules `3420/100000` in `90.113s` after entering search in both bounded windows (`56` and `30` iterations, `45` and `18` improvements, `0` CP-SAT repairs, `0` inner fallback).
 - Together, the `v3` and `v4` artifacts falsify the older "100K ALNS never reaches search" reading: the controlling bottleneck was first-window geometry and seed construction pressure, not the later CP-SAT repair flag alone.
 - They still do not establish production readiness, because the bounded current-head run remains partial (`mean_scheduled_ratio = 0.0342`, `feasible = false`) and still trails the same-run greedy baseline on scheduled coverage.
