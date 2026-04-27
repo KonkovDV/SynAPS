@@ -107,10 +107,10 @@ def test_create_solver_rhc_alns_defaults_to_greedy_only_inner_repair() -> None:
     assert solver.name == "rhc"
     assert solve_kwargs["inner_solver"] == "alns"
     assert solve_kwargs["progressive_admission_relaxation_enabled"] is True
-    assert solve_kwargs["precedence_ready_candidate_filter_enabled"] is True
+    assert solve_kwargs["precedence_ready_candidate_filter_enabled"] is False
     assert solve_kwargs["admission_relaxation_min_fill_ratio"] == 0.30
-    assert solve_kwargs["due_admission_horizon_factor"] == 2.0
-    assert solve_kwargs["admission_full_scan_enabled"] is False
+    assert solve_kwargs["due_admission_horizon_factor"] == 6.0
+    assert solve_kwargs["admission_full_scan_enabled"] is True
     assert solve_kwargs["alns_budget_auto_scaling_enabled"] is True
     assert solve_kwargs["alns_presearch_max_window_ops"] == 5000
     assert solve_kwargs["alns_budget_estimated_repair_s_per_destroyed_op"] == 0.125

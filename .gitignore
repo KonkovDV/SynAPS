@@ -72,3 +72,6 @@ benchmark/results/
 
 # Local-only markdown archive (not published)
 archive/
+
+# Upstream reference snapshots (local donor exploration, never committed)
+_synaps_upstream_ref/

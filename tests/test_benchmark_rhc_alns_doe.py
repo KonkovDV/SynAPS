@@ -49,7 +49,7 @@ def test_study_rhc_50k_propagates_seed_to_alns_inner_kwargs(monkeypatch, tmp_pat
     forwarded = captured_kwargs[0]["solver_kwargs"]["inner_kwargs"]
     assert forwarded["random_seed"] == 7
     assert forwarded["dynamic_sa_enabled"] is True
-    assert captured_kwargs[0]["solver_kwargs"]["hybrid_inner_routing_enabled"] is True
+    assert captured_kwargs[0]["solver_kwargs"]["hybrid_inner_routing_enabled"] is False
     assert captured_kwargs[0]["solver_kwargs"]["hybrid_inner_solver"] == "cpsat"
 
 

@@ -213,7 +213,7 @@ def _destroy_related(
 ) -> set[UUID]:
     """Remove operations that are related to a seed operation (Shaw removal).
 
-    Relatedness = same machine assignment + low setup time between them.
+    Relatedness = same machine assignment + low setup time + temporal proximity.
     Shaw (1998): operations are related if they share resources and have
     similar processing characteristics.
     """
@@ -243,6 +243,13 @@ def _destroy_related(
         score += setup
         # Similar processing time
         score += abs(op.base_duration_min - seed_op.base_duration_min) * 0.5
+        # R7: Temporal proximity — operations closer in time are more related
+        # (Ropke & Pisinger 2006: temporal relatedness prevents idle-time gaps
+        # from decoupling structurally adjacent operations).
+        time_gap_minutes = abs(
+            (a.start_time - seed_assignment.start_time).total_seconds() / 60.0
+        )
+        score += time_gap_minutes * 0.01
         relatedness.append((score, a.operation_id))
 
     relatedness.sort(key=lambda x: x[0])
@@ -285,13 +292,60 @@ def _destroy_machine_segment(
     return {machine_seq[i].operation_id for i in range(start_idx, start_idx + seg_size)}
 
 
+def _destroy_precedence_chain(
+    assignments: list[Assignment],
+    problem: ScheduleProblem,
+    sdst: SdstMatrix,
+    destroy_size: int,
+    rng: random.Random,
+) -> set[UUID]:
+    """Remove all operations of a randomly selected order (precedence-chain removal).
+
+    R8 — Forces complete re-sequencing of an entire work order.
+    Particularly effective for large instances where a single order occupies
+    multiple work centers across many time windows, creating compounding
+    sequencing errors.  Voudouris & Tsang (1999) term similar moves
+    "ejection chains"; Ropke & Pisinger (2006) §3.3 generalise them as
+    order-based removal.
+    """
+    if not assignments:
+        return set()
+
+    ops_by_id = {op.id: op for op in problem.operations}
+    ops_by_order: dict[Any, list[UUID]] = {}
+    for a in assignments:
+        op = ops_by_id.get(a.operation_id)
+        if op is None:
+            continue
+        ops_by_order.setdefault(op.order_id, []).append(a.operation_id)
+
+    if not ops_by_order:
+        return _destroy_random(assignments, problem, sdst, destroy_size, rng)
+
+    # Prefer orders that fit fully within destroy_size (clean chain removal)
+    valid_orders = [
+        (oid, oids)
+        for oid, oids in ops_by_order.items()
+        if 1 <= len(oids) <= destroy_size
+    ]
+    if valid_orders:
+        order_id, op_ids = rng.choice(valid_orders)
+        return set(op_ids)
+
+    # Fall back to largest order, capped at destroy_size
+    order_id, op_ids = max(ops_by_order.items(), key=lambda x: len(x[1]))
+    return set(rng.sample(op_ids, min(destroy_size, len(op_ids))))
+
+
 # All destroy operators (random, worst, related: Shaw/Ropke-Pisinger;
-#  machine_segment: domain heuristic for setup-chain disruption)
+#  machine_segment: domain heuristic for setup-chain disruption;
+#  precedence_chain: R8 order-based ejection for work-order level re-sequencing)
 DESTROY_OPERATORS = [
     ("random", _destroy_random),
     ("worst", _destroy_worst),
     ("related", _destroy_related),
     ("machine_segment", _destroy_machine_segment),
+    ("precedence_chain", _destroy_precedence_chain),
 ]
 
 
@@ -546,6 +600,10 @@ def _repair_greedy_outcome(
         problem,
         base_assignments=frozen_assignments,
         disrupted_op_ids=disrupted_op_ids,
+        # radius=0: only the destroyed ops are re-placed; frozen assignments are
+        # truly frozen. radius=1 caused regressions because IncrementalRepair
+        # freed successor ops jointly but _repair_greedy_outcome filtered them out,
+        # leaving stale successor positions that conflicted with the new placements.
         radius=0,
     )
 
@@ -830,7 +888,10 @@ class AlnsSolver(BaseSolver):
         sa_auto_calibration_enabled: bool = bool(
             kwargs.get("sa_auto_calibration_enabled", False)
         )
-        sa_calibration_trials: int = max(0, int(kwargs.get("sa_calibration_trials", 5)))
+        # R6: default raised from 5 to 15 — Pepels (2014, C&OR) recommends ≥10-50
+        # worsening samples for reliable SA temperature estimation. 5 gave ≥40%
+        # variance at 50K scale, reducing strict-lane reproducibility.
+        sa_calibration_trials: int = max(0, int(kwargs.get("sa_calibration_trials", 15)))
         sa_initial_acceptance_probability: float = float(
             kwargs.get("sa_initial_acceptance_probability", 0.8)
         )
@@ -1275,8 +1336,33 @@ class AlnsSolver(BaseSolver):
 
         if initial_result is None:
             if n_ops <= initial_beam_op_limit:
-                initial_solver_name = "beam"
-                initial_result = BeamSearchDispatch(beam_width=3).solve(problem)
+                beam_result = BeamSearchDispatch(beam_width=3).solve(problem)
+                greedy_result = GreedyDispatch().solve(problem)
+
+                beam_valid = _is_valid_complete_schedule(list(beam_result.assignments))
+                greedy_valid = _is_valid_complete_schedule(list(greedy_result.assignments))
+
+                if beam_valid and greedy_valid:
+                    beam_cost = _objective_cost(
+                        _evaluate_objective(problem, list(beam_result.assignments), sdst),
+                        objective_weights,
+                    )
+                    greedy_cost = _objective_cost(
+                        _evaluate_objective(problem, list(greedy_result.assignments), sdst),
+                        objective_weights,
+                    )
+                    if greedy_cost < beam_cost:
+                        initial_solver_name = "greedy"
+                        initial_result = greedy_result
+                    else:
+                        initial_solver_name = "beam"
+                        initial_result = beam_result
+                elif beam_valid:
+                    initial_solver_name = "beam"
+                    initial_result = beam_result
+                else:
+                    initial_solver_name = "greedy"
+                    initial_result = greedy_result
             else:
                 initial_solver_name = "greedy"
                 initial_result = GreedyDispatch().solve(problem)
@@ -1336,6 +1422,18 @@ class AlnsSolver(BaseSolver):
                 seed=seed,
                 fallback_temperature=sa_initial_temp,
             )
+            if sa_calibration_samples > 0:
+                # R5: express sa_temp_min as a fraction of calibrated T_0.
+                # An absolute floor of 50.0 causes acceptance probability
+                # e^(-delta/50) ≈ 0 for large-scale objectives (delta ~ 1000s),
+                # effectively reducing SA to a hill-climber after very few iters.
+                # Pepels (2014): T_min = 0.01 * T_0 is the recommended lower end.
+                sa_temp_min = max(sa_temp_min, 0.01 * sa_calibrated_base_temp)
+                # Recompute effective initial temperature with calibrated base.
+                effective_sa_initial_temp = min(
+                    sa_temp_max,
+                    max(sa_temp_min, sa_calibrated_base_temp * sa_pressure_factor),
+                )
 
         # ------- Phase 2: ALNS operator selection (Roulette Wheel) -------
         n_operators = len(DESTROY_OPERATORS)

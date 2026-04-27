@@ -1794,6 +1794,33 @@ class TestRhcSolver:
         assert result.metadata["lower_bound_upper_bound_comparable"] is False
         assert result.metadata["gap"] is None
 
+    def test_rhc_partial_schedule_with_assignments_marks_bounds_non_comparable(
+        self,
+    ) -> None:
+        """Partial RHC outputs with committed assignments must not expose a comparable gap."""
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_long_chain_problem(18)
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=180,
+            overlap_minutes=0,
+            inner_solver="greedy",
+            time_limit_s=10,
+            max_ops_per_window=6,
+            max_windows=2,
+            fallback_repair_enabled=False,
+        )
+
+        assert result.status == SolverStatus.ERROR
+        assert len(result.assignments) > 0
+        assert result.metadata["ops_scheduled"] < result.metadata["ops_total"]
+        assert "lower_bound" in result.metadata
+        assert "upper_bound" in result.metadata
+        assert result.metadata["lower_bound_upper_bound_comparable"] is False
+        assert result.metadata["gap"] is None
+
     def test_rhc_backtracking_rewinds_recent_boundary_assignments_into_next_window(
         self,
         monkeypatch: pytest.MonkeyPatch,

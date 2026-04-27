@@ -475,7 +475,7 @@ def test_study_rhc_500k_lane_both_profiles_workers(
         assert kwargs["solver_kwargs"]["backtracking_tail_minutes"] == 60
         assert kwargs["solver_kwargs"]["backtracking_max_ops"] == 24
         assert kwargs["solver_kwargs"]["progressive_admission_relaxation_enabled"] is True
-        assert kwargs["solver_kwargs"]["precedence_ready_candidate_filter_enabled"] is True
+        assert kwargs["solver_kwargs"]["precedence_ready_candidate_filter_enabled"] is False
         assert kwargs["solver_kwargs"]["admission_relaxation_min_fill_ratio"] == 0.30
         assert kwargs["solver_kwargs"]["alns_budget_auto_scaling_enabled"] is True
         assert (
@@ -716,8 +716,8 @@ def test_study_rhc_500k_inherits_tuned_alns_admission_profile(
 
     assert captured_kwargs
     profile = captured_kwargs[0]
-    assert profile["due_admission_horizon_factor"] == 2.0
-    assert profile["admission_full_scan_enabled"] is False
+    assert profile["due_admission_horizon_factor"] == 6.0
+    assert profile["admission_full_scan_enabled"] is True
 
 
 def test_study_rhc_500k_blocks_execution_above_model_operation_limit(

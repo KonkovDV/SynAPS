@@ -452,10 +452,13 @@ def _build_industrial_50k_solver_specs(
         "alns_inner_window_time_cap_s": 180,
         "max_ops_per_window": 5_000,
         "progressive_admission_relaxation_enabled": True,
-        "precedence_ready_candidate_filter_enabled": True,
-        "due_admission_horizon_factor": 2.0,
+        # R4 (audit DOE): disabled — kills ~66% of candidate pool on large instances
+        "precedence_ready_candidate_filter_enabled": False,
+        # R2 (audit): raised from 2.0 → 6.0 to expose more ops to admission gate
+        "due_admission_horizon_factor": 6.0,
         "admission_relaxation_min_fill_ratio": 0.30,
-        "admission_full_scan_enabled": False,
+        # R3 (audit): full scan required to fill windows on large instances
+        "admission_full_scan_enabled": True,
         "alns_budget_auto_scaling_enabled": True,
         "alns_presearch_max_window_ops": 5_000,
         "alns_budget_estimated_repair_s_per_destroyed_op": 0.125,
@@ -486,6 +489,8 @@ def _build_industrial_50k_solver_specs(
             "sa_due_alpha": 0.35,
             "sa_candidate_beta": 0.15,
             "sa_pressure_cooling_gamma": 0.0015,
+            # R6 (audit): 20 trials for stable T_0 estimate (Pepels 2014)
+            "sa_calibration_trials": 20,
             "sa_temp_min": 50.0,
             "sa_temp_max": 500.0,
         },

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -298,10 +300,13 @@ def test_study_rhc_50k_uses_tuned_alns_window_budget_profile(
     profile = captured_kwargs[0]["solver_kwargs"]
     assert profile["alns_inner_window_time_cap_s"] == 180
     assert profile["progressive_admission_relaxation_enabled"] is True
-    assert profile["precedence_ready_candidate_filter_enabled"] is True
-    assert profile["due_admission_horizon_factor"] == 2.0
+    # R4: precedence_ready_candidate_filter now disabled for 50K (audit DOE finding)
+    assert profile["precedence_ready_candidate_filter_enabled"] is False
+    # R2: horizon factor raised from 2.0 → 6.0 to expose more ops to admission gate
+    assert profile["due_admission_horizon_factor"] == 6.0
     assert profile["admission_relaxation_min_fill_ratio"] == 0.30
-    assert profile["admission_full_scan_enabled"] is False
+    # R3: full scan enabled; only full-scan can fill windows on large instances
+    assert profile["admission_full_scan_enabled"] is True
     assert profile["alns_budget_auto_scaling_enabled"] is True
     assert profile["alns_presearch_max_window_ops"] == 5_000
     assert profile["alns_budget_estimated_repair_s_per_destroyed_op"] == 0.125
@@ -886,3 +891,112 @@ def test_study_rhc_50k_max_push_both_lanes_keep_strict_worker_overrides(
     for kwargs in captured_kwargs:
         assert kwargs["solver_kwargs"]["hybrid_inner_routing_enabled"] is False
         assert kwargs["solver_kwargs"]["inner_kwargs"]["use_cpsat_repair"] is False
+
+
+def test_study_rhc_50k_inner_kwargs_include_calibration_trials(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """R6: industrial-50k profile must forward sa_calibration_trials ≥ 20 to inner ALNS."""
+    import benchmark.study_rhc_50k as study_module
+
+    captured_kwargs: list[dict] = []
+
+    def fake_run_scaling_case(*, n_ops, n_machines, n_states, solver_name, solver_kwargs, seed):
+        captured_kwargs.append({"solver_kwargs": solver_kwargs})
+        return {
+            "status": "feasible",
+            "feasible": True,
+            "solver": solver_name,
+            "makespan_min": 100.0,
+            "total_setup_min": 20.0,
+            "total_tardiness_min": 0.0,
+            "total_material_loss": 0.0,
+            "assigned_ops": n_ops,
+            "violations": 0,
+            "solve_ms": 1,
+            "gen_ms": 1,
+            "verify_ms": 0,
+            "n_ops": n_ops,
+            "n_machines": n_machines,
+            "n_states": n_states,
+            "sdst_memory_bytes": 0,
+            "metadata": {"inner_fallback_ratio": 0.0, "inner_fallback_kpi_passed": True},
+        }
+
+    monkeypatch.setattr(study_module, "run_scaling_case", fake_run_scaling_case)
+
+    study_module.study_rhc_50k(
+        preset_name="industrial-50k",
+        seeds=[1],
+        solver_names=["RHC-ALNS"],
+        write_dir=tmp_path,
+    )
+
+    assert captured_kwargs
+    inner = captured_kwargs[0]["solver_kwargs"]["inner_kwargs"]
+    # R6: must be ≥20 to meet Pepels (2014) minimum for reliable SA calibration
+    assert inner.get("sa_calibration_trials", 0) >= 20
+
+
+@pytest.mark.slow
+def test_study_rhc_50k_quality_gate_scheduled_ratio_ci_gate(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """R11: CI gate — quality_gate scheduled_ratio check must enforce ≥90% threshold.
+
+    This test validates the quality-gate machinery used for slow integration runs.
+    It is marked @pytest.mark.slow to prevent it from running in the fast unit lane.
+    The actual live 50K solve is not executed here; the contract is that when a real
+    solve returns scheduled_ratio < 0.90 the gate must fail.
+    """
+    import benchmark.study_rhc_50k as study_module
+
+    def make_fake(ratio: float):
+        def fake_run_scaling_case(
+            *, n_ops, n_machines, n_states, solver_name, solver_kwargs, seed
+        ):
+            return {
+                "status": "feasible" if ratio >= 1.0 else "error",
+                "feasible": ratio >= 1.0,
+                "solver": solver_name,
+                "makespan_min": 100.0,
+                "total_setup_min": 20.0,
+                "total_tardiness_min": 0.0,
+                "total_material_loss": 0.0,
+                "assigned_ops": int(n_ops * ratio),
+                "violations": 0,
+                "solve_ms": 1,
+                "gen_ms": 1,
+                "verify_ms": 0,
+                "n_ops": n_ops,
+                "n_machines": n_machines,
+                "n_states": n_states,
+                "sdst_memory_bytes": 0,
+                "metadata": {"inner_fallback_ratio": 0.0, "inner_fallback_kpi_passed": True},
+            }
+        return fake_run_scaling_case
+
+    # Gate must PASS at 100% scheduled ratio
+    monkeypatch.setattr(study_module, "run_scaling_case", make_fake(1.0))
+    report_pass = study_module.study_rhc_50k(
+        preset_name="industrial-50k",
+        seeds=[1],
+        solver_names=["RHC-ALNS"],
+        lane="throughput",
+        write_dir=tmp_path,
+    )
+    assert report_pass["quality_gate"]["results"]["RHC-ALNS"]["checks"]["scheduled_ratio"] is True
+
+    # Gate must FAIL at 50% scheduled ratio (below 90% threshold)
+    monkeypatch.setattr(study_module, "run_scaling_case", make_fake(0.5))
+    report_fail = study_module.study_rhc_50k(
+        preset_name="industrial-50k",
+        seeds=[1],
+        solver_names=["RHC-ALNS"],
+        lane="throughput",
+        write_dir=tmp_path,
+    )
+    assert report_fail["quality_gate"]["results"]["RHC-ALNS"]["checks"]["scheduled_ratio"] is False
+    assert report_fail["quality_gate"]["results"]["RHC-ALNS"]["passed"] is False

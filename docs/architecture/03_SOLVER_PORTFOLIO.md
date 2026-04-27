@@ -69,15 +69,17 @@ These are **measured line counts**, not estimates.
 | **Pareto Slice** | `synaps/solvers/pareto_slice_solver.py` | 104 | Two-stage $\varepsilon$-constraint (Makespan-then-Secondary) |
 | **Incremental Repair** | `synaps/solvers/incremental_repair.py` | 318 | Neighbourhood radius + greedy fallback + micro-CP-SAT |
 | **Portfolio Router** | `synaps/solvers/router.py` | 252 | Deterministic regime×size→solver decision tree |
-| **Graph Partitioning** | `synaps/solvers/partitioning.py` | 271 | Coarsening (BFS ARC-affinity) + FFD Bin-Packing + Refinement |
-| **Solver Registry** | `synaps/solvers/registry.py` | 210 | 13 pre-configured solver profiles |
 | **FeasibilityChecker** | `synaps/solvers/feasibility_checker.py` | 280 | Independent post-solve validator with event-sweep ARC checks |
+| **RHC Solver** | `synaps/solvers/rhc_solver.py` | 2 972 | Rolling-horizon temporal decomposition; ALNS/CP-SAT inner; adaptive admission + budget guard |
+| **ALNS Solver** | `synaps/solvers/alns_solver.py` | 1 837 | 5-operator LNS (random/worst/related/machine_segment/precedence_chain) + SA + adaptive weights |
+| **Graph Partitioning** | `synaps/solvers/partitioning.py` | 271 | Coarsening (BFS ARC-affinity) + FFD Bin-Packing + Refinement |
+| **Solver Registry** | `synaps/solvers/registry.py` | 444 | 21 pre-configured solver profiles + RHC-ALNS admission/budget tuning |
 | **Data Model** | `synaps/model.py` | 333 | Pydantic v2 schema + cross-reference validator |
 | **Control-Plane BFF** | `control-plane/src/*.ts` | 674 | Fastify + OpenAPI/AJV + Python bridge (TypeScript) |
-| **Total Solver Core** | | **4 315** | |
-| **Total with Support** | | **5 803** | |
+| **Total Solver Core** | | **9 124** | |
+| **Total with Support** | | **10 846** | |
 
-### 2.2. Solver Registry — 21 Pre-Configured Profiles
+### 2.2. Solver Registry — 21 Pre-Configured Profiles (registry.py, 444 LOC)
 
 The `SolverRegistry` (`registry.py`) provides named profiles used by the Portfolio Router:
 
@@ -97,7 +99,7 @@ The `SolverRegistry` (`registry.py`) provides named profiles used by the Portfol
 | `LBBD-10` | LbbdSolver | 60 s | 10 | Full decomposition |
 | `LBBD-5-HD` | LbbdHdSolver | 120 s | 5 | Industrial ($\leq 50$K ops) |
 | `LBBD-10-HD` | LbbdHdSolver | 300 s | 10 | Large factory |
-| `LBBD-20-HD` | LbbdHdSolver | 600 s | 20 | Extreme (50K+ ops) |
+| `LBBD-20-HD` | LbbdHdSolver | 600 s | 20 | Extreme (50K+ ops, experimental — use RHC-ALNS as validated path) |
 | `ALNS-300` | AlnsSolver | 120 s | 300 | Metaheuristic for 1K–10K ops |
 | `ALNS-500` | AlnsSolver | 300 s | 500 | Metaheuristic for 10K–50K ops |
 | `ALNS-1000` | AlnsSolver | 600 s | 1000 | Extended ALNS for 50K+ ops |

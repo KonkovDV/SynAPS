@@ -1895,22 +1895,50 @@ class RhcSolver(BaseSolver):
                                 if bool(alns_budget_profile["scaled"]):
                                     alns_budget_scaled_windows += 1
 
-                        should_skip_alns_presearch = (
-                            selected_inner_solver_name == "alns"
-                            and alns_presearch_budget_guard_enabled
-                            and len(clean_window_ops) > alns_presearch_max_window_ops
-                            and per_window_limit < alns_presearch_min_time_limit_s
-                        )
+                        # R1: Adaptive budget guard — use estimated cost vs. available
+                        # per-window budget instead of raw op-count threshold.
+                        # When auto-scaling is active the budget profile already carries
+                        # a calibrated estimate; fall back to the legacy raw-count guard
+                        # only when the profile is unavailable.
+                        if alns_budget_auto_scaling_enabled and alns_budget_profile is not None:
+                            _estimated_total_run_s = (
+                                float(alns_budget_profile["estimated_repair_s_per_destroyed_op"])
+                                * int(alns_budget_profile["effective_max_destroy"])
+                                * int(alns_budget_profile["effective_max_iterations"])
+                            )
+                            should_skip_alns_presearch = (
+                                selected_inner_solver_name == "alns"
+                                and alns_presearch_budget_guard_enabled
+                                and _estimated_total_run_s > per_window_limit
+                            )
+                        else:
+                            should_skip_alns_presearch = (
+                                selected_inner_solver_name == "alns"
+                                and alns_presearch_budget_guard_enabled
+                                and len(clean_window_ops) > alns_presearch_max_window_ops
+                                and per_window_limit < alns_presearch_min_time_limit_s
+                            )
                         if should_skip_alns_presearch:
                             alns_presearch_budget_guard_skipped_windows += 1
-                            logger.info(
-                                "RHC window %d skipped ALNS pre-search: %d ops exceed guard "
-                                "limit=%d at per-window budget %.2fs",
-                                window_count,
-                                len(clean_window_ops),
-                                alns_presearch_max_window_ops,
-                                per_window_limit,
-                            )
+                            if alns_budget_auto_scaling_enabled and alns_budget_profile is not None:
+                                logger.info(
+                                    "RHC window %d skipped ALNS pre-search: estimated run %.2fs "
+                                    "exceeds per-window budget %.2fs (iters=%d destroy=%d)",
+                                    window_count,
+                                    _estimated_total_run_s,
+                                    per_window_limit,
+                                    int(alns_budget_profile["effective_max_iterations"]),
+                                    int(alns_budget_profile["effective_max_destroy"]),
+                                )
+                            else:
+                                logger.info(
+                                    "RHC window %d skipped ALNS pre-search: %d ops exceed guard "
+                                    "limit=%d at per-window budget %.2fs",
+                                    window_count,
+                                    len(clean_window_ops),
+                                    alns_presearch_max_window_ops,
+                                    per_window_limit,
+                                )
                             inner_result = ScheduleResult(
                                 solver_name="alns",
                                 status=SolverStatus.ERROR,

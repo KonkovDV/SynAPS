@@ -82,12 +82,18 @@ def _rhc_alns_solve_kwargs(*, window_minutes: int, overlap_minutes: int) -> dict
         "alns_inner_window_time_cap_s": 180,
         "max_ops_per_window": 5000,
         "candidate_pool_factor": 2.0,
-        "due_admission_horizon_factor": 2.0,
+        # R2: raised from 2.0 to 6.0 — 2.0 only covered 1200 min of a 43200-min
+        # 30-day horizon, admitting <700 ops/window. 6.0 gives ~3600 min lookahead.
+        "due_admission_horizon_factor": 6.0,
         "admission_tail_weight": 0.5,
         "progressive_admission_relaxation_enabled": True,
-        "precedence_ready_candidate_filter_enabled": True,
+        # R4: disabled — at 50K startup <1/3 of ops are precedence-ready;
+        # the filter killed ~66% of the full-scan pool before any chains built.
+        "precedence_ready_candidate_filter_enabled": False,
         "admission_relaxation_min_fill_ratio": 0.30,
-        "admission_full_scan_enabled": False,
+        # R3: enabled — only full-scan can fill windows when due-admission gate is
+        # restrictive. DOE evidence: 480/120 + full_scan admits 1531 ops vs 228.
+        "admission_full_scan_enabled": True,
         "alns_budget_auto_scaling_enabled": True,
         "alns_presearch_max_window_ops": 5000,
         "alns_budget_estimated_repair_s_per_destroyed_op": 0.125,
@@ -114,10 +120,15 @@ def _rhc_alns_solve_kwargs(*, window_minutes: int, overlap_minutes: int) -> dict
             "repair_num_workers": 1,
             "cpsat_max_destroy_ops": 32,
             "sa_auto_calibration_enabled": True,
+            # R6: raised from 5 to 20 — Pepels (2014) recommends ≥10-50 worsening
+            # samples for reliable SA temperature estimation.
+            "sa_calibration_trials": 20,
             "dynamic_sa_enabled": True,
             "sa_due_alpha": 0.35,
             "sa_candidate_beta": 0.15,
             "sa_pressure_cooling_gamma": 0.0015,
+            # R5: sa_temp_min is now computed as 0.01*T_0 post-calibration in
+            # AlnsSolver.solve(); this value serves as the floor before calibration.
             "sa_temp_min": 50.0,
             "sa_temp_max": 500.0,
         },
@@ -265,8 +276,10 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
             "gap_threshold": 0.005,
         },
         description=(
-            "Extended Hierarchical LBBD for 50 000+ operations. "
-            "Tighter gap (0.5%), smaller clusters (≤150 ops), 20 iterations, 10min budget."
+            "Extended Hierarchical LBBD. "
+            "Tighter gap (0.5%), smaller clusters (≤150 ops), 20 iterations, 10min budget. "
+            "Designed for 50 000+ ops via ~333 clusters; no DOE validation at that scale yet "
+            "— use RHC-ALNS as the validated path for 50K+ instances."
         ),
     ),
     # ---- ALNS variants (5k–50k+ operations) ----
