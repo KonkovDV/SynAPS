@@ -20,7 +20,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Literal
 
-from benchmark.study_rhc_50k import _apply_lane_profile
+from benchmark.study_rhc_50k import _apply_lane_profile, _summarize_inner_windows
 from synaps.model import (
     MAX_SCHEDULE_OPERATIONS,
     MAX_SCHEDULE_ORDERS,
@@ -358,6 +358,14 @@ def _summarize_runs(runs: list[dict[str, Any]], *, cvar_alpha: float) -> dict[st
             and run["results"]["inner_fallback_ratio"] is not None
         )
     ]
+    flattened_inner_window_summaries: list[dict[str, Any]] = []
+    for run in completed:
+        solver_metadata = run.get("solver_metadata", {})
+        inner_window_summaries = solver_metadata.get("inner_window_summaries")
+        if isinstance(inner_window_summaries, list):
+            for summary_entry in inner_window_summaries:
+                if isinstance(summary_entry, dict):
+                    flattened_inner_window_summaries.append(summary_entry)
 
     summary.update(
         {
@@ -389,6 +397,10 @@ def _summarize_runs(runs: list[dict[str, Any]], *, cvar_alpha: float) -> dict[st
             _tail_cvar(fallback_ratios, cvar_alpha),
             4,
         )
+
+    summary["inner_window_summary"] = _summarize_inner_windows(
+        flattened_inner_window_summaries
+    )
 
     return summary
 

@@ -234,6 +234,92 @@ def test_study_rhc_500k_preserves_solver_metadata_for_audit(
     assert run["solver_metadata"]["inner_window_summaries"][0]["initial_solution_ms"] == 345
 
 
+def test_study_rhc_500k_summarizes_inner_window_audit_signals(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import benchmark.study_rhc_500k as study_module
+
+    def fake_run_scaling_case(*, n_ops, n_machines, n_states, solver_name, solver_kwargs, seed):
+        return {
+            "status": "error",
+            "feasible": False,
+            "solver": solver_name,
+            "makespan_min": 123.0,
+            "total_setup_min": 20.0,
+            "total_tardiness_min": 5.0,
+            "total_material_loss": 0.0,
+            "assigned_ops": 321,
+            "violations": 0,
+            "solve_ms": 1000,
+            "gen_ms": 1,
+            "verify_ms": 1,
+            "n_ops": n_ops,
+            "n_machines": n_machines,
+            "n_states": n_states,
+            "sdst_memory_bytes": 0,
+            "metadata": {
+                "inner_fallback_ratio": 0.5,
+                "inner_window_summaries": [
+                    {
+                        "window": 1,
+                        "resolution_mode": "inner",
+                        "iterations_completed": 12,
+                        "improvements": 7,
+                        "ops_in_window": 120,
+                        "ops_committed": 36,
+                        "initial_solution_ms": 345,
+                        "time_limit_exhausted_before_search": False,
+                        "warm_start_used": True,
+                    },
+                    {
+                        "window": 2,
+                        "resolution_mode": "fallback_greedy",
+                        "iterations_completed": 0,
+                        "improvements": 0,
+                        "ops_in_window": 180,
+                        "ops_committed": 18,
+                        "initial_solution_ms": 455,
+                        "time_limit_exhausted_before_search": True,
+                        "budget_guard_skipped_initial_search": True,
+                        "warm_start_used": False,
+                        "warm_start_rejected_reason": "warm_start_incomplete",
+                    },
+                ],
+            },
+        }
+
+    monkeypatch.setattr(study_module, "run_scaling_case", fake_run_scaling_case)
+
+    report = study_module.study_rhc_500k(
+        execution_mode="gated",
+        scales=[100_000],
+        seeds=[1],
+        solver_names=["RHC-ALNS"],
+        lane="throughput",
+        write_dir=tmp_path,
+    )
+
+    inner = report["summary_by_config"]["RHC-ALNS|throughput|100000"]["inner_window_summary"]
+    assert inner["windows_observed"] == 2
+    assert inner["search_active_windows"] == 1
+    assert inner["search_active_window_rate"] == 0.5
+    assert inner["budget_guard_skipped_windows"] == 1
+    assert inner["time_limit_exhausted_before_search_windows"] == 1
+    assert inner["fallback_windows"] == 1
+    assert inner["total_iterations_completed"] == 12
+    assert inner["mean_initial_solution_ms"] == 400.0
+    assert inner["max_initial_solution_ms"] == 455
+    assert inner["mean_ops_in_window"] == 150.0
+    assert inner["mean_ops_committed"] == 27.0
+    assert inner["mean_commit_yield"] == 0.2
+    assert inner["warm_start_used_windows"] == 1
+    assert inner["warm_start_window_rate"] == 0.5
+    assert inner["warm_start_rejected_reason_counts"] == {
+        "warm_start_incomplete": 1,
+    }
+
+
 def test_study_rhc_500k_lane_both_profiles_workers(
     monkeypatch,
     tmp_path: Path,

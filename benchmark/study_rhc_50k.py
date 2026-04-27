@@ -44,6 +44,108 @@ def _tail_cvar(values: list[float], alpha: float) -> float:
     return float(statistics.mean(tail)) if tail else float(var_alpha)
 
 
+def _summarize_inner_windows(inner_window_summaries: list[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate audit-critical telemetry from per-window inner solver summaries."""
+
+    normalized = [summary for summary in inner_window_summaries if isinstance(summary, dict)]
+    if not normalized:
+        return {
+            "windows_observed": 0,
+            "search_active_windows": 0,
+            "search_active_window_rate": 0.0,
+            "budget_guard_skipped_windows": 0,
+            "time_limit_exhausted_before_search_windows": 0,
+            "fallback_windows": 0,
+            "total_iterations_completed": 0,
+            "mean_iterations_completed": 0.0,
+            "mean_iterations_completed_active": 0.0,
+            "mean_improvements": 0.0,
+            "mean_initial_solution_ms": 0.0,
+            "max_initial_solution_ms": 0,
+            "mean_ops_in_window": 0.0,
+            "mean_ops_committed": 0.0,
+            "total_ops_in_window": 0,
+            "total_ops_committed": 0,
+            "mean_commit_yield": 0.0,
+            "warm_start_used_windows": 0,
+            "warm_start_window_rate": 0.0,
+            "warm_start_rejected_reason_counts": {},
+        }
+
+    iterations = [int(summary.get("iterations_completed", 0) or 0) for summary in normalized]
+    active_iterations = [value for value in iterations if value > 0]
+    improvements = [int(summary.get("improvements", 0) or 0) for summary in normalized]
+    initial_solution_ms = [
+        int(summary.get("initial_solution_ms", 0) or 0) for summary in normalized
+    ]
+    ops_in_window = [int(summary.get("ops_in_window", 0) or 0) for summary in normalized]
+    ops_committed = [int(summary.get("ops_committed", 0) or 0) for summary in normalized]
+    commit_yields = [
+        committed / max(1, window_ops)
+        for committed, window_ops in zip(ops_committed, ops_in_window, strict=True)
+    ]
+    fallback_windows = sum(
+        1 for summary in normalized if summary.get("resolution_mode") == "fallback_greedy"
+    )
+    budget_guard_skipped_windows = sum(
+        1
+        for summary in normalized
+        if bool(summary.get("budget_guard_skipped_initial_search", False))
+    )
+    time_limit_exhausted_before_search_windows = sum(
+        1
+        for summary in normalized
+        if bool(summary.get("time_limit_exhausted_before_search", False))
+    )
+    warm_start_used_windows = sum(
+        1 for summary in normalized if bool(summary.get("warm_start_used", False))
+    )
+    search_active_windows = len(active_iterations)
+    warm_start_rejected_reason_counts: dict[str, int] = {}
+    for summary in normalized:
+        reason = summary.get("warm_start_rejected_reason")
+        if isinstance(reason, str) and reason:
+            warm_start_rejected_reason_counts[reason] = (
+                warm_start_rejected_reason_counts.get(reason, 0) + 1
+            )
+
+    return {
+        "windows_observed": len(normalized),
+        "search_active_windows": search_active_windows,
+        "search_active_window_rate": round(
+            search_active_windows / max(1, len(normalized)),
+            4,
+        ),
+        "budget_guard_skipped_windows": budget_guard_skipped_windows,
+        "time_limit_exhausted_before_search_windows": (
+            time_limit_exhausted_before_search_windows
+        ),
+        "fallback_windows": fallback_windows,
+        "total_iterations_completed": sum(iterations),
+        "mean_iterations_completed": round(statistics.mean(iterations), 2),
+        "mean_iterations_completed_active": round(
+            statistics.mean(active_iterations),
+            2,
+        )
+        if active_iterations
+        else 0.0,
+        "mean_improvements": round(statistics.mean(improvements), 2),
+        "mean_initial_solution_ms": round(statistics.mean(initial_solution_ms), 2),
+        "max_initial_solution_ms": max(initial_solution_ms),
+        "mean_ops_in_window": round(statistics.mean(ops_in_window), 2),
+        "mean_ops_committed": round(statistics.mean(ops_committed), 2),
+        "total_ops_in_window": sum(ops_in_window),
+        "total_ops_committed": sum(ops_committed),
+        "mean_commit_yield": round(statistics.mean(commit_yields), 4),
+        "warm_start_used_windows": warm_start_used_windows,
+        "warm_start_window_rate": round(
+            warm_start_used_windows / max(1, len(normalized)),
+            4,
+        ),
+        "warm_start_rejected_reason_counts": warm_start_rejected_reason_counts,
+    }
+
+
 def _apply_lane_profile(
     solver_name: str,
     solver_kwargs: dict[str, Any],
@@ -735,6 +837,7 @@ def _summarize_solver_records(
         for record in records
         if "inner_fallback_kpi_passed" in record.get("solver_metadata", {})
     ]
+    flattened_inner_window_summaries: list[dict[str, Any]] = []
     native_acceleration_flags: list[bool] = []
     warm_start_window_flags: list[bool] = []
     warm_start_completed_counts: list[float] = []
@@ -755,6 +858,7 @@ def _summarize_solver_records(
             for summary in inner_window_summaries:
                 if not isinstance(summary, dict):
                     continue
+                flattened_inner_window_summaries.append(summary)
                 if "warm_start_used" in summary:
                     warm_start_window_flags.append(bool(summary["warm_start_used"]))
                 if "warm_start_completed_assignments" in summary:
@@ -848,6 +952,9 @@ def _summarize_solver_records(
             statistics.mean(warm_start_completed_counts),
             3,
         )
+    summary["inner_window_summary"] = _summarize_inner_windows(
+        flattened_inner_window_summaries
+    )
     return summary
 
 

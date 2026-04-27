@@ -257,6 +257,7 @@ python -m benchmark.study_rhc_50k \
 ```
 
 Study пишет materialized instances в `instances/` и верхнеуровневый артефакт `rhc_50k_study.json` с агрегатами по wall-clock, verification time, makespan, total setup и RHC-specific metadata вроде `preprocessing_ms` и давления candidate-pool.
+Теперь summary этого исследования также публикует `summary_by_solver.*.inner_window_summary`, поднимая из raw `inner_window_summaries` такие audit-сигналы, как `search_active_window_rate`, `mean_initial_solution_ms`, `mean_commit_yield` и `warm_start_rejected_reason_counts`.
 
 ### Текущие артефакты
 
@@ -347,6 +348,7 @@ python -m benchmark.study_rhc_500k --execution-mode gated --lane both --seeds 1 
 
 Артефакт исследования: `rhc_500k_study.json` в выбранной study-директории.
 Для каждого выполненного run артефакт теперь сохраняет и raw `solver_metadata`, включая `inner_window_summaries`, чтобы staged 100K+ audit можно было читать из JSON, а не только из terminal traces.
+Staged summary-слой теперь также поднимает эти window-level сигналы в `summary_by_config.*.inner_window_summary`, чтобы search-entry, стоимость seed construction, commit-yield и warm-start rejection patterns читались без ручного сворачивания сырых массивов по окнам.
 
 ## Примеры входных данных
 

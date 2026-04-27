@@ -262,6 +262,7 @@ python -m benchmark.study_rhc_50k \
 ```
 
 The study writes materialized instances under `instances/` and a top-level `rhc_50k_study.json` artifact with aggregated wall-clock, verification time, makespan, setup totals, and RHC-specific metadata such as preprocessing time and candidate-pool pressure.
+The study summary now also emits `summary_by_solver.*.inner_window_summary`, which lifts per-window audit signals like `search_active_window_rate`, `mean_initial_solution_ms`, `mean_commit_yield`, and `warm_start_rejected_reason_counts` out of raw `inner_window_summaries`.
 
 April 2026 hardening note:
 
@@ -359,6 +360,7 @@ python -m benchmark.study_rhc_500k --execution-mode gated --lane both --seeds 1 
 
 The script writes `rhc_500k_study.json` into the selected study directory.
 Each executed run now also preserves raw `solver_metadata`, including `inner_window_summaries`, so staged 100K+ audit slices can be reconstructed from the artifact JSON instead of relying on terminal-only traces.
+The staged summary layer also promotes those window-level signals into `summary_by_config.*.inner_window_summary`, so audit consumers can read search-entry, seed-cost, commit-yield, and warm-start rejection patterns without manually folding raw per-window arrays.
 
 ## Instances
 
