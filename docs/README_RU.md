@@ -49,6 +49,7 @@ Language: [EN](README.md) | **RU**
 ## Аудиторские отчёты
 
 - [ACADEMIC_TECHNICAL_REPORT_2026_04.md](audit/ACADEMIC_TECHNICAL_REPORT_2026_04.md) — академический технический аудит: формальная классификация задачи, анализ solver-портфолио, конкурентное позиционирование, рекомендации.
+- [SYNAPS_RECHECK_AUDIT_2026_04_27.md](audit/SYNAPS_RECHECK_AUDIT_2026_04_27.md) — current-head recheck после очистки публичного `RHC-ALNS` профиля и staged `100k+` geometry-retune, с внешним фактчекингом по ALNS / CP-SAT и обновлённым verdict по scale boundary.
 - [SYNAPS_UPDATE_AUDIT_2026_04_25.md](audit/SYNAPS_UPDATE_AUDIT_2026_04_25.md) — post-audit note: реализованные исправления по admission starvation и ALNS budget scaling.
 - [SYNAPS_ACADEMIC_AUDIT_COMPREHENSIVE_RU.md](audit/SYNAPS_ACADEMIC_AUDIT_COMPREHENSIVE_RU.md) — аудит архитектуры: incremental repair, feasibility checker, ML advisory, целевой OSS/OSH-стек.
 - [SYNAPS_CRITICAL_GAPS_AND_OPTIMIZATIONS_RU.md](audit/SYNAPS_CRITICAL_GAPS_AND_OPTIMIZATIONS_RU.md) — 5 архитектурных узких мест с академическими ссылками и планом усиления. Gap #1 (параллелизм LBBD) уже закрыт.

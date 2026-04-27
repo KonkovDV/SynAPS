@@ -1,0 +1,199 @@
+{
+  "study_kind": "rhc-500k",
+  "execution_mode": "gated",
+  "lane_mode": "throughput",
+  "scales": [
+    100000
+  ],
+  "requested_solver_names": [
+    "RHC-GREEDY",
+    "RHC-ALNS"
+  ],
+  "seed_count": 1,
+  "cvar_alpha": 0.95,
+  "scale_records": [
+    {
+      "scale": 100000,
+      "topology": {
+        "n_ops": 100000,
+        "n_machines": 200,
+        "n_states": 20
+      },
+      "projection": {
+        "eligible_per_operation": 20,
+        "eligible_links": 2000000,
+        "expected_setup_entries": 38000,
+        "n_orders": 20000,
+        "sdst_dense_gb": 0.001,
+        "setup_entries_gb": 0.007,
+        "eligible_links_gb": 0.03,
+        "operation_objects_gb": 0.048,
+        "order_objects_gb": 0.005,
+        "estimated_model_gb": 0.09,
+        "estimated_working_set_gb": 0.144
+      },
+      "resource_gate": {
+        "allowed": true,
+        "reasons": [],
+        "limits": {
+          "max_estimated_memory_gb": 64.0,
+          "max_setup_entries": 25000000,
+          "max_eligible_links": 60000000
+        },
+        "model_limits": {
+          "max_operations": 200000,
+          "max_orders": 200000,
+          "max_work_centers": 10000,
+          "max_setup_entries": 2000000
+        }
+      },
+      "runs": [
+        {
+          "scale": 100000,
+          "lane": "throughput",
+          "solver_label": "RHC-GREEDY",
+          "solver_name": "rhc-greedy",
+          "seed": 1,
+          "results": {
+            "status": "error",
+            "feasible": false,
+            "violations": 0,
+            "makespan_minutes": 2728.19,
+            "total_setup_minutes": 8766.0,
+            "total_tardiness_minutes": 298995.73,
+            "assigned_ops": 7852,
+            "n_ops": 100000,
+            "solve_ms": 90213,
+            "acceleration": {
+              "native_available": false,
+              "atcs_log_score_backend": "python",
+              "atcs_log_score_batch_backend": "python",
+              "resource_capacity_backend": "python",
+              "rhc_candidate_metrics_backend": "python",
+              "rhc_candidate_metrics_np_backend": "python",
+              "rhc_candidate_metrics_np_jagged_backend": "python",
+              "native_module": null
+            },
+            "inner_fallback_ratio": 0.0
+          }
+        },
+        {
+          "scale": 100000,
+          "lane": "throughput",
+          "solver_label": "RHC-ALNS",
+          "solver_name": "rhc-alns",
+          "seed": 1,
+          "results": {
+            "status": "error",
+            "feasible": false,
+            "violations": 0,
+            "makespan_minutes": 1154.93,
+            "total_setup_minutes": 3222.0,
+            "total_tardiness_minutes": 5263.52,
+            "assigned_ops": 3420,
+            "n_ops": 100000,
+            "solve_ms": 90113,
+            "acceleration": {
+              "native_available": false,
+              "atcs_log_score_backend": "python",
+              "atcs_log_score_batch_backend": "python",
+              "resource_capacity_backend": "python",
+              "rhc_candidate_metrics_backend": "python",
+              "rhc_candidate_metrics_np_backend": "python",
+              "rhc_candidate_metrics_np_jagged_backend": "python",
+              "native_module": null
+            },
+            "inner_fallback_ratio": 0.0
+          }
+        }
+      ],
+      "execution": "executed"
+    }
+  ],
+  "summary_by_config": {
+    "RHC-GREEDY|throughput|100000": {
+      "run_count": 1,
+      "error_count": 0,
+      "error_rate": 0.0,
+      "status": "ok",
+      "feasibility_rate": 0.0,
+      "mean_makespan_minutes": 2728.19,
+      "median_makespan_minutes": 2728.19,
+      "iqr_makespan_minutes": 0.0,
+      "cvar_makespan_minutes": 2728.19,
+      "mean_wall_time_s": 90.213,
+      "median_wall_time_s": 90.213,
+      "iqr_wall_time_s": 0.0,
+      "cvar_wall_time_s": 90.213,
+      "mean_scheduled_ratio": 0.0785,
+      "cvar_unscheduled_ratio": 0.9215,
+      "mean_throughput_ops_per_s": 87.038,
+      "mean_inner_fallback_ratio": 0.0,
+      "cvar_inner_fallback_ratio": 0.0
+    },
+    "RHC-ALNS|throughput|100000": {
+      "run_count": 1,
+      "error_count": 0,
+      "error_rate": 0.0,
+      "status": "ok",
+      "feasibility_rate": 0.0,
+      "mean_makespan_minutes": 1154.93,
+      "median_makespan_minutes": 1154.93,
+      "iqr_makespan_minutes": 0.0,
+      "cvar_makespan_minutes": 1154.93,
+      "mean_wall_time_s": 90.113,
+      "median_wall_time_s": 90.113,
+      "iqr_wall_time_s": 0.0,
+      "cvar_wall_time_s": 90.113,
+      "mean_scheduled_ratio": 0.0342,
+      "cvar_unscheduled_ratio": 0.9658,
+      "mean_throughput_ops_per_s": 37.952,
+      "mean_inner_fallback_ratio": 0.0,
+      "cvar_inner_fallback_ratio": 0.0
+    }
+  },
+  "quality_gate": {
+    "baseline_solver": "RHC-GREEDY",
+    "results": {
+      "RHC-GREEDY|throughput|100000": {
+        "baseline_key": "RHC-GREEDY|throughput|100000",
+        "objective_degradation_ratio": 1.0,
+        "thresholds": {
+          "min_scheduled_ratio": 0.9,
+          "max_inner_fallback_ratio": 0.2,
+          "max_makespan_degradation_ratio": 1.1
+        },
+        "checks": {
+          "summary_ok": true,
+          "feasibility": false,
+          "scheduled_ratio": false,
+          "fallback_ratio": true,
+          "objective_degradation": true
+        },
+        "passed": false
+      },
+      "RHC-ALNS|throughput|100000": {
+        "baseline_key": "RHC-GREEDY|throughput|100000",
+        "objective_degradation_ratio": 0.4233,
+        "thresholds": {
+          "min_scheduled_ratio": 0.9,
+          "max_inner_fallback_ratio": 0.2,
+          "max_makespan_degradation_ratio": 1.1
+        },
+        "checks": {
+          "summary_ok": true,
+          "feasibility": false,
+          "scheduled_ratio": false,
+          "fallback_ratio": true,
+          "objective_degradation": true
+        },
+        "passed": false
+      }
+    }
+  },
+  "resource_gate_defaults": {
+    "max_estimated_memory_gb": 64.0,
+    "max_setup_entries": 25000000,
+    "max_eligible_links": 60000000
+  }
+}

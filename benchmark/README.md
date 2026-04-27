@@ -278,24 +278,28 @@ The latest pre-fix live stress-matrix artifact is [studies/test-50k-academic-mat
 
 The retired guarded-profile artifact is [studies/2026-04-26-rhc-alns-postfix-canonical-v4/rhc_50k_study.json](studies/2026-04-26-rhc-alns-postfix-canonical-v4/rhc_50k_study.json).
 
-The fresh current-head audit before the profile refresh is [studies/2026-04-27-rhc-50k-audit-v1/rhc_50k_study.json](studies/2026-04-27-rhc-50k-audit-v1/rhc_50k_study.json).
+The current-head audit before the profile refresh is [studies/2026-04-27-rhc-50k-audit-v1/rhc_50k_study.json](studies/2026-04-27-rhc-50k-audit-v1/rhc_50k_study.json).
+
+The refreshed current-head public/default audit is [studies/2026-04-27-rhc-50k-audit-v2-current-head/rhc_50k_study.json](studies/2026-04-27-rhc-50k-audit-v2-current-head/rhc_50k_study.json).
 
 Read them together rather than collapsing them into one story:
 
 - the pre-fix stress matrix preserves the old ALNS failure shape, where coverage was weak but some windows did enter search;
 - the guarded-profile artifact preserves the second regime, where oversized ALNS windows are skipped before costly seed generation can burn the whole per-window budget;
-- the fresh current-head audit preserves the mixed regime, where early windows do enter ALNS, but windows 2-3 burn budget on zero-yield CP-SAT repair and later windows fall back or time out under hybrid CP-SAT routing;
-- both runs still report `status=error` and `feasible=false`, so neither should be read as a solved industrial benchmark.
+- the current-head-before-refresh audit preserves the mixed regime, where early windows do enter ALNS, but windows 2-3 burn budget on zero-yield CP-SAT repair and later windows fall back or time out under hybrid CP-SAT routing;
+- the refreshed current-head audit shows the public profile after that cleanup: hybrid CP-SAT routing and CP-SAT repair are gone from the public path, windows 1-2 still enter search, and later windows now fail earlier with `inner_time_limit_exhausted_before_search` during seed construction;
+- all current-head public runs still report `status=error` and `feasible=false`, so none should be read as a solved industrial benchmark.
 - in that partial regime, compare coverage and fallback metrics first; do not interpret bound-gap quality unless `lower_bound_upper_bound_comparable=true`.
 
 The current split is now more precise:
 
 - pre-fix `RHC-ALNS|throughput` reported `mean_scheduled_ratio = 0.0946`, `mean_makespan_minutes = 4985.85`, and `mean_inner_fallback_ratio = 0.1`;
 - guarded-profile `RHC-ALNS|throughput` reports `mean_scheduled_ratio = 0.3028`, `mean_makespan_minutes = 9675.18`, and `mean_inner_fallback_ratio = 1.0`;
-- fresh current-head `RHC-ALNS|throughput` reports `mean_scheduled_ratio = 0.1243`, `mean_makespan_minutes = 4134.84`, and `mean_inner_fallback_ratio = 0.625`;
-- post-fix `RHC-GREEDY|throughput` remains the stronger pure-coverage baseline at `mean_scheduled_ratio = 0.37` with zero inner fallback.
+- current-head-before-refresh `RHC-ALNS|throughput` reports `mean_scheduled_ratio = 0.1243`, `mean_makespan_minutes = 4134.84`, and `mean_inner_fallback_ratio = 0.625`;
+- current-head-after-refresh `RHC-ALNS|throughput` reports `mean_scheduled_ratio = 0.0845`, `mean_makespan_minutes = 3059.82`, and `mean_inner_fallback_ratio = 0.6667`;
+- current-head-after-refresh `RHC-GREEDY|throughput` remains the stronger pure-coverage baseline at `mean_scheduled_ratio = 0.3563` with zero inner fallback.
 
-So the public 50K path remains real and reproducible, but the latest evidence now says something stricter than either the old stress-matrix story or the guarded-fallback story alone: ALNS can enter search, yet the retired public profile was still wasting too much budget in CP-SAT side paths. That is why the public `RHC-ALNS` default now disables hybrid CP-SAT routing and CP-SAT micro-repair, while the DOE harnesses keep those knobs exposed for controlled experiments.
+So the public 50K path remains real and reproducible, but the latest evidence is now four-way: ALNS can enter search; the retired public profile was wasting too much budget in CP-SAT side paths; and the refreshed public default removes those side paths yet still loses late windows to seed-construction exhaustion. That is why the public `RHC-ALNS` default stays greedy-only and hybrid-off, while the DOE harnesses keep those knobs exposed for controlled experiments.
 
 Post-audit (2026-04-26) solver hardening now includes:
 
@@ -320,6 +324,8 @@ RHC-ALNS profile update (April 2026):
 Bounded 100K evidence for the retired profile is [studies/2026-04-27-rhc-100k-audit-v1/rhc_500k_study.json](studies/2026-04-27-rhc-100k-audit-v1/rhc_500k_study.json). It shows `RHC-GREEDY` scheduling `8144/100000` operations in `90.226s`, while `RHC-ALNS` schedules `0/100000` operations and exhausts `400518 ms` in initial solution generation before the first ALNS iteration. Treat that artifact as failure evidence for the retired profile, not as a claim that the refreshed default is already validated at 100K.
 
 Bounded 100K evidence for the staged geometry-refresh harness is [studies/2026-04-27-rhc-100k-audit-v3-geometry-refresh/rhc_500k_study.json](studies/2026-04-27-rhc-100k-audit-v3-geometry-refresh/rhc_500k_study.json). In that slice, the staged `100k+` harness narrows `RHC-ALNS` first-window geometry to `300/90`, reducing the first inner slice to `760` ops. The run reaches `ALNS starting`, completes `55` iterations with `43` improvements, records `0` inner fallback, and finishes at `4678/100000` scheduled operations in `90.118s`. Read that artifact as proof that 100K ALNS can now enter search under the staged harness, not as proof that the 100K path is closed: the run still ends partial and `feasible=false`.
+
+Fresh bounded 100K current-head evidence on that same staged harness is [studies/2026-04-27-rhc-100k-audit-v4-current-head/rhc_500k_study.json](studies/2026-04-27-rhc-100k-audit-v4-current-head/rhc_500k_study.json). It reports `RHC-GREEDY` scheduling `7852/100000` operations in `90.213s`, while `RHC-ALNS` schedules `3420/100000` in `90.113s`. ALNS still reaches search in both bounded windows, completing `56` and `30` iterations with `45` and `18` improvements, using `0` CP-SAT repairs, and reporting `0` inner fallback. Read that artifact as the honest current comparison: search-entry is preserved, but scheduled coverage still trails the same-run greedy baseline and remains partial (`mean_scheduled_ratio = 0.0342`, `feasible = false`).
 
 ## Staged 500K Study
 
