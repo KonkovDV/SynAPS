@@ -497,17 +497,17 @@ def _build_industrial_50k_solver_specs(
                 "time_limit_s": 3600,
                 "alns_inner_window_time_cap_s": 600,
                 "admission_full_scan_enabled": True,
-                "hybrid_inner_routing_enabled": True,
+                "hybrid_inner_routing_enabled": False,
             }
         )
         inner_kwargs = rhc_alns_kwargs["inner_kwargs"]
         inner_kwargs.update(
             {
                 "max_iterations": 300,
-                "use_cpsat_repair": True,
-                "repair_time_limit_s": 30,
-                "repair_num_workers": 4,
-                "cpsat_max_destroy_ops": 128,
+                "use_cpsat_repair": False,
+                "repair_time_limit_s": 5,
+                "repair_num_workers": 1,
+                "cpsat_max_destroy_ops": 32,
             }
         )
 
@@ -1107,8 +1107,8 @@ def _build_parser() -> argparse.ArgumentParser:
         default="canonical",
         help=(
             "Industrial-50K benchmark profile: canonical keeps the published defaults; "
-            "max-push-50k enables long budgets, full-scan admission, hybrid inner routing, "
-            "and CP-SAT repair"
+            "max-push-50k enables long budgets, full-scan admission, and the "
+            "evidence-backed greedy-repair/two-phase refinement path"
         ),
     )
     parser.add_argument(

@@ -746,7 +746,7 @@ def test_study_rhc_50k_two_phase_refinement_uses_external_warm_start(
     assert summary["mean_warm_start_completed_assignments"] == 1.0
 
 
-def test_study_rhc_50k_max_push_profile_exposes_acceleration_status_and_aggressive_knobs(
+def test_study_rhc_50k_max_push_profile_exposes_acceleration_status_and_evidence_backed_knobs(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -813,15 +813,15 @@ def test_study_rhc_50k_max_push_profile_exposes_acceleration_status_and_aggressi
     assert profile["time_limit_s"] == 3600
     assert profile["alns_inner_window_time_cap_s"] == 600
     assert profile["admission_full_scan_enabled"] is True
-    assert profile["hybrid_inner_routing_enabled"] is True
+    assert profile["hybrid_inner_routing_enabled"] is False
     assert profile["inner_kwargs"]["max_iterations"] == 300
-    assert profile["inner_kwargs"]["use_cpsat_repair"] is True
-    assert profile["inner_kwargs"]["repair_time_limit_s"] == 30
-    assert profile["inner_kwargs"]["repair_num_workers"] == 4
-    assert profile["inner_kwargs"]["cpsat_max_destroy_ops"] == 128
+    assert profile["inner_kwargs"]["use_cpsat_repair"] is False
+    assert profile["inner_kwargs"]["repair_time_limit_s"] == 5
+    assert profile["inner_kwargs"]["repair_num_workers"] == 1
+    assert profile["inner_kwargs"]["cpsat_max_destroy_ops"] == 32
 
 
-def test_study_rhc_50k_max_push_both_lanes_apply_cpsat_worker_profiles(
+def test_study_rhc_50k_max_push_both_lanes_keep_strict_worker_overrides(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -873,11 +873,16 @@ def test_study_rhc_50k_max_push_both_lanes_apply_cpsat_worker_profiles(
 
     assert report["lane_mode"] == "both"
     assert len(captured_kwargs) == 2
-    worker_pairs = sorted(
-        (
-            kwargs["solver_kwargs"]["hybrid_inner_kwargs"]["num_workers"],
-            kwargs["solver_kwargs"]["inner_kwargs"]["repair_num_workers"],
-        )
+    hybrid_workers = sorted(
+        kwargs["solver_kwargs"]["hybrid_inner_kwargs"]["num_workers"]
         for kwargs in captured_kwargs
     )
-    assert worker_pairs == [(1, 1), (4, 4)]
+    repair_workers = sorted(
+        kwargs["solver_kwargs"]["inner_kwargs"]["repair_num_workers"]
+        for kwargs in captured_kwargs
+    )
+    assert hybrid_workers == [1, 4]
+    assert repair_workers == [1, 1]
+    for kwargs in captured_kwargs:
+        assert kwargs["solver_kwargs"]["hybrid_inner_routing_enabled"] is False
+        assert kwargs["solver_kwargs"]["inner_kwargs"]["use_cpsat_repair"] is False
