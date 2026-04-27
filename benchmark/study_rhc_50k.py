@@ -26,6 +26,7 @@ from synaps.solvers.sdst_matrix import SdstMatrix
 from synaps.validation import verify_schedule_result
 
 LaneMode = Literal["throughput", "strict", "both"]
+QualityGateProfile = Literal["balanced", "feasibility-first"]
 
 
 def _strict_cpsat_replay_parameters() -> dict[str, bool]:
@@ -353,10 +354,15 @@ def _evaluate_quality_gate(
     min_scheduled_ratio: float,
     max_makespan_degradation_ratio: float,
     max_inner_fallback_ratio: float,
+    profile: QualityGateProfile,
 ) -> dict[str, dict[str, Any]]:
     """Evaluate multi-criterion quality gate per solver summary."""
 
     results: dict[str, dict[str, Any]] = {}
+    required_checks = ["feasibility", "scheduled_ratio", "fallback_ratio"]
+    if profile == "balanced":
+        required_checks.append("objective_degradation")
+
     for key, summary in summaries.items():
         solver_name, _, lane_suffix = key.partition("|")
         baseline_key = (
@@ -402,6 +408,7 @@ def _evaluate_quality_gate(
 
         results[key] = {
             "baseline_key": baseline_key,
+            "profile": profile,
             "objective_degradation_ratio": round(objective_ratio, 4)
             if math.isfinite(objective_ratio)
             else None,
@@ -409,7 +416,8 @@ def _evaluate_quality_gate(
             "max_makespan_degradation_ratio": max_makespan_degradation_ratio,
             "max_inner_fallback_ratio": max_inner_fallback_ratio,
             "checks": checks,
-            "passed": all(checks.values()),
+            "required_checks": required_checks,
+            "passed": all(checks[name] for name in required_checks),
         }
 
     return results
@@ -426,6 +434,7 @@ def study_rhc_50k(
     cvar_alpha: float = 0.95,
     quality_gate_enabled: bool = True,
     quality_gate_baseline_solver: str = "RHC-GREEDY",
+    quality_gate_profile: QualityGateProfile = "balanced",
     min_scheduled_ratio: float = 0.90,
     max_makespan_degradation_ratio: float = 1.05,
     max_inner_fallback_ratio: float = 0.10,
@@ -442,6 +451,7 @@ def study_rhc_50k(
             cvar_alpha=cvar_alpha,
             quality_gate_enabled=quality_gate_enabled,
             quality_gate_baseline_solver=quality_gate_baseline_solver,
+            quality_gate_profile=quality_gate_profile,
             min_scheduled_ratio=min_scheduled_ratio,
             max_makespan_degradation_ratio=max_makespan_degradation_ratio,
             max_inner_fallback_ratio=max_inner_fallback_ratio,
@@ -515,6 +525,7 @@ def study_rhc_50k(
         report["quality_gate"] = {
             "enabled": True,
             "baseline_solver": quality_gate_baseline_solver,
+            "profile": quality_gate_profile,
             "max_makespan_degradation_ratio": max_makespan_degradation_ratio,
             "max_inner_fallback_ratio": max_inner_fallback_ratio,
             "results": _evaluate_quality_gate(
@@ -523,6 +534,7 @@ def study_rhc_50k(
                 min_scheduled_ratio=min_scheduled_ratio,
                 max_makespan_degradation_ratio=max_makespan_degradation_ratio,
                 max_inner_fallback_ratio=max_inner_fallback_ratio,
+                profile=quality_gate_profile,
             ),
         }
     else:
@@ -554,6 +566,7 @@ def _study_industrial_50k(
     cvar_alpha: float,
     quality_gate_enabled: bool,
     quality_gate_baseline_solver: str,
+    quality_gate_profile: QualityGateProfile,
     min_scheduled_ratio: float,
     max_makespan_degradation_ratio: float,
     max_inner_fallback_ratio: float,
@@ -770,6 +783,7 @@ def _study_industrial_50k(
         report["quality_gate"] = {
             "enabled": True,
             "baseline_solver": quality_gate_baseline_solver,
+            "profile": quality_gate_profile,
             "max_makespan_degradation_ratio": max_makespan_degradation_ratio,
             "max_inner_fallback_ratio": max_inner_fallback_ratio,
             "results": _evaluate_quality_gate(
@@ -778,6 +792,7 @@ def _study_industrial_50k(
                 min_scheduled_ratio=min_scheduled_ratio,
                 max_makespan_degradation_ratio=max_makespan_degradation_ratio,
                 max_inner_fallback_ratio=max_inner_fallback_ratio,
+                profile=quality_gate_profile,
             ),
         }
     else:
@@ -1033,6 +1048,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Baseline solver used for objective degradation check",
     )
     parser.add_argument(
+        "--quality-gate-profile",
+        choices=["balanced", "feasibility-first"],
+        default="balanced",
+        help=(
+            "Quality-gate policy: balanced requires objective parity vs baseline; "
+            "feasibility-first keeps objective degradation visible but gates only on "
+            "feasibility, scheduled ratio, and fallback pressure"
+        ),
+    )
+    parser.add_argument(
         "--min-scheduled-ratio",
         type=float,
         default=0.90,
@@ -1074,6 +1099,7 @@ def main(argv: list[str] | None = None) -> int:
         cvar_alpha=args.cvar_alpha,
         quality_gate_enabled=args.quality_gate,
         quality_gate_baseline_solver=args.quality_gate_baseline,
+        quality_gate_profile=args.quality_gate_profile,
         min_scheduled_ratio=args.min_scheduled_ratio,
         max_makespan_degradation_ratio=args.max_makespan_degradation_ratio,
         max_inner_fallback_ratio=args.max_inner_fallback_ratio,

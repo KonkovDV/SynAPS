@@ -26,6 +26,13 @@ python -m benchmark.study_rhc_50k --preset industrial-50k --seeds 1 \
   --solvers RHC-GREEDY RHC-ALNS \
   --write-dir benchmark/studies/2026-04-12-rhc-50k
 
+# Повторить с feasibility-first gate: деградация objective остаётся видимой,
+# но pass/fail определяется по feasibility, coverage и fallback pressure.
+python -m benchmark.study_rhc_50k --preset industrial-50k --seeds 1 \
+  --solvers RHC-GREEDY RHC-ALNS \
+  --quality-gate-profile feasibility-first \
+  --write-dir benchmark/studies/2026-04-27-rhc-50k-feasibility-first
+
 # Прогнать staged 500K-исследование в безопасном plan-режиме (без solve)
 python -m benchmark.study_rhc_500k --execution-mode plan --lane both --seeds 1 2 3
 
@@ -327,6 +334,11 @@ RHC-ALNS profile обновление (Апрель 2026):
 3. admission gate перед дорогими solve-фазами (`execution-mode gated`);
 4. робастных метрик (mean/median/IQR/CVaR по makespan и wall-time, scheduled-ratio и tail unscheduled risk);
 5. quality gate относительно baseline solver в том же lane и масштабе.
+
+Профили quality gate:
+
+- `balanced` (по умолчанию): требует feasibility, scheduled ratio, fallback pressure и objective parity относительно baseline solver.
+- `feasibility-first`: сохраняет objective degradation в отчёте, но в pass/fail логике использует только feasibility, scheduled ratio и fallback pressure. Этот режим нужен для честных coverage/repair исследований, где цель эксперимента не сводится к makespan parity.
 
 ### Режимы выполнения
 

@@ -31,6 +31,7 @@ from synaps.benchmarks.run_scaling_benchmark import run_benchmark as run_scaling
 
 LaneMode = Literal["throughput", "strict", "both"]
 ExecutionMode = Literal["plan", "gated", "full"]
+QualityGateProfile = Literal["balanced", "feasibility-first"]
 
 
 def _tail_cvar(values: list[float], alpha: float) -> float:
@@ -414,10 +415,15 @@ def _evaluate_quality_gate(
     min_scheduled_ratio: float,
     max_inner_fallback_ratio: float,
     max_makespan_degradation_ratio: float,
+    profile: QualityGateProfile,
 ) -> dict[str, dict[str, Any]]:
     """Evaluate quality gate per solver|lane|scale key."""
 
     result: dict[str, dict[str, Any]] = {}
+    required_checks = ["summary_ok", "feasibility", "scheduled_ratio", "fallback_ratio"]
+    if profile == "balanced":
+        required_checks.append("objective_degradation")
+
     for key, summary in summaries.items():
         solver_name, lane, scale_str = key.split("|")
         baseline_key = f"{baseline_solver}|{lane}|{scale_str}"
@@ -458,6 +464,7 @@ def _evaluate_quality_gate(
 
         result[key] = {
             "baseline_key": baseline_key,
+            "profile": profile,
             "objective_degradation_ratio": round(degradation_ratio, 4)
             if math.isfinite(degradation_ratio)
             else None,
@@ -467,7 +474,8 @@ def _evaluate_quality_gate(
                 "max_makespan_degradation_ratio": max_makespan_degradation_ratio,
             },
             "checks": checks,
-            "passed": all(checks.values()),
+            "required_checks": required_checks,
+            "passed": all(checks[name] for name in required_checks),
         }
 
     return result
@@ -483,6 +491,7 @@ def study_rhc_500k(
     write_dir: Path | None = None,
     cvar_alpha: float = 0.95,
     quality_gate_baseline_solver: str = "RHC-GREEDY",
+    quality_gate_profile: QualityGateProfile = "balanced",
     min_scheduled_ratio: float = 0.90,
     max_inner_fallback_ratio: float = 0.20,
     max_makespan_degradation_ratio: float = 1.10,
@@ -667,6 +676,7 @@ def study_rhc_500k(
         min_scheduled_ratio=min_scheduled_ratio,
         max_inner_fallback_ratio=max_inner_fallback_ratio,
         max_makespan_degradation_ratio=max_makespan_degradation_ratio,
+        profile=quality_gate_profile,
     )
 
     report = {
@@ -681,6 +691,7 @@ def study_rhc_500k(
         "summary_by_config": summary_by_config,
         "quality_gate": {
             "baseline_solver": quality_gate_baseline_solver,
+            "profile": quality_gate_profile,
             "results": quality_gate,
         },
         "resource_gate_defaults": {
@@ -713,6 +724,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--write-dir", type=Path)
     parser.add_argument("--cvar-alpha", type=float, default=0.95)
     parser.add_argument("--quality-gate-baseline", default="RHC-GREEDY")
+    parser.add_argument(
+        "--quality-gate-profile",
+        choices=["balanced", "feasibility-first"],
+        default="balanced",
+    )
     parser.add_argument("--min-scheduled-ratio", type=float, default=0.90)
     parser.add_argument("--max-inner-fallback-ratio", type=float, default=0.20)
     parser.add_argument("--max-makespan-degradation-ratio", type=float, default=1.10)
@@ -755,6 +771,7 @@ def main(argv: list[str] | None = None) -> int:
         write_dir=args.write_dir,
         cvar_alpha=args.cvar_alpha,
         quality_gate_baseline_solver=args.quality_gate_baseline,
+        quality_gate_profile=args.quality_gate_profile,
         min_scheduled_ratio=args.min_scheduled_ratio,
         max_inner_fallback_ratio=args.max_inner_fallback_ratio,
         max_makespan_degradation_ratio=args.max_makespan_degradation_ratio,

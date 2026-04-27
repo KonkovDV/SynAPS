@@ -369,6 +369,66 @@ def test_study_rhc_50k_quality_gate_flags_partial_schedule(
     assert gate_result["checks"]["scheduled_ratio"] is False
 
 
+def test_study_rhc_50k_feasibility_first_gate_does_not_require_objective_parity(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import benchmark.study_rhc_50k as study_module
+
+    def fake_run_scaling_case(*, n_ops, n_machines, n_states, solver_name, solver_kwargs, seed):
+        makespan = 100.0 if solver_name == "rhc-greedy" else 140.0
+        metadata = (
+            {}
+            if solver_name == "rhc-greedy"
+            else {
+                "inner_fallback_ratio": 0.05,
+            }
+        )
+        return {
+            "status": "feasible",
+            "feasible": True,
+            "solver": solver_name,
+            "makespan_min": makespan,
+            "total_setup_min": 20.0,
+            "total_tardiness_min": 0.0,
+            "total_material_loss": 0.0,
+            "assigned_ops": n_ops,
+            "violations": 0,
+            "solve_ms": 15,
+            "gen_ms": 1,
+            "verify_ms": 1,
+            "n_ops": n_ops,
+            "n_machines": n_machines,
+            "n_states": n_states,
+            "sdst_memory_bytes": 0,
+            "metadata": metadata,
+        }
+
+    monkeypatch.setattr(study_module, "run_scaling_case", fake_run_scaling_case)
+
+    report = study_module.study_rhc_50k(
+        preset_name="industrial-50k",
+        seeds=[1],
+        solver_names=["RHC-GREEDY", "RHC-ALNS"],
+        lane="throughput",
+        write_dir=tmp_path,
+        quality_gate_profile="feasibility-first",
+        max_makespan_degradation_ratio=1.05,
+    )
+
+    gate_result = report["quality_gate"]["results"]["RHC-ALNS"]
+    assert gate_result["checks"]["feasibility"] is True
+    assert gate_result["checks"]["scheduled_ratio"] is True
+    assert gate_result["checks"]["fallback_ratio"] is True
+    assert gate_result["checks"]["objective_degradation"] is False
+    assert gate_result["required_checks"] == [
+        "feasibility",
+        "scheduled_ratio",
+        "fallback_ratio",
+    ]
+    assert gate_result["passed"] is True
+
+
 def test_study_rhc_50k_reports_process_and_solve_outcomes(
     monkeypatch,
     tmp_path: Path,

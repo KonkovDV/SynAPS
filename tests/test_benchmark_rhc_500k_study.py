@@ -163,6 +163,76 @@ def test_study_rhc_500k_reports_summary_and_quality_gate(
     assert gate_result["passed"] is True
 
 
+def test_study_rhc_500k_feasibility_first_gate_allows_objective_regression(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import benchmark.study_rhc_500k as study_module
+
+    def fake_run_scaling_case(*, n_ops, n_machines, n_states, solver_name, solver_kwargs, seed):
+        makespan = 100.0 if solver_name == "rhc-greedy" else 130.0
+        metadata = (
+            {
+                "acceleration": {
+                    "rhc_candidate_metrics_backend": "python",
+                },
+            }
+            if solver_name == "rhc-greedy"
+            else {
+                "inner_fallback_ratio": 0.05,
+                "acceleration": {
+                    "rhc_candidate_metrics_backend": "native",
+                },
+            }
+        )
+        return {
+            "status": "feasible",
+            "feasible": True,
+            "solver": solver_name,
+            "makespan_min": makespan,
+            "total_setup_min": 20.0,
+            "total_tardiness_min": 0.0,
+            "total_material_loss": 0.0,
+            "assigned_ops": n_ops,
+            "violations": 0,
+            "solve_ms": 10,
+            "gen_ms": 1,
+            "verify_ms": 1,
+            "n_ops": n_ops,
+            "n_machines": n_machines,
+            "n_states": n_states,
+            "sdst_memory_bytes": 0,
+            "metadata": metadata,
+        }
+
+    monkeypatch.setattr(study_module, "run_scaling_case", fake_run_scaling_case)
+
+    report = study_module.study_rhc_500k(
+        execution_mode="gated",
+        scales=[50_000],
+        seeds=[1],
+        solver_names=["RHC-GREEDY", "RHC-ALNS"],
+        lane="throughput",
+        write_dir=tmp_path,
+        quality_gate_profile="feasibility-first",
+        max_makespan_degradation_ratio=1.05,
+    )
+
+    gate_result = report["quality_gate"]["results"]["RHC-ALNS|throughput|50000"]
+    assert gate_result["checks"]["summary_ok"] is True
+    assert gate_result["checks"]["feasibility"] is True
+    assert gate_result["checks"]["scheduled_ratio"] is True
+    assert gate_result["checks"]["fallback_ratio"] is True
+    assert gate_result["checks"]["objective_degradation"] is False
+    assert gate_result["required_checks"] == [
+        "summary_ok",
+        "feasibility",
+        "scheduled_ratio",
+        "fallback_ratio",
+    ]
+    assert gate_result["passed"] is True
+
+
 def test_study_rhc_500k_preserves_solver_metadata_for_audit(
     monkeypatch,
     tmp_path: Path,

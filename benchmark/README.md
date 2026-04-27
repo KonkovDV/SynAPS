@@ -26,6 +26,13 @@ python -m benchmark.study_rhc_50k --preset industrial-50k --seeds 1 \
   --solvers RHC-GREEDY RHC-ALNS \
   --write-dir benchmark/studies/2026-04-12-rhc-50k
 
+# Re-run with a feasibility-first gate: objective degradation stays visible,
+# but pass/fail is driven by feasibility, coverage, and fallback pressure.
+python -m benchmark.study_rhc_50k --preset industrial-50k --seeds 1 \
+  --solvers RHC-GREEDY RHC-ALNS \
+  --quality-gate-profile feasibility-first \
+  --write-dir benchmark/studies/2026-04-27-rhc-50k-feasibility-first
+
 # Run the staged 500K stress-study in safe planning mode (resource projection + gate)
 python -m benchmark.study_rhc_500k --execution-mode plan --lane both --seeds 1 2 3
 
@@ -339,6 +346,11 @@ It extends the 50K workflow with:
 3. admission gate before expensive solves (`execution-mode gated`);
 4. robust summary metrics (mean/median/IQR/CVaR for makespan and wall-time, scheduled-ratio and tail unscheduled risk);
 5. quality gate versus baseline solver on the same lane and scale.
+
+Quality-gate policies:
+
+- `balanced` (default): requires feasibility, scheduled ratio, fallback pressure, and objective parity versus the baseline solver.
+- `feasibility-first`: keeps objective degradation in the report, but gates only on feasibility, scheduled ratio, and fallback pressure. Use this when the study is meant to track coverage/repair progress rather than make a makespan-parity claim.
 
 ### Execution modes
 
