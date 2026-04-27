@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 from synaps.contracts import (
+    ProblemInstanceSlice,
     RepairRequest,
     RepairResponse,
     RoutingContextContract,
@@ -14,6 +16,7 @@ from synaps.contracts import (
     build_contract_schema_bundle,
     execute_repair_request,
     execute_solve_request,
+    resolve_solve_request_problem,
     write_contract_schemas,
 )
 from synaps.model import MAX_SCHEDULE_OPERATIONS, SolverStatus
@@ -37,6 +40,63 @@ def test_execute_solve_request_returns_contract_response() -> None:
     assert response.request_id == "req-1"
     assert response.result.status in {SolverStatus.FEASIBLE, SolverStatus.OPTIMAL}
     assert response.result.metadata["portfolio"]["regime"] == SolveRegime.INTERACTIVE.value
+
+
+def test_execute_solve_request_supports_problem_instance_ref_slice(tmp_path: Path) -> None:
+    problem = make_simple_problem()
+    problem_path = tmp_path / "problem.json"
+    problem_path.write_text(json.dumps(problem.model_dump(mode="json")), encoding="utf-8")
+
+    request = SolveRequest(
+        request_id="req-ref-1",
+        problem_instance_ref=problem_path.name,
+        problem_slice=ProblemInstanceSlice(max_operations=2),
+        context=RoutingContextContract(regime=SolveRegime.INTERACTIVE),
+        solve_options=SolveOptions(),
+    )
+
+    resolved_problem = resolve_solve_request_problem(request, instance_dir=tmp_path)
+    response = execute_solve_request(
+        request,
+        instance_dir=tmp_path,
+        resolved_problem=resolved_problem,
+    )
+
+    assert len(resolved_problem.operations) == 2
+    assert response.request_id == "req-ref-1"
+    assert response.result.status in {SolverStatus.FEASIBLE, SolverStatus.OPTIMAL}
+
+
+def test_solve_request_requires_exactly_one_problem_source() -> None:
+    problem = make_simple_problem()
+
+    try:
+        SolveRequest(problem=problem, problem_instance_ref="problem.json")
+    except ValueError as exc:
+        assert "exactly one" in str(exc)
+    else:
+        raise AssertionError("expected SolveRequest to reject dual problem sources")
+
+    try:
+        SolveRequest()
+    except ValueError as exc:
+        assert "exactly one" in str(exc)
+    else:
+        raise AssertionError("expected SolveRequest to require a problem source")
+
+
+def test_problem_instance_ref_stays_within_instance_dir(tmp_path: Path) -> None:
+    request = SolveRequest(
+        problem_instance_ref="../outside.json",
+        problem_slice=ProblemInstanceSlice(max_operations=2),
+    )
+
+    try:
+        resolve_solve_request_problem(request, instance_dir=tmp_path)
+    except ValueError as exc:
+        assert "within instance_dir" in str(exc)
+    else:
+        raise AssertionError("expected instance-dir traversal to be rejected")
 
 
 def test_execute_repair_request_returns_contract_response() -> None:
@@ -93,6 +153,17 @@ def test_build_contract_schema_bundle_contains_all_public_contracts() -> None:
         "repair-response.schema.json",
     }
     assert bundle["solve-request.schema.json"]["title"] == "SolveRequest"
+    assert bundle["solve-request.schema.json"]["oneOf"] == [
+        {"required": ["problem"]},
+        {"required": ["problem_instance_ref"]},
+    ]
+    assert "ProblemInstanceSlice" in bundle["solve-request.schema.json"]["$defs"]
+    assert (
+        "default"
+        not in bundle["solve-request.schema.json"]["$defs"]["ProblemInstanceSlice"]["properties"][
+            "max_operations"
+        ]
+    )
     solve_problem_schema = bundle["solve-request.schema.json"]["$defs"]["ScheduleProblem"]
     assert solve_problem_schema["properties"]["operations"]["maxItems"] == MAX_SCHEDULE_OPERATIONS
     repair_schema = bundle["repair-request.schema.json"]
@@ -119,6 +190,9 @@ def test_contract_examples_are_valid_models() -> None:
     solve_request = SolveRequest.model_validate_json(
         (examples_dir / "solve-request.example.json").read_text(encoding="utf-8")
     )
+    solve_request_instance_ref = SolveRequest.model_validate_json(
+        (examples_dir / "solve-request.instance-ref.example.json").read_text(encoding="utf-8")
+    )
     solve_response = SolveResponse.model_validate_json(
         (examples_dir / "solve-response.example.json").read_text(encoding="utf-8")
     )
@@ -130,4 +204,5 @@ def test_contract_examples_are_valid_models() -> None:
     )
 
     assert solve_request.contract_version == solve_response.contract_version
+    assert solve_request_instance_ref.problem_instance_ref == "benchmark/instances/tiny_3x3.json"
     assert repair_request.contract_version == repair_response.contract_version

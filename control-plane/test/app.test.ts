@@ -35,6 +35,23 @@ function createSolveRequest(): Record<string, unknown> {
   };
 }
 
+function createInstanceRefSolveRequest(): Record<string, unknown> {
+  return {
+    contract_version: "2026-04-03",
+    problem_instance_ref: "benchmark/instances/tiny_3x3.json",
+    problem_slice: {
+      max_operations: 2,
+    },
+    context: {
+      regime: "nominal",
+      exact_required: false,
+      preferred_max_latency_s: null,
+    },
+    verify_feasibility: true,
+    solve_options: {},
+  };
+}
+
 type OpenApiDocument = {
   openapi: string;
   components: {
@@ -300,6 +317,58 @@ test("solve route injects request id and returns validated response", async () =
   assert.equal(payload.result.solver_name, "greedy_dispatch");
   assert.equal(payload.request_id, seenRequestId);
   assert.ok(typeof seenRequestId === "string" && seenRequestId.length > 0);
+
+  await app.close();
+});
+
+test("solve route accepts file-backed solve requests without inline problem", async () => {
+  let seenProblemInstanceRef: string | undefined;
+  let seenProblemSlice: Record<string, unknown> | undefined;
+  const executor: SynapsContractExecutor = {
+    async executeSolveRequest(payload: object): Promise<unknown> {
+      const request = payload as {
+        request_id?: string;
+        problem?: unknown;
+        problem_instance_ref?: string;
+        problem_slice?: Record<string, unknown>;
+      };
+      seenProblemInstanceRef = request.problem_instance_ref;
+      seenProblemSlice = request.problem_slice;
+      assert.equal(request.problem ?? null, null);
+
+      return {
+        contract_version: "2026-04-03",
+        request_id: request.request_id,
+        result: {
+          solver_name: "greedy_dispatch",
+          status: "feasible",
+          assignments: [],
+          objective: {},
+          duration_ms: 1,
+          metadata: {
+            portfolio: {
+              solver_config: "GREED",
+            },
+          },
+          random_seed: null,
+        },
+      };
+    },
+    async executeRepairRequest(): Promise<unknown> {
+      throw new Error("unused");
+    },
+  };
+
+  const app = buildControlPlaneApp({ executor });
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/v1/solve",
+    payload: createInstanceRefSolveRequest(),
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(seenProblemInstanceRef, "benchmark/instances/tiny_3x3.json");
+  assert.deepEqual(seenProblemSlice, { max_operations: 2 });
 
   await app.close();
 });

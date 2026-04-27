@@ -91,6 +91,12 @@ python -m synaps solve-request <request.json>
 python -m synaps repair-request <request.json>
 ```
 
+For solve requests, the bridge now also passes `--instance-dir <repo-root>` so callers can
+send `problem_instance_ref` instead of embedding very large scheduling instances inline.
+That file-backed path can pair `problem_instance_ref` with `problem_slice` to materialize an
+order-complete subset before the Python contract validates `ScheduleProblem`, which keeps
+300K/500K study flows off the JSON/Pydantic payload boundary.
+
 ## Boundary
 
 This package is intentionally thin.

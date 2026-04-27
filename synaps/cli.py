@@ -14,6 +14,7 @@ from synaps.contracts import (
     execute_solve_request,
     parse_repair_request_json,
     parse_solve_request_json,
+    resolve_solve_request_problem,
     write_contract_schemas,
 )
 from synaps.model import ScheduleProblem, ScheduleResult, normalize_schedule_problem_data
@@ -128,6 +129,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Directory where runtime replay artifacts should be written",
     )
     solve_request_parser.add_argument(
+        "--instance-dir",
+        type=Path,
+        help="Allowed base directory for relative problem_instance_ref files",
+    )
+    solve_request_parser.add_argument(
         "--output-file",
         type=Path,
         help="Optional path where the JSON response should be written instead of stdout",
@@ -217,21 +223,39 @@ def main(argv: list[str] | None = None) -> int:
 
     elif args.command == "solve-request":
         solve_request = parse_solve_request_json(_load_json_source(args.request))
-        solve_response = execute_solve_request(solve_request)
+        instance_dir = args.instance_dir
+        if instance_dir is None and args.request != "-":
+            instance_dir = Path(args.request).resolve().parent
+
+        resolved_problem = resolve_solve_request_problem(
+            solve_request,
+            instance_dir=instance_dir,
+        )
+        solve_response = execute_solve_request(
+            solve_request,
+            instance_dir=instance_dir,
+            resolved_problem=resolved_problem,
+        )
         request_stem = "stdin" if args.request == "-" else Path(args.request).stem
         _write_runtime_replay(
             output_dir=args.replay_output_dir,
             artifact_kind="runtime-solve",
             artifact_source="synaps.cli.solve-request",
-            problem=solve_request.problem,
+            problem=resolved_problem,
             result=solve_response.result,
             request_summary={
                 "request_path": str(args.request),
+                "problem_instance_ref": solve_request.problem_instance_ref,
                 "solver_config": solve_request.solver_config,
                 "regime": solve_request.context.regime.value,
                 "preferred_max_latency_s": solve_request.context.preferred_max_latency_s,
                 "exact_required": solve_request.context.exact_required,
                 "verify_feasibility": solve_request.verify_feasibility,
+                "problem_slice": (
+                    solve_request.problem_slice.model_dump(mode="json", exclude_none=True)
+                    if solve_request.problem_slice is not None
+                    else None
+                ),
                 "solve_options": solve_request.solve_options.model_dump(exclude_none=True),
             },
             request_id=solve_request.request_id,

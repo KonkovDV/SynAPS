@@ -64,6 +64,10 @@ async function executePythonContract(
 ): Promise<unknown> {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "synaps-bff-"));
   const responsePath = path.join(tempDir, `${subcommand}.response.json`);
+  const commandArgs = ["-m", "synaps", subcommand, "-", "--output-file", responsePath];
+  if (subcommand === "solve-request") {
+    commandArgs.push("--instance-dir", paths.repoRoot);
+  }
 
   try {
     const { stdout, stderr, exitCode } = await new Promise<{
@@ -75,7 +79,7 @@ async function executePythonContract(
       let outputLimitExceeded = false;
       const child = spawn(
         paths.pythonExecutable,
-        ["-m", "synaps", subcommand, "-", "--output-file", responsePath],
+        commandArgs,
         {
           cwd: paths.repoRoot,
           env: process.env,

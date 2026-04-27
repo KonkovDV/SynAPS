@@ -188,6 +188,10 @@ function normalizeRepairPayload(payload: Record<string, unknown>): Record<string
   };
 }
 
+function maybeApplyAclGuardrails(problem: unknown): unknown {
+  return problem == null ? problem : applyAclGuardrails(problem);
+}
+
 interface SolveAttempt {
   solver_config: string | null;
   bridge_code?: string;
@@ -461,7 +465,7 @@ export function buildControlPlaneApp(
       );
       const guardedPayload: Record<string, unknown> = {
         ...rawPayload,
-        problem: applyAclGuardrails(rawPayload.problem),
+        problem: maybeApplyAclGuardrails(rawPayload.problem),
       };
       closeObservedSpan(preValidationSpan, "ok");
 
@@ -669,7 +673,7 @@ export function buildControlPlaneApp(
       );
       const guardedPayload: Record<string, unknown> = {
         ...rawPayload,
-        problem: applyAclGuardrails(rawPayload.problem),
+        problem: maybeApplyAclGuardrails(rawPayload.problem),
       };
       const requestId = asString(guardedPayload.request_id) ?? request.id;
 

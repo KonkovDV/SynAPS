@@ -44,3 +44,37 @@ test("python executor streams solve requests through the SynAPS CLI", async () =
   assert.equal(response.result.solver_name, "greedy_dispatch");
   assert.ok(["feasible", "optimal"].includes(response.result.status));
 });
+
+test("python executor supports file-backed solve requests with pre-validation slicing", async () => {
+  const executor = createPythonContractExecutor();
+  const response = await executor.executeSolveRequest({
+    contract_version: "2026-04-03",
+    request_id: "executor-test-instance-ref",
+    problem_instance_ref: "benchmark/instances/tiny_3x3.json",
+    problem_slice: {
+      max_operations: 2,
+    },
+    context: {
+      regime: "nominal",
+      exact_required: false,
+      preferred_max_latency_s: 1,
+    },
+    solver_config: "GREED",
+    verify_feasibility: true,
+    solve_options: {},
+  }) as {
+    contract_version: string;
+    request_id: string;
+    result: {
+      solver_name: string;
+      status: string;
+      assignments: Array<unknown>;
+    };
+  };
+
+  assert.equal(response.contract_version, "2026-04-03");
+  assert.equal(response.request_id, "executor-test-instance-ref");
+  assert.equal(response.result.solver_name, "greedy_dispatch");
+  assert.equal(response.result.assignments.length, 2);
+  assert.ok(["feasible", "optimal"].includes(response.result.status));
+});

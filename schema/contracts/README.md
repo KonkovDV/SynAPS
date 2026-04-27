@@ -10,6 +10,7 @@ runtime invocation contract.
 - `repair-request.schema.json` — request contract for bounded repair execution
 - `repair-response.schema.json` — response contract for bounded repair execution
 - `examples/solve-request.example.json` — minimal end-to-end solve request payload
+- `examples/solve-request.instance-ref.example.json` — file-backed solve request with pre-validation slicing
 - `examples/solve-response.example.json` — corresponding solve response payload
 - `examples/repair-request.example.json` — minimal end-to-end repair request payload
 - `examples/repair-response.example.json` — corresponding repair response payload
@@ -33,6 +34,19 @@ Recommended flow:
 2. invoke the Python kernel via `python -m synaps solve-request` or `python -m synaps repair-request`;
 3. validate outbound payloads against the corresponding response schema;
 4. keep network transport concerns outside the deterministic kernel.
+
+`SolveRequest` now supports two mutually exclusive problem sources:
+
+- inline `problem` for small and medium payloads;
+- relative `problem_instance_ref` for file-backed execution, optionally paired with
+	`problem_slice` so order-complete subsets can be materialized before Pydantic enforces
+	the `MAX_SCHEDULE_OPERATIONS` ceiling.
+
+When `problem_instance_ref` is used, resolve it against an explicit instance root:
+
+```bash
+python -m synaps solve-request request.json --instance-dir .
+```
 
 You can start from the `examples/` payloads for smoke tests and external integration
 prototypes.

@@ -167,6 +167,48 @@
       "title": "Order",
       "type": "object"
     },
+    "ProblemInstanceSlice": {
+      "description": "Order-complete slice descriptor applied before ScheduleProblem validation.",
+      "properties": {
+        "max_operations": {
+          "anyOf": [
+            {
+              "maximum": 200000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Max Operations"
+        },
+        "order_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "maxItems": 200000,
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Order Ids"
+        },
+        "order_offset": {
+          "minimum": 0,
+          "title": "Order Offset",
+          "type": "integer"
+        }
+      },
+      "title": "ProblemInstanceSlice",
+      "type": "object"
+    },
     "RoutingContextContract": {
       "description": "JSON-serializable routing context for external callers.",
       "properties": {
@@ -509,6 +551,18 @@
     }
   },
   "description": "Canonical request contract for routed or explicit solve execution.",
+  "oneOf": [
+    {
+      "required": [
+        "problem"
+      ]
+    },
+    {
+      "required": [
+        "problem_instance_ref"
+      ]
+    }
+  ],
   "properties": {
     "context": {
       "$ref": "#/$defs/RoutingContextContract"
@@ -520,7 +574,37 @@
       "type": "string"
     },
     "problem": {
-      "$ref": "#/$defs/ScheduleProblem"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ScheduleProblem"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "problem_instance_ref": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Problem Instance Ref"
+    },
+    "problem_slice": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ProblemInstanceSlice"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "request_id": {
       "anyOf": [
@@ -555,9 +639,6 @@
       "type": "boolean"
     }
   },
-  "required": [
-    "problem"
-  ],
   "title": "SolveRequest",
   "type": "object"
 }

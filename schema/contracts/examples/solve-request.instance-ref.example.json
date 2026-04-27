@@ -1,0 +1,24 @@
+{
+  "contract_version": "2026-04-03",
+  "request_id": "example-solve-instance-ref-1",
+  "problem_instance_ref": "benchmark/instances/tiny_3x3.json",
+  "problem_slice": {
+    "max_operations": 2
+  },
+  "context": {
+    "regime": "nominal",
+    "preferred_max_latency_s": null,
+    "exact_required": false
+  },
+  "solver_config": "GREED",
+  "verify_feasibility": true,
+  "solve_options": {
+    "time_limit_s": null,
+    "random_seed": null,
+    "num_workers": null,
+    "max_iterations": null,
+    "material_loss_scale": null,
+    "objective_weights": null,
+    "epsilon_constraints": null
+  }
+}
