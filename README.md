@@ -180,6 +180,16 @@ python -m benchmark.study_rhc_50k \
   --write-dir benchmark/studies/_local-rhc-50k
 ```
 
+Run the named max-push 50K profile (aggressive ALNS budget + `RHC-ALNS-REFINE` default set):
+
+```bash
+python -m benchmark.study_rhc_50k \
+  --preset industrial-50k \
+  --seeds 1 \
+  --study-profile max-push-50k \
+  --write-dir benchmark/studies/_local-rhc-50k-max
+```
+
 Run a bounded 100K ALNS audit slice:
 
 ```bash
@@ -244,6 +254,28 @@ Build the native extension:
 ```bash
 cd native/synaps_native
 maturin develop --release
+```
+
+Confirm that the active runtime sees the native backend and then measure the large-candidate speedup surface:
+
+```bash
+python -c "from synaps import accelerators; print(accelerators.get_acceleration_status())"
+python -m benchmark.study_native_rhc_candidate_acceleration \
+  --sizes 50000,100000,500000 \
+  --repeats 5 \
+  --output benchmark/results/native-rhc-candidate-acceleration.json
+```
+
+For geometry-driven 50K admission/search studies, run the bounded DOE rail directly:
+
+```bash
+python -m benchmark.study_rhc_alns_geometry_doe \
+  --lane throughput \
+  --seeds 1 \
+  --max-windows 2 \
+  --time-limit-s 300 \
+  --geometries 480:120 360:90 300:90 240:60 \
+  --write-dir benchmark/studies/_local-geo-doe
 ```
 
 See: [HPC Silicon-Level Optimization Roadmap](docs/architecture/08_HPC_SILICON_OPTIMIZATION_ROADMAP.md)

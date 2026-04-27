@@ -171,6 +171,16 @@ python -m benchmark.study_rhc_50k \
   --write-dir benchmark/studies/_local-rhc-50k
 ```
 
+Запустить именованный max-push 50K profile (агрессивный ALNS budget + дефолтный набор с `RHC-ALNS-REFINE`):
+
+```bash
+python -m benchmark.study_rhc_50k \
+  --preset industrial-50k \
+  --seeds 1 \
+  --study-profile max-push-50k \
+  --write-dir benchmark/studies/_local-rhc-50k-max
+```
+
 Запустить bounded 100K ALNS audit slice:
 
 ```bash
@@ -235,6 +245,28 @@ SynAPS включает опциональное Rust-ядро ускорени�
 ```bash
 cd native/synaps_native
 maturin develop --release
+```
+
+Проверить, что runtime действительно видит native backend, и затем измерить speedup на больших candidate-масштабах:
+
+```bash
+python -c "from synaps import accelerators; print(accelerators.get_acceleration_status())"
+python -m benchmark.study_native_rhc_candidate_acceleration \
+  --sizes 50000,100000,500000 \
+  --repeats 5 \
+  --output benchmark/results/native-rhc-candidate-acceleration.json
+```
+
+Для geometry-driven 50K admission/search исследований запускайте bounded DOE rail напрямую:
+
+```bash
+python -m benchmark.study_rhc_alns_geometry_doe \
+  --lane throughput \
+  --seeds 1 \
+  --max-windows 2 \
+  --time-limit-s 300 \
+  --geometries 480:120 360:90 300:90 240:60 \
+  --write-dir benchmark/studies/_local-geo-doe
 ```
 
 См.: [HPC-дорожная карта оптимизаций уровня кремния](docs/architecture/08_HPC_SILICON_OPTIMIZATION_ROADMAP.md)

@@ -33,9 +33,33 @@ python -m benchmark.study_rhc_50k --preset industrial-50k --seeds 1 \
   --quality-gate-profile feasibility-first \
   --write-dir benchmark/studies/2026-04-27-rhc-50k-feasibility-first
 
+# Запустить именованный max-push 50K profile: длинный ALNS budget,
+# full admission scan, hybrid inner routing, CP-SAT repair и дефолтный warm-start путь RHC-ALNS-REFINE.
+python -m benchmark.study_rhc_50k --preset industrial-50k --seeds 1 \
+  --study-profile max-push-50k \
+  --write-dir benchmark/studies/2026-04-27-rhc-50k-max-push
+
+# Проверить, что runtime видит native backend, и измерить speedup candidate-metric path
+python -c "from synaps import accelerators; print(accelerators.get_acceleration_status())"
+python -m benchmark.study_native_rhc_candidate_acceleration \
+  --sizes 50000,100000,500000 \
+  --repeats 5 \
+  --output benchmark/results/native-rhc-candidate-acceleration.json
+
+# Прогнать bounded DOE по window geometry на 50K
+python -m benchmark.study_rhc_alns_geometry_doe \
+  --lane throughput \
+  --seeds 1 \
+  --max-windows 2 \
+  --time-limit-s 300 \
+  --geometries 480:120 360:90 300:90 240:60 \
+  --write-dir benchmark/studies/2026-04-27-rhc-geometry-doe
+
 # Прогнать staged 500K-исследование в безопасном plan-режиме (без solve)
 python -m benchmark.study_rhc_500k --execution-mode plan --lane both --seeds 1 2 3
 
+
+`benchmark.study_rhc_50k --study-profile max-push-50k` — это явная поверхность для режима “максимально продавить 50K”. Она не меняет опубликованный canonical profile, но добавляет второй именованный benchmark profile, который включает дорогие controls из large-instance audit loop: более длинные ALNS budgets, full admission scan, hybrid inner routing, CP-SAT repair и двухфазный warm-start путь `RHC-ALNS-REFINE`.
 # Прогнать gate-защищённую лестницу 50k->500k
 python -m benchmark.study_rhc_500k --execution-mode gated --lane both --seeds 1 \
   --scales 50000 100000 200000 300000 500000 \

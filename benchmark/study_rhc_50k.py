@@ -19,6 +19,7 @@ from typing import Any, Literal
 
 from benchmark.generate_instances import preset_spec, write_problem_instance
 from benchmark.run_benchmark import run_benchmark
+from synaps import accelerators
 from synaps.benchmarks.instance_generator import generate_large_instance
 from synaps.benchmarks.run_scaling_benchmark import run_benchmark as run_scaling_case
 from synaps.solvers.rhc_solver import RhcSolver
@@ -27,6 +28,7 @@ from synaps.validation import verify_schedule_result
 
 LaneMode = Literal["throughput", "strict", "both"]
 QualityGateProfile = Literal["balanced", "feasibility-first"]
+StudyProfile = Literal["canonical", "max-push-50k"]
 
 
 def _strict_cpsat_replay_parameters() -> dict[str, bool]:
@@ -174,6 +176,8 @@ def _apply_lane_profile(
         inner_kwargs = profiled.setdefault("inner_kwargs", {})
         if isinstance(inner_kwargs, dict):
             inner_kwargs.setdefault("random_seed", seed)
+            if lane == "strict" and "repair_num_workers" in inner_kwargs:
+                inner_kwargs["repair_num_workers"] = 1
 
         hybrid_kwargs = profiled.setdefault("hybrid_inner_kwargs", {})
         if isinstance(hybrid_kwargs, dict):
@@ -423,6 +427,109 @@ def _evaluate_quality_gate(
     return results
 
 
+def _default_industrial_solver_names(study_profile: StudyProfile) -> list[str]:
+    if study_profile == "max-push-50k":
+        return ["RHC-GREEDY", "RHC-ALNS", "RHC-ALNS-REFINE"]
+    return ["RHC-GREEDY", "RHC-ALNS"]
+
+
+def _build_industrial_50k_solver_specs(
+    *,
+    study_profile: StudyProfile,
+) -> dict[str, dict[str, Any]]:
+    rhc_greedy_kwargs = {
+        "window_minutes": 480,
+        "overlap_minutes": 60,
+        "inner_solver": "greedy",
+        "time_limit_s": 600,
+        "max_ops_per_window": 10_000,
+    }
+    rhc_alns_kwargs = {
+        "window_minutes": 480,
+        "overlap_minutes": 120,
+        "inner_solver": "alns",
+        "time_limit_s": 1200,
+        "alns_inner_window_time_cap_s": 180,
+        "max_ops_per_window": 5_000,
+        "progressive_admission_relaxation_enabled": True,
+        "precedence_ready_candidate_filter_enabled": True,
+        "due_admission_horizon_factor": 2.0,
+        "admission_relaxation_min_fill_ratio": 0.30,
+        "admission_full_scan_enabled": False,
+        "alns_budget_auto_scaling_enabled": True,
+        "alns_presearch_max_window_ops": 5_000,
+        "alns_budget_estimated_repair_s_per_destroyed_op": 0.125,
+        "hybrid_inner_routing_enabled": False,
+        "hybrid_inner_solver": "cpsat",
+        "hybrid_due_pressure_threshold": 0.35,
+        "hybrid_candidate_pressure_threshold": 4.0,
+        "hybrid_max_ops": 1_500,
+        "backtracking_enabled": True,
+        "backtracking_tail_minutes": 60,
+        "backtracking_max_ops": 24,
+        "hybrid_inner_kwargs": {
+            "num_workers": 4,
+        },
+        "inner_fallback_kpi_threshold": 0.10,
+        "inner_kwargs": {
+            "max_iterations": 100,
+            "destroy_fraction": 0.03,
+            "min_destroy": 10,
+            "max_destroy": 40,
+            "max_no_improve_iters": 30,
+            "use_cpsat_repair": False,
+            "repair_time_limit_s": 5,
+            "repair_num_workers": 1,
+            "cpsat_max_destroy_ops": 32,
+            "sa_auto_calibration_enabled": True,
+            "dynamic_sa_enabled": True,
+            "sa_due_alpha": 0.35,
+            "sa_candidate_beta": 0.15,
+            "sa_pressure_cooling_gamma": 0.0015,
+            "sa_temp_min": 50.0,
+            "sa_temp_max": 500.0,
+        },
+    }
+
+    if study_profile == "max-push-50k":
+        rhc_alns_kwargs.update(
+            {
+                "time_limit_s": 3600,
+                "alns_inner_window_time_cap_s": 600,
+                "admission_full_scan_enabled": True,
+                "hybrid_inner_routing_enabled": True,
+            }
+        )
+        inner_kwargs = rhc_alns_kwargs["inner_kwargs"]
+        inner_kwargs.update(
+            {
+                "max_iterations": 300,
+                "use_cpsat_repair": True,
+                "repair_time_limit_s": 30,
+                "repair_num_workers": 4,
+                "cpsat_max_destroy_ops": 128,
+            }
+        )
+
+    return {
+        "RHC-GREEDY": {
+            "solver_name": "rhc-greedy",
+            "solver_kwargs": deepcopy(rhc_greedy_kwargs),
+        },
+        "RHC-ALNS": {
+            "solver_name": "rhc-alns",
+            "solver_kwargs": deepcopy(rhc_alns_kwargs),
+        },
+        "RHC-ALNS-REFINE": {
+            "solver_name": "rhc-alns-refine",
+            "baseline_solver_name": "rhc-greedy",
+            "baseline_solver_kwargs": deepcopy(rhc_greedy_kwargs),
+            "solver_kwargs": deepcopy(rhc_alns_kwargs),
+            "two_phase_refinement": True,
+        },
+    }
+
+
 def study_rhc_50k(
     *,
     preset_name: str = "industrial-50k",
@@ -438,13 +545,14 @@ def study_rhc_50k(
     min_scheduled_ratio: float = 0.90,
     max_makespan_degradation_ratio: float = 1.05,
     max_inner_fallback_ratio: float = 0.10,
+    study_profile: StudyProfile = "canonical",
 ) -> dict[str, Any]:
     """Run and persist a deterministic RHC large-instance benchmark study."""
 
     if preset_name == "industrial-50k":
         return _study_industrial_50k(
             seeds=seeds or [1],
-            solver_names=solver_names or ["RHC-GREEDY", "RHC-ALNS"],
+            solver_names=solver_names or _default_industrial_solver_names(study_profile),
             runs=runs,
             write_dir=write_dir,
             lane=lane,
@@ -455,6 +563,7 @@ def study_rhc_50k(
             min_scheduled_ratio=min_scheduled_ratio,
             max_makespan_degradation_ratio=max_makespan_degradation_ratio,
             max_inner_fallback_ratio=max_inner_fallback_ratio,
+            study_profile=study_profile,
         )
 
     study_seeds = seeds or [1]
@@ -507,6 +616,8 @@ def study_rhc_50k(
     report = {
         "study_kind": "rhc-50k",
         "preset_name": preset_name,
+        "study_profile": study_profile,
+        "acceleration_status": accelerators.get_acceleration_status(),
         "requested_solver_names": requested_solver_names,
         "lane_mode": lane,
         "cvar_alpha": cvar_alpha,
@@ -570,81 +681,12 @@ def _study_industrial_50k(
     min_scheduled_ratio: float,
     max_makespan_degradation_ratio: float,
     max_inner_fallback_ratio: float,
+    study_profile: StudyProfile,
 ) -> dict[str, Any]:
     artifact_dir = write_dir or Path("benchmark") / "studies" / "rhc_50k"
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
-    rhc_greedy_kwargs = {
-        "window_minutes": 480,
-        "overlap_minutes": 60,
-        "inner_solver": "greedy",
-        "time_limit_s": 600,
-        "max_ops_per_window": 10_000,
-    }
-    rhc_alns_kwargs = {
-        "window_minutes": 480,
-        "overlap_minutes": 120,
-        "inner_solver": "alns",
-        "time_limit_s": 1200,
-        "alns_inner_window_time_cap_s": 180,
-        "max_ops_per_window": 5_000,
-        "progressive_admission_relaxation_enabled": True,
-        "precedence_ready_candidate_filter_enabled": True,
-        "due_admission_horizon_factor": 2.0,
-        "admission_relaxation_min_fill_ratio": 0.30,
-        "admission_full_scan_enabled": False,
-        "alns_budget_auto_scaling_enabled": True,
-        "alns_presearch_max_window_ops": 5_000,
-        "alns_budget_estimated_repair_s_per_destroyed_op": 0.125,
-        "hybrid_inner_routing_enabled": False,
-        "hybrid_inner_solver": "cpsat",
-        "hybrid_due_pressure_threshold": 0.35,
-        "hybrid_candidate_pressure_threshold": 4.0,
-        "hybrid_max_ops": 1_500,
-        "backtracking_enabled": True,
-        "backtracking_tail_minutes": 60,
-        "backtracking_max_ops": 24,
-        "hybrid_inner_kwargs": {
-            "num_workers": 4,
-        },
-        "inner_fallback_kpi_threshold": 0.10,
-        "inner_kwargs": {
-            "max_iterations": 100,
-            "destroy_fraction": 0.03,
-            "min_destroy": 10,
-            "max_destroy": 40,
-            "max_no_improve_iters": 30,
-            "use_cpsat_repair": False,
-            "repair_time_limit_s": 5,
-            "repair_num_workers": 1,
-            "cpsat_max_destroy_ops": 32,
-            "sa_auto_calibration_enabled": True,
-            "dynamic_sa_enabled": True,
-            "sa_due_alpha": 0.35,
-            "sa_candidate_beta": 0.15,
-            "sa_pressure_cooling_gamma": 0.0015,
-            "sa_temp_min": 50.0,
-            "sa_temp_max": 500.0,
-        },
-    }
-
-    solver_specs = {
-        "RHC-GREEDY": {
-            "solver_name": "rhc-greedy",
-            "solver_kwargs": deepcopy(rhc_greedy_kwargs),
-        },
-        "RHC-ALNS": {
-            "solver_name": "rhc-alns",
-            "solver_kwargs": deepcopy(rhc_alns_kwargs),
-        },
-        "RHC-ALNS-REFINE": {
-            "solver_name": "rhc-alns-refine",
-            "baseline_solver_name": "rhc-greedy",
-            "baseline_solver_kwargs": deepcopy(rhc_greedy_kwargs),
-            "solver_kwargs": deepcopy(rhc_alns_kwargs),
-            "two_phase_refinement": True,
-        },
-    }
+    solver_specs = _build_industrial_50k_solver_specs(study_profile=study_profile)
 
     records: list[dict[str, Any]] = []
     grouped_by_solver: dict[str, list[dict[str, Any]]] = {
@@ -752,6 +794,8 @@ def _study_industrial_50k(
     report = {
         "study_kind": "rhc-50k",
         "preset_name": "industrial-50k",
+        "study_profile": study_profile,
+        "acceleration_status": accelerators.get_acceleration_status(),
         "requested_solver_names": solver_names,
         "lane_mode": lane,
         "cvar_alpha": cvar_alpha,
@@ -1058,6 +1102,16 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--study-profile",
+        choices=["canonical", "max-push-50k"],
+        default="canonical",
+        help=(
+            "Industrial-50K benchmark profile: canonical keeps the published defaults; "
+            "max-push-50k enables long budgets, full-scan admission, hybrid inner routing, "
+            "and CP-SAT repair"
+        ),
+    )
+    parser.add_argument(
         "--min-scheduled-ratio",
         type=float,
         default=0.90,
@@ -1103,6 +1157,7 @@ def main(argv: list[str] | None = None) -> int:
         min_scheduled_ratio=args.min_scheduled_ratio,
         max_makespan_degradation_ratio=args.max_makespan_degradation_ratio,
         max_inner_fallback_ratio=args.max_inner_fallback_ratio,
+        study_profile=args.study_profile,
     )
     json.dump(report, sys.stdout, indent=2)
     sys.stdout.write("\n")

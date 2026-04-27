@@ -33,9 +33,34 @@ python -m benchmark.study_rhc_50k --preset industrial-50k --seeds 1 \
   --quality-gate-profile feasibility-first \
   --write-dir benchmark/studies/2026-04-27-rhc-50k-feasibility-first
 
+# Run the named max-push 50K profile: long ALNS budget, full admission scan,
+# hybrid inner routing, CP-SAT repair, and the default RHC-ALNS-REFINE warm-start path.
+python -m benchmark.study_rhc_50k --preset industrial-50k --seeds 1 \
+  --study-profile max-push-50k \
+  --write-dir benchmark/studies/2026-04-27-rhc-50k-max-push
+
+# Check whether the runtime sees the native backend and benchmark candidate-metric speedup
+python -c "from synaps import accelerators; print(accelerators.get_acceleration_status())"
+python -m benchmark.study_native_rhc_candidate_acceleration \
+  --sizes 50000,100000,500000 \
+  --repeats 5 \
+  --output benchmark/results/native-rhc-candidate-acceleration.json
+
+# Sweep window geometry under a bounded 50K DOE
+python -m benchmark.study_rhc_alns_geometry_doe \
+  --lane throughput \
+  --seeds 1 \
+  --max-windows 2 \
+  --time-limit-s 300 \
+  --geometries 480:120 360:90 300:90 240:60 \
+  --write-dir benchmark/studies/2026-04-27-rhc-geometry-doe
+
 # Run the staged 500K stress-study in safe planning mode (resource projection + gate)
 python -m benchmark.study_rhc_500k --execution-mode plan --lane both --seeds 1 2 3
 
+
+`benchmark.study_rhc_50k --study-profile max-push-50k` is the explicit “push 50K as hard as possible” surface.
+It keeps the published canonical profile intact, but exposes a second named benchmark profile that turns on the expensive controls discussed in the large-instance audit loop: longer ALNS budgets, full admission scan, hybrid inner routing, CP-SAT repair, and the two-phase `RHC-ALNS-REFINE` warm-start path.
 # Execute gated stress-study ladder (runs only scales that pass admission gate)
 python -m benchmark.study_rhc_500k --execution-mode gated --lane both --seeds 1 \
   --scales 50000 100000 200000 300000 500000 \

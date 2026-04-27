@@ -744,3 +744,140 @@ def test_study_rhc_50k_two_phase_refinement_uses_external_warm_start(
     summary = report["summary_by_solver"]["RHC-ALNS-REFINE"]
     assert summary["mean_warm_start_window_rate"] == 1.0
     assert summary["mean_warm_start_completed_assignments"] == 1.0
+
+
+def test_study_rhc_50k_max_push_profile_exposes_acceleration_status_and_aggressive_knobs(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import benchmark.study_rhc_50k as study_module
+
+    captured_kwargs: list[dict] = []
+
+    def fake_run_scaling_case(*, n_ops, n_machines, n_states, solver_name, solver_kwargs, seed):
+        captured_kwargs.append(
+            {
+                "solver_name": solver_name,
+                "solver_kwargs": solver_kwargs,
+                "seed": seed,
+            }
+        )
+        return {
+            "status": "feasible",
+            "feasible": True,
+            "solver": solver_name,
+            "makespan_min": 100.0,
+            "total_setup_min": 20.0,
+            "total_tardiness_min": 0.0,
+            "total_material_loss": 0.0,
+            "assigned_ops": n_ops,
+            "violations": 0,
+            "solve_ms": 1,
+            "gen_ms": 1,
+            "verify_ms": 0,
+            "n_ops": n_ops,
+            "n_machines": n_machines,
+            "n_states": n_states,
+            "sdst_memory_bytes": 0,
+            "metadata": {
+                "inner_fallback_ratio": 0.0,
+                "inner_fallback_kpi_passed": True,
+            },
+        }
+
+    monkeypatch.setattr(study_module, "run_scaling_case", fake_run_scaling_case)
+    monkeypatch.setattr(
+        study_module.accelerators,
+        "get_acceleration_status",
+        lambda: {
+            "native_available": True,
+            "rhc_candidate_metrics_backend": "native",
+            "rhc_candidate_metrics_np_backend": "native",
+        },
+    )
+
+    report = study_module.study_rhc_50k(
+        preset_name="industrial-50k",
+        seeds=[5],
+        solver_names=["RHC-ALNS"],
+        lane="throughput",
+        study_profile="max-push-50k",
+        write_dir=tmp_path,
+    )
+
+    assert report["study_profile"] == "max-push-50k"
+    assert report["acceleration_status"]["native_available"] is True
+    assert captured_kwargs
+
+    profile = captured_kwargs[0]["solver_kwargs"]
+    assert profile["time_limit_s"] == 3600
+    assert profile["alns_inner_window_time_cap_s"] == 600
+    assert profile["admission_full_scan_enabled"] is True
+    assert profile["hybrid_inner_routing_enabled"] is True
+    assert profile["inner_kwargs"]["max_iterations"] == 300
+    assert profile["inner_kwargs"]["use_cpsat_repair"] is True
+    assert profile["inner_kwargs"]["repair_time_limit_s"] == 30
+    assert profile["inner_kwargs"]["repair_num_workers"] == 4
+    assert profile["inner_kwargs"]["cpsat_max_destroy_ops"] == 128
+
+
+def test_study_rhc_50k_max_push_both_lanes_apply_cpsat_worker_profiles(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import benchmark.study_rhc_50k as study_module
+
+    captured_kwargs: list[dict] = []
+
+    def fake_run_scaling_case(*, n_ops, n_machines, n_states, solver_name, solver_kwargs, seed):
+        captured_kwargs.append(
+            {
+                "solver_name": solver_name,
+                "solver_kwargs": solver_kwargs,
+                "seed": seed,
+            }
+        )
+        return {
+            "status": "feasible",
+            "feasible": True,
+            "solver": solver_name,
+            "makespan_min": 100.0,
+            "total_setup_min": 20.0,
+            "total_tardiness_min": 0.0,
+            "total_material_loss": 0.0,
+            "assigned_ops": n_ops,
+            "violations": 0,
+            "solve_ms": 1,
+            "gen_ms": 1,
+            "verify_ms": 0,
+            "n_ops": n_ops,
+            "n_machines": n_machines,
+            "n_states": n_states,
+            "sdst_memory_bytes": 0,
+            "metadata": {
+                "inner_fallback_ratio": 0.0,
+                "inner_fallback_kpi_passed": True,
+            },
+        }
+
+    monkeypatch.setattr(study_module, "run_scaling_case", fake_run_scaling_case)
+
+    report = study_module.study_rhc_50k(
+        preset_name="industrial-50k",
+        seeds=[11],
+        solver_names=["RHC-ALNS"],
+        lane="both",
+        study_profile="max-push-50k",
+        write_dir=tmp_path,
+    )
+
+    assert report["lane_mode"] == "both"
+    assert len(captured_kwargs) == 2
+    worker_pairs = sorted(
+        (
+            kwargs["solver_kwargs"]["hybrid_inner_kwargs"]["num_workers"],
+            kwargs["solver_kwargs"]["inner_kwargs"]["repair_num_workers"],
+        )
+        for kwargs in captured_kwargs
+    )
+    assert worker_pairs == [(1, 1), (4, 4)]
