@@ -30,6 +30,8 @@
 | `2026-04-26-rhc-100k-alns-academic-v4` | 2026-04-26 | 100K scale academic validation | RHC-ALNS produces feasible windows at 100K with correct geometry |
 | `2026-04-27-rhc-50k-audit-v2-current-head` | 2026-04-27 | Pre-audit baseline at current HEAD | Last measurement before HYPERDEEP_AUDIT_PLAN_2026_04_27 implementation |
 | `2026-04-27-rhc-100k-audit-v4-current-head` | 2026-04-27 | 100K pre-audit baseline | Metrics captured before R1–R9 audit changes |
+| `2026-05-01-rhc-50k-audit-v3-post-critical-fixes` | 2026-05-01 | Fresh 50K post-critical-fixes rerun | Scheduled ratio improved on both solvers under native-backed execution; still partial and not algorithm-only comparable to the pure-Python `v2` anchor |
+| `2026-05-01-rhc-100k-audit-v5-post-critical-fixes` | 2026-05-01 | Fresh bounded 100K post-critical-fixes rerun | `RHC-GREEDY` improved to `9287/100000`; `RHC-ALNS` regressed to `0/100000` in `445s` with no fallback repair |
 
 ---
 
@@ -46,6 +48,8 @@ be deleted without affecting canonical evidence.
 | Tier | Purpose | Files |
 |------|---------|-------|
 | **Primary DOE** | Window geometry × admission sensitivity | `2026-04-26-rhc-alns-geometry-doe-validation-v1/summary.md` |
-| **Scale gate** | 50K feasibility before committing to 100K+  | `2026-04-27-rhc-50k-audit-v2-current-head/` |
+| **Scale gate (latest)** | Fresh 50K post-critical-fixes rerun on pushed `master` | `2026-05-01-rhc-50k-audit-v3-post-critical-fixes/` |
+| **50K pure-Python anchor** | Clean comparison point before the native-backed rerun | `2026-04-27-rhc-50k-audit-v2-current-head/` |
 | **Admission ablation** | `precedence_ready_candidate_filter` impact | `2026-04-26-rhc-alns-precedence-ready-v1/` |
-| **100K baseline** | RHC-ALNS at 2× target scale | `2026-04-27-rhc-100k-audit-v4-current-head/` |
+| **100K pure-Python anchor** | Bounded current-head comparison before the native-backed rerun | `2026-04-27-rhc-100k-audit-v4-current-head/` |
+| **100K current rerun** | Fresh bounded 100K evidence on pushed `master` | `2026-05-01-rhc-100k-audit-v5-post-critical-fixes/` |

@@ -315,12 +315,15 @@ The current-head audit before the profile refresh is [studies/2026-04-27-rhc-50k
 
 The refreshed current-head public/default audit is [studies/2026-04-27-rhc-50k-audit-v2-current-head/rhc_50k_study.json](studies/2026-04-27-rhc-50k-audit-v2-current-head/rhc_50k_study.json).
 
+The fresh post-critical-fixes rerun on pushed `master` is [studies/2026-05-01-rhc-50k-audit-v3-post-critical-fixes/rhc_50k_study.json](studies/2026-05-01-rhc-50k-audit-v3-post-critical-fixes/rhc_50k_study.json).
+
 Read them together rather than collapsing them into one story:
 
 - the pre-fix stress matrix preserves the old ALNS failure shape, where coverage was weak but some windows did enter search;
 - the guarded-profile artifact preserves the second regime, where oversized ALNS windows are skipped before costly seed generation can burn the whole per-window budget;
 - the current-head-before-refresh audit preserves the mixed regime, where early windows do enter ALNS, but windows 2-3 burn budget on zero-yield CP-SAT repair and later windows fall back or time out under hybrid CP-SAT routing;
 - the refreshed current-head audit shows the public profile after that cleanup: hybrid CP-SAT routing and CP-SAT repair are gone from the public path, windows 1-2 still enter search, and later windows now fail earlier with `inner_time_limit_exhausted_before_search` during seed construction;
+- the fresh 2026-05-01 rerun is the latest operational current-head evidence, but it is environment-shifted rather than algorithm-only comparable: `native_acceleration_rate = 1.0` in `v3` versus `0.0` in the 2026-04-27 `v2` anchor;
 - all current-head public runs still report `status=error` and `feasible=false`, so none should be read as a solved industrial benchmark.
 - in that partial regime, compare coverage and fallback metrics first; do not interpret bound-gap quality unless `lower_bound_upper_bound_comparable=true`.
 
@@ -330,9 +333,11 @@ The current split is now more precise:
 - guarded-profile `RHC-ALNS|throughput` reports `mean_scheduled_ratio = 0.3028`, `mean_makespan_minutes = 9675.18`, and `mean_inner_fallback_ratio = 1.0`;
 - current-head-before-refresh `RHC-ALNS|throughput` reports `mean_scheduled_ratio = 0.1243`, `mean_makespan_minutes = 4134.84`, and `mean_inner_fallback_ratio = 0.625`;
 - current-head-after-refresh `RHC-ALNS|throughput` reports `mean_scheduled_ratio = 0.0845`, `mean_makespan_minutes = 3059.82`, and `mean_inner_fallback_ratio = 0.6667`;
-- current-head-after-refresh `RHC-GREEDY|throughput` remains the stronger pure-coverage baseline at `mean_scheduled_ratio = 0.3563` with zero inner fallback.
+- fresh post-critical-fixes `RHC-ALNS|throughput` reports `mean_scheduled_ratio = 0.1374`, `mean_makespan_minutes = 4295.25`, `mean_inner_fallback_ratio = 0.3333`, `search_active_window_rate = 0.6667`, and `native_acceleration_rate = 1.0`;
+- fresh post-critical-fixes `RHC-GREEDY|throughput` reports `mean_scheduled_ratio = 0.4184` with `native_acceleration_rate = 1.0`;
+- current-head-after-refresh `RHC-GREEDY|throughput` remains the stronger pure-coverage pure-Python baseline at `mean_scheduled_ratio = 0.3563` with zero inner fallback.
 
-So the public 50K path remains real and reproducible, but the latest evidence is now four-way: ALNS can enter search; the retired public profile was wasting too much budget in CP-SAT side paths; and the refreshed public default removes those side paths yet still loses late windows to seed-construction exhaustion. That is why the public `RHC-ALNS` default stays greedy-only and hybrid-off, while the DOE harnesses keep those knobs exposed for controlled experiments.
+So the public 50K path remains real and reproducible, but the latest evidence is now five-way: ALNS can enter search; the retired public profile was wasting too much budget in CP-SAT side paths; the refreshed pure-Python public default removed those side paths yet still lost late windows to seed-construction exhaustion; and the fresh native-backed rerun raises scheduled coverage on both solvers without closing feasibility. That is why the public `RHC-ALNS` default stays greedy-only and hybrid-off, while the DOE harnesses keep those knobs exposed for controlled experiments.
 
 Post-audit (2026-04-26) solver hardening now includes:
 
@@ -359,6 +364,8 @@ Bounded 100K evidence for the retired profile is [studies/2026-04-27-rhc-100k-au
 Bounded 100K evidence for the staged geometry-refresh harness is [studies/2026-04-27-rhc-100k-audit-v3-geometry-refresh/rhc_500k_study.json](studies/2026-04-27-rhc-100k-audit-v3-geometry-refresh/rhc_500k_study.json). In that slice, the staged `100k+` harness narrows `RHC-ALNS` first-window geometry to `300/90`, reducing the first inner slice to `760` ops. The run reaches `ALNS starting`, completes `55` iterations with `43` improvements, records `0` inner fallback, and finishes at `4678/100000` scheduled operations in `90.118s`. That evidence is now promoted into the named portfolio/runtime profile `RHC-ALNS-100K`, so the search-entry geometry is available outside the staged harness too. Read the artifact as proof that 100K ALNS can now enter search under that profile, not as proof that the 100K path is closed: the run still ends partial and `feasible=false`.
 
 Fresh bounded 100K current-head evidence on that same staged harness is [studies/2026-04-27-rhc-100k-audit-v4-current-head/rhc_500k_study.json](studies/2026-04-27-rhc-100k-audit-v4-current-head/rhc_500k_study.json). It reports `RHC-GREEDY` scheduling `7852/100000` operations in `90.213s`, while `RHC-ALNS` schedules `3420/100000` in `90.113s`. ALNS still reaches search in both bounded windows, completing `56` and `30` iterations with `45` and `18` improvements, using `0` CP-SAT repairs, and reporting `0` inner fallback. Read that artifact as the honest current comparison: search-entry is preserved, but scheduled coverage still trails the same-run greedy baseline and remains partial (`mean_scheduled_ratio = 0.0342`, `feasible = false`).
+
+Fresh bounded 100K post-critical-fixes evidence on pushed `master` is [studies/2026-05-01-rhc-100k-audit-v5-post-critical-fixes/rhc_500k_study.json](studies/2026-05-01-rhc-100k-audit-v5-post-critical-fixes/rhc_500k_study.json). In that native-backed slice, `RHC-GREEDY` improves to `9287/100000` scheduled operations in `90.282s`, but `RHC-ALNS` regresses to `0/100000` scheduled operations in `445.213s`, ends after one window, skips fallback repair, and records `solver_metadata.error = "no assignments produced"`. Because the 2026-04-27 `v4` anchor ran pure-Python backends while `v5` used `synaps_native`, read the comparison as environment-shifted evidence, not as a clean algorithm-only delta. The practical conclusion is still negative: the current 100K ALNS path is not stable on pushed `master`, and native-backed runs can still fall back into the old pre-search seed-stall failure family.
 
 ## Staged 500K Study
 
