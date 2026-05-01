@@ -102,6 +102,7 @@ def test_setup_cost_cuts_are_exposed_in_metadata() -> None:
 
     assert result.status in {SolverStatus.FEASIBLE, SolverStatus.OPTIMAL, SolverStatus.TIMEOUT}
     assert result.metadata["cut_pool"]["kinds"].get("setup_cost", 0) >= 1
+    assert result.metadata["cut_pool"]["kinds"].get("critical_path", 0) >= 1
 
 
 def test_lbbd_reports_master_warm_start_iterations() -> None:

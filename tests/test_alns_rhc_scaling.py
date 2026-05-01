@@ -998,7 +998,11 @@ class TestAlnsSolver:
         """ALNS should recover to the initial solution if final incumbent is invalid."""
         import synaps.solvers.alns_solver as alns_module
 
-        problem = _make_3state_problem(n_orders=3, ops_per_order=2)
+        # n_ops > initial_beam_op_limit (default 60) keeps Phase 1 on the
+        # single-greedy branch, so the checker call sequence is deterministic:
+        # #1 = post-Phase-1 validation, #2 = final incumbent check (forced
+        # violation here), #3 = recovered-initial-solution check.
+        problem = _make_3state_problem(n_orders=12, ops_per_order=6)
         check_calls = {"count": 0}
 
         def fake_check(self, problem, assignments):

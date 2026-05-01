@@ -45,6 +45,12 @@ Heuristic-only `RuntimePredictor.heuristic()` remains available for experimentat
 7. ALNS initial seed construction is now explicitly budgeted and no longer monopolizes bounded windows.
 `synaps/solvers/greedy_dispatch.py` now honors `time_limit_s` and returns `TIMEOUT` with partial-schedule metadata; `synaps/solvers/alns_solver.py` now converts that path into explicit `initial_seed_greedy_timed_out` failures, caps phase-1 seed construction on bounded windows, and preserves time for same-window fallback. On current `master`, the accepted bounded rerun in `benchmark/studies/2026-05-08-rhc-100k-audit-v11-post-bounded-seed-cap` reaches `7236/100000` scheduled operations in `90.255s` versus same-run `RHC-GREEDY` `7230/100000` in `90.365s`, with `windows_observed = 2`, `fallback_repair_skipped = false`, and no `solver_metadata.error`.
 
+8. `_find_critical_path` is no longer duplicated between standard and hierarchical LBBD.
+`synaps/solvers/lbbd_solver.py` now imports the public `find_critical_path` wrapper from `synaps/solvers/lbbd_hd_solver.py` under the `_find_critical_path` alias and the private duplicate (≈86 lines) was removed. Both solvers therefore share one realised critical-path implementation, which removes the rebuilt-from-scratch divergence risk between the two LBBD variants and keeps `find_critical_path` available to `tests/test_lbbd_hd_solver.py` unchanged.
+
+9. The ALNS final-validation recovery test is no longer dependent on a fragile checker-call count.
+`tests/test_alns_rhc_scaling.py::TestAlnsSolver::test_alns_recovers_when_final_validation_rejects_incumbent` now uses `_make_3state_problem(n_orders=12, ops_per_order=6)` so `n_ops > initial_beam_op_limit`. Phase 1 then takes the single-greedy initial-seed branch instead of the beam+greedy branch, which makes the second `FeasibilityChecker.check(...)` call the final incumbent check rather than the post-greedy validation, restoring the deterministic `#1 = post-Phase-1 / #2 = final / #3 = recovered-initial` checker-call sequence the test relies on.
+
 ## Still Open After Re-Verification
 
 These items remain real follow-up work after the current pass:

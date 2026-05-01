@@ -11,8 +11,8 @@ Features:
       GreedyDispatch (toggle via use_greedy_warm_start).
     - Parallel subproblem execution via ProcessPoolExecutor for
       O(K) speedup (toggle via parallel_subproblems).
-    - Four families of Benders cuts: nogood, capacity,
-      setup_cost, load_balance.
+        - Five families of Benders cuts: nogood, capacity,
+            setup_cost, load_balance, critical_path.
 """
 
 from __future__ import annotations
@@ -39,6 +39,7 @@ from synaps.model import (
 )
 from synaps.solvers import BaseSolver
 from synaps.solvers.cpsat_solver import CpSatSolver
+from synaps.solvers.lbbd_hd_solver import find_critical_path as _find_critical_path
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -305,6 +306,21 @@ class LbbdSolver(BaseSolver):
                             bottleneck_ops=set(),
                         )
                     )
+
+            critical_ops, critical_duration = _find_critical_path(
+                problem,
+                sub_assignments,
+                ops_by_id,
+            )
+            if critical_ops and len(critical_ops) >= 2 and critical_duration > 0:
+                benders_cuts.append(
+                    _BendersCut(
+                        assignment_map=dict(assignment_map),
+                        kind="critical_path",
+                        rhs=critical_duration,
+                        bottleneck_ops=set(critical_ops),
+                    )
+                )
 
         status = SolverStatus.FEASIBLE if best_assignments else SolverStatus.TIMEOUT
         elapsed_ms = int((time.monotonic() - t0) * 1000)
@@ -629,6 +645,40 @@ def _solve_master(
                     len(setup_cut_indices),
                     np.array(setup_cut_indices, dtype=np.int32),
                     np.array(setup_cut_coeffs),
+                )
+        elif cut.kind == "critical_path":
+            critical_cut_indices = [cmax_idx]
+            critical_cut_coeffs = [1.0]
+            total_processing = 0.0
+            for op_id in cut.bottleneck_ops:
+                critical_wc_id = cut.assignment_map.get(op_id)
+                if critical_wc_id is None:
+                    continue
+                key = (op_id, critical_wc_id)
+                if key not in var_index:
+                    continue
+                critical_wc = wc_by_id.get(critical_wc_id)
+                critical_op = next(
+                    (operation for operation in problem.operations if operation.id == op_id),
+                    None,
+                )
+                if critical_wc is None or critical_op is None:
+                    continue
+                processing_time = max(
+                    1.0,
+                    critical_op.base_duration_min / critical_wc.speed_factor,
+                )
+                total_processing += processing_time
+                critical_cut_indices.append(var_index[key])
+                critical_cut_coeffs.append(-processing_time)
+            if len(critical_cut_indices) > 1:
+                rhs_val = cut.rhs - total_processing
+                h.addRow(
+                    rhs_val,
+                    highspy.kHighsInf,
+                    len(critical_cut_indices),
+                    np.array(critical_cut_indices, dtype=np.int32),
+                    np.array(critical_cut_coeffs),
                 )
 
     # Solve
