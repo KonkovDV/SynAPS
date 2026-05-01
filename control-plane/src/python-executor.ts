@@ -30,6 +30,46 @@ function resolveExecutionLimits(): SynapsPythonExecutionLimits {
   };
 }
 
+const ALLOWED_SYNAPS_BRIDGE_ENV_KEYS = new Set([
+  "SYNAPS_DISABLE_NATIVE_ACCELERATION",
+]);
+
+function isAllowedSynapsBridgeEnvKey(key: string): boolean {
+  const normalizedKey = key.toUpperCase();
+  return (
+    normalizedKey.startsWith("SYNAPS_PYTHON_") ||
+    ALLOWED_SYNAPS_BRIDGE_ENV_KEYS.has(normalizedKey)
+  );
+}
+
+function buildPythonBridgeEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const allowedKeys = new Set([
+    "PATH",
+    "PATHEXT",
+    "SYSTEMROOT",
+    "COMSPEC",
+    "TEMP",
+    "TMP",
+    "PYTHONPATH",
+    "PYTHONUTF8",
+    "PYTHONDONTWRITEBYTECODE",
+  ]);
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (value === undefined) {
+      continue;
+    }
+    if (
+      allowedKeys.has(key.toUpperCase()) ||
+      isAllowedSynapsBridgeEnvKey(key) ||
+      key.startsWith("OTEL_")
+    ) {
+      env[key] = value;
+    }
+  }
+  return env;
+}
+
 export class SynapsPythonBridgeError extends Error {
   readonly code: SynapsPythonBridgeErrorCode;
 
@@ -82,7 +122,7 @@ async function executePythonContract(
         commandArgs,
         {
           cwd: paths.repoRoot,
-          env: process.env,
+          env: buildPythonBridgeEnv(),
           stdio: ["pipe", "pipe", "pipe"],
         },
       );
@@ -211,3 +251,7 @@ export function createPythonContractExecutor(
     },
   };
 }
+
+export const _testInternals = {
+  buildPythonBridgeEnv,
+};

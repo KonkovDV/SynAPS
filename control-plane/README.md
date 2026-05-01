@@ -46,8 +46,17 @@ Key env vars:
 - `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://.../v1/traces`
 - `SYNAPS_ENABLE_LIMIT_GUARDS=1`
 - `SYNAPS_LIMIT_GUARD_CHAIN=CPSAT-30,LBBD-10,RHC-ALNS,GREED`
+- `SYNAPS_CONTROL_PLANE_API_KEY=...`
+- `SYNAPS_CONTROL_PLANE_MAX_BODY_BYTES=10000000`
+- `SYNAPS_CONTROL_PLANE_RATE_LIMIT_MAX=60`
+- `SYNAPS_CONTROL_PLANE_RATE_LIMIT_WINDOW_MS=60000`
 - `SYNAPS_PYTHON_EXEC_TIMEOUT_MS=...`
 - `SYNAPS_PYTHON_MAX_OUTPUT_BYTES=...`
+
+When `SYNAPS_CONTROL_PLANE_API_KEY` is set, the control plane requires either
+`x-api-key: <value>` or `Authorization: Bearer <value>` on every route.
+Optional fixed-window throttling is enabled by setting both
+`SYNAPS_CONTROL_PLANE_RATE_LIMIT_MAX` and `SYNAPS_CONTROL_PLANE_RATE_LIMIT_WINDOW_MS`.
 
 Ready-to-import monitoring artifacts (Grafana dashboard + Prometheus alert rules):
 
@@ -83,6 +92,11 @@ By default the control plane tries to locate a Python executable in this order:
 
 Set `SYNAPS_PYTHON_BIN` explicitly when CI or local tooling should use a specific
 interpreter instead of the nearest ancestor virtual environment.
+
+The Python bridge now forwards only the minimal runtime environment it needs:
+system path/process variables, `SYNAPS_PYTHON_*`, `SYNAPS_DISABLE_NATIVE_ACCELERATION`,
+and `OTEL_*`. Control-plane-only settings such as `SYNAPS_CONTROL_PLANE_API_KEY`
+and rate-limit/body-limit knobs are intentionally not propagated to the Python subprocess.
 
 The BFF executes:
 

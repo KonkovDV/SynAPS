@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import { applyAclGuardrails, AclValidationError } from "./anti-corruption";
@@ -31,6 +32,12 @@ export interface BuildControlPlaneAppOptions {
   logger?: boolean;
   metrics?: SynapsMetricsRegistry;
   solveJobs?: SynapsSolveJobStore;
+  apiKey?: string | null;
+  bodyLimitBytes?: number;
+  rateLimit?: {
+    maxRequests: number;
+    windowMs: number;
+  } | null;
 }
 
 const errorEnvelopeSchema = {
@@ -247,6 +254,79 @@ function shouldRetryAfterResultStatus(status: string | null): boolean {
   return status === "timeout" || status === "error";
 }
 
+function parsePositiveInteger(value: string | undefined): number | null {
+  if (value === undefined || value.trim().length === 0) {
+    return null;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return Math.floor(parsed);
+}
+
+function resolveControlPlaneApiKey(optionValue: string | null | undefined): string | null {
+  if (optionValue !== undefined) {
+    return optionValue && optionValue.trim().length > 0 ? optionValue : null;
+  }
+  const value = process.env.SYNAPS_CONTROL_PLANE_API_KEY;
+  return value && value.trim().length > 0 ? value : null;
+}
+
+function resolveBodyLimitBytes(optionValue: number | undefined): number {
+  if (optionValue !== undefined && Number.isFinite(optionValue) && optionValue > 0) {
+    return Math.floor(optionValue);
+  }
+  return parsePositiveInteger(process.env.SYNAPS_CONTROL_PLANE_MAX_BODY_BYTES) ?? 10_000_000;
+}
+
+function resolveRateLimit(
+  optionValue: BuildControlPlaneAppOptions["rateLimit"] | undefined,
+): { maxRequests: number; windowMs: number } | null {
+  if (optionValue !== undefined) {
+    return optionValue;
+  }
+  const maxRequests = parsePositiveInteger(process.env.SYNAPS_CONTROL_PLANE_RATE_LIMIT_MAX);
+  if (maxRequests === null) {
+    return null;
+  }
+  return {
+    maxRequests,
+    windowMs:
+      parsePositiveInteger(process.env.SYNAPS_CONTROL_PLANE_RATE_LIMIT_WINDOW_MS) ?? 60_000,
+  };
+}
+
+function matchesControlPlaneApiKey(
+  presentedApiKey: string | null,
+  expectedApiKey: string,
+): boolean {
+  if (presentedApiKey === null) {
+    return false;
+  }
+  const presentedBuffer = Buffer.from(presentedApiKey, "utf-8");
+  const expectedBuffer = Buffer.from(expectedApiKey, "utf-8");
+  return (
+    presentedBuffer.length === expectedBuffer.length &&
+    timingSafeEqual(presentedBuffer, expectedBuffer)
+  );
+}
+
+function extractPresentedApiKey(request: {
+  headers: Record<string, string | string[] | undefined>;
+}): string | null {
+  const apiKeyHeader = request.headers["x-api-key"];
+  if (typeof apiKeyHeader === "string" && apiKeyHeader.trim().length > 0) {
+    return apiKeyHeader.trim();
+  }
+  const authorizationHeader = request.headers.authorization;
+  if (typeof authorizationHeader !== "string") {
+    return null;
+  }
+  const bearerMatch = authorizationHeader.match(/^\s*Bearer\s+(.+?)\s*$/i);
+  return bearerMatch?.[1] ?? null;
+}
+
 function annotateResponseWithFallback(
   response: Record<string, unknown>,
   attempts: SolveAttempt[],
@@ -325,6 +405,9 @@ export function buildControlPlaneApp(
   const metrics = options.metrics ?? new SynapsMetricsRegistry();
   const solveJobs = options.solveJobs ?? new InMemorySolveJobStore();
   const openApiDocument = buildOpenApiDocument(schemas);
+  const apiKey = resolveControlPlaneApiKey(options.apiKey);
+  const rateLimit = resolveRateLimit(options.rateLimit);
+  const rateLimitBuckets = new Map<string, { resetAt: number; count: number }>();
   const routeList = [
     "/healthz",
     "/metrics",
@@ -350,7 +433,42 @@ export function buildControlPlaneApp(
   const fallbackChain = parseLimitGuardChain();
   const limitGuardsEnabled = process.env.SYNAPS_ENABLE_LIMIT_GUARDS !== "0";
 
-  const app = Fastify({ logger: options.logger ?? false });
+  const app = Fastify({
+    logger: options.logger ?? false,
+    bodyLimit: resolveBodyLimitBytes(options.bodyLimitBytes),
+  });
+
+  app.addHook("onRequest", async (request, reply) => {
+    if (apiKey !== null) {
+      const presentedApiKey = extractPresentedApiKey(request);
+      if (!matchesControlPlaneApiKey(presentedApiKey, apiKey)) {
+        reply.code(401).send({
+          statusCode: 401,
+          error: "Unauthorized",
+          message: "Missing or invalid SynAPS control-plane API key",
+        });
+        return;
+      }
+    }
+
+    if (rateLimit !== null) {
+      const key = request.ip;
+      const now = Date.now();
+      const bucket = rateLimitBuckets.get(key);
+      if (bucket === undefined || bucket.resetAt <= now) {
+        rateLimitBuckets.set(key, { resetAt: now + rateLimit.windowMs, count: 1 });
+        return;
+      }
+      bucket.count += 1;
+      if (bucket.count > rateLimit.maxRequests) {
+        return reply.code(429).send({
+          statusCode: 429,
+          error: "Too Many Requests",
+          message: "SynAPS control-plane rate limit exceeded",
+        });
+      }
+    }
+  });
 
   app.get(
     "/healthz",

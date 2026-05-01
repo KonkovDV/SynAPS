@@ -98,6 +98,61 @@ test("health endpoint returns ok", async () => {
   await app.close();
 });
 
+test("optional api key guard rejects unauthenticated requests", async () => {
+  const app = buildControlPlaneApp({
+    apiKey: "test-key",
+    executor: {
+      async executeSolveRequest(): Promise<unknown> {
+        throw new Error("unused");
+      },
+      async executeRepairRequest(): Promise<unknown> {
+        throw new Error("unused");
+      },
+    },
+  });
+
+  const unauthorized = await app.inject({ method: "GET", url: "/healthz" });
+  assert.equal(unauthorized.statusCode, 401);
+
+  const authorized = await app.inject({
+    method: "GET",
+    url: "/healthz",
+    headers: { "x-api-key": "test-key" },
+  });
+  assert.equal(authorized.statusCode, 200);
+
+  const bearerAuthorized = await app.inject({
+    method: "GET",
+    url: "/healthz",
+    headers: { authorization: "bearer test-key" },
+  });
+  assert.equal(bearerAuthorized.statusCode, 200);
+
+  await app.close();
+});
+
+test("optional fixed-window rate limit returns 429 after the configured budget", async () => {
+  const app = buildControlPlaneApp({
+    rateLimit: { maxRequests: 1, windowMs: 60_000 },
+    executor: {
+      async executeSolveRequest(): Promise<unknown> {
+        throw new Error("unused");
+      },
+      async executeRepairRequest(): Promise<unknown> {
+        throw new Error("unused");
+      },
+    },
+  });
+
+  const first = await app.inject({ method: "GET", url: "/healthz" });
+  assert.equal(first.statusCode, 200);
+
+  const second = await app.inject({ method: "GET", url: "/healthz" });
+  assert.equal(second.statusCode, 429);
+
+  await app.close();
+});
+
 test("runtime contract index exposes discoverability metadata", async () => {
   const app = buildControlPlaneApp({
     executor: {
