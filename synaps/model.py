@@ -33,6 +33,7 @@ class Order(BaseModel):
 
     id: UUID = Field(default_factory=uuid4)
     external_ref: str
+    release_date: datetime | None = None
     due_date: datetime
     priority: int = 500
     quantity: float = 1.0
@@ -116,11 +117,14 @@ def normalize_schedule_problem_data(data: object) -> object:
     changed = False
 
     for raw_operation in raw_operations:
-        if not isinstance(raw_operation, dict):
+        if isinstance(raw_operation, dict):
+            operation = dict(raw_operation)
+        elif isinstance(raw_operation, BaseModel):
+            operation = dict(raw_operation.model_dump(mode="python"))
+        else:
             normalized_operations.append(raw_operation)
             continue
 
-        operation = dict(raw_operation)
         normalized_operations.append(operation)
         operations_by_order.setdefault(operation.get("order_id"), []).append(operation)
 
@@ -195,7 +199,7 @@ class ScheduleProblem(BaseModel):
         if issues:
             raise ValueError("; ".join(issues))
 
-        return data
+        return normalize_schedule_problem_data(data)
 
     @staticmethod
     def _duplicate_keys(values: list[Any]) -> set[Any]:
@@ -337,7 +341,17 @@ class ScheduleProblem(BaseModel):
 
                 expected_predecessor_id = previous_operation.id
                 if operation.predecessor_op_id is None:
-                    operation.predecessor_op_id = expected_predecessor_id
+                    # Previous behavior mutated the model here, violating
+                    # validator semantics.  The correct path is to run
+                    # normalize_schedule_problem_data() on the raw payload
+                    # before constructing ScheduleProblem.
+                    issues.append(
+                        "operation "
+                        f"{operation.id} is missing predecessor_op_id "
+                        f"(expected {expected_predecessor_id} based on "
+                        f"seq_in_order within order {order_id}); "
+                        "use normalize_schedule_problem_data() to autofill"
+                    )
                 elif operation.predecessor_op_id != expected_predecessor_id:
                     issues.append(
                         "operation "

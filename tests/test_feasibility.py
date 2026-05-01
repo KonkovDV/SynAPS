@@ -286,6 +286,73 @@ class TestFeasibilityChecker:
         assert len(resource_violations) == 1
         assert resource_violations[0].operation_id in {op_a.id, op_c.id}
 
+    def test_exhaustive_mode_reports_multiple_auxiliary_resource_overflows(self) -> None:
+        checker = FeasibilityChecker()
+        horizon_end = HORIZON_START + timedelta(hours=2)
+        state = State(id=uuid4(), code="STATE-A")
+        tool = AuxiliaryResource(id=uuid4(), code="TOOL-X", resource_type="tool", pool_size=1)
+        work_centers = [
+            WorkCenter(id=uuid4(), code=f"WC-{index}", capability_group="machining")
+            for index in range(3)
+        ]
+        orders = [
+            Order(id=uuid4(), external_ref=f"ORD-{index}", due_date=horizon_end)
+            for index in range(3)
+        ]
+        operations = [
+            Operation(
+                id=uuid4(),
+                order_id=orders[index].id,
+                seq_in_order=0,
+                state_id=state.id,
+                base_duration_min=30,
+                eligible_wc_ids=[work_centers[index].id],
+            )
+            for index in range(3)
+        ]
+
+        problem = ScheduleProblem(
+            states=[state],
+            orders=orders,
+            operations=operations,
+            work_centers=work_centers,
+            setup_matrix=[],
+            auxiliary_resources=[tool],
+            aux_requirements=[
+                OperationAuxRequirement(operation_id=operation.id, aux_resource_id=tool.id)
+                for operation in operations
+            ],
+            planning_horizon_start=HORIZON_START,
+            planning_horizon_end=horizon_end,
+        )
+        assignments = [
+            Assignment(
+                operation_id=operation.id,
+                work_center_id=work_centers[index].id,
+                start_time=HORIZON_START + timedelta(minutes=index),
+                end_time=HORIZON_START + timedelta(minutes=30 + index),
+            )
+            for index, operation in enumerate(operations)
+        ]
+
+        default_violations = checker.check(problem, assignments)
+        exhaustive_violations = checker.check(problem, assignments, exhaustive=True)
+
+        default_resource_violations = [
+            violation
+            for violation in default_violations
+            if violation.kind == "AUX_RESOURCE_CAPACITY_VIOLATION"
+        ]
+        exhaustive_resource_violations = [
+            violation
+            for violation in exhaustive_violations
+            if violation.kind == "AUX_RESOURCE_CAPACITY_VIOLATION"
+        ]
+
+        assert len(default_resource_violations) == 1
+        assert len(exhaustive_resource_violations) > len(default_resource_violations)
+        assert len(exhaustive_resource_violations) >= 2
+
     def test_detects_auxiliary_resource_violation_during_setup_windows(self) -> None:
         checker = FeasibilityChecker()
         horizon_end = HORIZON_START + timedelta(hours=4)

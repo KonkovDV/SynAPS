@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -98,6 +99,15 @@ def compute_relaxed_makespan_lower_bound(problem: ScheduleProblem) -> MakespanLo
                 topo_frontier.append(successor_id)
 
     if len(topo_order) != len(problem.operations):
+        # Precedence graph contains a cycle — topological sort is incomplete.
+        # Fall back to flat ordering which yields a weaker (degenerate) lower
+        # bound.  This signals upstream data corruption that should be fixed.
+        logging.getLogger(__name__).warning(
+            "precedence_cycle_detected: topological sort covered %d of %d "
+            "operations — lower bound will be weaker than expected",
+            len(topo_order),
+            len(problem.operations),
+        )
         topo_order = [operation.id for operation in problem.operations]
 
     longest_path_to: dict[UUID, float] = {}

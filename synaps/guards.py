@@ -14,7 +14,7 @@ Usage::
 from __future__ import annotations
 
 import os
-import threading
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -42,7 +42,10 @@ class ResourceLimits:
 
     Attributes:
         timeout_s: Maximum wall-clock seconds for the solve call.
-            ``None`` means no timeout (solver's own ``time_limit_s`` applies).
+            Forwarded to the solver's native ``time_limit_s`` parameter
+            so that solver-internal resources (e.g. CP-SAT C++ threads)
+            are cleaned up correctly.  ``None`` means no timeout
+            (solver's own ``time_limit_s`` applies).
         memory_limit_mb: Optional memory ceiling in megabytes.
             If the process RSS already exceeds this before solving, the call
             is rejected immediately.
@@ -56,7 +59,14 @@ class ResourceLimits:
 
 
 def _get_rss_mb() -> int | None:
-    """Return current process RSS in MB, or ``None`` if unavailable."""
+    """Return current process RSS in MB, or ``None`` if unavailable.
+
+    Platform detection uses ``sys.platform`` to distinguish macOS (bytes)
+    from Linux (KB) for ``ru_maxrss`` units.  The previous heuristic based
+    on value magnitude (> 1_000_000) was incorrect — on Linux a 1 GB process
+    reports ~1_000_000 KB, which crossed the threshold and was erroneously
+    treated as macOS bytes, causing a ~1000× underestimate.
+    """
     try:
         if os.name == "nt":
             import ctypes
@@ -95,11 +105,14 @@ def _get_rss_mb() -> int | None:
             if getrusage is None or rusage_self is None:
                 return None
             rusage = getrusage(rusage_self)
-            # On Linux maxrss is in KB; on macOS it's in bytes.
-            maxrss_kb = int(getattr(rusage, "ru_maxrss", 0))
-            if maxrss_kb > 1_000_000:
-                return maxrss_kb // (1024 * 1024)
-            return maxrss_kb // 1024
+            maxrss = int(getattr(rusage, "ru_maxrss", 0))
+            # macOS reports ru_maxrss in bytes; Linux reports in KB.
+            # Use sys.platform for reliable detection instead of a
+            # value-magnitude heuristic (which fails at ~1 GB on Linux).
+            if sys.platform == "darwin":
+                return maxrss // (1024 * 1024)
+            # Linux and other POSIX: KB
+            return maxrss // 1024
     except Exception:
         return None
 
@@ -120,44 +133,6 @@ def _check_memory_limit(limits: ResourceLimits) -> None:
         )
 
 
-def _solve_with_timeout(
-    solver: BaseSolver,
-    problem: ScheduleProblem,
-    timeout_s: int,
-    **kwargs: Any,
-) -> ScheduleResult:
-    """Run ``solver.solve()`` with a wall-clock timeout via a daemon thread."""
-    result_box: list[ScheduleResult | BaseException] = []
-
-    def _target() -> None:
-        try:
-            result_box.append(solver.solve(problem, **kwargs))
-        except BaseException as exc:
-            result_box.append(exc)
-
-    thread = threading.Thread(target=_target, daemon=True)
-    thread.start()
-    thread.join(timeout=timeout_s)
-
-    if thread.is_alive():
-        _log.warning(
-            "solve_timeout",
-            solver=solver.name,
-            timeout_s=timeout_s,
-        )
-        raise SolverTimeoutError(
-            f"Solver {solver.name!r} exceeded {timeout_s}s wall-clock timeout"
-        )
-
-    if not result_box:
-        raise SolverTimeoutError("Solver thread completed without producing a result")
-
-    outcome = result_box[0]
-    if isinstance(outcome, BaseException):
-        raise outcome
-    return outcome
-
-
 def guarded_solve(
     solver: BaseSolver,
     problem: ScheduleProblem,
@@ -170,10 +145,15 @@ def guarded_solve(
     If *limits* is ``None``, the solver runs without additional guards
     (equivalent to calling ``solver.solve()`` directly).
 
-    Returns a :class:`ScheduleResult`. If a timeout or memory limit is hit,
-    raises :class:`SolverTimeoutError` or :class:`SolverMemoryError`.  The
-    caller can catch these and produce a result with an appropriate
-    :class:`SolverErrorCategory`.
+    When ``limits.timeout_s`` is set, it is forwarded to the solver's
+    ``time_limit_s`` parameter so that the solver terminates cleanly via
+    its own internal mechanisms (e.g. CP-SAT's ``max_time_in_seconds``).
+    This avoids leaking C++ solver resources that occur with daemon-thread
+    based timeout wrappers.
+
+    Returns a :class:`ScheduleResult`. If a memory limit is hit,
+    raises :class:`SolverMemoryError`.  The caller can catch this and
+    produce a result with an appropriate :class:`SolverErrorCategory`.
     """
     if limits is None:
         return solver.solve(problem, **solve_kwargs)
@@ -181,7 +161,27 @@ def guarded_solve(
     _check_memory_limit(limits)
 
     if limits.timeout_s is not None:
-        return _solve_with_timeout(solver, problem, limits.timeout_s, **solve_kwargs)
+        # Forward the timeout to the solver's native time_limit_s parameter.
+        # This ensures the solver (e.g. CP-SAT C++ backend) terminates
+        # cleanly and releases all internal resources.  The previous
+        # daemon-thread approach leaked C++ solver instances on timeout.
+        effective_kwargs = dict(solve_kwargs)
+        existing_limit = effective_kwargs.get("time_limit_s")
+        if existing_limit is not None:
+            # Use the stricter of the two limits
+            effective_kwargs["time_limit_s"] = min(
+                int(existing_limit), limits.timeout_s
+            )
+        else:
+            effective_kwargs["time_limit_s"] = limits.timeout_s
+
+        _log.info(
+            "guarded_solve_timeout_forwarded",
+            solver=solver.name,
+            timeout_s=limits.timeout_s,
+            effective_time_limit_s=effective_kwargs["time_limit_s"],
+        )
+        return solver.solve(problem, **effective_kwargs)
 
     return solver.solve(problem, **solve_kwargs)
 

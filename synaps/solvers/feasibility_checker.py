@@ -43,7 +43,11 @@ class FeasibilityChecker:
     """
 
     def check(
-        self, problem: ScheduleProblem, assignments: list[Assignment]
+        self,
+        problem: ScheduleProblem,
+        assignments: list[Assignment],
+        *,
+        exhaustive: bool = False,
     ) -> list[FeasibilityViolation]:
         violations: list[FeasibilityViolation] = []
         ops_by_id = {op.id: op for op in problem.operations}
@@ -148,7 +152,8 @@ class FeasibilityChecker:
                                 work_center_id=wc_id,
                             )
                         )
-                        break
+                        if not exhaustive:
+                            break
                 explicit_lane_metadata = all(
                     assignment.lane_id is not None for assignment in machine_assignments
                 )
@@ -214,7 +219,9 @@ class FeasibilityChecker:
                                     work_center_id=wc_id,
                                 )
                             )
-                            break
+                            if not exhaustive:
+                                break
+                            continue
 
                         lane_sequences[chosen_lane_index].append(assignment)
 
@@ -365,7 +372,8 @@ class FeasibilityChecker:
                             operation_id=operation_id,
                         )
                     )
-                    break
+                    if not exhaustive:
+                        break
 
         # 6. Horizon bounds
         for a in assignments:

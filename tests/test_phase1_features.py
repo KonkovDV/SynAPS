@@ -161,6 +161,22 @@ class TestResourceLimits:
         result = guarded_solve(solver, problem, limits=limits)
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
 
+    def test_guarded_solve_forwards_strictest_native_timeout(self) -> None:
+        class SpySolver:
+            name = "spy"
+
+            def solve(self, _problem, **kwargs):
+                return kwargs
+
+        problem = make_simple_problem()
+        result = guarded_solve(
+            SpySolver(),
+            problem,
+            limits=ResourceLimits(timeout_s=10),
+            time_limit_s=30,
+        )
+        assert result["time_limit_s"] == 10
+
     def test_timeout_to_error_result(self) -> None:
         err = SolverTimeoutError("test timeout")
         result = timeout_to_error_result("CPSAT-30", err)

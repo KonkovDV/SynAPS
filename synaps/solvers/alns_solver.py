@@ -220,7 +220,6 @@ def _destroy_related(
     if not assignments:
         return set()
 
-    {a.operation_id: a for a in assignments}
     ops_by_id = {op.id: op for op in problem.operations}
 
     # Pick random seed

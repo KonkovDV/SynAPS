@@ -34,6 +34,16 @@ class TestDomainModel:
         assert o.priority == 500
         assert o.quantity == 1.0
         assert o.unit == "pcs"
+        assert o.release_date is None
+
+    def test_order_accepts_release_date(self) -> None:
+        release_date = datetime(2025, 12, 31, tzinfo=UTC)
+        o = Order(
+            external_ref="ORD-001",
+            release_date=release_date,
+            due_date=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+        assert o.release_date == release_date
 
     def test_operation_fields(self) -> None:
         order_id = State(code="X").id  # just get a UUID
@@ -174,6 +184,11 @@ class TestDomainModel:
         assert problem.operations[0].predecessor_op_id is None
         assert problem.operations[1].predecessor_op_id == op_1.id
         assert problem.operations[2].predecessor_op_id == op_2.id
+
+        dumped = problem.model_dump()
+        restored = ScheduleProblem.model_validate(dumped)
+        assert restored.operations[1].predecessor_op_id == op_1.id
+        assert restored.operations[2].predecessor_op_id == op_2.id
 
     def test_normalize_problem_data_autofills_predecessor_chain_without_mutating(self) -> None:
         order_id = uuid4()

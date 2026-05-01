@@ -1129,6 +1129,29 @@ class TestRhcSolver:
 
         assert cap == 30
 
+    def test_rhc_extract_order_release_offset_prefers_explicit_release_date(self) -> None:
+        """Explicit Order.release_date should take precedence over legacy metadata keys."""
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        order = Order(
+            id=uuid4(),
+            external_ref="ORD-REL-001",
+            release_date=HORIZON_START + timedelta(minutes=120),
+            due_date=HORIZON_END,
+            domain_attributes={
+                "release_offset_min": 15,
+                "release_date": (HORIZON_START + timedelta(minutes=30)).isoformat(),
+            },
+        )
+
+        offset = RhcSolver._extract_order_release_offset_minutes(
+            order,
+            horizon_start=HORIZON_START,
+            horizon_minutes=600.0,
+        )
+
+        assert offset == 120.0
+
     def test_rhc_earliest_start_preprocessing_scales_better_than_quadratic(self) -> None:
         """RHC preprocessing should stay near-linear enough to catch quadratic regressions."""
         from synaps.solvers.rhc_solver import RhcSolver

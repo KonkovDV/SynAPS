@@ -2863,6 +2863,11 @@ class RhcSolver(BaseSolver):
     ) -> float:
         """Parse optional order release metadata into horizon-relative minutes."""
 
+        release_date = getattr(order, "release_date", None)
+        if isinstance(release_date, datetime):
+            offset = (release_date - horizon_start).total_seconds() / 60.0
+            return max(0.0, min(offset, horizon_minutes))
+
         domain_attributes = getattr(order, "domain_attributes", None) or {}
         direct_keys = (
             "release_offset_min",
