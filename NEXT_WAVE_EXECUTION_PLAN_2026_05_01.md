@@ -20,12 +20,13 @@ Repository-backed baseline before the next algorithm wave:
 - Fresh bounded 100K evidence is now closed under `benchmark/studies/2026-05-01-rhc-100k-audit-v5-post-critical-fixes`: `RHC-GREEDY` improved to `9287/100000` scheduled operations in `90.282s`, while `RHC-ALNS` regressed to `0/100000` in `445.213s` with `solver_metadata.error = "no assignments produced"`.
 - Fresh bounded 100K follow-up evidence is now closed under `benchmark/studies/2026-05-01-rhc-100k-audit-v7-post-guard-harness-fix`: `RHC-GREEDY` reached `7633/100000` scheduled operations in `90.399s`, while `RHC-ALNS` recovered to `6933/100000` in `90.281s` by skipping oversized ALNS pre-search windows (`budget_guard_skipped_windows = 2`) and falling back greedily. This closes the catastrophic zero-assignment seed-stall family on the staged harness, but it does not restore active ALNS search or greedy parity.
 - Fresh bounded 100K predicate-follow-up evidence is now closed under `benchmark/studies/2026-05-01-rhc-100k-audit-v8-post-predicate-fix`: the `R1` predicate patch does re-enter ALNS search on the bounded rail, but the same run shows the next controlling bottleneck. `RHC-ALNS` starts ALNS on a `1501`-operation first window, spends about `808.843s` in initial solution generation, completes `0` iterations, and regresses to `0/100000` scheduled operations while `RHC-GREEDY` reaches `7013/100000` in `90.376s`.
+- Fresh bounded 100K closure evidence is now closed under `benchmark/studies/2026-05-08-rhc-100k-audit-v11-post-bounded-seed-cap`: `RHC-ALNS` reaches `7236/100000` scheduled operations in `90.255s`, same-run `RHC-GREEDY` reaches `7230/100000` in `90.365s`, two bounded windows are observed, fallback repair is no longer skipped, and `solver_metadata.error` is absent. This closes the bounded-stability acceptance gate even though active ALNS search is still absent.
 - The TypeScript `control-plane` security/auth hardening shipped separately on 2026-05-01 as commit `7dc540f` (`fix(control-plane): harden auth and python bridge env`).
 - Deep audit re-verification on current `master` is now captured in `AUDIT_VERIFICATION_2026_05_01.md`; it separates stale findings from live defects and records the fixes that actually shipped in this pass.
 
 Current unresolved technical bottlenecks are still split into two families:
 
-1. RHC/ALNS coverage yield and bounded 100K active-search productivity, now specifically fixing the ALNS initial-solution path so the `R1` predicate no longer reopens a pre-search budget overrun before the first search iteration.
+1. RHC/ALNS active-search yield above the bounded-stability gate. The accepted `v11` slice restores same-run bounded parity, but `search_active_window_rate` is still `0.0` and `inner_fallback_ratio` is still `1.0`, so the remaining 100K/200K work is yield optimization rather than catastrophic-stall containment.
 2. LBBD master strength and excessive RHC parameter surface area.
 
 ## External Evidence Anchors
@@ -77,7 +78,8 @@ Follow-up update after the original wave closure:
 
 - `benchmark/studies/2026-05-01-rhc-100k-audit-v7-post-guard-harness-fix` now shows that restoring the staged `1000/240` ALNS presearch guard removes the catastrophic `0/100000` failure mode on the bounded `100k` native-backed rail;
 - `benchmark/studies/2026-05-01-rhc-100k-audit-v8-post-predicate-fix` now shows that the `R1` predicate patch re-enters ALNS search on the bounded `100k` rail, but the run still fails because initial solution generation consumes the full window budget before search begins;
-- the remaining 100K issue is therefore no longer just guard-skipped fallback behavior. The controlling open bottleneck is budget-unaware ALNS initial seed construction on oversized bounded windows.
+- `benchmark/studies/2026-05-08-rhc-100k-audit-v11-post-bounded-seed-cap` now shows that explicit phase-1 seed caps close that deeper initial-seed stall family and restore same-run bounded parity without reopening `solver_metadata.error` or `fallback_repair_skipped = true`;
+- the remaining 100K issue is therefore no longer bounded-stability. The controlling open bottleneck is fallback-heavy behavior with `search_active_window_rate = 0.0`, not catastrophic pre-search stall.
 
 ### Wave 2 — Control-Plane Security/Auth Changeset
 
@@ -200,7 +202,7 @@ python -m benchmark.study_rhc_500k \
   --seeds 1 \
   --time-limit-cap-s 90 \
   --max-windows-override 2 \
-   --write-dir benchmark/studies/2026-05-01-rhc-100k-audit-v8-post-predicate-fix
+   --write-dir benchmark/studies/2026-05-08-rhc-100k-audit-v11-post-bounded-seed-cap
 ```
 
 ### Validate the control-plane changeset

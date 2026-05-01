@@ -3064,6 +3064,161 @@ class TestRhcInnerSolver:
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
         assert result.metadata["alns_presearch_budget_guard_skipped_windows"] == 0
 
+    def test_alns_reports_initial_seed_timeout_when_budget_exhausted(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """ALNS must surface initial-seed greedy timeout before search starts."""
+        import synaps.solvers.alns_solver as alns_module
+        from synaps.model import ScheduleResult
+
+        problem = _make_long_chain_problem(80)
+
+        def fake_greedy(self, problem, **kwargs):
+            return ScheduleResult(
+                solver_name="greedy_dispatch",
+                status=SolverStatus.TIMEOUT,
+                assignments=[],
+                duration_ms=25,
+                metadata={
+                    "partial_schedule": True,
+                    "remaining_ops": len(problem.operations),
+                    "scheduled_ops": 0,
+                },
+            )
+
+        monkeypatch.setattr(
+            "synaps.solvers.greedy_dispatch.GreedyDispatch.solve",
+            fake_greedy,
+        )
+
+        result = alns_module.AlnsSolver().solve(
+            problem,
+            time_limit_s=1.0,
+            max_iterations=5,
+            initial_beam_op_limit=0,
+            frozen_initial_repair_max_ops=0,
+            use_cpsat_repair=False,
+        )
+
+        assert result.status == SolverStatus.ERROR
+        assert result.metadata["error"] == "initial_seed_greedy_timed_out"
+        assert result.metadata["time_limit_exhausted_before_search"] is True
+        assert result.metadata["iterations_completed"] == 0
+
+    def test_alns_caps_initial_seed_budget_below_full_window_budget(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Initial seed construction must reserve budget for search or fallback."""
+        import synaps.solvers.alns_solver as alns_module
+        from synaps.model import ScheduleResult
+
+        problem = _make_long_chain_problem(80)
+        captured_budgets: list[float] = []
+
+        def fake_greedy(self, problem, **kwargs):
+            captured_budgets.append(float(kwargs["time_limit_s"]))
+            return ScheduleResult(
+                solver_name="greedy_dispatch",
+                status=SolverStatus.TIMEOUT,
+                assignments=[],
+                duration_ms=25,
+                metadata={
+                    "partial_schedule": True,
+                    "remaining_ops": len(problem.operations),
+                    "scheduled_ops": 0,
+                },
+            )
+
+        monkeypatch.setattr(
+            "synaps.solvers.greedy_dispatch.GreedyDispatch.solve",
+            fake_greedy,
+        )
+
+        alns_module.AlnsSolver().solve(
+            problem,
+            time_limit_s=30.0,
+            repair_time_limit_s=2,
+            max_iterations=5,
+            initial_beam_op_limit=0,
+            frozen_initial_repair_max_ops=0,
+            use_cpsat_repair=False,
+        )
+
+        assert captured_budgets
+        assert captured_budgets[0] >= 1.0
+        assert captured_budgets[0] <= 3.0
+
+    def test_rhc_falls_back_when_alns_initial_seed_times_out(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """RHC must route ALNS initial-seed timeout into the outer greedy fallback."""
+        from synaps.model import ScheduleResult
+        from synaps.solvers.greedy_dispatch import GreedyDispatch
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_3state_problem(n_orders=4, ops_per_order=2)
+        alns_call_count = 0
+
+        def fake_alns(self, problem, **kwargs):
+            nonlocal alns_call_count
+            alns_call_count += 1
+            return ScheduleResult(
+                solver_name="alns",
+                status=SolverStatus.ERROR,
+                assignments=[],
+                duration_ms=0,
+                metadata={
+                    "error": "initial_seed_greedy_timed_out",
+                    "initial_seed_fallback_reason": "initial_seed_greedy_timed_out",
+                    "time_limit_exhausted_before_search": True,
+                    "iterations_completed": 0,
+                    "initial_solution_ms": 0,
+                },
+            )
+
+        monkeypatch.setattr(
+            "synaps.solvers.alns_solver.AlnsSolver.solve",
+            fake_alns,
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=480,
+            overlap_minutes=60,
+            inner_solver="alns",
+            time_limit_s=30,
+            max_ops_per_window=50,
+            fallback_repair_enabled=True,
+            alns_presearch_budget_guard_enabled=True,
+            alns_presearch_max_window_ops=100,
+            alns_presearch_min_time_limit_s=1,
+            inner_kwargs={
+                "max_iterations": 1,
+                "use_cpsat_repair": False,
+            },
+        )
+
+        assert alns_call_count >= 1
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert result.metadata["inner_window_summaries"]
+        first_window = result.metadata["inner_window_summaries"][0]
+        assert first_window["resolution_mode"] == "fallback_greedy"
+        assert (
+            first_window["fallback_reason"]
+            == "inner_time_limit_exhausted_before_search"
+        )
+        assert (
+            first_window["fallback_reason_code"]
+            == "inner_time_limit_exhausted_before_search"
+        )
+        assert first_window["inner_status"] == "error"
+        assert result.metadata["inner_resolution_counts"]["fallback_greedy"] >= 1
+        greedy_result = GreedyDispatch().solve(problem)
+        assert len(result.assignments) == len(greedy_result.assignments)
+
     def test_rhc_hybrid_routes_dense_window_to_cpsat(
         self,
         monkeypatch: pytest.MonkeyPatch,

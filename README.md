@@ -96,7 +96,7 @@ Key comparison points:
 - Current-head-after-refresh `RHC-ALNS|throughput` in `2026-04-27-rhc-50k-audit-v2-current-head` reports `mean_scheduled_ratio = 0.0845`, `mean_makespan_minutes = 3059.82`, and `mean_inner_fallback_ratio = 0.6667`.
 - Fresh post-critical-fixes `RHC-ALNS|throughput` in `2026-05-01-rhc-50k-audit-v3-post-critical-fixes` reports `mean_scheduled_ratio = 0.1374`, `mean_makespan_minutes = 4295.25`, `mean_inner_fallback_ratio = 0.3333`, `search_active_window_rate = 0.6667`, and `native_acceleration_rate = 1.0`.
 - Fresh post-critical-fixes `RHC-GREEDY|throughput` in `2026-05-01-rhc-50k-audit-v3-post-critical-fixes` reports `mean_scheduled_ratio = 0.4184`, `mean_makespan_minutes = 13622.18`, and `native_acceleration_rate = 1.0`.
-- The unresolved research problem is now split in two: the fresh 50K rerun improved coverage under a native-backed environment but did not reach feasibility, while `100k+` remains the more fragile coverage bottleneck and has regressed again on the latest bounded ALNS slice.
+- The unresolved research problem is now split in two: the fresh 50K rerun improved coverage under a native-backed environment but did not reach feasibility, while `100k+` has now recovered stable bounded fallback parity but still lacks productive active-search yield.
 
 ## 100K+ Snapshot (staged harness)
 
@@ -106,7 +106,7 @@ What is now implemented and verified:
 
 - `benchmark.study_rhc_500k` has a scale ladder (`50k -> 100k -> 200k -> 300k -> 500k`)
 - resource projection and gated execution are active
-- ALNS pre-search guard parameters are now scaled with problem size in the harness instead of staying frozen at 50K thresholds
+- bounded staged `100k` runs keep the validated `alns_presearch_max_window_ops=1000` / `alns_presearch_min_time_limit_s=240.0` guard envelope while using the named `RHC-ALNS-100K` geometry
 - a bounded academic run can be forced with `--max-windows-override` for reproducible 100K+ evidence slices
 
 What the latest audit established:
@@ -120,9 +120,11 @@ What the latest audit established:
 - The fresh same-run current-head comparison in `benchmark/studies/2026-04-27-rhc-100k-audit-v4-current-head/rhc_500k_study.json` keeps that search-entry result but puts it against a same-run baseline: `RHC-GREEDY` schedules `7852/100000` operations in `90.213s`, while `RHC-ALNS` schedules `3420/100000` in `90.113s` after entering search in both bounded windows (`56` and `30` iterations, `45` and `18` improvements, `0` CP-SAT repairs, `0` inner fallback).
 - The fresh post-critical-fixes bounded rerun on pushed `master` in `benchmark/studies/2026-05-01-rhc-100k-audit-v5-post-critical-fixes/rhc_500k_study.json` shifts the picture again: `RHC-GREEDY` improves to `9287/100000` scheduled operations in `90.282s`, but `RHC-ALNS` regresses to `0/100000` scheduled operations in `445.213s`, ends after one window, skips fallback repair, and reports `solver_metadata.error = "no assignments produced"`.
 - That fresh `v5` comparison is also environment-shifted: the 2026-04-27 `v4` anchor ran pure-Python backends, while the 2026-05-01 `v5` rerun used `synaps_native` across the candidate and capacity path.
-- So the `v3` and `v4` artifacts still falsify the universal claim that 100K ALNS can never reach search, but the fresh `v5` rerun shows the current path is not stable: in the native-backed environment, the bounded ALNS slice falls back into the older pre-search seed-stall failure family.
-- The 100K path still does not establish production readiness, because the latest bounded ALNS run is both partial and unstable (`mean_scheduled_ratio = 0.0`, `feasible = false`) while the same rerun's greedy baseline improves to `mean_scheduled_ratio = 0.0929`.
-- So the next hard engineering boundary is split: model/schema capacity blocks `300k` and `500k`, while `100k` and `200k` still need better seed/admission/coverage yield and explicit environment-stability checks rather than heavier CP-SAT side paths.
+- The staged `v7` guard-restoration rerun (`benchmark/studies/2026-05-01-rhc-100k-audit-v7-post-guard-harness-fix/rhc_500k_study.json`) closed the catastrophic `0/100000` collapse by skipping oversized ALNS pre-search windows and falling back safely to greedy, but it still left the bounded rail fallback-only.
+- The staged `v8` predicate-follow-up rerun (`benchmark/studies/2026-05-01-rhc-100k-audit-v8-post-predicate-fix/rhc_500k_study.json`) proved that `R1` really re-opened ALNS entry on the `1501`-operation bounded window, but it also exposed the next controlling bottleneck: initial solution generation consumed about `808843 ms`, completed `0` search iterations, and regressed back to `0/100000` scheduled operations.
+- The fresh bounded rerun in `benchmark/studies/2026-05-08-rhc-100k-audit-v11-post-bounded-seed-cap/rhc_500k_study.json` closes that deeper initial-seed stall family on current `master`: `RHC-ALNS` now schedules `7236/100000` operations in `90.255s`, while same-run `RHC-GREEDY` schedules `7230/100000` in `90.365s`, with `windows_observed = 2`, `fallback_repair_skipped = false`, and no `solver_metadata.error`.
+- That `v11` artifact does not yet establish productive active ALNS search at `100k`: `search_active_window_rate` is still `0.0` and `inner_fallback_ratio` remains `1.0`. It does, however, close the bounded-stability acceptance gate that previously blocked the next algorithm wave.
+- So the next hard engineering boundary is split: model/schema capacity still blocks `300k` and `500k`, while `100k` and `200k` now need active-search yield improvement and simpler admission/seed policies rather than catastrophic-stall containment or heavier CP-SAT side paths.
 
 ## Solver Portfolio
 

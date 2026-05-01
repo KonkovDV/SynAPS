@@ -58,6 +58,10 @@ class GreedyDispatch(BaseSolver):
     def solve(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
         t0 = time.monotonic()
         acceleration_status = get_acceleration_status()
+        time_limit_s_raw = kwargs.get("time_limit_s")
+        time_limit_s: float | None = None
+        if time_limit_s_raw is not None:
+            time_limit_s = max(0.1, float(time_limit_s_raw))
 
         # Precompute lookup tables
         orders_by_id = {o.id: o for o in problem.orders}
@@ -74,6 +78,31 @@ class GreedyDispatch(BaseSolver):
         machine_idx = MachineIndex(dispatch_context)
 
         while remaining:
+            if time_limit_s is not None and (time.monotonic() - t0) > time_limit_s:
+                elapsed_ms = int((time.monotonic() - t0) * 1000)
+                partial_makespan = (
+                    max(
+                        (assignment.end_time - horizon_start).total_seconds() / 60.0
+                        for assignment in assignments
+                    )
+                    if assignments
+                    else 0.0
+                )
+                return ScheduleResult(
+                    solver_name=self.name,
+                    status=SolverStatus.TIMEOUT,
+                    assignments=assignments,
+                    objective=ObjectiveValues(makespan_minutes=partial_makespan),
+                    duration_ms=elapsed_ms,
+                    metadata={
+                        "acceleration": acceleration_status,
+                        "partial_schedule": True,
+                        "scheduled_ops": len(assignments),
+                        "remaining_ops": len(remaining),
+                        "time_limit_s": time_limit_s,
+                    },
+                )
+
             # Filter to ready operations (predecessor scheduled or none)
             ready = [
                 op

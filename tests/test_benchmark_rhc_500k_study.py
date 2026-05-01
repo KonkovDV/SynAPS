@@ -577,7 +577,7 @@ def test_study_rhc_500k_applies_max_windows_override(
     assert captured_max_windows == [2]
 
 
-def test_scale_solver_kwargs_relaxes_alns_presearch_guard_for_100k_plus() -> None:
+def test_scale_solver_kwargs_keeps_alns_presearch_guard_stable_for_100k_plus() -> None:
     import benchmark.study_rhc_500k as study_module
 
     base_kwargs = study_module._default_solver_specs()["RHC-ALNS"]["solver_kwargs"]
@@ -595,10 +595,9 @@ def test_scale_solver_kwargs_relaxes_alns_presearch_guard_for_100k_plus() -> Non
     assert scaled["window_minutes"] == 300
     assert scaled["overlap_minutes"] == 90
     assert scaled["alns_presearch_budget_guard_enabled"] is True
-    assert scaled["alns_presearch_max_window_ops"] > 1_000
+    assert scaled["alns_presearch_max_window_ops"] == 1_000
     assert scaled["alns_presearch_max_window_ops"] <= scaled["max_ops_per_window"]
-    assert scaled["alns_presearch_min_time_limit_s"] < 240.0
-    assert scaled["alns_presearch_min_time_limit_s"] >= 30.0
+    assert scaled["alns_presearch_min_time_limit_s"] == 240.0
 
 
 def test_scale_solver_kwargs_supports_named_rhc_alns_100k_profile() -> None:
@@ -619,9 +618,9 @@ def test_scale_solver_kwargs_supports_named_rhc_alns_100k_profile() -> None:
     assert scaled["window_minutes"] == 300
     assert scaled["overlap_minutes"] == 90
     assert scaled["alns_presearch_budget_guard_enabled"] is True
-    assert scaled["alns_presearch_max_window_ops"] > 1_000
+    assert scaled["alns_presearch_max_window_ops"] == 1_000
     assert scaled["alns_presearch_max_window_ops"] <= scaled["max_ops_per_window"]
-    assert scaled["alns_presearch_min_time_limit_s"] < 240.0
+    assert scaled["alns_presearch_min_time_limit_s"] == 240.0
 
 
 def test_study_rhc_500k_uses_narrower_alns_geometry_for_100k_plus(

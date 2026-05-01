@@ -1029,7 +1029,12 @@ class AlnsSolver(BaseSolver):
         dispatch_context = build_dispatch_context(problem)
         lower_bound = compute_relaxed_makespan_lower_bound(problem)
 
-        def _initial_generation_error_result(error_message: str) -> ScheduleResult:
+        def _initial_generation_error_result(
+            error_message: str,
+            *,
+            reason_key: str | None = None,
+            time_limit_exhausted_before_search: bool | None = None,
+        ) -> ScheduleResult:
             elapsed_ms = int((time.monotonic() - t0) * 1000)
             return ScheduleResult(
                 solver_name=self.name,
@@ -1037,6 +1042,7 @@ class AlnsSolver(BaseSolver):
                 duration_ms=elapsed_ms,
                 metadata={
                     "error": error_message,
+                    "initial_seed_fallback_reason": reason_key or error_message,
                     "initial_solver": initial_solver_name,
                     "warm_start_used": warm_start_used,
                     "warm_start_supplied_assignments": warm_start_supplied_assignments,
@@ -1044,10 +1050,33 @@ class AlnsSolver(BaseSolver):
                     "warm_start_rejected_reason": warm_start_rejected_reason,
                     "initial_solution_ms": elapsed_ms,
                     "time_limit_exhausted_before_search": (
-                        (time.monotonic() - t0) > time_limit_s
+                        bool(time_limit_exhausted_before_search)
+                        if time_limit_exhausted_before_search is not None
+                        else (time.monotonic() - t0) > time_limit_s
                     ),
                     "iterations_completed": 0,
                 },
+            )
+
+        def _remaining_initial_seed_budget_s() -> float:
+            return max(1.0, time_limit_s - (time.monotonic() - t0))
+
+        def _initial_seed_budget_s() -> float:
+            remaining_budget_s = _remaining_initial_seed_budget_s()
+            repair_budget_s = max(1.0, float(repair_time_limit_s))
+            # Phase-1 seed construction must leave room for either actual ALNS search
+            # or the outer RHC fallback, rather than monopolizing the whole window.
+            if time_limit_s <= 90.0:
+                phase_cap_s = max(1.0, min(3.0, repair_budget_s * 2.0))
+            else:
+                phase_cap_s = max(5.0, min(10.0, repair_budget_s * 5.0))
+            return min(remaining_budget_s, phase_cap_s)
+
+        def _initial_seed_timed_out(result: ScheduleResult) -> bool:
+            metadata = result.metadata or {}
+            return (
+                result.status == SolverStatus.TIMEOUT
+                or bool(metadata.get("partial_schedule"))
             )
 
         def _reanchor_against_frozen(
@@ -1336,7 +1365,10 @@ class AlnsSolver(BaseSolver):
         if initial_result is None:
             if n_ops <= initial_beam_op_limit:
                 beam_result = BeamSearchDispatch(beam_width=3).solve(problem)
-                greedy_result = GreedyDispatch().solve(problem)
+                greedy_result = GreedyDispatch().solve(
+                    problem,
+                    time_limit_s=_initial_seed_budget_s(),
+                )
 
                 beam_valid = _is_valid_complete_schedule(list(beam_result.assignments))
                 greedy_valid = _is_valid_complete_schedule(list(greedy_result.assignments))
@@ -1364,12 +1396,31 @@ class AlnsSolver(BaseSolver):
                     initial_result = greedy_result
             else:
                 initial_solver_name = "greedy"
-                initial_result = GreedyDispatch().solve(problem)
+                initial_result = GreedyDispatch().solve(
+                    problem,
+                    time_limit_s=_initial_seed_budget_s(),
+                )
+
+            if _initial_seed_timed_out(initial_result):
+                return _initial_generation_error_result(
+                    "initial_seed_greedy_timed_out",
+                    reason_key="initial_seed_greedy_timed_out",
+                    time_limit_exhausted_before_search=True,
+                )
 
             if not _is_valid_complete_schedule(list(initial_result.assignments)):
                 # Fall back to greedy if beam failed to cover the full instance.
                 initial_solver_name = "greedy"
-                initial_result = GreedyDispatch().solve(problem)
+                initial_result = GreedyDispatch().solve(
+                    problem,
+                    time_limit_s=_initial_seed_budget_s(),
+                )
+                if _initial_seed_timed_out(initial_result):
+                    return _initial_generation_error_result(
+                        "initial_seed_greedy_timed_out",
+                        reason_key="initial_seed_greedy_timed_out",
+                        time_limit_exhausted_before_search=True,
+                    )
                 if not _is_valid_complete_schedule(list(initial_result.assignments)):
                     return _initial_generation_error_result(
                         "initial solution generation failed"

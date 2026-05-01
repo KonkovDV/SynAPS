@@ -1,5 +1,6 @@
 """Tests for GreedyDispatch solver."""
 
+import time
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -381,6 +382,32 @@ class TestGreedyDispatch:
             )
 
         assert "first operation" in str(exc_info.value)
+
+    def test_returns_timeout_with_partial_schedule_when_budget_exhausted(
+        self,
+        simple_problem: ScheduleProblem,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        solver = GreedyDispatch()
+        problem = simple_problem
+
+        import synaps.solvers.greedy_dispatch as greedy_module
+
+        original_slot_search = greedy_module.find_earliest_feasible_slot
+
+        def slow_slot_search(*args, **kwargs):
+            time.sleep(0.02)
+            return original_slot_search(*args, **kwargs)
+
+        monkeypatch.setattr(greedy_module, "find_earliest_feasible_slot", slow_slot_search)
+
+        result = solver.solve(problem, time_limit_s=0.05)
+
+        assert result.status == SolverStatus.TIMEOUT
+        assert result.metadata["partial_schedule"] is True
+        assert result.metadata["remaining_ops"] > 0
+        assert 0 < len(result.assignments) < len(problem.operations)
+        assert result.duration_ms >= 20
 
 
 class TestBeamSearchDispatch:

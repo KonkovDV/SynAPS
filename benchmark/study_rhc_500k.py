@@ -308,22 +308,15 @@ def _scale_solver_kwargs(
             max_iterations = int(inner_kwargs.get("max_iterations", 100))
             inner_kwargs["max_iterations"] = min(180, max_iterations)
 
-        # Relax ALNS pre-search guard as scale grows to avoid permanent "not_run_budget_guard"
-        # behavior on 100k+ instances while preserving conservative lower bounds.
+        # Keep the ALNS pre-search guard anchored to the validated 100K geometry-refresh
+        # envelope. The staged 300/90 profile re-entered search around ~760 ops/window,
+        # while relaxing the guard above the base 1000/240 thresholds reopened the old
+        # initial-seed stall family on bounded 100K runs.
         base_guard_ops = int(base_kwargs.get("alns_presearch_max_window_ops", 1000))
         base_guard_time_s = float(base_kwargs.get("alns_presearch_min_time_limit_s", 240.0))
         scaled_window_cap = int(scaled.get("max_ops_per_window", base_guard_ops))
-
-        guard_from_ratio = int(round(base_guard_ops * (ratio ** 0.35)))
-        guard_from_window_cap = int(round(scaled_window_cap * 0.5))
-        effective_guard_ops = max(base_guard_ops, guard_from_ratio, guard_from_window_cap)
-        scaled["alns_presearch_max_window_ops"] = min(scaled_window_cap, effective_guard_ops)
-
-        effective_guard_time_s = max(30.0, base_guard_time_s * (ratio ** -0.35))
-        scaled["alns_presearch_min_time_limit_s"] = round(
-            min(base_guard_time_s, effective_guard_time_s),
-            2,
-        )
+        scaled["alns_presearch_max_window_ops"] = min(scaled_window_cap, base_guard_ops)
+        scaled["alns_presearch_min_time_limit_s"] = round(base_guard_time_s, 2)
         scaled["alns_presearch_budget_guard_enabled"] = bool(
             scaled.get("alns_presearch_budget_guard_enabled", True)
         )
