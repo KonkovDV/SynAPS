@@ -160,6 +160,15 @@ class RuntimePredictor:
         self._model = model
         self._model_version = model_version
 
+    @property
+    def has_loaded_model(self) -> bool:
+        """Return ``True`` when the predictor is backed by loaded model weights.
+
+        Heuristic predictors are intentionally advisory-only for experimentation
+        and should not override the deterministic production router.
+        """
+        return self._model is not None
+
     @classmethod
     def load(cls, path: Path | str) -> RuntimePredictor:
         """Load a trained model from disk.  Raises if torch is unavailable."""

@@ -54,6 +54,11 @@ What is not claimed:
 - full industrial validation on a live factory
 - guaranteed full feasible 50K solve within the current study timeboxes
 
+May 2026 audit re-verification:
+
+- current audit status is tracked in `AUDIT_VERIFICATION_2026_05_01.md`
+- that pass confirmed several stale findings were already closed on current `master`, and only the still-live defects were changed: heuristic-only ML advisory can no longer override deterministic routing, public verification is exhaustive, and LBBD / LBBD-HD setup lower bounds are now sequence-safe
+
 ## 50K Snapshot (industrial-50k)
 
 Canonical artifacts:

@@ -397,7 +397,10 @@ def select_solver(
             from synaps.ml_advisory import RuntimePredictor, encode_problem_features
             from synaps.problem_profile import build_problem_profile as _build_profile
 
-            if isinstance(advisory_predictor, RuntimePredictor):
+            if (
+                isinstance(advisory_predictor, RuntimePredictor)
+                and advisory_predictor.has_loaded_model
+            ):
                 profile = _build_profile(problem)
                 features = encode_problem_features(problem, profile)
                 advisory = advisory_predictor.predict(features)

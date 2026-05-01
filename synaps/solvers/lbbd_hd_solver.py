@@ -112,6 +112,10 @@ class LbbdHdSolver(BaseSolver):
         wc_by_id = {wc.id: wc for wc in problem.work_centers}
         ops_by_id = {op.id: op for op in problem.operations}
         orders_by_id = {o.id: o for o in problem.orders}
+        setup_lookup = {
+            (entry.work_center_id, entry.from_state_id, entry.to_state_id): entry.setup_minutes
+            for entry in problem.setup_matrix
+        }
         eligible_by_op: dict[UUID, list[UUID]] = {
             op.id: (
                 op.eligible_wc_ids
@@ -130,14 +134,16 @@ class LbbdHdSolver(BaseSolver):
 
         # Min-setup lower bound per machine
         min_setup_by_wc: dict[UUID, float] = {}
-        if setup_relaxation and problem.setup_matrix:
+        if setup_relaxation:
             for wc in problem.work_centers:
-                positives = [
-                    e.setup_minutes
-                    for e in problem.setup_matrix
-                    if e.work_center_id == wc.id and e.setup_minutes > 0
-                ]
-                min_setup_by_wc[wc.id] = min(positives) if positives else 0.0
+                transition_floor = _compute_machine_transition_floor(
+                    problem,
+                    eligible_by_op,
+                    wc.id,
+                    setup_lookup,
+                )
+                if transition_floor > 0:
+                    min_setup_by_wc[wc.id] = transition_floor
 
         # ---- Measure 3: Greedy warm-start ----
         prev_assignment_map: dict[UUID, UUID] | None = None
@@ -377,6 +383,69 @@ class _BendersCut:
         self.bottleneck_ops = bottleneck_ops
 
 
+def _compute_machine_transition_floor(
+    problem: ScheduleProblem,
+    eligible_by_op: dict[UUID, list[UUID]],
+    work_center_id: UUID,
+    setup_lookup: dict[tuple[UUID, UUID, UUID], float],
+) -> float:
+    """Return the strongest safe per-transition setup floor for the master."""
+
+    relevant_state_ids = {
+        operation.state_id
+        for operation in problem.operations
+        if work_center_id in eligible_by_op.get(operation.id, [])
+    }
+    if not relevant_state_ids:
+        return 0.0
+
+    min_transition = float("inf")
+    for from_state_id in relevant_state_ids:
+        for to_state_id in relevant_state_ids:
+            transition = float(
+                setup_lookup.get((work_center_id, from_state_id, to_state_id), 0.0)
+            )
+            if transition <= 0:
+                return 0.0
+            min_transition = min(min_transition, transition)
+
+    return 0.0 if min_transition == float("inf") else min_transition
+
+
+def _compute_sequence_independent_setup_lower_bound(
+    assignments: list[Assignment],
+    work_center_id: UUID,
+    ops_by_id: dict[UUID, Operation],
+    setup_lookup: dict[tuple[UUID, UUID, UUID], float],
+) -> float:
+    """Return a sequence-independent setup lower bound for a machine cluster."""
+
+    state_ids = [
+        operation.state_id
+        for assignment in assignments
+        if (operation := ops_by_id.get(assignment.operation_id)) is not None
+    ]
+    if len(state_ids) < 2:
+        return 0.0
+
+    distinct_state_ids = sorted(set(state_ids), key=str)
+    if len(distinct_state_ids) == 1:
+        state_id = distinct_state_ids[0]
+        self_setup = float(setup_lookup.get((work_center_id, state_id, state_id), 0.0))
+        return max(self_setup, 0.0) * float(len(state_ids) - 1)
+
+    min_cross_state_setup = min(
+        float(setup_lookup.get((work_center_id, from_state_id, to_state_id), 0.0))
+        for from_state_id in distinct_state_ids
+        for to_state_id in distinct_state_ids
+        if from_state_id != to_state_id
+    )
+    if min_cross_state_setup <= 0:
+        return 0.0
+
+    return min_cross_state_setup * float(len(distinct_state_ids) - 1)
+
+
 # ---------------------------------------------------------------------------
 # Measure 2: Precedence-Aware Master Problem (HiGHS MIP)
 # ---------------------------------------------------------------------------
@@ -510,6 +579,7 @@ def _solve_precedence_aware_master(
     for wc in problem.work_centers:
         cap_indices: list[int] = []
         cap_coeffs: list[float] = []
+        cap_upper_bound = 0.0
         for op in problem.operations:
             key = (op.id, wc.id)
             if key in var_index:
@@ -522,11 +592,12 @@ def _solve_precedence_aware_master(
             ms = min_setup_by_wc[wc.id]
             if ms > 0:
                 cap_coeffs = [c + ms for c in cap_coeffs]
+                cap_upper_bound = ms
         # ∑ P·y - C_max ≤ 0
         cap_indices.append(cmax_idx)
         cap_coeffs.append(-1.0)
         h.addRow(
-            -highspy.kHighsInf, 0.0,
+            -highspy.kHighsInf, cap_upper_bound,
             len(cap_indices),
             np.array(cap_indices, dtype=np.int32),
             np.array(cap_coeffs),
@@ -1278,17 +1349,13 @@ def _generate_all_cuts(
     for (wc_id, _lane_id), m_assignments in assignments_by_machine.items():
         if len(m_assignments) < 2:
             continue
-        sorted_a = sorted(m_assignments, key=lambda x: x.start_time)
-        actual_setup_total = 0.0
-        for idx in range(len(sorted_a) - 1):
-            prev_op = ops_by_id.get(sorted_a[idx].operation_id)
-            curr_op = ops_by_id.get(sorted_a[idx + 1].operation_id)
-            if prev_op is None or curr_op is None:
-                continue
-            actual_setup_total += setup_lookup.get(
-                (wc_id, prev_op.state_id, curr_op.state_id), 0
-            )
-        if actual_setup_total <= 0:
+        setup_lower_bound = _compute_sequence_independent_setup_lower_bound(
+            m_assignments,
+            wc_id,
+            ops_by_id,
+            setup_lookup,
+        )
+        if setup_lower_bound <= 0:
             continue
         processing_total = sum(
             max(
@@ -1301,9 +1368,9 @@ def _generate_all_cuts(
         )
         machine_setup_profiles.append(
             (
-                actual_setup_total,
+                setup_lower_bound,
                 {a.operation_id for a in m_assignments},
-                processing_total + actual_setup_total,
+                processing_total + setup_lower_bound,
             )
         )
 

@@ -72,6 +72,10 @@ class LbbdSolver(BaseSolver):
         wc_by_id = {wc.id: wc for wc in problem.work_centers}
         ops_by_id = {op.id: op for op in problem.operations}
         orders_by_id = {o.id: o for o in problem.orders}
+        setup_lookup = {
+            (entry.work_center_id, entry.from_state_id, entry.to_state_id): entry.setup_minutes
+            for entry in problem.setup_matrix
+        }
         eligible_by_op: dict[UUID, list[UUID]] = {
             op.id: (
                 op.eligible_wc_ids if op.eligible_wc_ids else [wc.id for wc in problem.work_centers]
@@ -93,18 +97,16 @@ class LbbdSolver(BaseSolver):
         master_warm_start_iterations = 0
 
         min_setup_by_wc: dict[UUID, float] = {}
-        if setup_relaxation and problem.setup_matrix:
+        if setup_relaxation:
             for work_center in problem.work_centers:
-                work_center_setups = [
-                    entry.setup_minutes
-                    for entry in problem.setup_matrix
-                    if entry.work_center_id == work_center.id
-                ]
-                if not work_center_setups:
-                    min_setup_by_wc[work_center.id] = 0.0
-                    continue
-                positive_setups = [setup for setup in work_center_setups if setup > 0]
-                min_setup_by_wc[work_center.id] = min(positive_setups) if positive_setups else 0.0
+                transition_floor = _compute_machine_transition_floor(
+                    problem,
+                    eligible_by_op,
+                    work_center.id,
+                    setup_lookup,
+                )
+                if transition_floor > 0:
+                    min_setup_by_wc[work_center.id] = transition_floor
 
         # --- Greedy warm start: use GreedyDispatch to seed initial UB ---
         greedy_warm_start_used = False
@@ -248,10 +250,6 @@ class LbbdSolver(BaseSolver):
                 )
             )
 
-            setup_lookup = {
-                (entry.work_center_id, entry.from_state_id, entry.to_state_id): entry.setup_minutes
-                for entry in problem.setup_matrix
-            }
             assignments_by_machine: dict[UUID, list[Assignment]] = defaultdict(list)
             for assignment in sub_assignments:
                 assignments_by_machine[assignment.work_center_id].append(assignment)
@@ -259,20 +257,13 @@ class LbbdSolver(BaseSolver):
             for work_center_id, machine_assignments in assignments_by_machine.items():
                 if len(machine_assignments) < 2:
                     continue
-                machine_assignments_sorted = sorted(
-                    machine_assignments, key=lambda assignment: assignment.start_time
+                setup_lower_bound = _compute_sequence_independent_setup_lower_bound(
+                    machine_assignments,
+                    work_center_id,
+                    ops_by_id,
+                    setup_lookup,
                 )
-                actual_setup_total = 0.0
-                for index in range(len(machine_assignments_sorted) - 1):
-                    previous_op = ops_by_id.get(machine_assignments_sorted[index].operation_id)
-                    current_op = ops_by_id.get(machine_assignments_sorted[index + 1].operation_id)
-                    if previous_op is None or current_op is None:
-                        continue
-                    actual_setup_total += setup_lookup.get(
-                        (work_center_id, previous_op.state_id, current_op.state_id),
-                        0,
-                    )
-                if actual_setup_total <= 0:
+                if setup_lower_bound <= 0:
                     continue
                 processing_total = sum(
                     max(
@@ -286,7 +277,7 @@ class LbbdSolver(BaseSolver):
                     _BendersCut(
                         assignment_map=dict(assignment_map),
                         kind="setup_cost",
-                        rhs=processing_total + actual_setup_total,
+                        rhs=processing_total + setup_lower_bound,
                         bottleneck_ops={
                             assignment.operation_id for assignment in machine_assignments
                         },
@@ -380,6 +371,74 @@ class _BendersCut:
         self.bottleneck_ops = bottleneck_ops
 
 
+def _compute_machine_transition_floor(
+    problem: ScheduleProblem,
+    eligible_by_op: dict[UUID, list[UUID]],
+    work_center_id: UUID,
+    setup_lookup: dict[tuple[UUID, UUID, UUID], float],
+) -> float:
+    """Return the strongest safe per-transition setup floor for the master.
+
+    The master does not know the realized state sequence, so a positive floor is
+    valid only when every possible transition between states that may be routed
+    to the machine carries a positive setup cost.
+    """
+
+    relevant_state_ids = {
+        operation.state_id
+        for operation in problem.operations
+        if work_center_id in eligible_by_op.get(operation.id, [])
+    }
+    if not relevant_state_ids:
+        return 0.0
+
+    min_transition = float("inf")
+    for from_state_id in relevant_state_ids:
+        for to_state_id in relevant_state_ids:
+            transition = float(
+                setup_lookup.get((work_center_id, from_state_id, to_state_id), 0.0)
+            )
+            if transition <= 0:
+                return 0.0
+            min_transition = min(min_transition, transition)
+
+    return 0.0 if min_transition == float("inf") else min_transition
+
+
+def _compute_sequence_independent_setup_lower_bound(
+    assignments: list[Assignment],
+    work_center_id: UUID,
+    ops_by_id: dict[UUID, Operation],
+    setup_lookup: dict[tuple[UUID, UUID, UUID], float],
+) -> float:
+    """Return a sequence-independent setup lower bound for a machine cluster."""
+
+    state_ids = [
+        operation.state_id
+        for assignment in assignments
+        if (operation := ops_by_id.get(assignment.operation_id)) is not None
+    ]
+    if len(state_ids) < 2:
+        return 0.0
+
+    distinct_state_ids = sorted(set(state_ids), key=str)
+    if len(distinct_state_ids) == 1:
+        state_id = distinct_state_ids[0]
+        self_setup = float(setup_lookup.get((work_center_id, state_id, state_id), 0.0))
+        return max(self_setup, 0.0) * float(len(state_ids) - 1)
+
+    min_cross_state_setup = min(
+        float(setup_lookup.get((work_center_id, from_state_id, to_state_id), 0.0))
+        for from_state_id in distinct_state_ids
+        for to_state_id in distinct_state_ids
+        if from_state_id != to_state_id
+    )
+    if min_cross_state_setup <= 0:
+        return 0.0
+
+    return min_cross_state_setup * float(len(distinct_state_ids) - 1)
+
+
 def _solve_master(
     problem: ScheduleProblem,
     eligible_by_op: dict[UUID, list[UUID]],
@@ -447,6 +506,7 @@ def _solve_master(
     for wc in problem.work_centers:
         capacity_indices: list[int] = []
         capacity_coeffs: list[float] = []
+        capacity_upper_bound = 0.0
         for op in problem.operations:
             key = (op.id, wc.id)
             if key in var_index:
@@ -459,12 +519,13 @@ def _solve_master(
             min_setup = min_setup_by_wc[wc.id]
             if min_setup > 0:
                 capacity_coeffs = [coefficient + min_setup for coefficient in capacity_coeffs]
+                capacity_upper_bound = min_setup
         # ∑ P·y - C_max ≤ 0
         capacity_indices.append(cmax_idx)
         capacity_coeffs.append(-1.0)
         h.addRow(
             -highspy.kHighsInf,
-            0.0,
+            capacity_upper_bound,
             len(capacity_indices),
             np.array(capacity_indices, dtype=np.int32),
             np.array(capacity_coeffs),

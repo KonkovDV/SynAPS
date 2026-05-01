@@ -35,7 +35,7 @@ def verify_schedule_result(
             violations=[],
         )
 
-    violations = FeasibilityChecker().check(problem, result.assignments)
+    violations = FeasibilityChecker().check(problem, result.assignments, exhaustive=True)
     violation_kind_counts = Counter(violation.kind for violation in violations)
     return SolutionVerification(
         feasible=not violations,

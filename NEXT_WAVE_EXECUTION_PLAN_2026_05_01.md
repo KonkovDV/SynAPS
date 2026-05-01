@@ -19,6 +19,7 @@ Repository-backed baseline before the next algorithm wave:
 - 100K bounded pure-Python comparison anchor remains `benchmark/studies/2026-04-27-rhc-100k-audit-v4-current-head`.
 - Fresh bounded 100K evidence is now closed under `benchmark/studies/2026-05-01-rhc-100k-audit-v5-post-critical-fixes`: `RHC-GREEDY` improved to `9287/100000` scheduled operations in `90.282s`, while `RHC-ALNS` regressed to `0/100000` in `445.213s` with `solver_metadata.error = "no assignments produced"`.
 - The TypeScript `control-plane` security/auth hardening shipped separately on 2026-05-01 as commit `7dc540f` (`fix(control-plane): harden auth and python bridge env`).
+- Deep audit re-verification on current `master` is now captured in `AUDIT_VERIFICATION_2026_05_01.md`; it separates stale findings from live defects and records the fixes that actually shipped in this pass.
 
 Current unresolved technical bottlenecks are still split into two families:
 
@@ -96,11 +97,15 @@ Commit rule:
 
 ### Wave 3 — Tighten LBBD Master Strength
 
+Status: in progress.
+
+The 2026-05-01 audit-reverification pass already shipped one safety slice in both `LBBD` and `LBBD-HD`: the master now uses a safe setup-transition floor, and `setup_cost` cuts now use sequence-independent lower bounds instead of incumbent-sequence setup totals.
+
 Goal: make the LBBD line stronger before expanding ALNS complexity again.
 
 Priority work:
 
-1. Add a setup-aware lower-bound surface for the LBBD master.
+1. Extend LBBD beyond the shipped safe setup floor and setup lower-bound repair with stronger master-side sequencing bounds.
 2. Add a TSP-style or critical-path-style sequencing cut family for machine-order structure.
 3. Extend the master-reporting surface so every LBBD run exposes which cuts tightened the lower bound and by how much.
 4. Revalidate `LBBD-10`, `LBBD-20-HD`, and any new master profile against at least one medium exact instance and one large generated instance.

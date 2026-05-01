@@ -12,6 +12,8 @@ from synaps.solvers.router import SolveRegime, SolverRoutingContext
 from synaps.validation import verify_schedule_result
 from tests.conftest import HORIZON_START
 
+from collections import Counter
+
 
 def test_solve_schedule_routes_small_nominal_problem(simple_problem: ScheduleProblem) -> None:
     result = solve_schedule(simple_problem)
@@ -168,3 +170,40 @@ def test_verify_schedule_result_reports_violation_kind_counts(
     assert verification.violation_kind_counts
     assert verification.violation_kinds == sorted(verification.violation_kind_counts.keys())
     assert sum(verification.violation_kind_counts.values()) == verification.violation_count
+
+
+def test_verify_schedule_result_uses_exhaustive_checker_for_parallel_capacity(
+    simple_problem: ScheduleProblem,
+) -> None:
+    widened_machine = simple_problem.work_centers[0].model_copy(update={"max_parallel": 2})
+    problem = simple_problem.model_copy(
+        update={
+            "work_centers": [widened_machine, *simple_problem.work_centers[1:]],
+        }
+    )
+    wc_id = widened_machine.id
+    overloaded_assignments = [
+        Assignment(
+            operation_id=operation.id,
+            work_center_id=wc_id,
+            start_time=HORIZON_START,
+            end_time=HORIZON_START + timedelta(minutes=30),
+        )
+        for operation in problem.operations
+    ]
+
+    result = GreedyDispatch().solve(problem)
+    result.status = SolverStatus.FEASIBLE
+    result.assignments = overloaded_assignments
+
+    exhaustive_violations = FeasibilityChecker().check(
+        problem,
+        overloaded_assignments,
+        exhaustive=True,
+    )
+    verification = verify_schedule_result(problem, result)
+
+    assert verification.violation_count == len(exhaustive_violations)
+    assert verification.violation_kind_counts == dict(
+        sorted(Counter(v.kind for v in exhaustive_violations).items())
+    )

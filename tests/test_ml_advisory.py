@@ -138,24 +138,46 @@ def test_select_solver_ignores_advisory_when_none() -> None:
     assert "ML advisory" not in decision.reason
 
 
-def test_select_solver_uses_advisory_when_confident() -> None:
-    """Advisory with confidence above threshold should override routing."""
+def test_select_solver_does_not_use_heuristic_advisory_even_when_confident() -> None:
+    """Heuristic-only predictors are placeholders and must not override routing."""
     problem = make_simple_problem()
 
     predictor = RuntimePredictor.heuristic()
-    solver, kwargs, decision = select_solver(
+    _, _, decision = select_solver(
         problem,
         advisory_predictor=predictor,
         advisory_confidence_threshold=0.3,  # low threshold so heuristic overrides
     )
 
-    # Heuristic recommends CPSAT-30 for small problems, but deterministic
-    # would pick CPSAT-10. If confidence > threshold, advisory wins.
-    if "ML advisory" in decision.reason:
-        assert decision.solver_config == "CPSAT-30"
-    else:
-        # If confidence was below threshold, deterministic still applies
-        assert decision.solver_config == "CPSAT-10"
+    assert decision.solver_config == "CPSAT-10"
+    assert "ML advisory" not in decision.reason
+
+
+def test_select_solver_uses_loaded_model_advisory_when_confident() -> None:
+    """Only predictors backed by a loaded model may override routing."""
+
+    class StubLoadedPredictor(RuntimePredictor):
+        def __init__(self) -> None:
+            super().__init__(model=object(), model_version="stub-runtime-v1")
+
+        def predict(self, features: ProblemFeatures) -> RuntimeAdvisory:
+            return RuntimeAdvisory(
+                predicted_ms={"GREED": 20.0, "CPSAT-30": 10.0, "LBBD": 40.0},
+                recommended_solver="CPSAT-30",
+                confidence=0.95,
+                model_version="stub-runtime-v1",
+            )
+
+    problem = make_simple_problem()
+
+    _, _, decision = select_solver(
+        problem,
+        advisory_predictor=StubLoadedPredictor(),
+        advisory_confidence_threshold=0.3,
+    )
+
+    assert decision.solver_config == "CPSAT-30"
+    assert "ML advisory" in decision.reason
 
 
 def test_select_solver_falls_back_when_advisory_low_confidence() -> None:

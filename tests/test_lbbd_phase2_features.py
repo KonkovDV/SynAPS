@@ -9,12 +9,25 @@ from synaps.model import (
     Operation,
     Order,
     ScheduleProblem,
+    Assignment,
     SetupEntry,
     SolverStatus,
     State,
     WorkCenter,
 )
 from synaps.solvers.lbbd_solver import LbbdSolver
+from synaps.solvers.lbbd_solver import (
+    _compute_machine_transition_floor as _compute_machine_transition_floor_plain,
+)
+from synaps.solvers.lbbd_solver import (
+    _compute_sequence_independent_setup_lower_bound as _compute_setup_lb_plain,
+)
+from synaps.solvers.lbbd_hd_solver import (
+    _compute_machine_transition_floor as _compute_machine_transition_floor_hd,
+)
+from synaps.solvers.lbbd_hd_solver import (
+    _compute_sequence_independent_setup_lower_bound as _compute_setup_lb_hd,
+)
 
 HORIZON_START = datetime(2026, 4, 1, 8, 0, tzinfo=UTC)
 HORIZON_END = datetime(2026, 4, 1, 20, 0, tzinfo=UTC)
@@ -129,3 +142,40 @@ def test_gap_threshold_is_configurable(simple_problem: ScheduleProblem) -> None:
     assert loose.metadata["gap_threshold"] == 0.50
     assert tight.metadata["gap_threshold"] == 0.01
     assert loose.metadata["iterations"] <= tight.metadata["iterations"]
+
+
+def test_setup_relaxation_floor_drops_to_zero_when_zero_transition_exists() -> None:
+    problem = _make_setup_dense_problem()
+    work_center = problem.work_centers[0]
+    eligible_by_op = {operation.id: list(operation.eligible_wc_ids) for operation in problem.operations}
+    setup_lookup = {
+        (entry.work_center_id, entry.from_state_id, entry.to_state_id): entry.setup_minutes
+        for entry in problem.setup_matrix
+    }
+
+    assert _compute_machine_transition_floor_plain(problem, eligible_by_op, work_center.id, setup_lookup) == 0.0
+    assert _compute_machine_transition_floor_hd(problem, eligible_by_op, work_center.id, setup_lookup) == 0.0
+
+
+def test_setup_cost_lower_bound_uses_state_mix_not_realized_sequence_cost() -> None:
+    problem = _make_setup_dense_problem()
+    work_center = problem.work_centers[0]
+    assignments = [
+        Assignment(
+            operation_id=operation.id,
+            work_center_id=work_center.id,
+            start_time=HORIZON_START + timedelta(minutes=index * 25),
+            end_time=HORIZON_START + timedelta(minutes=index * 25 + 20),
+        )
+        for index, operation in enumerate(problem.operations)
+    ]
+    ops_by_id = {operation.id: operation for operation in problem.operations}
+    setup_lookup = {
+        (entry.work_center_id, entry.from_state_id, entry.to_state_id): entry.setup_minutes
+        for entry in problem.setup_matrix
+    }
+
+    assert (
+        _compute_setup_lb_plain(assignments, work_center.id, ops_by_id, setup_lookup) == 5.0
+    )
+    assert _compute_setup_lb_hd(assignments, work_center.id, ops_by_id, setup_lookup) == 5.0
