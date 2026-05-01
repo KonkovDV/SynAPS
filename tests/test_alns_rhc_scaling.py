@@ -3003,6 +3003,67 @@ class TestRhcInnerSolver:
         assert result.metadata["alns_presearch_budget_guard_enabled"] is True
         assert result.metadata["alns_presearch_budget_guard_skipped_windows"] == 0
 
+    def test_rhc_presearch_budget_guard_prefers_scaled_budget_profile_over_legacy_size_cut(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A calibrated ALNS budget profile should override the legacy raw-count guard."""
+        from synaps.model import ScheduleResult
+        from synaps.solvers.rhc_solver import RhcSolver
+
+        problem = _make_3state_problem(n_orders=4, ops_per_order=2)
+        alns_call_count = 0
+
+        def fake_alns(self, problem, **kwargs):
+            nonlocal alns_call_count
+            alns_call_count += 1
+            return ScheduleResult(
+                solver_name="alns",
+                status=SolverStatus.ERROR,
+                assignments=[],
+                duration_ms=0,
+                metadata={
+                    "time_limit_exhausted_before_search": True,
+                    "iterations_completed": 0,
+                    "improvements": 0,
+                    "initial_solution_ms": 0,
+                    "budget_guard_skipped_initial_search": False,
+                    "inner_status_override": "budget_exhausted_before_search",
+                    "inner_solver_executed": True,
+                },
+            )
+
+        monkeypatch.setattr(
+            "synaps.solvers.alns_solver.AlnsSolver.solve",
+            fake_alns,
+        )
+
+        result = RhcSolver().solve(
+            problem,
+            window_minutes=480,
+            overlap_minutes=60,
+            inner_solver="alns",
+            time_limit_s=30,
+            max_ops_per_window=50,
+            alns_budget_auto_scaling_enabled=True,
+            alns_budget_estimated_repair_s_per_destroyed_op=0.01,
+            alns_presearch_budget_guard_enabled=True,
+            alns_presearch_max_window_ops=1,
+            alns_presearch_min_time_limit_s=240,
+            inner_kwargs={
+                "max_iterations": 1,
+                "destroy_fraction": 0.01,
+                "min_destroy": 1,
+                "max_destroy": 1,
+                "repair_time_limit_s": 0.1,
+                "use_cpsat_repair": False,
+            },
+        )
+
+        assert alns_call_count >= 1
+        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+        assert result.metadata["alns_presearch_budget_guard_skipped_windows"] == 0
+
     def test_rhc_hybrid_routes_dense_window_to_cpsat(
         self,
         monkeypatch: pytest.MonkeyPatch,

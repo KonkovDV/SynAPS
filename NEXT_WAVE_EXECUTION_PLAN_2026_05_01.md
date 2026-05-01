@@ -18,12 +18,14 @@ Repository-backed baseline before the next algorithm wave:
 - Fresh post-critical-fixes 50K evidence is now closed under `benchmark/studies/2026-05-01-rhc-50k-audit-v3-post-critical-fixes`: `RHC-GREEDY` reached `mean_scheduled_ratio = 0.4184`, `RHC-ALNS` reached `0.1374`, and both ran with `native_acceleration_rate = 1.0`.
 - 100K bounded pure-Python comparison anchor remains `benchmark/studies/2026-04-27-rhc-100k-audit-v4-current-head`.
 - Fresh bounded 100K evidence is now closed under `benchmark/studies/2026-05-01-rhc-100k-audit-v5-post-critical-fixes`: `RHC-GREEDY` improved to `9287/100000` scheduled operations in `90.282s`, while `RHC-ALNS` regressed to `0/100000` in `445.213s` with `solver_metadata.error = "no assignments produced"`.
+- Fresh bounded 100K follow-up evidence is now closed under `benchmark/studies/2026-05-01-rhc-100k-audit-v7-post-guard-harness-fix`: `RHC-GREEDY` reached `7633/100000` scheduled operations in `90.399s`, while `RHC-ALNS` recovered to `6933/100000` in `90.281s` by skipping oversized ALNS pre-search windows (`budget_guard_skipped_windows = 2`) and falling back greedily. This closes the catastrophic zero-assignment seed-stall family on the staged harness, but it does not restore active ALNS search or greedy parity.
+- Fresh bounded 100K predicate-follow-up evidence is now closed under `benchmark/studies/2026-05-01-rhc-100k-audit-v8-post-predicate-fix`: the `R1` predicate patch does re-enter ALNS search on the bounded rail, but the same run shows the next controlling bottleneck. `RHC-ALNS` starts ALNS on a `1501`-operation first window, spends about `808.843s` in initial solution generation, completes `0` iterations, and regresses to `0/100000` scheduled operations while `RHC-GREEDY` reaches `7013/100000` in `90.376s`.
 - The TypeScript `control-plane` security/auth hardening shipped separately on 2026-05-01 as commit `7dc540f` (`fix(control-plane): harden auth and python bridge env`).
 - Deep audit re-verification on current `master` is now captured in `AUDIT_VERIFICATION_2026_05_01.md`; it separates stale findings from live defects and records the fixes that actually shipped in this pass.
 
 Current unresolved technical bottlenecks are still split into two families:
 
-1. RHC/ALNS coverage yield and environment stability at 50K and bounded 100K, especially ALNS seed/search entry at bounded 100K.
+1. RHC/ALNS coverage yield and bounded 100K active-search productivity, now specifically fixing the ALNS initial-solution path so the `R1` predicate no longer reopens a pre-search budget overrun before the first search iteration.
 2. LBBD master strength and excessive RHC parameter surface area.
 
 ## External Evidence Anchors
@@ -71,6 +73,12 @@ Result:
 - 50K improved on scheduled coverage for both solvers, but the rerun is environment-shifted because native acceleration was active;
 - 100K `RHC-GREEDY` improved under the native-backed rerun, while bounded 100K `RHC-ALNS` regressed to a one-window zero-assignment stall and reopened the old seed-construction failure family.
 
+Follow-up update after the original wave closure:
+
+- `benchmark/studies/2026-05-01-rhc-100k-audit-v7-post-guard-harness-fix` now shows that restoring the staged `1000/240` ALNS presearch guard removes the catastrophic `0/100000` failure mode on the bounded `100k` native-backed rail;
+- `benchmark/studies/2026-05-01-rhc-100k-audit-v8-post-predicate-fix` now shows that the `R1` predicate patch re-enters ALNS search on the bounded `100k` rail, but the run still fails because initial solution generation consumes the full window budget before search begins;
+- the remaining 100K issue is therefore no longer just guard-skipped fallback behavior. The controlling open bottleneck is budget-unaware ALNS initial seed construction on oversized bounded windows.
+
 ### Wave 2 — Control-Plane Security/Auth Changeset
 
 Status: completed on 2026-05-01 via commit `7dc540f`.
@@ -99,14 +107,14 @@ Commit rule:
 
 Status: in progress.
 
-The 2026-05-01 audit-reverification pass already shipped one safety slice in both `LBBD` and `LBBD-HD`: the master now uses a safe setup-transition floor, and `setup_cost` cuts now use sequence-independent lower bounds instead of incumbent-sequence setup totals.
+The 2026-05-01 audit-reverification pass already shipped one safety slice in both `LBBD` and `LBBD-HD`: the master now uses a safe setup-transition floor, and `setup_cost` cuts now use sequence-independent lower bounds instead of incumbent-sequence setup totals. The current head also ports the `critical_path` cut family from `LBBD-HD` into standard `LBBD`, so the next step is to measure and extend cut strength beyond that baseline.
 
 Goal: make the LBBD line stronger before expanding ALNS complexity again.
 
 Priority work:
 
-1. Extend LBBD beyond the shipped safe setup floor and setup lower-bound repair with stronger master-side sequencing bounds.
-2. Add a TSP-style or critical-path-style sequencing cut family for machine-order structure.
+1. Quantify the impact of the shipped standard `critical_path` cut family on medium and large instances, not just on metadata exposure.
+2. Extend LBBD beyond the shipped safe setup floor, setup lower-bound repair, and current `critical_path` family with stronger master-side sequencing bounds such as TSP-style machine-order cuts.
 3. Extend the master-reporting surface so every LBBD run exposes which cuts tightened the lower bound and by how much.
 4. Revalidate `LBBD-10`, `LBBD-20-HD`, and any new master profile against at least one medium exact instance and one large generated instance.
 
@@ -135,6 +143,10 @@ Target simplification:
    - `search-entry`
    - `bounded-100k`
 4. Introduce a variable-fixing policy inspired by `L-RHO`: once operations stay stable across windows, prefer fixing them instead of re-opening them every horizon.
+5. Fold the bounded-100K search-entry contract into that named-policy layer, so the solver can distinguish between:
+   - profile-aware ALNS entry;
+   - safe greedy fallback;
+   - and future budget-aware initial-seed strategies.
 
 Concrete implementation direction:
 
@@ -188,7 +200,7 @@ python -m benchmark.study_rhc_500k \
   --seeds 1 \
   --time-limit-cap-s 90 \
   --max-windows-override 2 \
-  --write-dir benchmark/studies/2026-05-01-rhc-100k-audit-v5-post-critical-fixes
+   --write-dir benchmark/studies/2026-05-01-rhc-100k-audit-v8-post-predicate-fix
 ```
 
 ### Validate the control-plane changeset

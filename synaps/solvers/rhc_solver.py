@@ -1900,27 +1900,39 @@ class RhcSolver(BaseSolver):
                         # When auto-scaling is active the budget profile already carries
                         # a calibrated estimate; fall back to the legacy raw-count guard
                         # only when the profile is unavailable.
+                        legacy_alns_presearch_guard_hit = (
+                            selected_inner_solver_name == "alns"
+                            and alns_presearch_budget_guard_enabled
+                            and len(clean_window_ops) > alns_presearch_max_window_ops
+                            and per_window_limit < alns_presearch_min_time_limit_s
+                        )
+                        budget_guard_estimated_run_hit = False
                         if alns_budget_auto_scaling_enabled and alns_budget_profile is not None:
                             _estimated_total_run_s = (
                                 float(alns_budget_profile["estimated_repair_s_per_destroyed_op"])
                                 * int(alns_budget_profile["effective_max_destroy"])
                                 * int(alns_budget_profile["effective_max_iterations"])
                             )
-                            should_skip_alns_presearch = (
+                            budget_guard_estimated_run_hit = (
                                 selected_inner_solver_name == "alns"
                                 and alns_presearch_budget_guard_enabled
                                 and _estimated_total_run_s > per_window_limit
                             )
+                            should_skip_alns_presearch = budget_guard_estimated_run_hit
                         else:
-                            should_skip_alns_presearch = (
-                                selected_inner_solver_name == "alns"
-                                and alns_presearch_budget_guard_enabled
-                                and len(clean_window_ops) > alns_presearch_max_window_ops
-                                and per_window_limit < alns_presearch_min_time_limit_s
-                            )
+                            should_skip_alns_presearch = legacy_alns_presearch_guard_hit
                         if should_skip_alns_presearch:
                             alns_presearch_budget_guard_skipped_windows += 1
-                            if alns_budget_auto_scaling_enabled and alns_budget_profile is not None:
+                            if legacy_alns_presearch_guard_hit and not budget_guard_estimated_run_hit:
+                                logger.info(
+                                    "RHC window %d skipped ALNS pre-search: %d ops exceed guard "
+                                    "limit=%d at per-window budget %.2fs",
+                                    window_count,
+                                    len(clean_window_ops),
+                                    alns_presearch_max_window_ops,
+                                    per_window_limit,
+                                )
+                            elif alns_budget_auto_scaling_enabled and alns_budget_profile is not None:
                                 logger.info(
                                     "RHC window %d skipped ALNS pre-search: estimated run %.2fs "
                                     "exceeds per-window budget %.2fs (iters=%d destroy=%d)",
