@@ -213,6 +213,19 @@
           "title": "Quantity",
           "type": "number"
         },
+        "release_date": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Release Date"
+        },
         "unit": {
           "default": "pcs",
           "title": "Unit",
