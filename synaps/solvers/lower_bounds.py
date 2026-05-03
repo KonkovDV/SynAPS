@@ -54,6 +54,11 @@ def _compute_auxiliary_resource_lb(
     The problem-level ARC bound is the maximum of `LB_arc(r)` over all
     auxiliary resources that actually have requirements pointing at them.
     Safe fallback (0.0) when no auxiliary resources or requirements exist.
+
+    TODO(R4-tech-debt): min_duration_by_op must be precomputed as
+    min(duration over eligible machines) by the caller. Moving this
+    computation inside would duplicate work from compute_relaxed_makespan_lower_bound
+    and add coupling; document this contract clearly for future solver authors.
     """
 
     if not problem.auxiliary_resources or not problem.aux_requirements:
