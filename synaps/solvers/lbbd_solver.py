@@ -138,7 +138,7 @@ class LbbdSolver(BaseSolver):
         min_setup_by_wc: dict[UUID, float] = {}
         if setup_relaxation:
             for work_center in problem.work_centers:
-                transition_floor = _compute_machine_transition_floor(
+                transition_floor = compute_machine_transition_floor(
                     problem,
                     eligible_by_op,
                     work_center.id,
@@ -330,7 +330,7 @@ class LbbdSolver(BaseSolver):
                 # `enable_machine_tsp_cuts` flag short-circuits the BHK call
                 # so benchmarks can isolate the cut's contribution.
                 tsp_setup_bound = (
-                    _compute_machine_tsp_lower_bound(
+                    compute_machine_tsp_lower_bound(
                         machine_state_seq,
                         work_center_id,
                         setup_lookup,
@@ -351,7 +351,7 @@ class LbbdSolver(BaseSolver):
                     )
                     continue
 
-                setup_lower_bound = _compute_sequence_independent_setup_lower_bound(
+                setup_lower_bound = compute_sequence_independent_setup_lower_bound(
                     machine_assignments,
                     work_center_id,
                     ops_by_id,

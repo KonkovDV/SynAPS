@@ -15,23 +15,16 @@ from synaps.model import (
     State,
     WorkCenter,
 )
+from synaps.solvers._lbbd_cuts import (
+    compute_machine_transition_floor as _compute_machine_transition_floor_plain,
+    compute_machine_tsp_lower_bound as _compute_machine_tsp_lb_plain,
+    compute_sequence_independent_setup_lower_bound as _compute_setup_lb_plain,
+    # Parity check aliases — same underlying helpers, ensure both solvers share logic
+    compute_machine_transition_floor as _compute_machine_transition_floor_hd,
+    compute_sequence_independent_setup_lower_bound as _compute_setup_lb_hd,
+)
 from synaps.solvers.lbbd_hd_solver import LbbdHdSolver
 from synaps.solvers.lbbd_solver import LbbdSolver
-from synaps.solvers.lbbd_solver import (
-    _compute_machine_transition_floor as _compute_machine_transition_floor_plain,
-)
-from synaps.solvers.lbbd_solver import (
-    _compute_machine_tsp_lower_bound as _compute_machine_tsp_lb_plain,
-)
-from synaps.solvers.lbbd_solver import (
-    _compute_sequence_independent_setup_lower_bound as _compute_setup_lb_plain,
-)
-from synaps.solvers.lbbd_hd_solver import (
-    _compute_machine_transition_floor as _compute_machine_transition_floor_hd,
-)
-from synaps.solvers.lbbd_hd_solver import (
-    _compute_sequence_independent_setup_lower_bound as _compute_setup_lb_hd,
-)
 
 HORIZON_START = datetime(2026, 4, 1, 8, 0, tzinfo=UTC)
 HORIZON_END = datetime(2026, 4, 1, 20, 0, tzinfo=UTC)

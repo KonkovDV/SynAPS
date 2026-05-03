@@ -142,7 +142,7 @@ class LbbdHdSolver(BaseSolver):
         min_setup_by_wc: dict[UUID, float] = {}
         if setup_relaxation:
             for wc in problem.work_centers:
-                transition_floor = _compute_machine_transition_floor(
+                transition_floor = compute_machine_transition_floor(
                     problem,
                     eligible_by_op,
                     wc.id,
@@ -1420,7 +1420,7 @@ def _generate_all_cuts(
             for a in m_assignments
             if a.operation_id in ops_by_id
         ]
-        tsp_lower_bound = _compute_machine_tsp_lower_bound(
+        tsp_lower_bound = compute_machine_tsp_lower_bound(
             machine_state_seq,
             wc_id,
             setup_lookup,
@@ -1429,7 +1429,7 @@ def _generate_all_cuts(
             setup_lower_bound = tsp_lower_bound
             cut_kind = "machine_tsp"
         else:
-            setup_lower_bound = _compute_sequence_independent_setup_lower_bound(
+            setup_lower_bound = compute_sequence_independent_setup_lower_bound(
                 m_assignments,
                 wc_id,
                 ops_by_id,
