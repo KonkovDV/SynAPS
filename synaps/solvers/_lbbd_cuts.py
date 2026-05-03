@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from synaps.model import Assignment, Operation, ScheduleProblem
 
 
-class _BendersCutLike(Protocol):
+class BendersCutLike(Protocol):
     """Structural type for Benders cuts shared by both LBBD solvers.
 
     Both `synaps.solvers.lbbd_solver._BendersCut` and
@@ -42,13 +42,18 @@ class _BendersCutLike(Protocol):
     bottleneck_ops: set[UUID]
 
 
-def cut_pool_fingerprint(cut: _BendersCutLike) -> tuple[str, frozenset[UUID], float]:
+def cut_pool_fingerprint(cut: BendersCutLike) -> tuple[str, frozenset[UUID], float]:
     """Return a canonical fingerprint for cut-pool deduplication.
 
     Two cuts collapse to the same fingerprint iff they agree on kind,
     bottleneck operations, and rhs to three decimals. The rhs rounding
     avoids near-duplicate accumulation when subproblem makespans differ
     only by floating-point drift across iterations or partitions.
+
+    Units: rhs is in minutes (consistent with makespan_minutes). The 3-decimal
+    precision is noise-free for integer minute values and typical float results
+    from setup/transition lookups. ARC-derived bounds that divide by pool_size
+    may produce sub-minute precision; rounding prevents near-duplicates.
     """
 
     return (cut.kind, frozenset(cut.bottleneck_ops), round(float(cut.rhs), 3))
@@ -194,6 +199,7 @@ def compute_machine_tsp_lower_bound(
 
 
 __all__ = [
+    "BendersCutLike",
     "compute_machine_transition_floor",
     "compute_machine_tsp_lower_bound",
     "compute_sequence_independent_setup_lower_bound",

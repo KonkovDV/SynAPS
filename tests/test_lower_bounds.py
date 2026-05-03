@@ -364,3 +364,60 @@ class TestAuxiliaryResourceLowerBound:
         )
         result = compute_relaxed_makespan_lower_bound(problem)
         assert result.auxiliary_resource_lb == pytest.approx(60.0)
+
+    def test_arc_lb_uses_min_proc_time_over_eligible_machines(self) -> None:
+        """R4 audit: ARC LB must use min(duration) over eligible machines.
+
+        If an operation is flexible (eligible on multiple machines with
+        different speed_factors), the lower bound should use the fastest
+        possible duration, not any fixed machine's duration. Otherwise the
+        bound would be artificially inflated (invalid LB).
+        """
+        from synaps.model import AuxiliaryResource, OperationAuxRequirement
+
+        # Two machines: WC0 (speed=1.0, duration=60), WC1 (speed=2.0, duration=30)
+        state = State(id=uuid4(), code="S0", label="State 0")
+        wc0 = WorkCenter(
+            id=uuid4(), code="WC0", capability_group="machining", speed_factor=1.0
+        )
+        wc1 = WorkCenter(
+            id=uuid4(), code="WC1", capability_group="machining", speed_factor=2.0
+        )
+
+        # One operation, eligible on BOTH machines
+        order = Order(id=uuid4(), external_ref="ORD-0", due_date=_HORIZON_END)
+        op = Operation(
+            id=uuid4(),
+            order_id=order.id,
+            seq_in_order=0,
+            state_id=state.id,
+            base_duration_min=60,  # 60 min on WC1, 30 min effective on WC2
+            eligible_wc_ids=[wc0.id, wc1.id],  # flexible
+        )
+
+        fixture = AuxiliaryResource(
+            id=uuid4(), code="FIX-1", resource_type="fixture", pool_size=1
+        )
+        requirement = OperationAuxRequirement(
+            operation_id=op.id,
+            aux_resource_id=fixture.id,
+            quantity_needed=1,
+        )
+
+        problem = ScheduleProblem(
+            states=[state],
+            orders=[order],
+            operations=[op],
+            work_centers=[wc0, wc1],
+            setup_matrix=[],
+            auxiliary_resources=[fixture],
+            aux_requirements=[requirement],
+            planning_horizon_start=_HORIZON_START,
+            planning_horizon_end=_HORIZON_END,
+        )
+
+        result = compute_relaxed_makespan_lower_bound(problem)
+        # ARC LB = (min_duration * qty) / pool_size = 30 * 1 / 1 = 30
+        # If the implementation incorrectly used a fixed machine (WC1), it would be 60.
+        assert result.auxiliary_resource_lb == pytest.approx(30.0)
+        assert result.max_operation_lb == pytest.approx(30.0)  # same logic

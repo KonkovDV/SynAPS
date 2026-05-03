@@ -180,6 +180,7 @@ class LbbdHdSolver(BaseSolver):
         # ---- LBBD main loop ----
         lb = 0.0
         benders_cuts: list[_BendersCut] = []
+        assert id(benders_cuts) not in locals().get("_seen_lists", set()), "benders_cuts must be fresh list"
         iteration_log: list[dict[str, Any]] = []
         master_warm_starts = 0
         # R10 (2026-05-03): master-LB telemetry mirrors the standard LBBD
