@@ -12,7 +12,15 @@ from uuid import uuid4
 
 import pytest
 
-from synaps.model import Operation, Order, ScheduleProblem, State, WorkCenter
+from synaps.model import (
+    AuxiliaryResource,
+    Operation,
+    OperationAuxRequirement,
+    Order,
+    ScheduleProblem,
+    State,
+    WorkCenter,
+)
 from synaps.solvers.lower_bounds import MakespanLowerBound, compute_relaxed_makespan_lower_bound
 
 _HORIZON_START = datetime(2026, 4, 1, 8, 0, tzinfo=UTC)
@@ -115,6 +123,7 @@ class TestComputeRelaxedMakespanLowerBound:
         assert result.average_capacity_lb == 0.0
         assert result.exclusive_machine_lb == 0.0
         assert result.max_operation_lb == 0.0
+        assert result.auxiliary_resource_lb == 0.0
 
     def test_single_op_single_machine_equals_duration(self) -> None:
         problem = _make_problem(n_ops=1, n_machines=1, base_duration_min=45)
@@ -181,6 +190,7 @@ class TestComputeRelaxedMakespanLowerBound:
             result.average_capacity_lb,
             result.exclusive_machine_lb,
             result.max_operation_lb,
+            result.auxiliary_resource_lb,
         )
 
     def test_as_metadata_returns_all_components_as_floats(self) -> None:
@@ -192,6 +202,7 @@ class TestComputeRelaxedMakespanLowerBound:
             "average_capacity_lb",
             "exclusive_machine_lb",
             "max_operation_lb",
+            "auxiliary_resource_lb",
         }
         assert set(meta.keys()) == expected_keys
         for v in meta.values():
@@ -218,3 +229,138 @@ class TestComputeRelaxedMakespanLowerBound:
         )
         result = compute_relaxed_makespan_lower_bound(problem)
         assert result.value == 0.0
+
+
+def _make_problem_with_aux_resource(
+    *,
+    n_ops: int,
+    n_machines: int,
+    base_duration_min: int,
+    aux_pool_size: int,
+    quantity_needed: int = 1,
+    ops_consuming_aux: int | None = None,
+) -> ScheduleProblem:
+    """Build a fully flexible problem where the first ``ops_consuming_aux``
+    operations all hold one shared auxiliary resource of pool ``aux_pool_size``.
+    ``ops_consuming_aux`` defaults to ``n_ops`` (every operation consumes the
+    pool), which is the standard setup for the ARC lower-bound regression.
+    """
+
+    if ops_consuming_aux is None:
+        ops_consuming_aux = n_ops
+
+    state = State(id=uuid4(), code="S0", label="State 0")
+    wcs = [
+        WorkCenter(
+            id=uuid4(),
+            code=f"WC{i}",
+            capability_group="machining",
+        )
+        for i in range(n_machines)
+    ]
+    wc_ids = [wc.id for wc in wcs]
+
+    orders: list[Order] = []
+    ops: list[Operation] = []
+    for k in range(n_ops):
+        order = Order(id=uuid4(), external_ref=f"ORD-{k:04d}", due_date=_HORIZON_END)
+        orders.append(order)
+        ops.append(
+            Operation(
+                id=uuid4(),
+                order_id=order.id,
+                seq_in_order=0,
+                state_id=state.id,
+                base_duration_min=base_duration_min,
+                eligible_wc_ids=wc_ids,
+            )
+        )
+
+    fixture = AuxiliaryResource(
+        id=uuid4(),
+        code="FIX-1",
+        resource_type="fixture",
+        pool_size=aux_pool_size,
+    )
+    requirements = [
+        OperationAuxRequirement(
+            operation_id=ops[i].id,
+            aux_resource_id=fixture.id,
+            quantity_needed=quantity_needed,
+        )
+        for i in range(ops_consuming_aux)
+    ]
+
+    return ScheduleProblem(
+        states=[state],
+        orders=orders,
+        operations=ops,
+        work_centers=wcs,
+        setup_matrix=[],
+        auxiliary_resources=[fixture],
+        aux_requirements=requirements,
+        planning_horizon_start=_HORIZON_START,
+        planning_horizon_end=_HORIZON_END,
+    )
+
+
+class TestAuxiliaryResourceLowerBound:
+    """R4 (2026-05-03): cumulative-load lower bound on shared aux resources.
+
+    Each `OperationAuxRequirement` contributes `quantity_needed` units of
+    auxiliary capacity for the operation's duration; the makespan must be at
+    least the per-resource cumulative resource-time divided by the pool size.
+    """
+
+    def test_arc_bound_is_zero_when_no_auxiliary_resources(self) -> None:
+        # Pure machine problem: no aux resources, no aux requirements.
+        problem = _make_problem(n_ops=4, n_machines=4, base_duration_min=30)
+        result = compute_relaxed_makespan_lower_bound(problem)
+        assert result.auxiliary_resource_lb == pytest.approx(0.0)
+
+    def test_arc_bound_serializes_three_ops_through_pool_size_one(self) -> None:
+        # 3 ops x 60 min on 4 machines (avg_capacity = 45) but all three
+        # require a single-unit fixture pool -> ARC LB = 3 * 60 / 1 = 180,
+        # dominating every machine-only component and lifting the global bound.
+        problem = _make_problem_with_aux_resource(
+            n_ops=3, n_machines=4, base_duration_min=60, aux_pool_size=1
+        )
+        result = compute_relaxed_makespan_lower_bound(problem)
+        assert result.auxiliary_resource_lb == pytest.approx(180.0)
+        assert result.value == pytest.approx(180.0)
+        # Sanity: the machine-only bounds are strictly weaker on this fixture.
+        assert result.average_capacity_lb < result.auxiliary_resource_lb
+        assert result.max_operation_lb < result.auxiliary_resource_lb
+
+    def test_arc_bound_divides_by_pool_size(self) -> None:
+        # 4 ops x 30 min sharing a pool of size 2 -> ARC LB = 4 * 30 / 2 = 60.
+        problem = _make_problem_with_aux_resource(
+            n_ops=4, n_machines=4, base_duration_min=30, aux_pool_size=2
+        )
+        result = compute_relaxed_makespan_lower_bound(problem)
+        assert result.auxiliary_resource_lb == pytest.approx(60.0)
+
+    def test_arc_bound_scales_with_quantity_needed(self) -> None:
+        # 2 ops x 30 min, pool=4, each op requires 2 units -> ARC LB = 2*30*2/4 = 30.
+        problem = _make_problem_with_aux_resource(
+            n_ops=2,
+            n_machines=4,
+            base_duration_min=30,
+            aux_pool_size=4,
+            quantity_needed=2,
+        )
+        result = compute_relaxed_makespan_lower_bound(problem)
+        assert result.auxiliary_resource_lb == pytest.approx(30.0)
+
+    def test_arc_bound_ignores_operations_without_requirements(self) -> None:
+        # 4 ops, only 2 of them consume the pool -> ARC LB = 2 * 30 / 1 = 60,
+        # not 4 * 30 / 1 = 120.
+        problem = _make_problem_with_aux_resource(
+            n_ops=4,
+            n_machines=4,
+            base_duration_min=30,
+            aux_pool_size=1,
+            ops_consuming_aux=2,
+        )
+        result = compute_relaxed_makespan_lower_bound(problem)
+        assert result.auxiliary_resource_lb == pytest.approx(60.0)
