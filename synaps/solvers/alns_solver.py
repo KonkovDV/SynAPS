@@ -1647,13 +1647,15 @@ class AlnsSolver(BaseSolver):
                     if greedy_outcome.status == RepairStatus.TIMEOUT:
                         greedy_repair_timeouts += 1
                     if greedy_outcome.status == RepairStatus.FEASIBLE:
-                        greedy_result = list(greedy_outcome.assignments)
-                        test_candidate = frozen + greedy_result
+                        greedy_repair_assignments = list(greedy_outcome.assignments)
+                        test_candidate = frozen + greedy_repair_assignments
                         if (
                             not _has_machine_overlap(test_candidate)
-                            and not _violates_frozen_precedence(greedy_result, frozen_by_op, ops_by_id)
+                            and not _violates_frozen_precedence(
+                                greedy_repair_assignments, frozen_by_op, ops_by_id
+                            )
                         ):
-                            new_assignments = greedy_result
+                            new_assignments = greedy_repair_assignments
                             repair_used = "greedy"
                             greedy_repairs += 1
                         else:

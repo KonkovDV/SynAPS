@@ -261,7 +261,7 @@ def _select_order_ids_for_slice(
             )
         return selected_order_ids
 
-    selected_order_ids: list[str] = []
+    selected_order_ids = []
     selected_operation_count = 0
     for order in orders[slice_spec.order_offset :]:
         order_id = order.get("id")
@@ -331,12 +331,14 @@ def _slice_problem_payload(
         for operation in selected_operations
         if isinstance(operation.get("state_id"), str)
     }
-    selected_work_center_ids = {
-        str(work_center_id)
-        for operation in selected_operations
-        for work_center_id in operation.get("eligible_wc_ids", [])
-        if isinstance(work_center_id, str)
-    }
+    selected_work_center_ids: set[str] = set()
+    for operation in selected_operations:
+        eligible_wc_ids = operation.get("eligible_wc_ids", [])
+        if not isinstance(eligible_wc_ids, list):
+            continue
+        for work_center_id in eligible_wc_ids:
+            if isinstance(work_center_id, str):
+                selected_work_center_ids.add(work_center_id)
     selected_aux_requirements = [
         requirement
         for requirement in aux_requirements

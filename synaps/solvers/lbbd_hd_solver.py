@@ -23,6 +23,7 @@ from __future__ import annotations
 import os
 import time
 from collections import defaultdict
+from collections.abc import Mapping
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
@@ -387,7 +388,7 @@ def _compute_machine_transition_floor(
     problem: ScheduleProblem,
     eligible_by_op: dict[UUID, list[UUID]],
     work_center_id: UUID,
-    setup_lookup: dict[tuple[UUID, UUID, UUID], float],
+    setup_lookup: Mapping[tuple[UUID, UUID, UUID], float],
 ) -> float:
     """Return the strongest safe per-transition setup floor for the master."""
 
@@ -416,7 +417,7 @@ def _compute_sequence_independent_setup_lower_bound(
     assignments: list[Assignment],
     work_center_id: UUID,
     ops_by_id: dict[UUID, Operation],
-    setup_lookup: dict[tuple[UUID, UUID, UUID], float],
+    setup_lookup: Mapping[tuple[UUID, UUID, UUID], float],
 ) -> float:
     """Return a sequence-independent setup lower bound for a machine cluster."""
 

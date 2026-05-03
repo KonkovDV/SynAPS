@@ -7,12 +7,12 @@ in the solver portfolio.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
 
-from synaps.model import Operation, Order, ScheduleProblem, SetupEntry, State, WorkCenter
+from synaps.model import Operation, Order, ScheduleProblem, State, WorkCenter
 from synaps.solvers.lower_bounds import MakespanLowerBound, compute_relaxed_makespan_lower_bound
 
 _HORIZON_START = datetime(2026, 4, 1, 8, 0, tzinfo=UTC)
