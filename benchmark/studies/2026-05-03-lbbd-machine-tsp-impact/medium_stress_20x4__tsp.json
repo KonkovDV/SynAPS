@@ -1,0 +1,59 @@
+{
+  "instance": "medium_stress_20x4",
+  "config": "with_machine_tsp",
+  "enable_machine_tsp_cuts": true,
+  "status": "feasible",
+  "wall_clock_s": 3.489,
+  "duration_ms": 3489,
+  "metadata": {
+    "iterations": 2,
+    "lower_bound": 183.0,
+    "upper_bound": 183.0,
+    "gap": 0.0,
+    "lb_evolution": [
+      138.33333333332644,
+      183.0
+    ],
+    "cut_kind_lb_contribution": {
+      "master_relaxation": 138.33333333332644,
+      "capacity": 8.933333333334712,
+      "machine_tsp": 17.866666666669424,
+      "load_balance": 8.933333333334712,
+      "critical_path": 8.933333333334712
+    },
+    "cut_pool": {
+      "size": 5,
+      "kinds": {
+        "capacity": 1,
+        "machine_tsp": 2,
+        "load_balance": 1,
+        "critical_path": 1
+      },
+      "skipped_duplicate": 0
+    },
+    "iteration_log": [
+      {
+        "iteration": 1,
+        "master_bound": 138.33333333332644,
+        "sub_makespan": 183.0,
+        "lb_delta": 138.33333333332644,
+        "cut_kinds_attributed": [],
+        "status": "feasible"
+      },
+      {
+        "iteration": 2,
+        "master_bound": 183.0,
+        "sub_makespan": 254.0,
+        "lb_delta": 44.666666666673564,
+        "cut_kinds_attributed": [
+          "capacity",
+          "machine_tsp",
+          "machine_tsp",
+          "load_balance",
+          "critical_path"
+        ],
+        "status": "feasible"
+      }
+    ]
+  }
+}

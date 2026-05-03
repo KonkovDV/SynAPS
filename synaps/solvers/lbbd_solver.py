@@ -74,6 +74,13 @@ class LbbdSolver(BaseSolver):
         use_greedy_warm_start: bool = bool(kwargs.get("use_greedy_warm_start", True))
         parallel_subproblems: bool = bool(kwargs.get("parallel_subproblems", True))
         num_workers: int = int(kwargs.get("num_workers", min(4, os.cpu_count() or 2)))
+        # R5 (2026-05-03): toggle for the sequence-aware machine_tsp Bellman-
+        # Held-Karp Benders cut. Defaults to True (production behaviour);
+        # benchmarks set this to False to measure the LB tightening that the
+        # cut delivers on top of the legacy setup_cost floor.
+        enable_machine_tsp_cuts: bool = bool(
+            kwargs.get("enable_machine_tsp_cuts", True)
+        )
 
         # Precompute lookups
         wc_by_id = {wc.id: wc for wc in problem.work_centers}
@@ -319,11 +326,17 @@ class LbbdSolver(BaseSolver):
                 # Prefer the sequence-aware machine-TSP lower bound when the
                 # realised distinct state count is small enough for exact
                 # Bellman-Held-Karp; otherwise fall back to the sequence-
-                # independent floor used historically by `setup_cost`.
-                tsp_setup_bound = _compute_machine_tsp_lower_bound(
-                    machine_state_seq,
-                    work_center_id,
-                    setup_lookup,
+                # independent floor used historically by `setup_cost`. The
+                # `enable_machine_tsp_cuts` flag short-circuits the BHK call
+                # so benchmarks can isolate the cut's contribution.
+                tsp_setup_bound = (
+                    _compute_machine_tsp_lower_bound(
+                        machine_state_seq,
+                        work_center_id,
+                        setup_lookup,
+                    )
+                    if enable_machine_tsp_cuts
+                    else 0.0
                 )
                 if tsp_setup_bound > 0:
                     _register_cut(
