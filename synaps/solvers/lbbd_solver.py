@@ -20,7 +20,6 @@ from __future__ import annotations
 import os
 import time
 from collections import defaultdict
-from collections.abc import Mapping
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
@@ -39,6 +38,12 @@ from synaps.model import (
     WorkCenter,
 )
 from synaps.solvers import BaseSolver
+from synaps.solvers._lbbd_cuts import (
+    compute_machine_transition_floor,
+    compute_machine_tsp_lower_bound,
+    compute_sequence_independent_setup_lower_bound,
+    cut_pool_fingerprint,
+)
 from synaps.solvers.cpsat_solver import CpSatSolver
 from synaps.solvers.lbbd_hd_solver import find_critical_path as _find_critical_path
 
@@ -97,6 +102,23 @@ class LbbdSolver(BaseSolver):
         iteration_log: list[dict[str, Any]] = []
         prev_assignment_map: dict[UUID, UUID] | None = None
         master_warm_start_iterations = 0
+        # R3 (2026-05-03): cut-pool deduplication. Two cuts with the same
+        # (kind, bottleneck_ops, rhs-rounded) fingerprint produce identical
+        # HiGHS rows, so the second one only inflates the master without
+        # tightening anything. The closure below registers a cut iff its
+        # fingerprint has not been seen.
+        seen_cut_fingerprints: set[tuple[str, frozenset[UUID], float]] = set()
+        cuts_skipped_duplicate = 0
+
+        def _register_cut(cut: _BendersCut) -> bool:
+            nonlocal cuts_skipped_duplicate
+            fp = cut_pool_fingerprint(cut)
+            if fp in seen_cut_fingerprints:
+                cuts_skipped_duplicate += 1
+                return False
+            seen_cut_fingerprints.add(fp)
+            benders_cuts.append(cut)
+            return True
         # Master-LB telemetry: each entry of `lb_evolution` is the master
         # lower bound observed in that iteration. `prev_iteration_cut_kinds`
         # carries the kinds of cuts added in iteration N-1, which are the
@@ -201,7 +223,7 @@ class LbbdSolver(BaseSolver):
 
             if sub_assignments is None:
                 # Subproblem infeasible for this assignment → add nogood cut
-                benders_cuts.append(
+                _register_cut(
                     _BendersCut(
                         assignment_map=dict(assignment_map),
                         kind="nogood",
@@ -265,7 +287,7 @@ class LbbdSolver(BaseSolver):
             bottleneck_ops = {
                 op_id for op_id, wc_id in assignment_map.items() if wc_id == bottleneck_wc
             }
-            benders_cuts.append(
+            _register_cut(
                 _BendersCut(
                     assignment_map=dict(assignment_map),
                     kind="capacity",
@@ -304,7 +326,7 @@ class LbbdSolver(BaseSolver):
                     setup_lookup,
                 )
                 if tsp_setup_bound > 0:
-                    benders_cuts.append(
+                    _register_cut(
                         _BendersCut(
                             assignment_map=dict(assignment_map),
                             kind="machine_tsp",
@@ -324,7 +346,7 @@ class LbbdSolver(BaseSolver):
                 )
                 if setup_lower_bound <= 0:
                     continue
-                benders_cuts.append(
+                _register_cut(
                     _BendersCut(
                         assignment_map=dict(assignment_map),
                         kind="setup_cost",
@@ -348,7 +370,7 @@ class LbbdSolver(BaseSolver):
                 max_load = max(machine_loads.values())
                 lb_cut_rhs = max(max_load, avg_load)
                 if lb_cut_rhs > lb:
-                    benders_cuts.append(
+                    _register_cut(
                         _BendersCut(
                             assignment_map=dict(assignment_map),
                             kind="load_balance",
@@ -363,7 +385,7 @@ class LbbdSolver(BaseSolver):
                 ops_by_id,
             )
             if critical_ops and len(critical_ops) >= 2 and critical_duration > 0:
-                benders_cuts.append(
+                _register_cut(
                     _BendersCut(
                         assignment_map=dict(assignment_map),
                         kind="critical_path",
@@ -438,6 +460,7 @@ class LbbdSolver(BaseSolver):
                 "cut_pool": {
                     "size": len(benders_cuts),
                     "kinds": cut_kinds,
+                    "skipped_duplicate": cuts_skipped_duplicate,
                 },
             },
         )
@@ -466,143 +489,15 @@ class _BendersCut:
         self.bottleneck_ops = bottleneck_ops
 
 
-def _compute_machine_transition_floor(
-    problem: ScheduleProblem,
-    eligible_by_op: dict[UUID, list[UUID]],
-    work_center_id: UUID,
-    setup_lookup: Mapping[tuple[UUID, UUID, UUID], float],
-) -> float:
-    """Return the strongest safe per-transition setup floor for the master.
-
-    The master does not know the realized state sequence, so a positive floor is
-    valid only when every possible transition between states that may be routed
-    to the machine carries a positive setup cost.
-    """
-
-    relevant_state_ids = {
-        operation.state_id
-        for operation in problem.operations
-        if work_center_id in eligible_by_op.get(operation.id, [])
-    }
-    if not relevant_state_ids:
-        return 0.0
-
-    min_transition = float("inf")
-    for from_state_id in relevant_state_ids:
-        for to_state_id in relevant_state_ids:
-            transition = float(
-                setup_lookup.get((work_center_id, from_state_id, to_state_id), 0.0)
-            )
-            if transition <= 0:
-                return 0.0
-            min_transition = min(min_transition, transition)
-
-    return 0.0 if min_transition == float("inf") else min_transition
-
-
-def _compute_sequence_independent_setup_lower_bound(
-    assignments: list[Assignment],
-    work_center_id: UUID,
-    ops_by_id: dict[UUID, Operation],
-    setup_lookup: Mapping[tuple[UUID, UUID, UUID], float],
-) -> float:
-    """Return a sequence-independent setup lower bound for a machine cluster."""
-
-    state_ids = [
-        operation.state_id
-        for assignment in assignments
-        if (operation := ops_by_id.get(assignment.operation_id)) is not None
-    ]
-    if len(state_ids) < 2:
-        return 0.0
-
-    distinct_state_ids = sorted(set(state_ids), key=str)
-    if len(distinct_state_ids) == 1:
-        state_id = distinct_state_ids[0]
-        self_setup = float(setup_lookup.get((work_center_id, state_id, state_id), 0.0))
-        return max(self_setup, 0.0) * float(len(state_ids) - 1)
-
-    min_cross_state_setup = min(
-        float(setup_lookup.get((work_center_id, from_state_id, to_state_id), 0.0))
-        for from_state_id in distinct_state_ids
-        for to_state_id in distinct_state_ids
-        if from_state_id != to_state_id
-    )
-    if min_cross_state_setup <= 0:
-        return 0.0
-
-    return min_cross_state_setup * float(len(distinct_state_ids) - 1)
-
-
-def _compute_machine_tsp_lower_bound(
-    state_ids: list[UUID],
-    work_center_id: UUID,
-    setup_lookup: Mapping[tuple[UUID, UUID, UUID], float],
-    *,
-    max_states: int = 12,
-) -> float:
-    """Sequence-aware setup lower bound on a single machine.
-
-    Solves the asymmetric Hamiltonian-path problem on the realised distinct
-    state types via Bellman-Held-Karp dynamic programming. The result is the
-    minimum cumulative setup time for any visit order of those state types
-    under the work-center-local sdst matrix and is therefore a valid lower
-    bound on the actual sequence-dependent setup contribution to the
-    machine's makespan, dominating the sequence-independent floor used by
-    `_compute_sequence_independent_setup_lower_bound`.
-
-    Falls back to 0.0 when the distinct state count exceeds `max_states`
-    (12 by default; BHK cost is O(n^2 * 2^n)) or when fewer than two state
-    types are present.
-
-    Reference: Naderi & Roshanaei (2021), "Critical-Path-Search Logic-Based
-    Benders Decomposition Approaches for Flexible Job Shop Scheduling",
-    INFORMS Journal on Optimization 4(1).
-    """
-
-    if len(state_ids) < 2:
-        return 0.0
-
-    distinct = list(dict.fromkeys(state_ids))
-    n = len(distinct)
-    if n < 2 or n > max_states:
-        return 0.0
-
-    inf = float("inf")
-    cost: list[list[float]] = [[inf] * n for _ in range(n)]
-    for i, from_state in enumerate(distinct):
-        for j, to_state in enumerate(distinct):
-            if i == j:
-                continue
-            cost[i][j] = float(
-                setup_lookup.get((work_center_id, from_state, to_state), 0.0)
-            )
-
-    full = 1 << n
-    dp: list[list[float]] = [[inf] * n for _ in range(full)]
-    for i in range(n):
-        dp[1 << i][i] = 0.0
-
-    for mask in range(1, full):
-        for i in range(n):
-            if not (mask >> i) & 1:
-                continue
-            base = dp[mask][i]
-            if base == inf:
-                continue
-            remaining = (~mask) & (full - 1)
-            j = 0
-            while remaining:
-                if remaining & 1:
-                    next_mask = mask | (1 << j)
-                    candidate = base + cost[i][j]
-                    if candidate < dp[next_mask][j]:
-                        dp[next_mask][j] = candidate
-                remaining >>= 1
-                j += 1
-
-    best = min(dp[full - 1])
-    return 0.0 if best == inf else best
+# R2 (2026-05-03): the three sequence-aware lower-bound helpers were moved to
+# `synaps.solvers._lbbd_cuts` so that LBBD and LBBD-HD share a single source
+# of truth. The aliases below preserve the historical private names that
+# callers and tests already import from this module.
+_compute_machine_transition_floor = compute_machine_transition_floor
+_compute_sequence_independent_setup_lower_bound = (
+    compute_sequence_independent_setup_lower_bound
+)
+_compute_machine_tsp_lower_bound = compute_machine_tsp_lower_bound
 
 
 def _solve_master(

@@ -15,6 +15,7 @@ from synaps.model import (
     State,
     WorkCenter,
 )
+from synaps.solvers.lbbd_hd_solver import LbbdHdSolver
 from synaps.solvers.lbbd_solver import LbbdSolver
 from synaps.solvers.lbbd_solver import (
     _compute_machine_transition_floor as _compute_machine_transition_floor_plain,
@@ -214,6 +215,93 @@ def test_lbbd_metadata_exposes_lb_evolution_and_cut_kind_contribution() -> None:
         assert "lb_delta" in entry
         assert "cut_kinds_attributed" in entry
         assert isinstance(entry["cut_kinds_attributed"], list)
+
+
+def test_lbbd_hd_emits_machine_tsp_cut_for_small_state_pools() -> None:
+    """R1 (2026-05-03): LBBD-HD must prefer the sequence-aware machine_tsp
+    Bellman-Held-Karp cut over the legacy setup_cost floor on the same
+    A<->B sdst-dense fixture used by the standard LBBD regression. This is
+    the cross-solver parity check that ensures the two LBBD variants share
+    the same cut taxonomy.
+    """
+    problem = _make_setup_dense_problem()
+
+    result = LbbdHdSolver().solve(
+        problem,
+        max_iterations=4,
+        time_limit_s=20,
+        random_seed=42,
+        setup_relaxation=False,
+    )
+
+    assert result.status in {SolverStatus.FEASIBLE, SolverStatus.OPTIMAL, SolverStatus.TIMEOUT}
+    cut_kinds = result.metadata["cut_pool"]["kinds"]
+    assert cut_kinds.get("machine_tsp", 0) >= 1
+    assert cut_kinds.get("setup_cost", 0) == 0
+
+
+def test_lbbd_hd_metadata_exposes_master_lb_telemetry() -> None:
+    """R10 (2026-05-03): LBBD-HD now mirrors the standard LBBD's master-LB
+    telemetry contract — `lb_evolution`, `cut_kind_lb_contribution`, and
+    per-iteration `lb_delta` / `cut_kinds_attributed` must all be present.
+    """
+    problem = _make_setup_dense_problem()
+
+    result = LbbdHdSolver().solve(
+        problem,
+        max_iterations=6,
+        time_limit_s=20,
+        random_seed=42,
+        setup_relaxation=False,
+    )
+
+    metadata = result.metadata
+    lb_evolution = metadata["lb_evolution"]
+    assert isinstance(lb_evolution, list)
+    assert len(lb_evolution) == metadata["iterations"]
+    for previous_lb, next_lb in zip(lb_evolution, lb_evolution[1:]):
+        assert next_lb + 1e-6 >= previous_lb
+
+    contribution = metadata["cut_kind_lb_contribution"]
+    assert isinstance(contribution, dict)
+    valid_kinds = set(metadata["cut_pool"]["kinds"]) | {"master_relaxation"}
+    assert set(contribution).issubset(valid_kinds)
+    assert all(value >= 0.0 for value in contribution.values())
+
+    for entry in metadata["iteration_log"]:
+        assert "lb_delta" in entry
+        assert "cut_kinds_attributed" in entry
+        assert isinstance(entry["cut_kinds_attributed"], list)
+
+
+def test_lbbd_reports_skipped_duplicate_cuts_metadata() -> None:
+    """R3 (2026-05-03): the cut pool deduplication counter must be present
+    in metadata regardless of whether duplicates were observed on this run.
+    """
+    problem = _make_setup_dense_problem()
+
+    plain = LbbdSolver().solve(
+        problem,
+        max_iterations=4,
+        time_limit_s=20,
+        random_seed=42,
+        setup_relaxation=False,
+    )
+    hd = LbbdHdSolver().solve(
+        problem,
+        max_iterations=4,
+        time_limit_s=20,
+        random_seed=42,
+        setup_relaxation=False,
+    )
+
+    assert "skipped_duplicate" in plain.metadata["cut_pool"]
+    assert isinstance(plain.metadata["cut_pool"]["skipped_duplicate"], int)
+    assert plain.metadata["cut_pool"]["skipped_duplicate"] >= 0
+
+    assert "skipped_duplicate" in hd.metadata["cut_pool"]
+    assert isinstance(hd.metadata["cut_pool"]["skipped_duplicate"], int)
+    assert hd.metadata["cut_pool"]["skipped_duplicate"] >= 0
 
 
 def test_lbbd_reports_master_warm_start_iterations() -> None:

@@ -23,7 +23,6 @@ from __future__ import annotations
 import os
 import time
 from collections import defaultdict
-from collections.abc import Mapping
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
@@ -42,6 +41,12 @@ from synaps.model import (
     WorkCenter,
 )
 from synaps.solvers import BaseSolver
+from synaps.solvers._lbbd_cuts import (
+    compute_machine_transition_floor,
+    compute_machine_tsp_lower_bound,
+    compute_sequence_independent_setup_lower_bound,
+    cut_pool_fingerprint,
+)
 from synaps.solvers.cpsat_solver import CpSatSolver
 from synaps.solvers.partitioning import partition_machines
 
@@ -177,11 +182,40 @@ class LbbdHdSolver(BaseSolver):
         benders_cuts: list[_BendersCut] = []
         iteration_log: list[dict[str, Any]] = []
         master_warm_starts = 0
+        # R10 (2026-05-03): master-LB telemetry mirrors the standard LBBD
+        # solver. Each iteration records its master lower bound; the LB delta
+        # observed in iteration N is attributed to the cut kinds added in
+        # iteration N-1 (the cuts that are first active in master N).
+        lb_evolution: list[float] = []
+        prev_master_bound: float = 0.0
+        prev_iteration_cut_kinds: list[str] = []
+        # R3 (2026-05-03): cut-pool deduplication. Identical (kind,
+        # bottleneck_ops, rhs-rounded) fingerprints produce redundant HiGHS
+        # rows, which only inflate the master without tightening anything.
+        # The register helper is used directly for the inline nogood path;
+        # post-`_generate_all_cuts` we dedup the freshly produced cuts in
+        # bulk so the helper does not need to be threaded into the cut
+        # generator.
+        seen_cut_fingerprints: set[tuple[str, frozenset[UUID], float]] = set()
+        cuts_skipped_duplicate = 0
+
+        def _register_cut(cut: _BendersCut) -> bool:
+            nonlocal cuts_skipped_duplicate
+            fp = cut_pool_fingerprint(cut)
+            if fp in seen_cut_fingerprints:
+                cuts_skipped_duplicate += 1
+                return False
+            seen_cut_fingerprints.add(fp)
+            benders_cuts.append(cut)
+            return True
 
         for iteration in range(1, max_iterations + 1):
             elapsed = time.monotonic() - t0
             if elapsed >= time_limit_s:
                 break
+
+            cuts_before_iteration = len(benders_cuts)
+            cut_kinds_attributed_now = list(prev_iteration_cut_kinds)
 
             # ---- Master Problem (Measure 2: with precedence) ----
             if prev_assignment_map is not None:
@@ -209,8 +243,11 @@ class LbbdHdSolver(BaseSolver):
                 )
 
             assignment_map, master_bound = master_result
+            lb_delta = master_bound - prev_master_bound
+            lb_evolution.append(master_bound)
             lb = max(lb, master_bound)
             prev_assignment_map = assignment_map
+            prev_master_bound = master_bound
 
             # ---- Measure 1: Balanced partitioning ----
             clusters = partition_machines(
@@ -235,7 +272,7 @@ class LbbdHdSolver(BaseSolver):
 
             if sub_result is None:
                 # Subproblem infeasible → add nogood cut
-                benders_cuts.append(
+                _register_cut(
                     _BendersCut(
                         assignment_map=dict(assignment_map),
                         kind="nogood",
@@ -248,9 +285,14 @@ class LbbdHdSolver(BaseSolver):
                         "iteration": iteration,
                         "master_bound": master_bound,
                         "sub_makespan": None,
+                        "lb_delta": lb_delta,
+                        "cut_kinds_attributed": cut_kinds_attributed_now,
                         "status": "sub_infeasible",
                     }
                 )
+                prev_iteration_cut_kinds = [
+                    cut.kind for cut in benders_cuts[cuts_before_iteration:]
+                ]
                 continue
 
             sub_assignments, sub_makespan = sub_result
@@ -285,6 +327,8 @@ class LbbdHdSolver(BaseSolver):
                     "master_bound": master_bound,
                     "sub_makespan": sub_makespan,
                     "gap": (ub - lb) / max(ub, 1e-9),
+                    "lb_delta": lb_delta,
+                    "cut_kinds_attributed": cut_kinds_attributed_now,
                     "status": "feasible",
                     "cluster_count": len(clusters),
                     "max_cluster_ops": max(
@@ -303,9 +347,11 @@ class LbbdHdSolver(BaseSolver):
             # Convergence check
             gap = (best_ub - lb) / max(best_ub, 1e-9)
             if gap < gap_threshold:
+                prev_iteration_cut_kinds = []
                 break
 
             # ---- Generate Benders cuts ----
+            cuts_before_gen = len(benders_cuts)
             _generate_all_cuts(
                 problem, sub_assignments, assignment_map,
                 benders_cuts, sub_makespan, wc_by_id, ops_by_id,
@@ -314,6 +360,16 @@ class LbbdHdSolver(BaseSolver):
                 local_branching_delta_ratio=local_branching_delta_ratio,
                 local_branching_max_ops=local_branching_max_ops,
             )
+            # R3: bulk-dedup the cuts that `_generate_all_cuts` just produced
+            # so identical fingerprints from earlier iterations do not stack.
+            freshly_generated = benders_cuts[cuts_before_gen:]
+            del benders_cuts[cuts_before_gen:]
+            for fresh_cut in freshly_generated:
+                _register_cut(fresh_cut)
+
+            prev_iteration_cut_kinds = [
+                cut.kind for cut in benders_cuts[cuts_before_iteration:]
+            ]
 
         # ---- Build final result ----
         status = SolverStatus.FEASIBLE if best_assignments else SolverStatus.TIMEOUT
@@ -323,6 +379,27 @@ class LbbdHdSolver(BaseSolver):
             cut_kinds[cut.kind] = cut_kinds.get(cut.kind, 0) + 1
 
         reported_lb = min(lb, best_ub) if best_ub < float("inf") else lb
+
+        # R10 (2026-05-03): aggregate per-iteration LB deltas back to the cut
+        # kinds that drove them. Iteration-1 (no attributable cuts) and any
+        # post-convergence delta accrue to the synthetic master_relaxation
+        # source, mirroring the standard LBBD reporting.
+        cut_kind_lb_contribution: dict[str, float] = {}
+        for entry in iteration_log:
+            delta = float(entry.get("lb_delta", 0.0) or 0.0)
+            if delta <= 0.0:
+                continue
+            kinds = entry.get("cut_kinds_attributed") or []
+            if not kinds:
+                cut_kind_lb_contribution["master_relaxation"] = (
+                    cut_kind_lb_contribution.get("master_relaxation", 0.0) + delta
+                )
+                continue
+            share = delta / float(len(kinds))
+            for kind in kinds:
+                cut_kind_lb_contribution[kind] = (
+                    cut_kind_lb_contribution.get(kind, 0.0) + share
+                )
 
         return ScheduleResult(
             solver_name=self.name,
@@ -343,6 +420,8 @@ class LbbdHdSolver(BaseSolver):
                     "master_relaxation_lb": reported_lb,
                 },
                 "iteration_log": iteration_log,
+                "lb_evolution": lb_evolution,
+                "cut_kind_lb_contribution": cut_kind_lb_contribution,
                 "gap_threshold": gap_threshold,
                 "setup_relaxation": setup_relaxation,
                 "setup_cut_top_k": setup_cut_top_k,
@@ -356,6 +435,7 @@ class LbbdHdSolver(BaseSolver):
                 "cut_pool": {
                     "size": len(benders_cuts),
                     "kinds": cut_kinds,
+                    "skipped_duplicate": cuts_skipped_duplicate,
                 },
             },
         )
@@ -384,67 +464,15 @@ class _BendersCut:
         self.bottleneck_ops = bottleneck_ops
 
 
-def _compute_machine_transition_floor(
-    problem: ScheduleProblem,
-    eligible_by_op: dict[UUID, list[UUID]],
-    work_center_id: UUID,
-    setup_lookup: Mapping[tuple[UUID, UUID, UUID], float],
-) -> float:
-    """Return the strongest safe per-transition setup floor for the master."""
-
-    relevant_state_ids = {
-        operation.state_id
-        for operation in problem.operations
-        if work_center_id in eligible_by_op.get(operation.id, [])
-    }
-    if not relevant_state_ids:
-        return 0.0
-
-    min_transition = float("inf")
-    for from_state_id in relevant_state_ids:
-        for to_state_id in relevant_state_ids:
-            transition = float(
-                setup_lookup.get((work_center_id, from_state_id, to_state_id), 0.0)
-            )
-            if transition <= 0:
-                return 0.0
-            min_transition = min(min_transition, transition)
-
-    return 0.0 if min_transition == float("inf") else min_transition
-
-
-def _compute_sequence_independent_setup_lower_bound(
-    assignments: list[Assignment],
-    work_center_id: UUID,
-    ops_by_id: dict[UUID, Operation],
-    setup_lookup: Mapping[tuple[UUID, UUID, UUID], float],
-) -> float:
-    """Return a sequence-independent setup lower bound for a machine cluster."""
-
-    state_ids = [
-        operation.state_id
-        for assignment in assignments
-        if (operation := ops_by_id.get(assignment.operation_id)) is not None
-    ]
-    if len(state_ids) < 2:
-        return 0.0
-
-    distinct_state_ids = sorted(set(state_ids), key=str)
-    if len(distinct_state_ids) == 1:
-        state_id = distinct_state_ids[0]
-        self_setup = float(setup_lookup.get((work_center_id, state_id, state_id), 0.0))
-        return max(self_setup, 0.0) * float(len(state_ids) - 1)
-
-    min_cross_state_setup = min(
-        float(setup_lookup.get((work_center_id, from_state_id, to_state_id), 0.0))
-        for from_state_id in distinct_state_ids
-        for to_state_id in distinct_state_ids
-        if from_state_id != to_state_id
-    )
-    if min_cross_state_setup <= 0:
-        return 0.0
-
-    return min_cross_state_setup * float(len(distinct_state_ids) - 1)
+# R2 (2026-05-03): the sequence-aware lower-bound helpers were moved to
+# `synaps.solvers._lbbd_cuts` so that LBBD and LBBD-HD share a single source
+# of truth. The aliases below preserve the historical private names that
+# callers and tests already import from this module.
+_compute_machine_transition_floor = compute_machine_transition_floor
+_compute_sequence_independent_setup_lower_bound = (
+    compute_sequence_independent_setup_lower_bound
+)
+_compute_machine_tsp_lower_bound = compute_machine_tsp_lower_bound
 
 
 # ---------------------------------------------------------------------------
@@ -666,7 +694,13 @@ def _solve_precedence_aware_master(
                 np.array([cmax_idx], dtype=np.int32),
                 np.array([1.0]),
             )
-        elif cut.kind == "setup_cost":
+        elif cut.kind in ("setup_cost", "machine_tsp"):
+            # R1 (2026-05-03): machine_tsp shares the combinatorial Benders
+            # form of setup_cost (rhs = total_processing + L; LHS adds
+            # -p_i * y_{i,wc} so that any reassignment relaxes the bound by
+            # exactly the removed processing time). The sub-problem already
+            # encoded the choice of L (BHK for machine_tsp, sequence-independent
+            # floor for setup_cost), so the master row is identical.
             sc_indices = [cmax_idx]
             sc_coeffs = [1.0]
             total_p = 0.0
@@ -1346,16 +1380,38 @@ def _generate_all_cuts(
     for a in sub_assignments:
         assignments_by_machine[_assignment_sequence_key(a)].append(a)
 
-    machine_setup_profiles: list[tuple[float, set[UUID], float]] = []
+    # R1 (2026-05-03): prefer the sequence-aware machine_tsp Benders cut
+    # (Bellman-Held-Karp on the realised distinct state types per machine,
+    # Naderi & Roshanaei 2021) and only fall back to the legacy
+    # sequence-independent setup_cost floor when the BHK window does not
+    # apply (fewer than two distinct state types or more than max_states).
+    # Both cuts share the same combinatorial form, so a single profile list
+    # can carry either kind alongside its machine fingerprint.
+    machine_setup_profiles: list[tuple[float, set[UUID], float, str]] = []
     for (wc_id, _lane_id), m_assignments in assignments_by_machine.items():
         if len(m_assignments) < 2:
             continue
-        setup_lower_bound = _compute_sequence_independent_setup_lower_bound(
-            m_assignments,
+        machine_state_seq = [
+            ops_by_id[a.operation_id].state_id
+            for a in m_assignments
+            if a.operation_id in ops_by_id
+        ]
+        tsp_lower_bound = _compute_machine_tsp_lower_bound(
+            machine_state_seq,
             wc_id,
-            ops_by_id,
             setup_lookup,
         )
+        if tsp_lower_bound > 0:
+            setup_lower_bound = tsp_lower_bound
+            cut_kind = "machine_tsp"
+        else:
+            setup_lower_bound = _compute_sequence_independent_setup_lower_bound(
+                m_assignments,
+                wc_id,
+                ops_by_id,
+                setup_lookup,
+            )
+            cut_kind = "setup_cost"
         if setup_lower_bound <= 0:
             continue
         processing_total = sum(
@@ -1372,10 +1428,11 @@ def _generate_all_cuts(
                 setup_lower_bound,
                 {a.operation_id for a in m_assignments},
                 processing_total + setup_lower_bound,
+                cut_kind,
             )
         )
 
-    for _setup_total, setup_ops, setup_rhs in sorted(
+    for _setup_total, setup_ops, setup_rhs, cut_kind in sorted(
         machine_setup_profiles,
         key=lambda item: item[0],
         reverse=True,
@@ -1383,7 +1440,7 @@ def _generate_all_cuts(
         benders_cuts.append(
             _BendersCut(
                 assignment_map=dict(assignment_map),
-                kind="setup_cost",
+                kind=cut_kind,
                 rhs=setup_rhs,
                 bottleneck_ops=setup_ops,
             )
