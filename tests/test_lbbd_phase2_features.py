@@ -20,6 +20,9 @@ from synaps.solvers.lbbd_solver import (
     _compute_machine_transition_floor as _compute_machine_transition_floor_plain,
 )
 from synaps.solvers.lbbd_solver import (
+    _compute_machine_tsp_lower_bound as _compute_machine_tsp_lb_plain,
+)
+from synaps.solvers.lbbd_solver import (
     _compute_sequence_independent_setup_lower_bound as _compute_setup_lb_plain,
 )
 from synaps.solvers.lbbd_hd_solver import (
@@ -89,7 +92,11 @@ def _make_setup_dense_problem() -> ScheduleProblem:
     )
 
 
-def test_setup_cost_cuts_are_exposed_in_metadata() -> None:
+def test_machine_tsp_cut_replaces_setup_cost_for_small_state_pools() -> None:
+    """Standard LBBD should prefer the sequence-aware machine_tsp cut over the
+    sequence-independent setup_cost floor when the realised distinct state
+    count fits Bellman-Held-Karp (≤12 by default).
+    """
     problem = _make_setup_dense_problem()
 
     result = LbbdSolver().solve(
@@ -101,8 +108,112 @@ def test_setup_cost_cuts_are_exposed_in_metadata() -> None:
     )
 
     assert result.status in {SolverStatus.FEASIBLE, SolverStatus.OPTIMAL, SolverStatus.TIMEOUT}
-    assert result.metadata["cut_pool"]["kinds"].get("setup_cost", 0) >= 1
-    assert result.metadata["cut_pool"]["kinds"].get("critical_path", 0) >= 1
+    cut_kinds = result.metadata["cut_pool"]["kinds"]
+    # setup_cost is the legacy floor; machine_tsp is the dominating Naderi &
+    # Roshanaei (2021) cut. On small state pools the latter must be active and
+    # the former must not be emitted (machine_tsp dominates and short-circuits
+    # the sequence-independent fallback in the same iteration).
+    assert cut_kinds.get("machine_tsp", 0) >= 1
+    assert cut_kinds.get("setup_cost", 0) == 0
+    assert cut_kinds.get("critical_path", 0) >= 1
+
+
+def test_machine_tsp_lower_bound_dominates_sequence_independent_floor() -> None:
+    """For any realised state set within the Bellman-Held-Karp window, the
+    machine-TSP setup bound must be at least as tight as the sequence-
+    independent floor used by the legacy setup_cost cut.
+    """
+    problem = _make_setup_dense_problem()
+    work_center = problem.work_centers[0]
+    ops_by_id = {operation.id: operation for operation in problem.operations}
+    assignments = [
+        Assignment(
+            operation_id=operation.id,
+            work_center_id=work_center.id,
+            start_time=HORIZON_START + timedelta(minutes=index * 25),
+            end_time=HORIZON_START + timedelta(minutes=index * 25 + 20),
+        )
+        for index, operation in enumerate(problem.operations)
+    ]
+    setup_lookup = {
+        (entry.work_center_id, entry.from_state_id, entry.to_state_id): entry.setup_minutes
+        for entry in problem.setup_matrix
+    }
+    state_seq = [
+        ops_by_id[assignment.operation_id].state_id for assignment in assignments
+    ]
+
+    tsp_bound = _compute_machine_tsp_lb_plain(state_seq, work_center.id, setup_lookup)
+    seq_independent_bound = _compute_setup_lb_plain(
+        assignments, work_center.id, ops_by_id, setup_lookup
+    )
+
+    assert tsp_bound >= seq_independent_bound
+    # On A↔B↔A with sdst = 5 in both directions, BHK yields exactly one
+    # transition's worth of setup (the path is A→B with cost 5 or B→A with
+    # cost 5), matching the legacy floor of 5.0 for two distinct states.
+    assert tsp_bound == 5.0
+
+
+def test_machine_tsp_lower_bound_returns_zero_above_max_states() -> None:
+    """machine_tsp bound must short-circuit to 0.0 when the distinct state
+    count exceeds the Bellman-Held-Karp ceiling, so the caller can fall back
+    to the sequence-independent floor.
+    """
+    work_center_id = uuid4()
+    state_ids = [uuid4() for _ in range(13)]
+    setup_lookup: dict[tuple, float] = {}
+    for from_state in state_ids:
+        for to_state in state_ids:
+            if from_state != to_state:
+                setup_lookup[(work_center_id, from_state, to_state)] = 5.0
+
+    bound = _compute_machine_tsp_lb_plain(state_ids, work_center_id, setup_lookup)
+
+    assert bound == 0.0
+
+
+def test_lbbd_metadata_exposes_lb_evolution_and_cut_kind_contribution() -> None:
+    """Master-LB telemetry must surface the per-iteration LB trajectory and
+    the cut-kind attribution sums so reviewers can quantify which cuts
+    actually moved the lower bound (arXiv 2504.16106 reporting style).
+    """
+    problem = _make_setup_dense_problem()
+
+    result = LbbdSolver().solve(
+        problem,
+        max_iterations=6,
+        time_limit_s=20,
+        random_seed=42,
+        setup_relaxation=False,
+    )
+
+    metadata = result.metadata
+    assert "lb_evolution" in metadata
+    assert "cut_kind_lb_contribution" in metadata
+
+    lb_evolution = metadata["lb_evolution"]
+    assert isinstance(lb_evolution, list)
+    assert len(lb_evolution) == metadata["iterations"]
+    assert all(isinstance(value, (int, float)) for value in lb_evolution)
+    # LB cannot strictly decrease across iterations: each new master is
+    # solved with at least as many cuts as the previous one.
+    for previous_lb, next_lb in zip(lb_evolution, lb_evolution[1:]):
+        assert next_lb + 1e-6 >= previous_lb
+
+    contribution = metadata["cut_kind_lb_contribution"]
+    assert isinstance(contribution, dict)
+    # Every reported contribution key must come from the cut pool, the
+    # synthetic master_relaxation source, or be a known cut kind.
+    valid_kinds = set(metadata["cut_pool"]["kinds"]) | {"master_relaxation"}
+    assert set(contribution).issubset(valid_kinds)
+    assert all(value >= 0.0 for value in contribution.values())
+
+    # Per-iteration entries must record the new attribution fields too.
+    for entry in metadata["iteration_log"]:
+        assert "lb_delta" in entry
+        assert "cut_kinds_attributed" in entry
+        assert isinstance(entry["cut_kinds_attributed"], list)
 
 
 def test_lbbd_reports_master_warm_start_iterations() -> None:

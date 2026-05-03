@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import time
 from collections import defaultdict
+from collections.abc import Mapping
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
@@ -96,6 +97,14 @@ class LbbdSolver(BaseSolver):
         iteration_log: list[dict[str, Any]] = []
         prev_assignment_map: dict[UUID, UUID] | None = None
         master_warm_start_iterations = 0
+        # Master-LB telemetry: each entry of `lb_evolution` is the master
+        # lower bound observed in that iteration. `prev_iteration_cut_kinds`
+        # carries the kinds of cuts added in iteration N-1, which are the
+        # ones whose effect is realised by the master solve in iteration N
+        # (and therefore the ones to attribute the LB delta to).
+        lb_evolution: list[float] = []
+        prev_master_bound: float = 0.0
+        prev_iteration_cut_kinds: list[str] = []
 
         min_setup_by_wc: dict[UUID, float] = {}
         if setup_relaxation:
@@ -133,6 +142,9 @@ class LbbdSolver(BaseSolver):
             if elapsed >= time_limit_s:
                 break
 
+            cuts_before_iteration = len(benders_cuts)
+            cut_kinds_attributed_now = list(prev_iteration_cut_kinds)
+
             # --- Master Problem ---
             if prev_assignment_map is not None:
                 master_warm_start_iterations += 1
@@ -154,8 +166,11 @@ class LbbdSolver(BaseSolver):
                 )
 
             assignment_map, master_bound = master_result
+            lb_delta = master_bound - prev_master_bound
+            lb_evolution.append(master_bound)
             lb = max(lb, master_bound)
             prev_assignment_map = assignment_map
+            prev_master_bound = master_bound
 
             # --- Subproblems (one CP-SAT per machine cluster) ---
             clusters = _cluster_machines(assignment_map, aux_links)
@@ -199,9 +214,14 @@ class LbbdSolver(BaseSolver):
                         "iteration": iteration,
                         "master_bound": master_bound,
                         "sub_makespan": None,
+                        "lb_delta": lb_delta,
+                        "cut_kinds_attributed": cut_kinds_attributed_now,
                         "status": "sub_infeasible",
                     }
                 )
+                prev_iteration_cut_kinds = [
+                    cut.kind for cut in benders_cuts[cuts_before_iteration:]
+                ]
                 continue
 
             ub = sub_makespan
@@ -225,6 +245,8 @@ class LbbdSolver(BaseSolver):
                     "master_bound": master_bound,
                     "sub_makespan": sub_makespan,
                     "gap": (ub - lb) / max(ub, 1e-9),
+                    "lb_delta": lb_delta,
+                    "cut_kinds_attributed": cut_kinds_attributed_now,
                     "status": "feasible",
                 }
             )
@@ -232,6 +254,7 @@ class LbbdSolver(BaseSolver):
             # --- Convergence check ---
             gap = (best_ub - lb) / max(best_ub, 1e-9)
             if gap < gap_threshold:
+                prev_iteration_cut_kinds = []
                 break
 
             # --- Generate Benders cut ---
@@ -258,14 +281,11 @@ class LbbdSolver(BaseSolver):
             for work_center_id, machine_assignments in assignments_by_machine.items():
                 if len(machine_assignments) < 2:
                     continue
-                setup_lower_bound = _compute_sequence_independent_setup_lower_bound(
-                    machine_assignments,
-                    work_center_id,
-                    ops_by_id,
-                    setup_lookup,
-                )
-                if setup_lower_bound <= 0:
-                    continue
+                machine_state_seq = [
+                    operation.state_id
+                    for assignment in machine_assignments
+                    if (operation := ops_by_id.get(assignment.operation_id)) is not None
+                ]
                 processing_total = sum(
                     max(
                         1.0,
@@ -274,6 +294,36 @@ class LbbdSolver(BaseSolver):
                     )
                     for assignment in machine_assignments
                 )
+                # Prefer the sequence-aware machine-TSP lower bound when the
+                # realised distinct state count is small enough for exact
+                # Bellman-Held-Karp; otherwise fall back to the sequence-
+                # independent floor used historically by `setup_cost`.
+                tsp_setup_bound = _compute_machine_tsp_lower_bound(
+                    machine_state_seq,
+                    work_center_id,
+                    setup_lookup,
+                )
+                if tsp_setup_bound > 0:
+                    benders_cuts.append(
+                        _BendersCut(
+                            assignment_map=dict(assignment_map),
+                            kind="machine_tsp",
+                            rhs=processing_total + tsp_setup_bound,
+                            bottleneck_ops={
+                                assignment.operation_id for assignment in machine_assignments
+                            },
+                        )
+                    )
+                    continue
+
+                setup_lower_bound = _compute_sequence_independent_setup_lower_bound(
+                    machine_assignments,
+                    work_center_id,
+                    ops_by_id,
+                    setup_lookup,
+                )
+                if setup_lower_bound <= 0:
+                    continue
                 benders_cuts.append(
                     _BendersCut(
                         assignment_map=dict(assignment_map),
@@ -322,6 +372,10 @@ class LbbdSolver(BaseSolver):
                     )
                 )
 
+            prev_iteration_cut_kinds = [
+                cut.kind for cut in benders_cuts[cuts_before_iteration:]
+            ]
+
         status = SolverStatus.FEASIBLE if best_assignments else SolverStatus.TIMEOUT
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         cut_kinds: dict[str, int] = {}
@@ -333,6 +387,29 @@ class LbbdSolver(BaseSolver):
         # signaling convergence. Report min(lb, best_ub) so consumers
         # always see lb <= ub.
         reported_lb = min(lb, best_ub) if best_ub < float("inf") else lb
+
+        # Aggregate per-iteration LB deltas back to the cut kinds that drove
+        # them. The delta seen in iteration N is attributable to the cuts
+        # generated in iteration N-1 (which are the ones first acting on the
+        # master in iteration N). Mixed-kind iterations split the share
+        # equally; iterations with no attributed cuts (typically the very
+        # first one) accrue to the unprimed master relaxation.
+        cut_kind_lb_contribution: dict[str, float] = {}
+        for entry in iteration_log:
+            delta = float(entry.get("lb_delta", 0.0) or 0.0)
+            if delta <= 0.0:
+                continue
+            kinds = entry.get("cut_kinds_attributed") or []
+            if not kinds:
+                cut_kind_lb_contribution["master_relaxation"] = (
+                    cut_kind_lb_contribution.get("master_relaxation", 0.0) + delta
+                )
+                continue
+            share = delta / float(len(kinds))
+            for kind in kinds:
+                cut_kind_lb_contribution[kind] = (
+                    cut_kind_lb_contribution.get(kind, 0.0) + share
+                )
 
         return ScheduleResult(
             solver_name=self.name,
@@ -351,6 +428,8 @@ class LbbdSolver(BaseSolver):
                     "master_relaxation_lb": reported_lb,
                 },
                 "iteration_log": iteration_log,
+                "lb_evolution": lb_evolution,
+                "cut_kind_lb_contribution": cut_kind_lb_contribution,
                 "gap_threshold": gap_threshold,
                 "setup_relaxation": setup_relaxation,
                 "master_warm_start_iterations": master_warm_start_iterations,
@@ -391,7 +470,7 @@ def _compute_machine_transition_floor(
     problem: ScheduleProblem,
     eligible_by_op: dict[UUID, list[UUID]],
     work_center_id: UUID,
-    setup_lookup: dict[tuple[UUID, UUID, UUID], float],
+    setup_lookup: Mapping[tuple[UUID, UUID, UUID], float],
 ) -> float:
     """Return the strongest safe per-transition setup floor for the master.
 
@@ -425,7 +504,7 @@ def _compute_sequence_independent_setup_lower_bound(
     assignments: list[Assignment],
     work_center_id: UUID,
     ops_by_id: dict[UUID, Operation],
-    setup_lookup: dict[tuple[UUID, UUID, UUID], float],
+    setup_lookup: Mapping[tuple[UUID, UUID, UUID], float],
 ) -> float:
     """Return a sequence-independent setup lower bound for a machine cluster."""
 
@@ -453,6 +532,77 @@ def _compute_sequence_independent_setup_lower_bound(
         return 0.0
 
     return min_cross_state_setup * float(len(distinct_state_ids) - 1)
+
+
+def _compute_machine_tsp_lower_bound(
+    state_ids: list[UUID],
+    work_center_id: UUID,
+    setup_lookup: Mapping[tuple[UUID, UUID, UUID], float],
+    *,
+    max_states: int = 12,
+) -> float:
+    """Sequence-aware setup lower bound on a single machine.
+
+    Solves the asymmetric Hamiltonian-path problem on the realised distinct
+    state types via Bellman-Held-Karp dynamic programming. The result is the
+    minimum cumulative setup time for any visit order of those state types
+    under the work-center-local sdst matrix and is therefore a valid lower
+    bound on the actual sequence-dependent setup contribution to the
+    machine's makespan, dominating the sequence-independent floor used by
+    `_compute_sequence_independent_setup_lower_bound`.
+
+    Falls back to 0.0 when the distinct state count exceeds `max_states`
+    (12 by default; BHK cost is O(n^2 * 2^n)) or when fewer than two state
+    types are present.
+
+    Reference: Naderi & Roshanaei (2021), "Critical-Path-Search Logic-Based
+    Benders Decomposition Approaches for Flexible Job Shop Scheduling",
+    INFORMS Journal on Optimization 4(1).
+    """
+
+    if len(state_ids) < 2:
+        return 0.0
+
+    distinct = list(dict.fromkeys(state_ids))
+    n = len(distinct)
+    if n < 2 or n > max_states:
+        return 0.0
+
+    inf = float("inf")
+    cost: list[list[float]] = [[inf] * n for _ in range(n)]
+    for i, from_state in enumerate(distinct):
+        for j, to_state in enumerate(distinct):
+            if i == j:
+                continue
+            cost[i][j] = float(
+                setup_lookup.get((work_center_id, from_state, to_state), 0.0)
+            )
+
+    full = 1 << n
+    dp: list[list[float]] = [[inf] * n for _ in range(full)]
+    for i in range(n):
+        dp[1 << i][i] = 0.0
+
+    for mask in range(1, full):
+        for i in range(n):
+            if not (mask >> i) & 1:
+                continue
+            base = dp[mask][i]
+            if base == inf:
+                continue
+            remaining = (~mask) & (full - 1)
+            j = 0
+            while remaining:
+                if remaining & 1:
+                    next_mask = mask | (1 << j)
+                    candidate = base + cost[i][j]
+                    if candidate < dp[next_mask][j]:
+                        dp[next_mask][j] = candidate
+                remaining >>= 1
+                j += 1
+
+    best = min(dp[full - 1])
+    return 0.0 if best == inf else best
 
 
 def _solve_master(
@@ -679,6 +829,45 @@ def _solve_master(
                     len(critical_cut_indices),
                     np.array(critical_cut_indices, dtype=np.int32),
                     np.array(critical_cut_coeffs),
+                )
+        elif cut.kind == "machine_tsp":
+            # Sequence-aware setup cut (Naderi & Roshanaei 2021):
+            # C_max + Σ_{i ∈ S_m} p_{i,m} · (1 − y[i, m]) ≥ Σ_{i ∈ S_m} p_{i,m} + L_TSP(S_m)
+            # where L_TSP is the Bellman-Held-Karp lower bound on the realised
+            # state-type Hamiltonian path. Same shape as `setup_cost`, but
+            # with a strictly tighter rhs.
+            tsp_cut_indices = [cmax_idx]
+            tsp_cut_coeffs = [1.0]
+            total_processing = 0.0
+            for op_id in cut.bottleneck_ops:
+                tsp_cut_wc_id = cut.assignment_map.get(op_id)
+                if tsp_cut_wc_id is None:
+                    continue
+                key = (op_id, tsp_cut_wc_id)
+                if key not in var_index:
+                    continue
+                tsp_cut_wc = wc_by_id.get(tsp_cut_wc_id)
+                tsp_cut_op = next(
+                    (operation for operation in problem.operations if operation.id == op_id),
+                    None,
+                )
+                if tsp_cut_wc is None or tsp_cut_op is None:
+                    continue
+                processing_time = max(
+                    1.0,
+                    tsp_cut_op.base_duration_min / tsp_cut_wc.speed_factor,
+                )
+                total_processing += processing_time
+                tsp_cut_indices.append(var_index[key])
+                tsp_cut_coeffs.append(-processing_time)
+            if len(tsp_cut_indices) > 1:
+                rhs_val = cut.rhs - total_processing
+                h.addRow(
+                    rhs_val,
+                    highspy.kHighsInf,
+                    len(tsp_cut_indices),
+                    np.array(tsp_cut_indices, dtype=np.int32),
+                    np.array(tsp_cut_coeffs),
                 )
 
     # Solve
