@@ -506,11 +506,32 @@ class _BendersCut:
 # `synaps.solvers._lbbd_cuts` so that LBBD and LBBD-HD share a single source
 # of truth. The aliases below preserve the historical private names that
 # callers and tests already import from this module.
-_compute_machine_transition_floor = compute_machine_transition_floor
-_compute_sequence_independent_setup_lower_bound = (
-    compute_sequence_independent_setup_lower_bound
+import warnings
+
+def _deprecated_alias(name: str, fn):  # type: ignore[no-untyped-def]
+    """Emit DeprecationWarning on first access to deprecated alias."""
+
+    def wrapper(*args, **kwargs):  # type: ignore[no-untyped-def]
+        warnings.warn(
+            f"{name} is deprecated; import from synaps.solvers._lbbd_cuts directly",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+_compute_machine_transition_floor = _deprecated_alias(
+    "_compute_machine_transition_floor", compute_machine_transition_floor
 )
-_compute_machine_tsp_lower_bound = compute_machine_tsp_lower_bound
+_compute_sequence_independent_setup_lower_bound = _deprecated_alias(
+    "_compute_sequence_independent_setup_lower_bound",
+    compute_sequence_independent_setup_lower_bound,
+)
+_compute_machine_tsp_lower_bound = _deprecated_alias(
+    "_compute_machine_tsp_lower_bound", compute_machine_tsp_lower_bound
+)
 
 
 def _solve_master(
