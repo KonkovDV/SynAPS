@@ -36,7 +36,10 @@ ARTIFACT_DIR = Path(__file__).resolve().parent
 # R5: single fixture with setup matrix stress pattern. medium_20x10 excluded
 # because CP-SAT subproblems stall under the default sub_time_limit_s
 # derived from time_limit_s // max_iterations.
-INSTANCE_NAMES = ["medium_stress_20x4"]
+INSTANCE_NAMES = [
+    "medium_stress_20x4",
+    "medium_4state_tsp_dominance_16x4",  # R5-extension: 4-state asymmetric setup for TSP strict dominance
+]
 TIME_LIMIT_S = 20
 MAX_ITERATIONS = 10
 RANDOM_SEED = 42

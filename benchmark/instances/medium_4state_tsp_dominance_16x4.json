@@ -1,0 +1,950 @@
+{
+  "states": [
+    {
+      "id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "code": "RAW",
+      "label": "Raw material"
+    },
+    {
+      "id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "code": "MACHINED",
+      "label": "Machined part"
+    },
+    {
+      "id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "code": "COATED",
+      "label": "Coated part"
+    },
+    {
+      "id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "code": "FINISHED",
+      "label": "Finished part"
+    }
+  ],
+  "work_centers": [
+    {
+      "id": "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+      "code": "MILL",
+      "label": "CNC Milling",
+      "capability_group": "machining",
+      "speed_factor": 1.0
+    },
+    {
+      "id": "36f2eac1-902c-4d50-a6c3-6a524bedd73f",
+      "code": "LATHE",
+      "label": "CNC Lathe",
+      "capability_group": "machining",
+      "speed_factor": 1.1
+    },
+    {
+      "id": "06eb918b-a722-468b-8707-fd7836389b23",
+      "code": "PAINT",
+      "label": "Paint Booth",
+      "capability_group": "finishing",
+      "speed_factor": 0.9
+    },
+    {
+      "id": "c3c8d614-7483-4c05-b1e0-b0210d352b4c",
+      "code": "ASSEMBLY",
+      "label": "Assembly Line",
+      "capability_group": "assembly",
+      "speed_factor": 1.0
+    }
+  ],
+  "machines": [
+    {
+      "id": "2f6780c6-1f84-480e-bcbe-48d5c4fd6af4",
+      "work_center_id": "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+      "code": "MILL-01"
+    },
+    {
+      "id": "ad9197c4-4d79-4f6d-baf0-1509d53d4200",
+      "work_center_id": "36f2eac1-902c-4d50-a6c3-6a524bedd73f",
+      "code": "LATHE-01"
+    },
+    {
+      "id": "1fb7b733-799f-4537-80db-2f934482c1a7",
+      "work_center_id": "06eb918b-a722-468b-8707-fd7836389b23",
+      "code": "PAINT-01"
+    },
+    {
+      "id": "671fad95-249f-488c-ad33-1b791e4090d1",
+      "work_center_id": "c3c8d614-7483-4c05-b1e0-b0210d352b4c",
+      "code": "ASM-01"
+    }
+  ],
+  "setup_matrix": [
+    {
+      "id": "1a272d13-3ff5-42a3-83ea-43285fabecd3",
+      "work_center_id": "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+      "from_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "to_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "setup_minutes": 0
+    },
+    {
+      "id": "6d5b8f58-0f15-4c88-85e2-8e804d73a2a6",
+      "work_center_id": "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+      "from_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "to_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "setup_minutes": 10
+    },
+    {
+      "id": "253ef330-8870-4ce6-87ab-6733a48ab2c2",
+      "work_center_id": "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+      "from_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "to_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "setup_minutes": 25
+    },
+    {
+      "id": "49bf03f7-498c-4287-ad64-6b8fec786672",
+      "work_center_id": "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+      "from_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "to_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "setup_minutes": 35
+    },
+    {
+      "id": "f3828491-777d-4846-a71f-6b5a1879c310",
+      "work_center_id": "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+      "from_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "to_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "setup_minutes": 15
+    },
+    {
+      "id": "a9a29c2e-921d-4bec-8bfe-6f7b463bf70b",
+      "work_center_id": "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+      "from_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "to_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "setup_minutes": 0
+    },
+    {
+      "id": "39f6cc6b-b387-412d-b26f-414bfc327c0f",
+      "work_center_id": "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+      "from_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "to_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "setup_minutes": 8
+    },
+    {
+      "id": "9ab96d8c-81ed-4d6e-840c-7d54bc3c8852",
+      "work_center_id": "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+      "from_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "to_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "setup_minutes": 20
+    },
+    {
+      "id": "c49530d9-58f3-4709-bd95-9c4f2b76c413",
+      "work_center_id": "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+      "from_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "to_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "setup_minutes": 30
+    },
+    {
+      "id": "e09ccd41-0150-4ed4-a4b7-90f5c6c0ccd0",
+      "work_center_id": "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+      "from_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "to_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "setup_minutes": 18
+    },
+    {
+      "id": "baf3463a-4f21-4f22-90bf-3745e9d81cd7",
+      "work_center_id": "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+      "from_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "to_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "setup_minutes": 0
+    },
+    {
+      "id": "5d57bb9f-b091-432e-b9d8-0d90a0c23e64",
+      "work_center_id": "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+      "from_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "to_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "setup_minutes": 5
+    },
+    {
+      "id": "f50c48d1-f562-43e7-acfc-cb5edacc5f30",
+      "work_center_id": "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+      "from_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "to_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "setup_minutes": 40
+    },
+    {
+      "id": "448fe593-95f2-4ded-8356-1d0bd73e9161",
+      "work_center_id": "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+      "from_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "to_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "setup_minutes": 22
+    },
+    {
+      "id": "98ecdeb7-fc0e-4473-8cd4-f9f90dd4f282",
+      "work_center_id": "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+      "from_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "to_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "setup_minutes": 12
+    },
+    {
+      "id": "93bebb6b-bee0-45fa-9bcb-fcb3c7b1ea48",
+      "work_center_id": "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+      "from_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "to_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "setup_minutes": 0
+    },
+    {
+      "id": "14f9db04-4079-43a1-8720-28aeb8769682",
+      "work_center_id": "36f2eac1-902c-4d50-a6c3-6a524bedd73f",
+      "from_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "to_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "setup_minutes": 0
+    },
+    {
+      "id": "b0fcf420-f005-48e1-946f-f8127c72195b",
+      "work_center_id": "36f2eac1-902c-4d50-a6c3-6a524bedd73f",
+      "from_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "to_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "setup_minutes": 10
+    },
+    {
+      "id": "548a1433-fdd1-48fe-ab49-3091df20afd0",
+      "work_center_id": "36f2eac1-902c-4d50-a6c3-6a524bedd73f",
+      "from_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "to_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "setup_minutes": 25
+    },
+    {
+      "id": "94e80883-43b8-4f5a-8149-e730c77bbbbe",
+      "work_center_id": "36f2eac1-902c-4d50-a6c3-6a524bedd73f",
+      "from_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "to_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "setup_minutes": 35
+    },
+    {
+      "id": "dc37eedb-9d71-4764-8cb7-357ce9c67183",
+      "work_center_id": "36f2eac1-902c-4d50-a6c3-6a524bedd73f",
+      "from_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "to_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "setup_minutes": 15
+    },
+    {
+      "id": "50d00623-2380-4d45-841a-1bd6c0252f21",
+      "work_center_id": "36f2eac1-902c-4d50-a6c3-6a524bedd73f",
+      "from_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "to_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "setup_minutes": 0
+    },
+    {
+      "id": "cddf3f0a-201b-4a71-a18d-67f39065ac24",
+      "work_center_id": "36f2eac1-902c-4d50-a6c3-6a524bedd73f",
+      "from_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "to_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "setup_minutes": 8
+    },
+    {
+      "id": "40c88fa9-b8ae-435d-a098-36e8bfcfba3f",
+      "work_center_id": "36f2eac1-902c-4d50-a6c3-6a524bedd73f",
+      "from_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "to_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "setup_minutes": 20
+    },
+    {
+      "id": "12fce187-8e1f-4b3c-b112-11b3dfe31ef4",
+      "work_center_id": "36f2eac1-902c-4d50-a6c3-6a524bedd73f",
+      "from_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "to_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "setup_minutes": 30
+    },
+    {
+      "id": "6d6acf1c-2d85-4c9c-9a1f-a210b762de78",
+      "work_center_id": "36f2eac1-902c-4d50-a6c3-6a524bedd73f",
+      "from_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "to_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "setup_minutes": 18
+    },
+    {
+      "id": "7ade7d2d-04c5-4497-bcde-abfea885b9c0",
+      "work_center_id": "36f2eac1-902c-4d50-a6c3-6a524bedd73f",
+      "from_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "to_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "setup_minutes": 0
+    },
+    {
+      "id": "01517066-0a58-4524-a32b-2492bf6d6003",
+      "work_center_id": "36f2eac1-902c-4d50-a6c3-6a524bedd73f",
+      "from_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "to_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "setup_minutes": 5
+    },
+    {
+      "id": "de7b52fb-303f-4b91-bcfa-0a77f61c59d4",
+      "work_center_id": "36f2eac1-902c-4d50-a6c3-6a524bedd73f",
+      "from_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "to_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "setup_minutes": 40
+    },
+    {
+      "id": "b79b22bb-18fb-46a1-95e7-f89848edd127",
+      "work_center_id": "36f2eac1-902c-4d50-a6c3-6a524bedd73f",
+      "from_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "to_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "setup_minutes": 22
+    },
+    {
+      "id": "03247b28-b53d-40d4-9449-27d860d46c9e",
+      "work_center_id": "36f2eac1-902c-4d50-a6c3-6a524bedd73f",
+      "from_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "to_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "setup_minutes": 12
+    },
+    {
+      "id": "30ffd326-0ffd-4a4a-88b0-e3299cdcd139",
+      "work_center_id": "36f2eac1-902c-4d50-a6c3-6a524bedd73f",
+      "from_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "to_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "setup_minutes": 0
+    },
+    {
+      "id": "615f0663-b9a0-4077-8bde-a1a7a61b2ac6",
+      "work_center_id": "06eb918b-a722-468b-8707-fd7836389b23",
+      "from_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "to_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "setup_minutes": 0
+    },
+    {
+      "id": "919bcacc-600c-425a-ad3e-d8d1aaa38a80",
+      "work_center_id": "06eb918b-a722-468b-8707-fd7836389b23",
+      "from_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "to_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "setup_minutes": 10
+    },
+    {
+      "id": "249303bd-3294-4f22-9b3a-fbeca976ebbe",
+      "work_center_id": "06eb918b-a722-468b-8707-fd7836389b23",
+      "from_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "to_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "setup_minutes": 25
+    },
+    {
+      "id": "7eb274ac-9984-4af1-a19a-27b051a9a537",
+      "work_center_id": "06eb918b-a722-468b-8707-fd7836389b23",
+      "from_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "to_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "setup_minutes": 35
+    },
+    {
+      "id": "36899a94-152c-46d2-9686-5e1705244d05",
+      "work_center_id": "06eb918b-a722-468b-8707-fd7836389b23",
+      "from_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "to_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "setup_minutes": 15
+    },
+    {
+      "id": "f2ecb22c-be71-4819-8b33-1cf70eda4a32",
+      "work_center_id": "06eb918b-a722-468b-8707-fd7836389b23",
+      "from_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "to_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "setup_minutes": 0
+    },
+    {
+      "id": "f649c656-7714-4f0e-ac76-e9966ac25d3c",
+      "work_center_id": "06eb918b-a722-468b-8707-fd7836389b23",
+      "from_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "to_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "setup_minutes": 8
+    },
+    {
+      "id": "40f4bcf4-6f5e-47ca-ad90-cb7cceae14fc",
+      "work_center_id": "06eb918b-a722-468b-8707-fd7836389b23",
+      "from_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "to_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "setup_minutes": 20
+    },
+    {
+      "id": "8cd46a59-641e-4639-a08b-c17c60599ae4",
+      "work_center_id": "06eb918b-a722-468b-8707-fd7836389b23",
+      "from_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "to_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "setup_minutes": 30
+    },
+    {
+      "id": "89ca7133-9085-46e1-b709-296da1280006",
+      "work_center_id": "06eb918b-a722-468b-8707-fd7836389b23",
+      "from_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "to_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "setup_minutes": 18
+    },
+    {
+      "id": "43cb173a-edb2-42da-a0e3-1ed68371cd84",
+      "work_center_id": "06eb918b-a722-468b-8707-fd7836389b23",
+      "from_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "to_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "setup_minutes": 0
+    },
+    {
+      "id": "70dad6d6-2949-43e3-84ab-dfab9c916366",
+      "work_center_id": "06eb918b-a722-468b-8707-fd7836389b23",
+      "from_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "to_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "setup_minutes": 5
+    },
+    {
+      "id": "450eddbe-ff01-4254-a1c9-8bfa2ab8905b",
+      "work_center_id": "06eb918b-a722-468b-8707-fd7836389b23",
+      "from_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "to_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "setup_minutes": 40
+    },
+    {
+      "id": "1a533720-2883-43bf-bc64-4fe687e580fb",
+      "work_center_id": "06eb918b-a722-468b-8707-fd7836389b23",
+      "from_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "to_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "setup_minutes": 22
+    },
+    {
+      "id": "54b2f1e6-8449-4474-8e76-61d356e567fe",
+      "work_center_id": "06eb918b-a722-468b-8707-fd7836389b23",
+      "from_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "to_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "setup_minutes": 12
+    },
+    {
+      "id": "a87c4578-0674-45bd-8738-cb7675a87ed1",
+      "work_center_id": "06eb918b-a722-468b-8707-fd7836389b23",
+      "from_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "to_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "setup_minutes": 0
+    },
+    {
+      "id": "14a38497-f3c2-47b1-b61e-9979db99b551",
+      "work_center_id": "c3c8d614-7483-4c05-b1e0-b0210d352b4c",
+      "from_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "to_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "setup_minutes": 0
+    },
+    {
+      "id": "13f67461-a10d-4582-8a01-34f1cc68c333",
+      "work_center_id": "c3c8d614-7483-4c05-b1e0-b0210d352b4c",
+      "from_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "to_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "setup_minutes": 10
+    },
+    {
+      "id": "0f898af1-28bd-40e8-a744-a5ed4c2ab925",
+      "work_center_id": "c3c8d614-7483-4c05-b1e0-b0210d352b4c",
+      "from_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "to_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "setup_minutes": 25
+    },
+    {
+      "id": "466b33eb-56cf-4b34-8e35-49346a7e6a75",
+      "work_center_id": "c3c8d614-7483-4c05-b1e0-b0210d352b4c",
+      "from_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "to_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "setup_minutes": 35
+    },
+    {
+      "id": "94634ae1-2278-43c5-b994-2619c76c90bb",
+      "work_center_id": "c3c8d614-7483-4c05-b1e0-b0210d352b4c",
+      "from_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "to_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "setup_minutes": 15
+    },
+    {
+      "id": "a122691a-548d-43ab-ad97-623162a1f880",
+      "work_center_id": "c3c8d614-7483-4c05-b1e0-b0210d352b4c",
+      "from_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "to_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "setup_minutes": 0
+    },
+    {
+      "id": "6bcb5faa-5937-420f-a7db-084d76d29c5c",
+      "work_center_id": "c3c8d614-7483-4c05-b1e0-b0210d352b4c",
+      "from_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "to_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "setup_minutes": 8
+    },
+    {
+      "id": "97ff5a8a-2569-4e6a-991d-208707c3aeb8",
+      "work_center_id": "c3c8d614-7483-4c05-b1e0-b0210d352b4c",
+      "from_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "to_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "setup_minutes": 20
+    },
+    {
+      "id": "4a0f3659-ed82-456b-918e-e16d4969a59b",
+      "work_center_id": "c3c8d614-7483-4c05-b1e0-b0210d352b4c",
+      "from_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "to_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "setup_minutes": 30
+    },
+    {
+      "id": "7a83747c-c2ae-4172-8dcd-4f66654dfaf9",
+      "work_center_id": "c3c8d614-7483-4c05-b1e0-b0210d352b4c",
+      "from_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "to_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "setup_minutes": 18
+    },
+    {
+      "id": "9f3eb73d-d580-451d-8317-13aca2c5b9c9",
+      "work_center_id": "c3c8d614-7483-4c05-b1e0-b0210d352b4c",
+      "from_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "to_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "setup_minutes": 0
+    },
+    {
+      "id": "e2538d0a-6c4c-44d0-9904-00139da72ffd",
+      "work_center_id": "c3c8d614-7483-4c05-b1e0-b0210d352b4c",
+      "from_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "to_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "setup_minutes": 5
+    },
+    {
+      "id": "3b4f28bf-b568-41ad-8936-f59968adacff",
+      "work_center_id": "c3c8d614-7483-4c05-b1e0-b0210d352b4c",
+      "from_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "to_state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "setup_minutes": 40
+    },
+    {
+      "id": "eb187d16-d8b2-4dd7-b3b0-ca474f2ff14c",
+      "work_center_id": "c3c8d614-7483-4c05-b1e0-b0210d352b4c",
+      "from_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "to_state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "setup_minutes": 22
+    },
+    {
+      "id": "6905fb19-a389-4a16-bd9c-6c56c1c938ab",
+      "work_center_id": "c3c8d614-7483-4c05-b1e0-b0210d352b4c",
+      "from_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "to_state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "setup_minutes": 12
+    },
+    {
+      "id": "e8340723-b35c-4144-91b7-50c3009bbeab",
+      "work_center_id": "c3c8d614-7483-4c05-b1e0-b0210d352b4c",
+      "from_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "to_state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "setup_minutes": 0
+    }
+  ],
+  "arc_profiles": [],
+  "auxiliary_resources": [],
+  "orders": [
+    {
+      "id": "12c94af7-1702-467e-9d6a-0613049db015",
+      "external_ref": "ORD-001",
+      "due_date": "2026-04-01T12:00:00+00:00",
+      "priority": 550
+    },
+    {
+      "id": "ff342641-4793-4947-8f55-129bec7be0cc",
+      "external_ref": "ORD-002",
+      "due_date": "2026-04-01T13:00:00+00:00",
+      "priority": 600
+    },
+    {
+      "id": "3a81222e-a586-4696-ad61-c409927ae6e6",
+      "external_ref": "ORD-003",
+      "due_date": "2026-04-01T14:00:00+00:00",
+      "priority": 650
+    },
+    {
+      "id": "f3901af1-e2ed-4a75-9a9a-ed12ba604dbd",
+      "external_ref": "ORD-004",
+      "due_date": "2026-04-01T15:00:00+00:00",
+      "priority": 700
+    },
+    {
+      "id": "e035fbe2-0f28-47fb-a62c-106e4ce9a5a1",
+      "external_ref": "ORD-005",
+      "due_date": "2026-04-01T16:00:00+00:00",
+      "priority": 750
+    },
+    {
+      "id": "0f4f83a7-e6ab-44a0-b791-3768badc48de",
+      "external_ref": "ORD-006",
+      "due_date": "2026-04-01T17:00:00+00:00",
+      "priority": 800
+    },
+    {
+      "id": "d62a6715-76ff-4062-804b-473d29da9be8",
+      "external_ref": "ORD-007",
+      "due_date": "2026-04-01T18:00:00+00:00",
+      "priority": 850
+    },
+    {
+      "id": "1de85ece-558a-4f01-9cc9-edba82c296f8",
+      "external_ref": "ORD-008",
+      "due_date": "2026-04-01T19:00:00+00:00",
+      "priority": 900
+    }
+  ],
+  "operations": [
+    {
+      "id": "84a93b99-1338-47e0-880f-4c376ffd4e03",
+      "order_id": "12c94af7-1702-467e-9d6a-0613049db015",
+      "seq_in_order": 0,
+      "state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "base_duration_min": 20,
+      "eligible_wc_ids": [
+        "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+        "36f2eac1-902c-4d50-a6c3-6a524bedd73f"
+      ],
+      "predecessor_op_id": null
+    },
+    {
+      "id": "0372bd34-4e77-49b0-9556-737c7b177b5f",
+      "order_id": "12c94af7-1702-467e-9d6a-0613049db015",
+      "seq_in_order": 1,
+      "state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "base_duration_min": 25,
+      "eligible_wc_ids": [
+        "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+        "36f2eac1-902c-4d50-a6c3-6a524bedd73f"
+      ],
+      "predecessor_op_id": "84a93b99-1338-47e0-880f-4c376ffd4e03"
+    },
+    {
+      "id": "11575864-3e57-4b2e-9f8f-b445d3b82d76",
+      "order_id": "12c94af7-1702-467e-9d6a-0613049db015",
+      "seq_in_order": 2,
+      "state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "base_duration_min": 15,
+      "eligible_wc_ids": [
+        "06eb918b-a722-468b-8707-fd7836389b23"
+      ],
+      "predecessor_op_id": "0372bd34-4e77-49b0-9556-737c7b177b5f"
+    },
+    {
+      "id": "ba24a3f0-cdbc-4f01-99e7-429ff1724521",
+      "order_id": "12c94af7-1702-467e-9d6a-0613049db015",
+      "seq_in_order": 3,
+      "state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "base_duration_min": 10,
+      "eligible_wc_ids": [
+        "c3c8d614-7483-4c05-b1e0-b0210d352b4c"
+      ],
+      "predecessor_op_id": "11575864-3e57-4b2e-9f8f-b445d3b82d76"
+    },
+    {
+      "id": "17660f63-5b61-4f90-aef1-1141352434ca",
+      "order_id": "ff342641-4793-4947-8f55-129bec7be0cc",
+      "seq_in_order": 0,
+      "state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "base_duration_min": 18,
+      "eligible_wc_ids": [
+        "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+        "36f2eac1-902c-4d50-a6c3-6a524bedd73f"
+      ],
+      "predecessor_op_id": null
+    },
+    {
+      "id": "b70ac2da-32ad-41af-bdbc-ef9a3c523016",
+      "order_id": "ff342641-4793-4947-8f55-129bec7be0cc",
+      "seq_in_order": 1,
+      "state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "base_duration_min": 22,
+      "eligible_wc_ids": [
+        "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+        "36f2eac1-902c-4d50-a6c3-6a524bedd73f"
+      ],
+      "predecessor_op_id": "17660f63-5b61-4f90-aef1-1141352434ca"
+    },
+    {
+      "id": "18318163-f4d2-4eac-bb64-d949098733bc",
+      "order_id": "ff342641-4793-4947-8f55-129bec7be0cc",
+      "seq_in_order": 2,
+      "state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "base_duration_min": 12,
+      "eligible_wc_ids": [
+        "06eb918b-a722-468b-8707-fd7836389b23"
+      ],
+      "predecessor_op_id": "b70ac2da-32ad-41af-bdbc-ef9a3c523016"
+    },
+    {
+      "id": "549a8568-a844-408b-9f9b-e5cd967f9f02",
+      "order_id": "ff342641-4793-4947-8f55-129bec7be0cc",
+      "seq_in_order": 3,
+      "state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "base_duration_min": 8,
+      "eligible_wc_ids": [
+        "c3c8d614-7483-4c05-b1e0-b0210d352b4c"
+      ],
+      "predecessor_op_id": "18318163-f4d2-4eac-bb64-d949098733bc"
+    },
+    {
+      "id": "0eade66c-39cb-40be-aef7-372b9a7abe62",
+      "order_id": "3a81222e-a586-4696-ad61-c409927ae6e6",
+      "seq_in_order": 0,
+      "state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "base_duration_min": 15,
+      "eligible_wc_ids": [
+        "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+        "36f2eac1-902c-4d50-a6c3-6a524bedd73f"
+      ],
+      "predecessor_op_id": null
+    },
+    {
+      "id": "fc705efb-c3e3-41bd-b76c-bb443b8944a9",
+      "order_id": "3a81222e-a586-4696-ad61-c409927ae6e6",
+      "seq_in_order": 1,
+      "state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "base_duration_min": 20,
+      "eligible_wc_ids": [
+        "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+        "36f2eac1-902c-4d50-a6c3-6a524bedd73f"
+      ],
+      "predecessor_op_id": "0eade66c-39cb-40be-aef7-372b9a7abe62"
+    },
+    {
+      "id": "c79ae70c-4d88-4939-b8a9-8024b80743ad",
+      "order_id": "3a81222e-a586-4696-ad61-c409927ae6e6",
+      "seq_in_order": 2,
+      "state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "base_duration_min": 18,
+      "eligible_wc_ids": [
+        "06eb918b-a722-468b-8707-fd7836389b23"
+      ],
+      "predecessor_op_id": "fc705efb-c3e3-41bd-b76c-bb443b8944a9"
+    },
+    {
+      "id": "4fd694f1-4550-44f1-aee8-debf33bcb050",
+      "order_id": "3a81222e-a586-4696-ad61-c409927ae6e6",
+      "seq_in_order": 3,
+      "state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "base_duration_min": 12,
+      "eligible_wc_ids": [
+        "c3c8d614-7483-4c05-b1e0-b0210d352b4c"
+      ],
+      "predecessor_op_id": "c79ae70c-4d88-4939-b8a9-8024b80743ad"
+    },
+    {
+      "id": "81c15559-d3e7-429c-87bf-9a64dfc508e3",
+      "order_id": "f3901af1-e2ed-4a75-9a9a-ed12ba604dbd",
+      "seq_in_order": 0,
+      "state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "base_duration_min": 22,
+      "eligible_wc_ids": [
+        "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+        "36f2eac1-902c-4d50-a6c3-6a524bedd73f"
+      ],
+      "predecessor_op_id": null
+    },
+    {
+      "id": "5e96b909-a16a-4080-aff2-9c914259b40f",
+      "order_id": "f3901af1-e2ed-4a75-9a9a-ed12ba604dbd",
+      "seq_in_order": 1,
+      "state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "base_duration_min": 28,
+      "eligible_wc_ids": [
+        "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+        "36f2eac1-902c-4d50-a6c3-6a524bedd73f"
+      ],
+      "predecessor_op_id": "81c15559-d3e7-429c-87bf-9a64dfc508e3"
+    },
+    {
+      "id": "80544c11-8ca0-4825-977c-cfa4878cd989",
+      "order_id": "f3901af1-e2ed-4a75-9a9a-ed12ba604dbd",
+      "seq_in_order": 2,
+      "state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "base_duration_min": 10,
+      "eligible_wc_ids": [
+        "06eb918b-a722-468b-8707-fd7836389b23"
+      ],
+      "predecessor_op_id": "5e96b909-a16a-4080-aff2-9c914259b40f"
+    },
+    {
+      "id": "dcf73c65-a81d-4183-8392-b6a80a9e9c21",
+      "order_id": "f3901af1-e2ed-4a75-9a9a-ed12ba604dbd",
+      "seq_in_order": 3,
+      "state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "base_duration_min": 15,
+      "eligible_wc_ids": [
+        "c3c8d614-7483-4c05-b1e0-b0210d352b4c"
+      ],
+      "predecessor_op_id": "80544c11-8ca0-4825-977c-cfa4878cd989"
+    },
+    {
+      "id": "da7106eb-afd5-45b5-abbe-b1dd7ba923f6",
+      "order_id": "e035fbe2-0f28-47fb-a62c-106e4ce9a5a1",
+      "seq_in_order": 0,
+      "state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "base_duration_min": 25,
+      "eligible_wc_ids": [
+        "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+        "36f2eac1-902c-4d50-a6c3-6a524bedd73f"
+      ],
+      "predecessor_op_id": null
+    },
+    {
+      "id": "ca54faec-014f-49ff-ae34-a9f17bf9c515",
+      "order_id": "e035fbe2-0f28-47fb-a62c-106e4ce9a5a1",
+      "seq_in_order": 1,
+      "state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "base_duration_min": 20,
+      "eligible_wc_ids": [
+        "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+        "36f2eac1-902c-4d50-a6c3-6a524bedd73f"
+      ],
+      "predecessor_op_id": "da7106eb-afd5-45b5-abbe-b1dd7ba923f6"
+    },
+    {
+      "id": "253391c1-f2d2-4ec7-adce-216b3eab749a",
+      "order_id": "e035fbe2-0f28-47fb-a62c-106e4ce9a5a1",
+      "seq_in_order": 2,
+      "state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "base_duration_min": 14,
+      "eligible_wc_ids": [
+        "06eb918b-a722-468b-8707-fd7836389b23"
+      ],
+      "predecessor_op_id": "ca54faec-014f-49ff-ae34-a9f17bf9c515"
+    },
+    {
+      "id": "7693a3ac-c49e-4ff7-a956-f1ec1427f443",
+      "order_id": "e035fbe2-0f28-47fb-a62c-106e4ce9a5a1",
+      "seq_in_order": 3,
+      "state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "base_duration_min": 10,
+      "eligible_wc_ids": [
+        "c3c8d614-7483-4c05-b1e0-b0210d352b4c"
+      ],
+      "predecessor_op_id": "253391c1-f2d2-4ec7-adce-216b3eab749a"
+    },
+    {
+      "id": "8b6342ba-090f-4da9-b8e9-6c68aba33161",
+      "order_id": "0f4f83a7-e6ab-44a0-b791-3768badc48de",
+      "seq_in_order": 0,
+      "state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "base_duration_min": 19,
+      "eligible_wc_ids": [
+        "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+        "36f2eac1-902c-4d50-a6c3-6a524bedd73f"
+      ],
+      "predecessor_op_id": null
+    },
+    {
+      "id": "6063a428-885a-45a7-ac5f-ddf42f55feeb",
+      "order_id": "0f4f83a7-e6ab-44a0-b791-3768badc48de",
+      "seq_in_order": 1,
+      "state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "base_duration_min": 24,
+      "eligible_wc_ids": [
+        "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+        "36f2eac1-902c-4d50-a6c3-6a524bedd73f"
+      ],
+      "predecessor_op_id": "8b6342ba-090f-4da9-b8e9-6c68aba33161"
+    },
+    {
+      "id": "5789ca08-e841-4da6-a0a7-153e1556ce94",
+      "order_id": "0f4f83a7-e6ab-44a0-b791-3768badc48de",
+      "seq_in_order": 2,
+      "state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "base_duration_min": 16,
+      "eligible_wc_ids": [
+        "06eb918b-a722-468b-8707-fd7836389b23"
+      ],
+      "predecessor_op_id": "6063a428-885a-45a7-ac5f-ddf42f55feeb"
+    },
+    {
+      "id": "1c4d77ff-72ba-44a2-9244-9f3fe9042622",
+      "order_id": "0f4f83a7-e6ab-44a0-b791-3768badc48de",
+      "seq_in_order": 3,
+      "state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "base_duration_min": 8,
+      "eligible_wc_ids": [
+        "c3c8d614-7483-4c05-b1e0-b0210d352b4c"
+      ],
+      "predecessor_op_id": "5789ca08-e841-4da6-a0a7-153e1556ce94"
+    },
+    {
+      "id": "1ab2b30c-6972-4b9e-8a79-1cb56f392142",
+      "order_id": "d62a6715-76ff-4062-804b-473d29da9be8",
+      "seq_in_order": 0,
+      "state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "base_duration_min": 21,
+      "eligible_wc_ids": [
+        "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+        "36f2eac1-902c-4d50-a6c3-6a524bedd73f"
+      ],
+      "predecessor_op_id": null
+    },
+    {
+      "id": "fc9a101e-34a4-4d34-a09d-968f283dc614",
+      "order_id": "d62a6715-76ff-4062-804b-473d29da9be8",
+      "seq_in_order": 1,
+      "state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "base_duration_min": 26,
+      "eligible_wc_ids": [
+        "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+        "36f2eac1-902c-4d50-a6c3-6a524bedd73f"
+      ],
+      "predecessor_op_id": "1ab2b30c-6972-4b9e-8a79-1cb56f392142"
+    },
+    {
+      "id": "d13f2f3f-6d30-4dc0-9ca6-a83e1eeb54fc",
+      "order_id": "d62a6715-76ff-4062-804b-473d29da9be8",
+      "seq_in_order": 2,
+      "state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "base_duration_min": 12,
+      "eligible_wc_ids": [
+        "06eb918b-a722-468b-8707-fd7836389b23"
+      ],
+      "predecessor_op_id": "fc9a101e-34a4-4d34-a09d-968f283dc614"
+    },
+    {
+      "id": "70270d77-278e-45a4-84a7-888988809f9f",
+      "order_id": "d62a6715-76ff-4062-804b-473d29da9be8",
+      "seq_in_order": 3,
+      "state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "base_duration_min": 14,
+      "eligible_wc_ids": [
+        "c3c8d614-7483-4c05-b1e0-b0210d352b4c"
+      ],
+      "predecessor_op_id": "d13f2f3f-6d30-4dc0-9ca6-a83e1eeb54fc"
+    },
+    {
+      "id": "eb3335d9-cc5d-457a-a4b2-897905bfb342",
+      "order_id": "1de85ece-558a-4f01-9cc9-edba82c296f8",
+      "seq_in_order": 0,
+      "state_id": "c930dc02-948c-4f59-8676-3bc1d32d5d85",
+      "base_duration_min": 17,
+      "eligible_wc_ids": [
+        "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+        "36f2eac1-902c-4d50-a6c3-6a524bedd73f"
+      ],
+      "predecessor_op_id": null
+    },
+    {
+      "id": "5a192935-b0a5-43b6-b226-4369900293f5",
+      "order_id": "1de85ece-558a-4f01-9cc9-edba82c296f8",
+      "seq_in_order": 1,
+      "state_id": "7fd73c81-fe4c-456d-a6fe-83212c642caf",
+      "base_duration_min": 23,
+      "eligible_wc_ids": [
+        "5beee5ae-6fd7-4ad0-aca5-83e7fd384b91",
+        "36f2eac1-902c-4d50-a6c3-6a524bedd73f"
+      ],
+      "predecessor_op_id": "eb3335d9-cc5d-457a-a4b2-897905bfb342"
+    },
+    {
+      "id": "83d8aba7-8ff3-4e26-a77a-1f0422e8aa8c",
+      "order_id": "1de85ece-558a-4f01-9cc9-edba82c296f8",
+      "seq_in_order": 2,
+      "state_id": "3c1fd053-cb03-4829-9df6-58ec63587714",
+      "base_duration_min": 15,
+      "eligible_wc_ids": [
+        "06eb918b-a722-468b-8707-fd7836389b23"
+      ],
+      "predecessor_op_id": "5a192935-b0a5-43b6-b226-4369900293f5"
+    },
+    {
+      "id": "fb9ed542-3030-4734-9fc7-2094b9d5c6e4",
+      "order_id": "1de85ece-558a-4f01-9cc9-edba82c296f8",
+      "seq_in_order": 3,
+      "state_id": "d2e2b14d-5589-41c5-af7c-6810244615ec",
+      "base_duration_min": 11,
+      "eligible_wc_ids": [
+        "c3c8d614-7483-4c05-b1e0-b0210d352b4c"
+      ],
+      "predecessor_op_id": "83d8aba7-8ff3-4e26-a77a-1f0422e8aa8c"
+    }
+  ],
+  "planning_horizon_start": "2026-04-01T08:00:00+00:00",
+  "planning_horizon_end": "2026-04-02T08:00:00+00:00"
+}

@@ -13,8 +13,10 @@ the Bellman-Held-Karp `machine_tsp` bound when it applies.
 
 | Instance | Config | LB | UB | Gap | Iter | Wall (s) | Cuts | Skipped dup |
 |---|---|---:|---:|---:|---:|---:|---|---:|
-| medium_stress_20x4 | baseline_without_tsp | 183.00 | 183.00 | 0.0000 | 2 | 3.517 | capacity=1, critical_path=1, load_balance=1, setup_cost=2 | 0 |
-| medium_stress_20x4 | with_machine_tsp | 183.00 | 183.00 | 0.0000 | 2 | 3.489 | capacity=1, critical_path=1, load_balance=1, machine_tsp=2 | 0 |
+| medium_stress_20x4 | baseline_without_tsp | 183.00 | 183.00 | 0.0000 | 2 | 3.496 | capacity=1, critical_path=1, load_balance=1, setup_cost=2 | 0 |
+| medium_stress_20x4 | with_machine_tsp | 183.00 | 183.00 | 0.0000 | 2 | 3.453 | capacity=1, critical_path=1, load_balance=1, machine_tsp=2 | 0 |
+| medium_4state_tsp_dominance_16x4 | baseline_without_tsp | 262.00 | 262.00 | 0.0000 | 2 | 4.236 | capacity=1, critical_path=1, load_balance=1, setup_cost=2 | 0 |
+| medium_4state_tsp_dominance_16x4 | with_machine_tsp | 260.00 | 260.00 | 0.0000 | 2 | 4.244 | capacity=1, critical_path=1, load_balance=1, machine_tsp=2 | 0 |
 
 ## Per-iteration master LB trajectory
 
@@ -27,6 +29,16 @@ the Bellman-Held-Karp `machine_tsp` bound when it applies.
 
 - **lb_evolution:** 138.33, 183.00
 - **cut_kind_lb_contribution:** capacity=8.93, critical_path=8.93, load_balance=8.93, machine_tsp=17.87, master_relaxation=138.33
+
+### medium_4state_tsp_dominance_16x4 — baseline_without_tsp
+
+- **lb_evolution:** 164.55, 262.00
+- **cut_kind_lb_contribution:** capacity=19.49, critical_path=19.49, load_balance=19.49, master_relaxation=164.55, setup_cost=38.98
+
+### medium_4state_tsp_dominance_16x4 — with_machine_tsp
+
+- **lb_evolution:** 164.55, 260.00
+- **cut_kind_lb_contribution:** capacity=19.09, critical_path=19.09, load_balance=19.09, machine_tsp=38.18, master_relaxation=164.55
 
 ## Reading the table
 
