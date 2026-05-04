@@ -57,6 +57,12 @@ from synaps.solvers.rhc._budget import (
     scale_alns_inner_budget as _scale_alns_inner_budget,
 )
 from synaps.solvers.rhc._metadata import build_inner_window_summary
+from synaps.solvers.rhc._window import (
+    collect_commit_candidates as _collect_commit_candidates,
+    reanchor_inner_assignments as _reanchor_inner_assignments,
+    select_backtracking_assignments as _select_backtracking_assignments,
+    stabilize_temporal_consistency as _stabilize_temporal_consistency,
+)
 from synaps.solvers.sdst_matrix import SdstMatrix
 
 if TYPE_CHECKING:
@@ -696,47 +702,26 @@ class RhcSolver(BaseSolver):
             frozen_committed_ids: set[UUID] | None = None,
             eligible_ids: set[UUID] | None = None,
         ) -> dict[UUID, Assignment]:
+            # Thin wrapper around the pure kernel in _window.py.
+            # The closure still owns the mutable `horizon_clipped_assignments`
+            # counter; the kernel returns the per-call clipped count.
             nonlocal horizon_clipped_assignments
-
-            frozen_ids = committed_op_ids if frozen_committed_ids is None else frozen_committed_ids
-
-            candidates: dict[UUID, Assignment] = {}
-            for assignment in assignments:
-                op_id = assignment.operation_id
-                if op_id in frozen_ids:
-                    continue
-                if eligible_ids is not None and op_id not in eligible_ids:
-                    continue
-
-                end_offset = (assignment.end_time - horizon_start).total_seconds() / 60.0
-                if end_offset > horizon_minutes + 1e-9:
-                    horizon_clipped_assignments += 1
-                    continue
-
-                # Freeze only work that fully completes inside the active horizon.
-                # Assignments that cross the rolling boundary must survive as tail
-                # so the overlap region can seed the next window.
-                if end_offset <= commit_boundary + 1e-9 or commit_all:
-                    candidates[op_id] = assignment
-
-            # Commit set must be precedence-closed.
-            changed = True
-            while changed:
-                changed = False
-                for op_id in list(candidates.keys()):
-                    operation = ops_by_id.get(op_id)
-                    predecessor_op_id = (
-                        operation.predecessor_op_id if operation is not None else None
-                    )
-                    if predecessor_op_id is None:
-                        continue
-                    if (
-                        predecessor_op_id not in frozen_ids
-                        and predecessor_op_id not in candidates
-                    ):
-                        del candidates[op_id]
-                        changed = True
-
+            frozen_ids = (
+                committed_op_ids
+                if frozen_committed_ids is None
+                else frozen_committed_ids
+            )
+            candidates, clipped_count = _collect_commit_candidates(
+                assignments,
+                commit_boundary=commit_boundary,
+                commit_all=commit_all,
+                frozen_ids=frozen_ids,
+                eligible_ids=eligible_ids,
+                horizon_start=horizon_start,
+                horizon_minutes=horizon_minutes,
+                ops_by_id=ops_by_id,
+            )
+            horizon_clipped_assignments += clipped_count
             return candidates
 
         def reanchor_inner_assignments(
@@ -745,134 +730,34 @@ class RhcSolver(BaseSolver):
             frozen_assignments: list[Assignment],
             frozen_assignment_by_op: dict[UUID, Assignment],
         ) -> tuple[list[Assignment], int]:
-            if not assignments or not frozen_assignments:
-                return list(assignments), 0
-
-            original_by_op = {
-                assignment.operation_id: assignment for assignment in assignments
-            }
-            scheduled_assignments = list(frozen_assignments)
-            machine_index = MachineIndex(dispatch_context)
-            for assignment in scheduled_assignments:
-                machine_index.add(assignment)
-
-            anchored_by_op = dict(frozen_assignment_by_op)
-            pending_assignments = sorted(
+            # Thin wrapper around the pure kernel in _window.py.
+            # MachineIndex and find_earliest_feasible_slot are passed in so
+            # _window.py does not need to import them (avoids a runtime cycle
+            # via _dispatch_support).
+            return _reanchor_inner_assignments(
                 assignments,
-                key=lambda assignment: (
-                    assignment.start_time,
-                    ops_by_id[assignment.operation_id].seq_in_order,
-                    op_positions[assignment.operation_id],
-                ),
+                frozen_assignments=frozen_assignments,
+                frozen_assignment_by_op=frozen_assignment_by_op,
+                dispatch_context=dispatch_context,
+                machine_index_factory=MachineIndex,
+                find_earliest_feasible_slot=find_earliest_feasible_slot,
+                ops_by_id=ops_by_id,
+                op_earliest=op_earliest,
+                op_positions=op_positions,
+                horizon_start=horizon_start,
             )
-            reanchored_assignments: list[Assignment] = []
-
-            for _ in range(len(pending_assignments) + 1):
-                if not pending_assignments:
-                    break
-                progress_made = False
-                next_pending: list[Assignment] = []
-
-                for assignment in pending_assignments:
-                    operation = ops_by_id[assignment.operation_id]
-                    earliest_start = op_earliest.get(operation.id, 0.0)
-                    if operation.predecessor_op_id is not None:
-                        predecessor_assignment = anchored_by_op.get(operation.predecessor_op_id)
-                        if predecessor_assignment is None:
-                            next_pending.append(assignment)
-                            continue
-                        predecessor_end = (
-                            predecessor_assignment.end_time - horizon_start
-                        ).total_seconds() / 60.0
-                        earliest_start = max(earliest_start, predecessor_end)
-
-                    slot = find_earliest_feasible_slot(
-                        dispatch_context,
-                        scheduled_assignments,
-                        operation,
-                        assignment.work_center_id,
-                        earliest_start,
-                        machine_index=machine_index,
-                    )
-                    if slot is None:
-                        next_pending.append(assignment)
-                        continue
-
-                    anchored_assignment = Assignment(
-                        operation_id=operation.id,
-                        work_center_id=assignment.work_center_id,
-                        start_time=horizon_start + timedelta(minutes=slot.start_offset),
-                        end_time=horizon_start + timedelta(minutes=slot.end_offset),
-                        setup_minutes=slot.setup_minutes,
-                        aux_resource_ids=slot.aux_resource_ids,
-                    )
-                    scheduled_assignments.append(anchored_assignment)
-                    machine_index.add(anchored_assignment)
-                    anchored_by_op[operation.id] = anchored_assignment
-                    reanchored_assignments.append(anchored_assignment)
-                    progress_made = True
-
-                if not progress_made:
-                    return list(assignments), 0
-                pending_assignments = next_pending
-
-            if pending_assignments:
-                return list(assignments), 0
-
-            changed_assignment_count = sum(
-                1
-                for assignment in reanchored_assignments
-                if original_by_op[assignment.operation_id].start_time != assignment.start_time
-                or original_by_op[assignment.operation_id].end_time != assignment.end_time
-                or original_by_op[assignment.operation_id].work_center_id
-                != assignment.work_center_id
-            )
-            return sorted(
-                reanchored_assignments,
-                key=lambda assignment: assignment.start_time,
-            ), changed_assignment_count
 
         def select_backtracking_assignments(window_start_offset: float) -> list[Assignment]:
-            if (
-                not backtracking_enabled
-                or backtracking_tail_minutes <= 0.0
-                or backtracking_max_ops <= 0
-                or not committed_assignments
-            ):
-                return []
-
-            rewind_boundary = max(0.0, window_start_offset - backtracking_tail_minutes)
-            rewound_ids = {
-                assignment.operation_id
-                for assignment in committed_assignments
-                if (
-                    (assignment.end_time - horizon_start).total_seconds() / 60.0
-                    > rewind_boundary + 1e-9
-                )
-            }
-            if not rewound_ids:
-                return []
-
-            changed = True
-            while changed:
-                changed = False
-                for op_id in committed_assignment_by_op:
-                    if op_id in rewound_ids:
-                        continue
-                    operation = ops_by_id.get(op_id)
-                    predecessor_op_id = (
-                        operation.predecessor_op_id if operation is not None else None
-                    )
-                    if predecessor_op_id in rewound_ids:
-                        rewound_ids.add(op_id)
-                        changed = True
-
-            if len(rewound_ids) > backtracking_max_ops:
-                return []
-
-            return sorted(
-                [committed_assignment_by_op[op_id] for op_id in rewound_ids],
-                key=lambda assignment: assignment.start_time,
+            # Thin wrapper around the pure kernel in _window.py.
+            return _select_backtracking_assignments(
+                window_start_offset=window_start_offset,
+                backtracking_enabled=backtracking_enabled,
+                backtracking_tail_minutes=backtracking_tail_minutes,
+                backtracking_max_ops=backtracking_max_ops,
+                committed_assignments=committed_assignments,
+                committed_assignment_by_op=committed_assignment_by_op,
+                ops_by_id=ops_by_id,
+                horizon_start=horizon_start,
             )
 
         def stabilize_temporal_consistency(
@@ -880,132 +765,13 @@ class RhcSolver(BaseSolver):
             *,
             max_passes: int = 8,
         ) -> dict[str, int]:
-            """Repair residual precedence and machine/setup conflicts in-place.
-
-            The pass is forward-only (only shifts later), bounded, and intended
-            as a final consistency stabilization step before objective evaluation.
-            """
-
-            if not assignments:
-                return {
-                    "passes": 0,
-                    "precedence_shifts": 0,
-                    "machine_shifts": 0,
-                }
-
-            assignment_by_op: dict[UUID, Assignment] = {
-                assignment.operation_id: assignment for assignment in assignments
-            }
-            assigned_op_ids = set(assignment_by_op.keys())
-
-            indegree: dict[UUID, int] = {op_id: 0 for op_id in assigned_op_ids}
-            successors: dict[UUID, list[UUID]] = defaultdict(list)
-            for op_id in assigned_op_ids:
-                operation = ops_by_id.get(op_id)
-                if operation is None:
-                    continue
-                predecessor_op_id = operation.predecessor_op_id
-                if predecessor_op_id is None or predecessor_op_id not in assigned_op_ids:
-                    continue
-                successors[predecessor_op_id].append(op_id)
-                indegree[op_id] = indegree.get(op_id, 0) + 1
-
-            topo_queue = deque(
-                sorted(
-                    [op_id for op_id, deg in indegree.items() if deg == 0],
-                    key=lambda op_id: (
-                        ops_by_id[op_id].seq_in_order if op_id in ops_by_id else 0
-                    ),
-                )
+            # Thin wrapper around the pure kernel in _window.py.
+            return _stabilize_temporal_consistency(
+                assignments,
+                ops_by_id=ops_by_id,
+                setup_minutes=dispatch_context.setup_minutes,
+                max_passes=max_passes,
             )
-            topo_order: list[UUID] = []
-            while topo_queue:
-                op_id = topo_queue.popleft()
-                topo_order.append(op_id)
-                for succ_id in successors.get(op_id, []):
-                    indegree[succ_id] -= 1
-                    if indegree[succ_id] == 0:
-                        topo_queue.append(succ_id)
-
-            if len(topo_order) < len(assigned_op_ids):
-                remaining_ids = assigned_op_ids - set(topo_order)
-                topo_order.extend(
-                    sorted(
-                        remaining_ids,
-                        key=lambda op_id: (
-                            ops_by_id[op_id].seq_in_order if op_id in ops_by_id else 0
-                        ),
-                    )
-                )
-
-            precedence_shifts = 0
-            machine_shifts = 0
-            passes = 0
-
-            for pass_index in range(max_passes):
-                changed = False
-                passes = pass_index + 1
-
-                for op_id in topo_order:
-                    operation = ops_by_id.get(op_id)
-                    if operation is None or operation.predecessor_op_id is None:
-                        continue
-                    predecessor_assignment = assignment_by_op.get(operation.predecessor_op_id)
-                    current_assignment = assignment_by_op.get(op_id)
-                    if predecessor_assignment is None or current_assignment is None:
-                        continue
-                    if current_assignment.start_time < predecessor_assignment.end_time:
-                        delta = predecessor_assignment.end_time - current_assignment.start_time
-                        current_assignment.start_time += delta
-                        current_assignment.end_time += delta
-                        precedence_shifts += 1
-                        changed = True
-
-                assignments_by_machine: dict[UUID, list[Assignment]] = defaultdict(list)
-                for assignment in assignment_by_op.values():
-                    assignments_by_machine[assignment.work_center_id].append(assignment)
-
-                for work_center_id, machine_assignments in assignments_by_machine.items():
-                    machine_assignments.sort(key=lambda assignment: assignment.start_time)
-                    previous_assignment: Assignment | None = None
-                    for current_assignment in machine_assignments:
-                        if previous_assignment is None:
-                            previous_assignment = current_assignment
-                            continue
-
-                        previous_operation = ops_by_id.get(previous_assignment.operation_id)
-                        current_operation = ops_by_id.get(current_assignment.operation_id)
-                        required_setup = 0
-                        if previous_operation is not None and current_operation is not None:
-                            required_setup = dispatch_context.setup_minutes.get(
-                                (
-                                    work_center_id,
-                                    previous_operation.state_id,
-                                    current_operation.state_id,
-                                ),
-                                0,
-                            )
-
-                        required_start = previous_assignment.end_time + timedelta(
-                            minutes=required_setup,
-                        )
-                        if current_assignment.start_time < required_start:
-                            delta = required_start - current_assignment.start_time
-                            current_assignment.start_time += delta
-                            current_assignment.end_time += delta
-                            machine_shifts += 1
-                            changed = True
-
-                        previous_assignment = current_assignment
-
-                if not changed:
-                    break
-
-            return {
-                "passes": passes,
-                "precedence_shifts": precedence_shifts,
-                "machine_shifts": machine_shifts,
-            }
 
         while window_start_offset < horizon_minutes:
             if max_windows is not None and window_count >= max_windows:
