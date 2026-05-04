@@ -44,6 +44,7 @@ from synaps.solvers._dispatch_support import (
     recompute_assignment_setups,
 )
 from synaps.solvers.lower_bounds import compute_relaxed_makespan_lower_bound
+from synaps.solvers.rhc._metadata import build_inner_window_summary
 from synaps.solvers.sdst_matrix import SdstMatrix
 
 if TYPE_CHECKING:
@@ -246,6 +247,21 @@ class RhcSolver(BaseSolver):
         }
         sdst = SdstMatrix.from_problem(problem)
         dispatch_context = build_dispatch_context(problem)
+
+        # P3.1: Variable fixing — detect stable ops across windows
+        variable_fixing_enabled: bool = bool(
+            kwargs.get("variable_fixing_enabled", True)
+        )
+        variable_fixing_min_frequency: int = max(
+            2, int(kwargs.get("variable_fixing_min_frequency", 2))
+        )
+        variable_fixing_max_ratio: float = min(
+            0.5,
+            max(0.0, float(kwargs.get("variable_fixing_max_ratio", 0.3))),
+        )
+        # Track (op_id -> (machine_id, consecutive_count))
+        op_machine_stability: dict[UUID, tuple[Any, int]] = {}
+        total_fixed_ops_across_windows = 0
 
         horizon_start = problem.planning_horizon_start
         horizon_end = problem.planning_horizon_end
@@ -509,46 +525,6 @@ class RhcSolver(BaseSolver):
         inner_window_summaries: list[dict[str, Any]] = []
         previous_window_tail_assignments: list[Assignment] = []
 
-        inner_summary_metadata_keys = (
-            "lower_bound",
-            "upper_bound",
-            "gap",
-            "iterations_completed",
-            "improvements",
-            "cpsat_repair_skips_large_destroy",
-            "cpsat_max_destroy_ops",
-            "cpsat_repair_attempts",
-            "cpsat_repairs",
-            "cpsat_repair_timeouts",
-            "greedy_repair_attempts",
-            "greedy_repairs",
-            "greedy_repair_timeouts",
-            "cpsat_repair_ms_total",
-            "greedy_repair_ms_total",
-            "cpsat_repair_ms_mean",
-            "greedy_repair_ms_mean",
-            "repair_rejection_reasons",
-            "feasibility_failures",
-            "initial_solution_ms",
-            "initial_solver",
-            "time_limit_exhausted_before_search",
-            "max_no_improve_iters",
-            "no_improve_early_stop",
-            "no_improve_streak_final",
-            "final_violations",
-            "final_violations_before_recovery",
-            "final_violation_recovery_attempted",
-            "final_violation_recovered",
-            "final_violation_recovery_source",
-            "warm_start_used",
-            "warm_start_supplied_assignments",
-            "warm_start_completed_assignments",
-            "warm_start_rejected_reason",
-            "budget_guard_skipped_initial_search",
-            "inner_status_override",
-            "inner_solver_executed",
-        )
-
         def append_inner_window_summary(
             *,
             window: int,
@@ -566,64 +542,27 @@ class RhcSolver(BaseSolver):
             fallback_iterations: int | None = None,
             exception_message: str | None = None,
         ) -> None:
-            summary: dict[str, Any] = {
-                "window": window,
-                "ops_committed": ops_committed,
-                "ops_in_window": ops_in_window,
-                "resolution_mode": resolution_mode,
-            }
-            if lower_bound is not None:
-                summary["lower_bound"] = round(lower_bound, 4)
-            if inner_time_limit_s is not None:
-                summary["inner_time_limit_s"] = round(inner_time_limit_s, 2)
-                # RHC passes a budget target into the inner solver but does not
-                # enforce a hard kill boundary at process level.
-                summary["inner_time_budget_s"] = round(inner_time_limit_s, 2)
-                summary["inner_time_budget_mode"] = "advisory_soft"
-                summary["inner_time_budget_hard_enforced"] = False
-            if candidate_pressure is not None:
-                summary["candidate_pressure"] = round(candidate_pressure, 4)
-            if due_pressure is not None:
-                summary["due_pressure"] = round(due_pressure, 4)
-            if due_drift_minutes is not None:
-                summary["due_drift_minutes"] = round(due_drift_minutes, 2)
-            if spillover_ops is not None:
-                summary["spillover_ops"] = spillover_ops
-            if fallback_reason is not None:
-                summary["fallback_reason"] = fallback_reason
-                summary["fallback_reason_code"] = fallback_reason
-            if fallback_iterations is not None:
-                summary["fallback_iterations"] = fallback_iterations
-            if exception_message is not None:
-                summary["inner_exception_message"] = exception_message
-
-            if inner_result is None:
-                summary["inner_status"] = "not_run"
-                summary["inner_duration_ms"] = 0
-            else:
-                computed_inner_status = (
-                    inner_result.status.value
-                    if hasattr(inner_result.status, "value")
-                    else str(inner_result.status)
+            # Thin wrapper around the pure builder in _metadata.py. The
+            # closure still owns the mutation of `inner_window_summaries`
+            # to keep call sites untouched during the R7 split.
+            inner_window_summaries.append(
+                build_inner_window_summary(
+                    window=window,
+                    ops_in_window=ops_in_window,
+                    ops_committed=ops_committed,
+                    resolution_mode=resolution_mode,
+                    inner_result=inner_result,
+                    lower_bound=lower_bound,
+                    inner_time_limit_s=inner_time_limit_s,
+                    candidate_pressure=candidate_pressure,
+                    due_pressure=due_pressure,
+                    due_drift_minutes=due_drift_minutes,
+                    spillover_ops=spillover_ops,
+                    fallback_reason=fallback_reason,
+                    fallback_iterations=fallback_iterations,
+                    exception_message=exception_message,
                 )
-                override_status = (inner_result.metadata or {}).get("inner_status_override")
-                if isinstance(override_status, str) and override_status:
-                    computed_inner_status = override_status
-                summary["inner_status"] = computed_inner_status
-                summary["inner_duration_ms"] = inner_result.duration_ms
-                if inner_time_limit_s is not None:
-                    budget_ms = int(round(inner_time_limit_s * 1000.0))
-                    if inner_result.duration_ms > budget_ms:
-                        summary["inner_time_budget_overrun_ms"] = (
-                            inner_result.duration_ms - budget_ms
-                        )
-                if hasattr(inner_result.error_category, "value"):
-                    summary["inner_error_category"] = inner_result.error_category.value
-                for key in inner_summary_metadata_keys:
-                    if key in (inner_result.metadata or {}):
-                        summary[key] = inner_result.metadata[key]
-
-            inner_window_summaries.append(summary)
+            )
 
         def global_time_exceeded() -> bool:
             return (time.monotonic() - time_budget_t0) > time_limit_s
@@ -1895,6 +1834,37 @@ class RhcSolver(BaseSolver):
                                 if bool(alns_budget_profile["scaled"]):
                                     alns_budget_scaled_windows += 1
 
+                            # P3.1: Variable fixing — pass stable ops to ALNS
+                            if variable_fixing_enabled:
+                                window_fixed_op_ids: set[UUID] = set()
+                                max_fixed = int(
+                                    len(clean_window_ops) * variable_fixing_max_ratio
+                                )
+                                for op in clean_window_ops:
+                                    if len(window_fixed_op_ids) >= max_fixed:
+                                        break
+                                    entry = op_machine_stability.get(op.id)
+                                    if (
+                                        entry is not None
+                                        and entry[1] >= variable_fixing_min_frequency
+                                    ):
+                                        window_fixed_op_ids.add(op.id)
+                                if window_fixed_op_ids:
+                                    effective_inner_kwargs["fixed_op_ids"] = (
+                                        window_fixed_op_ids
+                                    )
+                                    total_fixed_ops_across_windows += len(
+                                        window_fixed_op_ids
+                                    )
+                                    logger.debug(
+                                        "RHC window %d: variable fixing %d ops (%.1f%%)",
+                                        window_count,
+                                        len(window_fixed_op_ids),
+                                        100.0
+                                        * len(window_fixed_op_ids)
+                                        / max(1, len(clean_window_ops)),
+                                    )
+
                         # R1: Adaptive budget guard — use estimated cost vs. available
                         # per-window budget instead of raw op-count threshold.
                         # When auto-scaling is active the budget profile already carries
@@ -2033,6 +2003,17 @@ class RhcSolver(BaseSolver):
                         )
                         window_start_offset += window_minutes
                         window_solved_via_inner = True
+
+                        # P3.1: Update op→machine stability for variable fixing
+                        if variable_fixing_enabled:
+                            for assignment in boundary_aware_assignments:
+                                oid = assignment.operation_id
+                                wc = assignment.work_center_id
+                                prev = op_machine_stability.get(oid)
+                                if prev is not None and prev[0] == wc:
+                                    op_machine_stability[oid] = (wc, prev[1] + 1)
+                                else:
+                                    op_machine_stability[oid] = (wc, 1)
                         append_inner_window_summary(
                             window=window_count,
                             ops_in_window=len(clean_window_ops),

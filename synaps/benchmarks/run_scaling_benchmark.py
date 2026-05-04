@@ -15,7 +15,7 @@ from typing import Any, TypedDict
 from synaps.benchmarks.instance_generator import generate_large_instance
 from synaps.solvers.alns_solver import AlnsSolver
 from synaps.solvers.greedy_dispatch import BeamSearchDispatch, GreedyDispatch
-from synaps.solvers.rhc_solver import RhcSolver
+from synaps.solvers.rhc import RhcSolver
 from synaps.solvers.sdst_matrix import SdstMatrix
 from synaps.validation import verify_schedule_result
 

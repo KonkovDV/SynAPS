@@ -22,7 +22,7 @@ from benchmark.run_benchmark import run_benchmark
 from synaps import accelerators
 from synaps.benchmarks.instance_generator import generate_large_instance
 from synaps.benchmarks.run_scaling_benchmark import run_benchmark as run_scaling_case
-from synaps.solvers.rhc_solver import RhcSolver
+from synaps.solvers.rhc import RhcSolver
 from synaps.solvers.sdst_matrix import SdstMatrix
 from synaps.validation import verify_schedule_result
 
