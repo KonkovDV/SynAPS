@@ -23,6 +23,7 @@ from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
+import warnings
 
 import highspy  # type: ignore[import-untyped]
 import numpy as np
@@ -506,7 +507,6 @@ class _BendersCut:
 # `synaps.solvers._lbbd_cuts` so that LBBD and LBBD-HD share a single source
 # of truth. The aliases below preserve the historical private names that
 # callers and tests already import from this module.
-import warnings
 
 def _deprecated_alias(name: str, fn):  # type: ignore[no-untyped-def]
     """Emit DeprecationWarning on first access to deprecated alias."""

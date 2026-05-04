@@ -16,7 +16,7 @@ from synaps.solvers.greedy_dispatch import BeamSearchDispatch, GreedyDispatch
 from synaps.solvers.lbbd_hd_solver import LbbdHdSolver
 from synaps.solvers.lbbd_solver import LbbdSolver
 from synaps.solvers.pareto_slice_solver import ParetoSliceCpSatSolver
-from synaps.solvers.rhc_solver import RhcSolver
+from synaps.solvers.rhc import RhcSolver
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
