@@ -44,6 +44,12 @@ from synaps.solvers._dispatch_support import (
     recompute_assignment_setups,
 )
 from synaps.solvers.lower_bounds import compute_relaxed_makespan_lower_bound
+from synaps.solvers.rhc._admission import (
+    advance_admission_frontier,
+    advance_due_frontier,
+    compute_precedence_closed_set,
+    count_admitted_candidates,
+)
 from synaps.solvers.rhc._metadata import build_inner_window_summary
 from synaps.solvers.sdst_matrix import SdstMatrix
 
@@ -568,29 +574,33 @@ class RhcSolver(BaseSolver):
             return (time.monotonic() - time_budget_t0) > time_limit_s
 
         def extend_candidate_frontiers(window_boundary: float) -> None:
+            # Thin wrapper around the pure kernels in _admission.py:
+            # the closure still owns mutation of the cursors, advance counters,
+            # and candidate-id sets to keep the rest of solve() unchanged.
             nonlocal admission_cursor
             nonlocal due_cursor
             nonlocal admission_frontier_advances
             nonlocal due_frontier_advances
 
-            while admission_cursor < len(ops_sorted_by_admission):
-                op = ops_sorted_by_admission[admission_cursor]
-                if (
-                    op_admission_offset_by_id.get(op.id, op_earliest.get(op.id, 0.0))
-                    >= window_boundary
-                ):
-                    break
-                admission_candidate_ids.add(op.id)
-                admission_cursor += 1
-                admission_frontier_advances += 1
+            new_admitted, admission_cursor = advance_admission_frontier(
+                cursor=admission_cursor,
+                ops_sorted_by_admission=ops_sorted_by_admission,
+                op_admission_offset_by_id=op_admission_offset_by_id,
+                op_earliest=op_earliest,
+                window_boundary=window_boundary,
+            )
+            admission_candidate_ids.update(new_admitted)
+            admission_frontier_advances += len(new_admitted)
 
-            while due_cursor < len(ops_sorted_by_due):
-                op = ops_sorted_by_due[due_cursor]
-                if order_due_offsets.get(op.order_id, horizon_minutes) >= window_boundary:
-                    break
-                due_candidate_ids.add(op.id)
-                due_cursor += 1
-                due_frontier_advances += 1
+            new_due, due_cursor = advance_due_frontier(
+                cursor=due_cursor,
+                ops_sorted_by_due=ops_sorted_by_due,
+                order_due_offsets=order_due_offsets,
+                horizon_minutes=horizon_minutes,
+                window_boundary=window_boundary,
+            )
+            due_candidate_ids.update(new_due)
+            due_frontier_advances += len(new_due)
 
         def collect_raw_window_candidate_ids() -> set[UUID]:
             admission_candidate_ids.difference_update(committed_op_ids)
@@ -627,26 +637,11 @@ class RhcSolver(BaseSolver):
 
             # Keep only operations whose unresolved predecessors are reachable in
             # the same candidate set (or already resolved by commits/tail carry-over).
-            predecessor_closed_ids = set(filtered_ids)
-            changed = True
-            while changed:
-                changed = False
-                for op_id in tuple(predecessor_closed_ids):
-                    operation = ops_by_id.get(op_id)
-                    predecessor_id = (
-                        operation.predecessor_op_id
-                        if operation is not None
-                        else None
-                    )
-                    if predecessor_id is None:
-                        continue
-                    if (
-                        predecessor_id in predecessor_closed_ids
-                        or predecessor_id in resolved_predecessor_ids
-                    ):
-                        continue
-                    predecessor_closed_ids.remove(op_id)
-                    changed = True
+            predecessor_closed_ids = compute_precedence_closed_set(
+                filtered_ids,
+                ops_by_id=ops_by_id,
+                resolved_predecessor_ids=resolved_predecessor_ids,
+            )
 
             blocked_by_precedence = max(0, len(filtered_ids) - len(predecessor_closed_ids))
             precedence_blocked_by_precedence_count += blocked_by_precedence
@@ -661,18 +656,11 @@ class RhcSolver(BaseSolver):
             raw_candidate_ids: set[UUID],
             window_boundary: float,
         ) -> int:
-            admitted_candidate_ids = {
-                op_id
-                for op_id in raw_candidate_ids
-                if (
-                    op_admission_offset_by_id.get(op_id, op_earliest.get(op_id, 0.0))
-                    < window_boundary
-                )
-            }
-            return (
-                len(admitted_candidate_ids)
-                if admitted_candidate_ids
-                else len(raw_candidate_ids)
+            return count_admitted_candidates(
+                raw_candidate_ids,
+                op_admission_offset_by_id=op_admission_offset_by_id,
+                op_earliest=op_earliest,
+                window_boundary=window_boundary,
             )
 
         def collect_commit_candidates(
