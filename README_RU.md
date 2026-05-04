@@ -282,7 +282,7 @@ python -m benchmark.study_rhc_alns_geometry_doe \
 ## Карта Репозитория
 
 - `synaps/solvers/` - реализации решателей и реестр
-- `synaps/solvers/rhc/` - подпакет Receding Horizon Control (декомпозиция R7 в процессе: `_state.py`, `_metadata.py`, `_admission.py` извлечены; `_solver.py` - основной цикл; `_budget.py` и `_window.py` - впереди)
+- `synaps/solvers/rhc/` - подпакет Receding Horizon Control (декомпозиция R7 в процессе: `_state.py`, `_metadata.py`, `_admission.py`, `_budget.py` извлечены; `_solver.py` - основной цикл; `_window.py` - впереди)
 - `synaps/model.py` - базовая Pydantic-модель
 - `synaps/contracts.py` - стабильные JSON-контракты
 - `synaps/problem_profile.py` - профилирование инстансов

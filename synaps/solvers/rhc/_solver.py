@@ -50,6 +50,12 @@ from synaps.solvers.rhc._admission import (
     compute_precedence_closed_set,
     count_admitted_candidates,
 )
+from synaps.solvers.rhc._budget import (
+    AlnsBudgetPolicy,
+    InnerWindowTimeCapPolicy,
+    resolve_inner_window_time_cap as _resolve_inner_window_time_cap,
+    scale_alns_inner_budget as _scale_alns_inner_budget,
+)
 from synaps.solvers.rhc._metadata import build_inner_window_summary
 from synaps.solvers.sdst_matrix import SdstMatrix
 
@@ -142,6 +148,25 @@ class RhcSolver(BaseSolver):
             alns_dynamic_repair_time_limit_min_s,
             float(kwargs.get("alns_dynamic_repair_time_limit_max_s", 5.0)),
         )
+        # Materialize the budget-policy snapshots once; downstream closures
+        # delegate to the pure kernels in synaps.solvers.rhc._budget.
+        _inner_window_cap_policy = InnerWindowTimeCapPolicy(
+            inner_window_time_cap_s=inner_window_time_cap_s,
+            alns_inner_window_time_cap_s=alns_inner_window_time_cap_s,
+            alns_inner_window_time_cap_scaled_s=alns_inner_window_time_cap_scaled_s,
+            alns_inner_window_time_cap_scale_threshold_ops=(
+                alns_inner_window_time_cap_scale_threshold_ops
+            ),
+        )
+        _alns_budget_policy = AlnsBudgetPolicy(
+            estimated_repair_s_per_destroyed_op_raw=(
+                alns_budget_estimated_repair_s_per_destroyed_op_raw
+            ),
+            dynamic_repair_time_limit_min_s=alns_dynamic_repair_time_limit_min_s,
+            dynamic_repair_time_limit_max_s=alns_dynamic_repair_time_limit_max_s,
+            dynamic_repair_s_per_destroyed_op=alns_dynamic_repair_s_per_destroyed_op,
+        )
+
         alns_presearch_budget_guard_enabled: bool = bool(
             kwargs.get("alns_presearch_budget_guard_enabled", True)
         )
@@ -1579,18 +1604,12 @@ class RhcSolver(BaseSolver):
                 selected_solver_name: str = selected_inner_solver_name,
                 window_op_count: int = 0,
             ) -> float:
-                if selected_solver_name == "alns":
-                    if alns_inner_window_time_cap_s is not None:
-                        return alns_inner_window_time_cap_s
-                    if inner_window_time_cap_s is not None:
-                        return inner_window_time_cap_s
-                    if window_op_count >= alns_inner_window_time_cap_scale_threshold_ops:
-                        return alns_inner_window_time_cap_scaled_s
-                    return 60.0
-
-                if inner_window_time_cap_s is not None:
-                    return inner_window_time_cap_s
-                return 60.0
+                # Thin wrapper around the pure kernel in _budget.py.
+                return _resolve_inner_window_time_cap(
+                    selected_solver_name=selected_solver_name,
+                    window_op_count=window_op_count,
+                    policy=_inner_window_cap_policy,
+                )
 
             def scale_alns_inner_budget(
                 effective_kwargs: dict[str, Any],
@@ -1598,83 +1617,13 @@ class RhcSolver(BaseSolver):
                 per_window_limit: float,
                 window_op_count: int,
             ) -> dict[str, Any]:
-                requested_max_iterations = max(
-                    1,
-                    int(effective_kwargs.get("max_iterations", 500)),
+                # Thin wrapper around the pure kernel in _budget.py.
+                return _scale_alns_inner_budget(
+                    effective_kwargs=effective_kwargs,
+                    per_window_limit=per_window_limit,
+                    window_op_count=window_op_count,
+                    policy=_alns_budget_policy,
                 )
-                min_destroy = max(1, int(effective_kwargs.get("min_destroy", 20)))
-                requested_max_destroy = max(
-                    min_destroy,
-                    int(effective_kwargs.get("max_destroy", 300)),
-                )
-                repair_time_limit_s = max(
-                    1.0,
-                    float(effective_kwargs.get("repair_time_limit_s", 10.0)),
-                )
-                estimated_repair_s_per_destroyed_op = (
-                    max(
-                        0.01,
-                        float(alns_budget_estimated_repair_s_per_destroyed_op_raw),
-                    )
-                    if alns_budget_estimated_repair_s_per_destroyed_op_raw is not None
-                    else repair_time_limit_s / max(1, requested_max_destroy)
-                )
-                destroy_cap_from_budget = min(
-                    requested_max_destroy,
-                    max(
-                        min_destroy,
-                        int(
-                            per_window_limit
-                            / max(1, requested_max_iterations)
-                            / estimated_repair_s_per_destroyed_op
-                        ),
-                    ),
-                )
-                destroy_fraction = max(
-                    0.0,
-                    float(effective_kwargs.get("destroy_fraction", 0.05)),
-                )
-                requested_destroy_size = max(
-                    min_destroy,
-                    int(math.ceil(window_op_count * destroy_fraction)),
-                )
-                effective_max_destroy = max(
-                    min_destroy,
-                    min(requested_max_destroy, destroy_cap_from_budget),
-                )
-                estimated_destroy_size = min(requested_destroy_size, effective_max_destroy)
-                estimated_iteration_seconds = max(
-                    0.1,
-                    estimated_destroy_size * estimated_repair_s_per_destroyed_op,
-                )
-                effective_max_iterations = min(
-                    requested_max_iterations,
-                    max(1, int(per_window_limit / estimated_iteration_seconds)),
-                )
-                effective_repair_time_limit_s = max(
-                    0.1,
-                    min(
-                        alns_dynamic_repair_time_limit_max_s,
-                        max(
-                            alns_dynamic_repair_time_limit_min_s,
-                            effective_max_destroy * alns_dynamic_repair_s_per_destroyed_op,
-                        ),
-                    ),
-                )
-                return {
-                    "requested_max_iterations": requested_max_iterations,
-                    "requested_max_destroy": requested_max_destroy,
-                    "effective_max_iterations": effective_max_iterations,
-                    "effective_max_destroy": effective_max_destroy,
-                    "effective_repair_time_limit_s": effective_repair_time_limit_s,
-                    "estimated_repair_s_per_destroyed_op": (
-                        estimated_repair_s_per_destroyed_op
-                    ),
-                    "scaled": (
-                        effective_max_iterations != requested_max_iterations
-                        or effective_max_destroy != requested_max_destroy
-                    ),
-                }
 
             if selected_inner_solver_name != "greedy":
                 try:

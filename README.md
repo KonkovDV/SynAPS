@@ -295,7 +295,7 @@ See: [HPC Silicon-Level Optimization Roadmap](docs/architecture/08_HPC_SILICON_O
 ## Repository Map
 
 - `synaps/solvers/` - solver implementations and registry
-- `synaps/solvers/rhc/` - Receding Horizon Control subpackage (R7 decomposition in progress: `_state.py`, `_metadata.py`, `_admission.py` extracted; `_solver.py` is the main loop; `_budget.py` and `_window.py` are upcoming)
+- `synaps/solvers/rhc/` - Receding Horizon Control subpackage (R7 decomposition in progress: `_state.py`, `_metadata.py`, `_admission.py`, `_budget.py` extracted; `_solver.py` is the main loop; `_window.py` is upcoming)
 - `synaps/model.py` - core Pydantic models
 - `synaps/contracts.py` - stable JSON contracts
 - `schema/contracts/examples/` - solve/repair example payloads for integration smoke tests
