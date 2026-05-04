@@ -71,13 +71,16 @@ def _evaluate_objective(
     problem: ScheduleProblem,
     assignments: list[Assignment],
     sdst: SdstMatrix,
+    *,
+    ops_by_id: dict[Any, Any] | None = None,
 ) -> ObjectiveValues:
     """Compute multi-objective values from a set of assignments."""
     if not assignments:
         return ObjectiveValues()
 
     horizon_start = problem.planning_horizon_start
-    ops_by_id = {op.id: op for op in problem.operations}
+    if ops_by_id is None:
+        ops_by_id = {op.id: op for op in problem.operations}
 
     # Makespan
     makespan = max(
@@ -130,6 +133,193 @@ def _objective_cost(obj: ObjectiveValues, weights: dict[str, float]) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Incremental objective evaluation (P2.1 — avoids full re-sort every iter)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _MachineObjectiveCache:
+    """Per-machine cached objective components for incremental ALNS evaluation."""
+
+    # Per-machine makespan (max end offset), setup, and material loss
+    machine_makespan: dict[Any, float]
+    machine_setup: dict[Any, float]
+    machine_loss: dict[Any, float]
+    # Aggregate totals
+    total_makespan: float
+    total_setup: float
+    total_material_loss: float
+    total_tardiness: float
+    # Pre-computed order completion offsets
+    order_completion: dict[Any, float]
+    # Pre-computed order due offsets (minutes from horizon_start)
+    order_due_offsets: dict[Any, float]
+
+
+def _build_machine_objective_cache(
+    problem: ScheduleProblem,
+    assignments: list[Assignment],
+    sdst: SdstMatrix,
+    *,
+    ops_by_id: dict[Any, Any],
+    horizon_start: Any,
+    order_due_offsets: dict[Any, float] | None = None,
+) -> _MachineObjectiveCache:
+    """Build per-machine cache for incremental objective evaluation."""
+    machine_makespan: dict[Any, float] = {}
+    machine_setup: dict[Any, float] = {}
+    machine_loss: dict[Any, float] = {}
+
+    by_machine: dict[Any, list[Assignment]] = {}
+    for a in assignments:
+        by_machine.setdefault(a.work_center_id, []).append(a)
+
+    for wc_id, ma in by_machine.items():
+        ma.sort(key=lambda a: a.start_time)
+        machine_makespan[wc_id] = max(
+            (a.end_time - horizon_start).total_seconds() / 60.0 for a in ma
+        )
+        setup = 0.0
+        loss = 0.0
+        for i in range(1, len(ma)):
+            prev_state = ops_by_id[ma[i - 1].operation_id].state_id
+            curr_state = ops_by_id[ma[i].operation_id].state_id
+            setup += sdst.get_setup(wc_id, prev_state, curr_state)
+            loss += sdst.get_material_loss(wc_id, prev_state, curr_state)
+        machine_setup[wc_id] = setup
+        machine_loss[wc_id] = loss
+
+    total_makespan = max(machine_makespan.values()) if machine_makespan else 0.0
+    total_setup = sum(machine_setup.values())
+    total_material_loss = sum(machine_loss.values())
+
+    order_completion: dict[Any, float] = {}
+    for a in assignments:
+        op = ops_by_id[a.operation_id]
+        end = (a.end_time - horizon_start).total_seconds() / 60.0
+        if op.order_id not in order_completion or end > order_completion[op.order_id]:
+            order_completion[op.order_id] = end
+
+    if order_due_offsets is None:
+        order_due_offsets = {
+            order.id: (order.due_date - horizon_start).total_seconds() / 60.0
+            for order in problem.orders
+        }
+
+    total_tardiness = 0.0
+    for order in problem.orders:
+        completion = order_completion.get(order.id, 0.0)
+        total_tardiness += max(completion - order_due_offsets[order.id], 0.0)
+
+    return _MachineObjectiveCache(
+        machine_makespan=machine_makespan,
+        machine_setup=machine_setup,
+        machine_loss=machine_loss,
+        total_makespan=total_makespan,
+        total_setup=total_setup,
+        total_material_loss=total_material_loss,
+        total_tardiness=total_tardiness,
+        order_completion=order_completion,
+        order_due_offsets=order_due_offsets,
+    )
+
+
+def _evaluate_objective_incremental(
+    problem: ScheduleProblem,
+    candidate: list[Assignment],
+    sdst: SdstMatrix,
+    *,
+    ops_by_id: dict[Any, Any],
+    horizon_start: Any,
+    affected_machine_ids: set[Any],
+    base_cache: _MachineObjectiveCache,
+) -> tuple[ObjectiveValues, _MachineObjectiveCache]:
+    """Recompute objective only for affected machines, reusing cached values.
+
+    Returns the new ObjectiveValues and an updated cache for the candidate.
+    """
+    # Rebuild only affected machines
+    affected_assignments: dict[Any, list[Assignment]] = {}
+    for a in candidate:
+        if a.work_center_id in affected_machine_ids:
+            affected_assignments.setdefault(a.work_center_id, []).append(a)
+
+    new_machine_makespan = dict(base_cache.machine_makespan)
+    new_machine_setup = dict(base_cache.machine_setup)
+    new_machine_loss = dict(base_cache.machine_loss)
+
+    # Remove affected machines that may now be empty
+    for wc_id in affected_machine_ids:
+        if wc_id not in affected_assignments:
+            new_machine_makespan.pop(wc_id, None)
+            new_machine_setup.pop(wc_id, None)
+            new_machine_loss.pop(wc_id, None)
+
+    for wc_id, ma in affected_assignments.items():
+        ma.sort(key=lambda a: a.start_time)
+        new_machine_makespan[wc_id] = max(
+            (a.end_time - horizon_start).total_seconds() / 60.0 for a in ma
+        )
+        setup = 0.0
+        loss = 0.0
+        for i in range(1, len(ma)):
+            prev_state = ops_by_id[ma[i - 1].operation_id].state_id
+            curr_state = ops_by_id[ma[i].operation_id].state_id
+            setup += sdst.get_setup(wc_id, prev_state, curr_state)
+            loss += sdst.get_material_loss(wc_id, prev_state, curr_state)
+        new_machine_setup[wc_id] = setup
+        new_machine_loss[wc_id] = loss
+
+    total_makespan = max(new_machine_makespan.values()) if new_machine_makespan else 0.0
+    total_setup = sum(new_machine_setup.values())
+    total_material_loss = sum(new_machine_loss.values())
+
+    # Recompute order completion (affected operations may change order completion)
+    new_order_completion = dict(base_cache.order_completion)
+    # Reset affected orders' completion to re-scan
+    affected_order_ids: set[Any] = set()
+    for a in candidate:
+        if a.work_center_id in affected_machine_ids:
+            op = ops_by_id[a.operation_id]
+            affected_order_ids.add(op.order_id)
+
+    # Re-derive completion for affected orders from all assignments
+    for oid in affected_order_ids:
+        new_order_completion[oid] = 0.0
+    for a in candidate:
+        op = ops_by_id[a.operation_id]
+        if op.order_id in affected_order_ids:
+            end = (a.end_time - horizon_start).total_seconds() / 60.0
+            if end > new_order_completion.get(op.order_id, 0.0):
+                new_order_completion[op.order_id] = end
+
+    total_tardiness = 0.0
+    order_due_offsets = base_cache.order_due_offsets
+    for order in problem.orders:
+        completion = new_order_completion.get(order.id, 0.0)
+        total_tardiness += max(completion - order_due_offsets[order.id], 0.0)
+
+    obj = ObjectiveValues(
+        makespan_minutes=total_makespan,
+        total_setup_minutes=total_setup,
+        total_material_loss=total_material_loss,
+        total_tardiness_minutes=total_tardiness,
+    )
+
+    new_cache = _MachineObjectiveCache(
+        machine_makespan=new_machine_makespan,
+        machine_setup=new_machine_setup,
+        machine_loss=new_machine_loss,
+        total_makespan=total_makespan,
+        total_setup=total_setup,
+        total_material_loss=total_material_loss,
+        total_tardiness=total_tardiness,
+        order_completion=new_order_completion,
+        order_due_offsets=order_due_offsets,
+    )
+    return obj, new_cache
+
+
+# ---------------------------------------------------------------------------
 # Destroy operators
 #   random     — uniform random removal
 #   worst      — removal by machine-local setup contribution
@@ -146,6 +336,8 @@ def _destroy_random(
     sdst: SdstMatrix,
     destroy_size: int,
     rng: random.Random,
+    *,
+    ops_by_id: dict[Any, Any] | None = None,
 ) -> set[UUID]:
     """Remove a random subset of operations."""
     op_ids = [a.operation_id for a in assignments]
@@ -159,13 +351,16 @@ def _destroy_worst(
     sdst: SdstMatrix,
     destroy_size: int,
     rng: random.Random,
+    *,
+    ops_by_id: dict[Any, Any] | None = None,
 ) -> set[UUID]:
     """Remove operations contributing the most to setup cost (worst removal).
 
     Picks operations whose machine-local setup contribution (predecessor→self
     + self→successor) is highest.
     """
-    ops_by_id = {op.id: op for op in problem.operations}
+    if ops_by_id is None:
+        ops_by_id = {op.id: op for op in problem.operations}
     by_machine: dict[Any, list[Assignment]] = {}
     for a in assignments:
         by_machine.setdefault(a.work_center_id, []).append(a)
@@ -210,6 +405,8 @@ def _destroy_related(
     sdst: SdstMatrix,
     destroy_size: int,
     rng: random.Random,
+    *,
+    ops_by_id: dict[Any, Any] | None = None,
 ) -> set[UUID]:
     """Remove operations that are related to a seed operation (Shaw removal).
 
@@ -220,7 +417,8 @@ def _destroy_related(
     if not assignments:
         return set()
 
-    ops_by_id = {op.id: op for op in problem.operations}
+    if ops_by_id is None:
+        ops_by_id = {op.id: op for op in problem.operations}
 
     # Pick random seed
     seed_assignment = rng.choice(assignments)
@@ -266,6 +464,8 @@ def _destroy_machine_segment(
     sdst: SdstMatrix,
     destroy_size: int,
     rng: random.Random,
+    *,
+    ops_by_id: dict[Any, Any] | None = None,
 ) -> set[UUID]:
     """Remove a contiguous segment of operations from a random machine.
 
@@ -297,6 +497,8 @@ def _destroy_precedence_chain(
     sdst: SdstMatrix,
     destroy_size: int,
     rng: random.Random,
+    *,
+    ops_by_id: dict[Any, Any] | None = None,
 ) -> set[UUID]:
     """Remove all operations of a randomly selected order (precedence-chain removal).
 
@@ -310,7 +512,8 @@ def _destroy_precedence_chain(
     if not assignments:
         return set()
 
-    ops_by_id = {op.id: op for op in problem.operations}
+    if ops_by_id is None:
+        ops_by_id = {op.id: op for op in problem.operations}
     ops_by_order: dict[Any, list[UUID]] = {}
     for a in assignments:
         op = ops_by_id.get(a.operation_id)
@@ -794,6 +997,7 @@ def _calibrate_sa_temperature(
             sdst,
             destroy_size,
             calibration_rng,
+            ops_by_id=ops_by_id,
         )
         if not destroyed_ids:
             continue
@@ -825,7 +1029,7 @@ def _calibrate_sa_temperature(
         if _has_machine_overlap(candidate):
             continue
 
-        candidate_obj = _evaluate_objective(problem, candidate, sdst)
+        candidate_obj = _evaluate_objective(problem, candidate, sdst, ops_by_id=ops_by_id)
         candidate_cost = _objective_cost(candidate_obj, objective_weights)
         delta = candidate_cost - current_cost
         if delta > 0:
@@ -970,6 +1174,24 @@ class AlnsSolver(BaseSolver):
             ).items()
         }
 
+        # P3.1: Variable fixing — exclude stable ops from destroy
+        fixed_op_ids_raw = kwargs.get("fixed_op_ids")
+        fixed_op_ids: set[UUID] = set(fixed_op_ids_raw) if fixed_op_ids_raw else set()
+
+        # P3.2: Adaptive destroy sizing (Deng et al. 2026)
+        adaptive_destroy_enabled: bool = bool(
+            kwargs.get("adaptive_destroy_enabled", False)
+        )
+        adaptive_destroy_grow_rate: float = float(
+            kwargs.get("adaptive_destroy_grow_rate", 1.15)
+        )
+        adaptive_destroy_shrink_rate: float = float(
+            kwargs.get("adaptive_destroy_shrink_rate", 0.85)
+        )
+
+        # P3.3: EMA repair-time tracking
+        ema_repair_alpha: float = float(kwargs.get("ema_repair_alpha", 0.3))
+
         max_no_improve_iters = max_no_improve_base_iters
         if dynamic_no_improve_enabled and max_no_improve_base_iters > 0:
             scaled_no_improve = int(
@@ -989,6 +1211,7 @@ class AlnsSolver(BaseSolver):
 
         destroy_size = max(min_destroy, int(len(problem.operations) * destroy_fraction))
         destroy_size = min(destroy_size, max_destroy)
+        adaptive_destroy_current = destroy_size
 
         sa_calibrated_base_temp = sa_initial_temp
         sa_calibration_samples = 0
@@ -1375,11 +1598,11 @@ class AlnsSolver(BaseSolver):
 
                 if beam_valid and greedy_valid:
                     beam_cost = _objective_cost(
-                        _evaluate_objective(problem, list(beam_result.assignments), sdst),
+                        _evaluate_objective(problem, list(beam_result.assignments), sdst, ops_by_id=ops_by_id),
                         objective_weights,
                     )
                     greedy_cost = _objective_cost(
-                        _evaluate_objective(problem, list(greedy_result.assignments), sdst),
+                        _evaluate_objective(problem, list(greedy_result.assignments), sdst, ops_by_id=ops_by_id),
                         objective_weights,
                     )
                     if greedy_cost < beam_cost:
@@ -1448,13 +1671,28 @@ class AlnsSolver(BaseSolver):
 
         # Current best
         current_assignments = list(initial_result.assignments)
-        current_obj = _evaluate_objective(problem, current_assignments, sdst)
+        current_obj = _evaluate_objective(problem, current_assignments, sdst, ops_by_id=ops_by_id)
         current_cost = _objective_cost(current_obj, objective_weights)
         initial_cost = current_cost
+
+        # P2.1: Pre-compute order due offsets once (avoids datetime math per iteration)
+        horizon_start = problem.planning_horizon_start
+        order_due_offsets = {
+            order.id: (order.due_date - horizon_start).total_seconds() / 60.0
+            for order in problem.orders
+        }
+        # Build per-machine cache for incremental evaluation
+        current_cache = _build_machine_objective_cache(
+            problem, current_assignments, sdst,
+            ops_by_id=ops_by_id,
+            horizon_start=horizon_start,
+            order_due_offsets=order_due_offsets,
+        )
 
         best_assignments = list(current_assignments)
         best_obj = current_obj
         best_cost = current_cost
+        best_cache = current_cache
 
         if sa_auto_calibration_enabled:
             sa_calibrated_base_temp, sa_calibration_samples = _calibrate_sa_temperature(
@@ -1509,6 +1747,10 @@ class AlnsSolver(BaseSolver):
         greedy_repair_timeouts = 0
         cpsat_repair_ms_total = 0
         greedy_repair_ms_total = 0
+        # R2 (EMA calibration): track total destroyed-op count per repair lane
+        # so RHC can compute an empirical mean repair time per destroyed op.
+        cpsat_repair_total_destroy_size = 0
+        greedy_repair_total_destroy_size = 0
         feasibility_failures = 0
         sa_worsening_accepted = 0
         sa_worsening_rejected = 0
@@ -1516,13 +1758,19 @@ class AlnsSolver(BaseSolver):
         iterations_completed = 0
         no_improve_streak = 0
         no_improve_early_stop = False
+        # P3.3: EMA repair-time tracker
+        ema_repair_ms: float = 0.0
+        ema_repair_samples: int = 0
+        # P3.1: fixed ops tracking
+        fixed_ops_applied = len(fixed_op_ids)
 
         logger.info(
-            "ALNS starting: %d ops, %d machines, destroy_size=%d, max_iter=%d",
+            "ALNS starting: %d ops, %d machines, destroy_size=%d, max_iter=%d, fixed_ops=%d",
             n_ops,
             len(problem.work_centers),
             destroy_size,
             max_iterations,
+            fixed_ops_applied,
         )
 
         # ------- Phase 3: Main ALNS loop -------
@@ -1553,10 +1801,20 @@ class AlnsSolver(BaseSolver):
 
                 op_name, destroy_fn = DESTROY_OPERATORS[selected_op_idx]
 
-                # Destroy
-                destroyed_ids = destroy_fn(
-                    current_assignments, problem, sdst, destroy_size, rng,
+                # P3.2: use adaptive destroy size
+                effective_destroy_size = (
+                    adaptive_destroy_current if adaptive_destroy_enabled else destroy_size
                 )
+
+                destroyed_ids = destroy_fn(
+                    current_assignments, problem, sdst, effective_destroy_size, rng,
+                    ops_by_id=ops_by_id,
+                )
+
+                # P3.1: exclude fixed ops from destroy set
+                if fixed_op_ids:
+                    destroyed_ids -= fixed_op_ids
+
                 if not destroyed_ids:
                     continue
 
@@ -1611,6 +1869,7 @@ class AlnsSolver(BaseSolver):
                         op_positions=op_positions,
                     )
                     cpsat_repair_ms_total += int((time.monotonic() - cpsat_repair_t0) * 1000)
+                    cpsat_repair_total_destroy_size += len(destroyed_ids)
                     if cpsat_outcome.status == RepairStatus.TIMEOUT:
                         cpsat_repair_timeouts += 1
                     if cpsat_outcome.status == RepairStatus.FEASIBLE:
@@ -1644,6 +1903,7 @@ class AlnsSolver(BaseSolver):
                     greedy_repair_t0 = time.monotonic()
                     greedy_outcome = _repair_greedy_outcome(problem, frozen, destroyed_ids)
                     greedy_repair_ms_total += int((time.monotonic() - greedy_repair_t0) * 1000)
+                    greedy_repair_total_destroy_size += len(destroyed_ids)
                     if greedy_outcome.status == RepairStatus.TIMEOUT:
                         greedy_repair_timeouts += 1
                     if greedy_outcome.status == RepairStatus.FEASIBLE:
@@ -1694,8 +1954,25 @@ class AlnsSolver(BaseSolver):
                     feasibility_failures += 1
                     continue
 
-                # Evaluate
-                candidate_obj = _evaluate_objective(problem, candidate, sdst)
+                # Evaluate incrementally — only recompute affected machines
+                # Affected = machines that had destroyed ops + machines that got repaired ops
+                affected_machine_ids: set[Any] = set()
+                destroyed_assignment_map = {
+                    a.operation_id: a for a in current_assignments
+                    if a.operation_id in destroyed_ids
+                }
+                for a in destroyed_assignment_map.values():
+                    affected_machine_ids.add(a.work_center_id)
+                for a in new_assignments:
+                    affected_machine_ids.add(a.work_center_id)
+
+                candidate_obj, candidate_cache = _evaluate_objective_incremental(
+                    problem, candidate, sdst,
+                    ops_by_id=ops_by_id,
+                    horizon_start=horizon_start,
+                    affected_machine_ids=affected_machine_ids,
+                    base_cache=current_cache,
+                )
                 candidate_cost = _objective_cost(candidate_obj, objective_weights)
                 delta = candidate_cost - current_cost
 
@@ -1706,9 +1983,11 @@ class AlnsSolver(BaseSolver):
                     best_assignments = list(candidate)
                     best_obj = candidate_obj
                     best_cost = candidate_cost
+                    best_cache = candidate_cache
                     current_assignments = candidate
                     current_obj = candidate_obj
                     current_cost = candidate_cost
+                    current_cache = candidate_cache
                     score_reward = sigma_1
                     improvements += 1
                     no_improve_streak = 0
@@ -1720,6 +1999,7 @@ class AlnsSolver(BaseSolver):
                     current_assignments = candidate
                     current_obj = candidate_obj
                     current_cost = candidate_cost
+                    current_cache = candidate_cache
                     score_reward = sigma_2 if delta < 0 else sigma_3
                     if delta < 0:
                         no_improve_streak = 0
@@ -1746,6 +2026,37 @@ class AlnsSolver(BaseSolver):
                     operator_scores = [0.0] * n_operators
                     operator_attempts = [0] * n_operators
 
+                # P3.3: Update EMA repair time
+                iter_repair_ms = 0
+                if repair_used == "cpsat":
+                    iter_repair_ms = cpsat_repair_ms_total  # cumulative, approximate
+                elif repair_used == "greedy":
+                    iter_repair_ms = greedy_repair_ms_total
+                if iter_repair_ms > 0:
+                    if ema_repair_samples == 0:
+                        ema_repair_ms = float(iter_repair_ms)
+                    else:
+                        ema_repair_ms = (
+                            ema_repair_alpha * iter_repair_ms
+                            + (1.0 - ema_repair_alpha) * ema_repair_ms
+                        )
+                    ema_repair_samples += 1
+
+                # P3.2: Adaptive destroy sizing
+                if adaptive_destroy_enabled:
+                    if score_reward >= sigma_1:
+                        # Improvement found — shrink destroy to exploit
+                        adaptive_destroy_current = max(
+                            min_destroy,
+                            int(adaptive_destroy_current * adaptive_destroy_shrink_rate),
+                        )
+                    elif no_improve_streak > 0 and no_improve_streak % 5 == 0:
+                        # No improvement plateau — grow destroy to explore
+                        adaptive_destroy_current = min(
+                            max_destroy,
+                            int(adaptive_destroy_current * adaptive_destroy_grow_rate),
+                        )
+
                 # Cool down
                 temperature *= effective_sa_cooling_rate
 
@@ -1760,7 +2071,7 @@ class AlnsSolver(BaseSolver):
         # ------- Phase 4: Final validation -------
         # Recompute setups from final sequence
         recompute_assignment_setups(best_assignments, dispatch_context)
-        final_obj = _evaluate_objective(problem, best_assignments, sdst)
+        final_obj = _evaluate_objective(problem, best_assignments, sdst, ops_by_id=ops_by_id)
         final_cost = _objective_cost(final_obj, objective_weights)
 
         # Full feasibility check
@@ -1784,7 +2095,7 @@ class AlnsSolver(BaseSolver):
                     final_violations_before_recovery,
                 )
                 best_assignments = recovered_assignments
-                final_obj = _evaluate_objective(problem, best_assignments, sdst)
+                final_obj = _evaluate_objective(problem, best_assignments, sdst, ops_by_id=ops_by_id)
                 final_cost = _objective_cost(final_obj, objective_weights)
                 violations = recovered_violations
                 final_violation_recovered = True
@@ -1824,9 +2135,28 @@ class AlnsSolver(BaseSolver):
                 "cpsat_repairs": cpsat_repairs,
                 "cpsat_repair_skips_large_destroy": cpsat_repair_skips_large_destroy,
                 "cpsat_repair_timeouts": cpsat_repair_timeouts,
+                "cpsat_repair_total_destroy_size": cpsat_repair_total_destroy_size,
                 "greedy_repair_attempts": greedy_repair_attempts,
                 "greedy_repairs": greedy_repairs,
                 "greedy_repair_timeouts": greedy_repair_timeouts,
+                "greedy_repair_total_destroy_size": greedy_repair_total_destroy_size,
+                # R2 (EMA calibration): empirical mean repair time per destroyed
+                # op, weighted across both repair lanes. None when no repair
+                # attempt produced a non-zero destroy size (cold start).
+                "observed_repair_s_per_destroyed_op": (
+                    (cpsat_repair_ms_total + greedy_repair_ms_total)
+                    / 1000.0
+                    / (
+                        cpsat_repair_total_destroy_size
+                        + greedy_repair_total_destroy_size
+                    )
+                    if (
+                        cpsat_repair_total_destroy_size
+                        + greedy_repair_total_destroy_size
+                    )
+                    > 0
+                    else None
+                ),
                 "repair_rejection_reasons": repair_rejection_reasons,
                 "initial_solver": initial_solver_name,
                 "warm_start_used": warm_start_used,
@@ -1910,5 +2240,13 @@ class AlnsSolver(BaseSolver):
                 "improvement_pct": round(
                     (1 - final_cost / max(initial_cost, 1e-9)) * 100, 2
                 ),
+                # P3.1: Variable fixing metadata
+                "fixed_ops_applied": fixed_ops_applied,
+                # P3.2: Adaptive destroy metadata
+                "adaptive_destroy_enabled": adaptive_destroy_enabled,
+                "adaptive_destroy_final_size": adaptive_destroy_current,
+                # P3.3: EMA repair-time metadata
+                "ema_repair_ms": round(ema_repair_ms, 2),
+                "ema_repair_samples": ema_repair_samples,
             },
         )

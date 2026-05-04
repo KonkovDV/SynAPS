@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from synaps.solvers.rhc._budget import (
     AlnsBudgetPolicy,
+    EmpiricalRepairCostEstimator,
     InnerWindowTimeCapPolicy,
     resolve_inner_window_time_cap,
     scale_alns_inner_budget,
@@ -216,3 +217,82 @@ class TestScaleAlnsInnerBudget:
             policy=_default_budget_policy(raw=0.1),
         )
         assert kwargs == original
+
+    def test_override_wins_over_policy_raw(self) -> None:
+        # Policy raw says 0.1, override says 0.5 ⇒ kernel should use 0.5.
+        result = scale_alns_inner_budget(
+            effective_kwargs={"max_iterations": 100, "max_destroy": 50, "min_destroy": 10},
+            per_window_limit=60.0,
+            window_op_count=200,
+            policy=_default_budget_policy(raw=0.1),
+            override_estimated_repair_s_per_destroyed_op=0.5,
+        )
+        assert result["estimated_repair_s_per_destroyed_op"] == 0.5
+
+    def test_override_floored_at_001(self) -> None:
+        result = scale_alns_inner_budget(
+            effective_kwargs={"max_iterations": 100, "max_destroy": 50, "min_destroy": 10},
+            per_window_limit=60.0,
+            window_op_count=200,
+            policy=_default_budget_policy(raw=0.5),
+            override_estimated_repair_s_per_destroyed_op=0.0001,
+        )
+        assert result["estimated_repair_s_per_destroyed_op"] == 0.01
+
+
+class TestEmpiricalRepairCostEstimator:
+    def test_initial_state(self) -> None:
+        e = EmpiricalRepairCostEstimator()
+        assert e.current() is None
+        assert e.observation_count == 0
+
+    def test_first_observation_initializes_exactly(self) -> None:
+        e = EmpiricalRepairCostEstimator(alpha=0.3)
+        result = e.update(0.5)
+        assert result == 0.5
+        assert e.current() == 0.5
+        assert e.observation_count == 1
+
+    def test_second_observation_blends_with_alpha(self) -> None:
+        # alpha=0.3, prior=0.5, observed=0.1 ⇒ 0.3*0.1 + 0.7*0.5 = 0.38
+        e = EmpiricalRepairCostEstimator(alpha=0.3)
+        e.update(0.5)
+        result = e.update(0.1)
+        assert abs(result - 0.38) < 1e-9
+        assert e.observation_count == 2
+
+    def test_none_observation_ignored(self) -> None:
+        e = EmpiricalRepairCostEstimator()
+        e.update(0.5)
+        before = e.estimate
+        result = e.update(None)
+        assert result == before
+        assert e.observation_count == 1  # not incremented
+
+    def test_zero_or_negative_observation_ignored(self) -> None:
+        e = EmpiricalRepairCostEstimator()
+        e.update(0.5)
+        e.update(0.0)
+        e.update(-1.0)
+        assert e.estimate == 0.5
+        assert e.observation_count == 1
+
+    def test_alpha_one_is_pure_replacement(self) -> None:
+        e = EmpiricalRepairCostEstimator(alpha=1.0)
+        e.update(0.5)
+        e.update(0.1)
+        assert e.estimate == 0.1
+
+    def test_alpha_zero_is_pure_history(self) -> None:
+        e = EmpiricalRepairCostEstimator(alpha=0.0)
+        e.update(0.5)
+        e.update(0.9)  # ignored by smoothing weight
+        assert e.estimate == 0.5
+
+    def test_long_run_converges_to_observation_mean(self) -> None:
+        # Repeatedly feed the same value; EMA must converge to it.
+        e = EmpiricalRepairCostEstimator(alpha=0.3)
+        target = 0.42
+        for _ in range(100):
+            e.update(target)
+        assert abs(e.estimate - target) < 1e-9

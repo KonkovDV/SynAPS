@@ -52,6 +52,7 @@ from synaps.solvers.rhc._admission import (
 )
 from synaps.solvers.rhc._budget import (
     AlnsBudgetPolicy,
+    EmpiricalRepairCostEstimator,
     InnerWindowTimeCapPolicy,
     resolve_inner_window_time_cap as _resolve_inner_window_time_cap,
     scale_alns_inner_budget as _scale_alns_inner_budget,
@@ -171,6 +172,16 @@ class RhcSolver(BaseSolver):
             dynamic_repair_time_limit_min_s=alns_dynamic_repair_time_limit_min_s,
             dynamic_repair_time_limit_max_s=alns_dynamic_repair_time_limit_max_s,
             dynamic_repair_s_per_destroyed_op=alns_dynamic_repair_s_per_destroyed_op,
+        )
+        # R2 (EMA calibration): solver-scoped repair-cost estimator. Updated
+        # after every ALNS window from the new ALNS metadata key
+        # `observed_repair_s_per_destroyed_op`; consumed by subsequent calls
+        # to `scale_alns_inner_budget` via the override parameter.
+        alns_repair_cost_alpha: float = float(
+            kwargs.get("alns_repair_cost_ema_alpha", 0.3)
+        )
+        alns_repair_cost_estimator = EmpiricalRepairCostEstimator(
+            alpha=max(0.0, min(1.0, alns_repair_cost_alpha)),
         )
 
         alns_presearch_budget_guard_enabled: bool = bool(
@@ -1384,11 +1395,17 @@ class RhcSolver(BaseSolver):
                 window_op_count: int,
             ) -> dict[str, Any]:
                 # Thin wrapper around the pure kernel in _budget.py.
+                # The EMA override (R2) wins over the static policy raw value;
+                # current() returns None until the first observation, leaving
+                # the budget kernel on its existing fallback path.
                 return _scale_alns_inner_budget(
                     effective_kwargs=effective_kwargs,
                     per_window_limit=per_window_limit,
                     window_op_count=window_op_count,
                     policy=_alns_budget_policy,
+                    override_estimated_repair_s_per_destroyed_op=(
+                        alns_repair_cost_estimator.current()
+                    ),
                 )
 
             if selected_inner_solver_name != "greedy":
@@ -1646,6 +1663,22 @@ class RhcSolver(BaseSolver):
                                 **effective_inner_kwargs,
                             )
                         assert inner_result is not None
+
+                    # R2 (EMA calibration): fold the observed empirical
+                    # repair cost from this window's ALNS metadata into the
+                    # solver-scoped EMA so the next window's
+                    # `scale_alns_inner_budget` call can override its
+                    # static fallback. update() ignores None / non-positive
+                    # observations.
+                    if (
+                        selected_inner_solver_name == "alns"
+                        and inner_result is not None
+                    ):
+                        alns_repair_cost_estimator.update(
+                            (inner_result.metadata or {}).get(
+                                "observed_repair_s_per_destroyed_op"
+                            )
+                        )
 
                     alns_budget_exhausted_before_search = bool(
                         selected_inner_solver_name == "alns"
@@ -2393,6 +2426,17 @@ class RhcSolver(BaseSolver):
                 ),
                 "alns_dynamic_repair_time_limit_max_s": (
                     alns_dynamic_repair_time_limit_max_s
+                ),
+                # R2 (EMA calibration) telemetry: final state of the
+                # solver-scoped repair-cost estimator.
+                "alns_repair_cost_ema_alpha": alns_repair_cost_alpha,
+                "alns_repair_cost_ema_estimate_s_per_destroyed_op": (
+                    round(alns_repair_cost_estimator.estimate, 6)
+                    if alns_repair_cost_estimator.estimate is not None
+                    else None
+                ),
+                "alns_repair_cost_ema_observation_count": (
+                    alns_repair_cost_estimator.observation_count
                 ),
                 "alns_budget_scaled_windows": alns_budget_scaled_windows,
                 "alns_presearch_budget_guard_enabled": (

@@ -128,12 +128,62 @@ class AlnsBudgetPolicy:
     dynamic_repair_s_per_destroyed_op: float
 
 
+@dataclass
+class EmpiricalRepairCostEstimator:
+    """EMA-based estimator for ALNS per-destroyed-op repair time.
+
+    Implements R2 from the 2026-05-01 academic re-audit (§ 3.5):
+
+    * Each successful inner ALNS window contributes one observation
+      ``observed_s_per_op = total_repair_seconds / total_destroyed_ops``
+      taken from the ALNS metadata.
+    * The estimator carries an EMA with smoothing factor ``alpha``
+      (default 0.3) plus an ``observation_count`` for telemetry.
+    * The first observation initializes the EMA exactly (no zero-start
+      bias). Subsequent observations are blended in.
+
+    A solver-scoped instance is updated after each ALNS window and read
+    by the next call to :func:`scale_alns_inner_budget` via the
+    ``override_estimated_repair_s_per_destroyed_op`` parameter, which
+    wins over ``policy.estimated_repair_s_per_destroyed_op_raw``.
+    """
+
+    alpha: float = 0.3
+    estimate: float | None = None
+    observation_count: int = 0
+
+    def update(self, observed_s_per_op: float | None) -> float | None:
+        """Blend a new observation into the EMA. Returns the new estimate.
+
+        ``None`` observations (cold start, repair lane never fired) are
+        ignored. Non-positive observations are also ignored: they are
+        artefacts of zero-time repair calls that would corrupt the
+        scale_alns_inner_budget linearization (division by zero).
+        """
+        if observed_s_per_op is None or observed_s_per_op <= 0.0:
+            return self.estimate
+        if self.estimate is None:
+            self.estimate = float(observed_s_per_op)
+        else:
+            self.estimate = (
+                self.alpha * float(observed_s_per_op)
+                + (1.0 - self.alpha) * self.estimate
+            )
+        self.observation_count += 1
+        return self.estimate
+
+    def current(self) -> float | None:
+        """Return the current EMA estimate, or ``None`` before any update."""
+        return self.estimate
+
+
 def scale_alns_inner_budget(
     *,
     effective_kwargs: dict[str, Any],
     per_window_limit: float,
     window_op_count: int,
     policy: AlnsBudgetPolicy,
+    override_estimated_repair_s_per_destroyed_op: float | None = None,
 ) -> dict[str, Any]:
     """Compute effective ALNS iteration / destroy / repair caps for the
     current window given a wall-clock budget.
@@ -171,11 +221,22 @@ def scale_alns_inner_budget(
         float(effective_kwargs.get("repair_time_limit_s", 10.0)),
     )
 
-    estimated_repair_s_per_destroyed_op = (
-        max(0.01, float(policy.estimated_repair_s_per_destroyed_op_raw))
-        if policy.estimated_repair_s_per_destroyed_op_raw is not None
-        else repair_time_limit_s / max(1, requested_max_destroy)
-    )
+    # Resolution priority for the per-op repair cost (R2 EMA calibration):
+    #   1. Per-call override from the solver-scoped EMA estimator.
+    #   2. Static policy value provided via kwargs at solver construction.
+    #   3. Fallback derived from the requested per-iteration repair budget.
+    if override_estimated_repair_s_per_destroyed_op is not None:
+        estimated_repair_s_per_destroyed_op = max(
+            0.01, float(override_estimated_repair_s_per_destroyed_op)
+        )
+    elif policy.estimated_repair_s_per_destroyed_op_raw is not None:
+        estimated_repair_s_per_destroyed_op = max(
+            0.01, float(policy.estimated_repair_s_per_destroyed_op_raw)
+        )
+    else:
+        estimated_repair_s_per_destroyed_op = (
+            repair_time_limit_s / max(1, requested_max_destroy)
+        )
 
     destroy_cap_from_budget = min(
         requested_max_destroy,
