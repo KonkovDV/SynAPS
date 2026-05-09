@@ -14,6 +14,6 @@ warnings.warn(
     stacklevel=2,
 )
 
-from synaps.solvers.rhc import RhcSolver, RhcWindowState
+from synaps.solvers.rhc import RhcSolver, RhcWindowState  # noqa: E402
 
 __all__ = ["RhcSolver", "RhcWindowState"]

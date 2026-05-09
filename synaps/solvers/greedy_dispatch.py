@@ -71,13 +71,14 @@ class GreedyDispatch(BaseSolver):
         horizon_start = problem.planning_horizon_start
 
         # Build operation queue (respecting precedence)
-        remaining = list(problem.operations)
+        all_ops = problem.operations
+        n_total_ops = len(all_ops)
         scheduled_ops: set[Any] = set()
         op_end_offsets: dict[Any, float] = {}
         assignments: list[Assignment] = []
         machine_idx = MachineIndex(dispatch_context)
 
-        while remaining:
+        while len(scheduled_ops) < n_total_ops:
             if time_limit_s is not None and (time.monotonic() - t0) > time_limit_s:
                 elapsed_ms = int((time.monotonic() - t0) * 1000)
                 partial_makespan = (
@@ -98,7 +99,7 @@ class GreedyDispatch(BaseSolver):
                         "acceleration": acceleration_status,
                         "partial_schedule": True,
                         "scheduled_ops": len(assignments),
-                        "remaining_ops": len(remaining),
+                        "remaining_ops": n_total_ops - len(scheduled_ops),
                         "time_limit_s": time_limit_s,
                     },
                 )
@@ -106,8 +107,9 @@ class GreedyDispatch(BaseSolver):
             # Filter to ready operations (predecessor scheduled or none)
             ready = [
                 op
-                for op in remaining
-                if op.predecessor_op_id is None or op.predecessor_op_id in scheduled_ops
+                for op in all_ops
+                if op.id not in scheduled_ops
+                and (op.predecessor_op_id is None or op.predecessor_op_id in scheduled_ops)
             ]
             if not ready:
                 elapsed_ms = int((time.monotonic() - t0) * 1000)
@@ -278,7 +280,6 @@ class GreedyDispatch(BaseSolver):
 
             op_end_offsets[best_op.id] = end_offset
             scheduled_ops.add(best_op.id)
-            remaining.remove(best_op)
 
         # Recompute per-assignment setup_minutes and aggregate total from the
         # final machine sequence — corrects ghost setups after gap insertions.

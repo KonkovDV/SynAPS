@@ -56,6 +56,7 @@ docs/_extra/
 
 # Benchmark outputs
 benchmark/results/
+benchmark/studies/
 .benchmarks/
 /test_results.txt
 

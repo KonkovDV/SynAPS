@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import json
+from pathlib import Path
 
 from synaps.contracts import (
     ProblemInstanceSlice,
@@ -203,7 +203,7 @@ def test_write_contract_schemas_writes_schema_files(tmp_path: Path) -> None:
 
 
 def test_contract_examples_are_valid_models() -> None:
-    examples_dir = Path("schema/contracts/examples")
+    examples_dir = Path(__file__).parent.parent / "schema" / "contracts" / "examples"
 
     solve_request = SolveRequest.model_validate_json(
         (examples_dir / "solve-request.example.json").read_text(encoding="utf-8")

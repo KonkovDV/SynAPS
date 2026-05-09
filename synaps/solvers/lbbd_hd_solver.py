@@ -22,13 +22,13 @@ from __future__ import annotations
 
 import os
 import time
+import warnings
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
-import warnings
 
-import highspy  # type: ignore[import-untyped]
+import highspy
 import numpy as np
 
 from synaps.model import (

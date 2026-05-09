@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 import json
+from collections import defaultdict
 from pathlib import Path
 from typing import Final, Literal
 from uuid import UUID  # noqa: TC003
@@ -11,8 +11,8 @@ from uuid import UUID  # noqa: TC003
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from synaps.model import (  # noqa: TC001
-    Assignment,
     MAX_SCHEDULE_OPERATIONS,
+    Assignment,
     ScheduleProblem,
     ScheduleResult,
     normalize_schedule_problem_data,

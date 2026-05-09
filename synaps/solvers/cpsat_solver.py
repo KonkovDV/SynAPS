@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 import time
+from collections.abc import Mapping
 from datetime import timedelta
 from typing import Any
 from uuid import NAMESPACE_DNS, UUID, uuid5

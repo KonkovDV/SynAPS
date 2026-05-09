@@ -6,9 +6,10 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
-from uuid import UUID
 
 if TYPE_CHECKING:
+    from uuid import UUID
+
     from synaps.model import ScheduleProblem
 
 

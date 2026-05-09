@@ -13,13 +13,13 @@ Academic basis:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import timedelta
-from enum import Enum
 import logging
 import math
 import random
 import time
+from dataclasses import dataclass
+from datetime import timedelta
+from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from synaps.model import (
@@ -539,6 +539,149 @@ def _destroy_precedence_chain(
     return set(rng.sample(op_ids, min(destroy_size, len(op_ids))))
 
 
+def _destroy_critical_path(
+    assignments: list[Assignment],
+    problem: ScheduleProblem,
+    sdst: SdstMatrix,
+    destroy_size: int,
+    rng: random.Random,
+    *,
+    ops_by_id: dict[Any, Any] | None = None,
+) -> set[UUID]:
+    """Remove operations on the critical path of the current schedule.
+
+    Builds a combined DAG of precedence edges and machine-sequence edges
+    (sorted by start_time), then computes the longest path via topological
+    sort + dynamic programming in O(N + E) time.
+
+    The critical path is the chain from a source node to the makespan-defining
+    operation. Destroying it forces ALNS repair to focus on the bottleneck.
+
+    Academic basis:
+        - Kelley & Walker (1959): Critical Path Method (CPM)
+        - Adams, Balas & Zawack (1988): shifting bottleneck + critical path
+          for job-shop scheduling
+    """
+    if not assignments:
+        return set()
+
+    if ops_by_id is None:
+        ops_by_id = {op.id: op for op in problem.operations}
+
+    # Build assignment lookup by operation_id
+    assignment_by_op: dict[UUID, Assignment] = {a.operation_id: a for a in assignments}
+
+    # Build machine sequences sorted by start_time
+    by_machine: dict[Any, list[Assignment]] = {}
+    for a in assignments:
+        by_machine.setdefault(a.work_center_id, []).append(a)
+    for wc_id in by_machine:
+        by_machine[wc_id].sort(key=lambda a: a.start_time)
+
+    # Build the combined DAG as adjacency list: node -> list of (successor, edge_weight)
+    # Node = operation_id (UUID)
+    # Edge weight = duration of the source operation (the time it contributes)
+    # The longest path length = sum of durations along the path = makespan
+    #
+    # We use operation duration as node weight. For longest-path DP:
+    #   dist[node] = duration[node] + max(dist[successor] for each successor)
+    # The critical path ends at the node with the maximum dist value.
+
+    # Compute duration for each assigned operation (in minutes)
+    op_duration: dict[UUID, float] = {}
+    for a in assignments:
+        duration_min = (a.end_time - a.start_time).total_seconds() / 60.0
+        op_duration[a.operation_id] = duration_min
+
+    # Build adjacency list (forward edges: predecessor -> successor)
+    # Edge types:
+    #   1. Precedence edges: op.predecessor_op_id -> op.id
+    #   2. Machine-sequence edges: consecutive ops on same machine (by start_time)
+    successors: dict[UUID, list[UUID]] = {}
+    in_degree: dict[UUID, int] = {}
+
+    assigned_op_ids = set(assignment_by_op.keys())
+
+    # Initialize all assigned operations
+    for op_id in assigned_op_ids:
+        successors.setdefault(op_id, [])
+        in_degree.setdefault(op_id, 0)
+
+    # Add precedence edges
+    for op_id in assigned_op_ids:
+        op = ops_by_id.get(op_id)
+        if op is None:
+            continue
+        pred_id = op.predecessor_op_id
+        if pred_id is not None and pred_id in assigned_op_ids:
+            successors.setdefault(pred_id, []).append(op_id)
+            in_degree[op_id] = in_degree.get(op_id, 0) + 1
+
+    # Add machine-sequence edges (consecutive operations on same machine)
+    for _wc_id, machine_seq in by_machine.items():
+        for i in range(len(machine_seq) - 1):
+            from_op = machine_seq[i].operation_id
+            to_op = machine_seq[i + 1].operation_id
+            successors.setdefault(from_op, []).append(to_op)
+            in_degree[to_op] = in_degree.get(to_op, 0) + 1
+
+    # Topological sort (Kahn's algorithm)
+    from collections import deque
+
+    queue: deque[UUID] = deque()
+    for op_id in assigned_op_ids:
+        if in_degree.get(op_id, 0) == 0:
+            queue.append(op_id)
+
+    topo_order: list[UUID] = []
+    while queue:
+        node = queue.popleft()
+        topo_order.append(node)
+        for succ in successors.get(node, []):
+            in_degree[succ] -= 1
+            if in_degree[succ] == 0:
+                queue.append(succ)
+
+    # If topological sort didn't cover all nodes (cycle in graph), fall back
+    if len(topo_order) != len(assigned_op_ids):
+        return _destroy_random(assignments, problem, sdst, destroy_size, rng)
+
+    # Longest path DP (forward pass)
+    # dist[node] = longest path length ending at node (inclusive of node's duration)
+    # predecessor_on_path[node] = the node that precedes this one on the longest path
+    dist: dict[UUID, float] = {}
+    predecessor_on_path: dict[UUID, UUID | None] = {}
+
+    for node in topo_order:
+        dist[node] = op_duration.get(node, 0.0)
+        predecessor_on_path[node] = None
+
+    for node in topo_order:
+        node_dist = dist[node]
+        for succ in successors.get(node, []):
+            candidate_dist = node_dist + op_duration.get(succ, 0.0)
+            if candidate_dist > dist[succ]:
+                dist[succ] = candidate_dist
+                predecessor_on_path[succ] = node
+
+    # Find the makespan-defining operation (node with maximum dist)
+    makespan_op_id = max(assigned_op_ids, key=lambda op_id: dist.get(op_id, 0.0))
+
+    # Trace back the critical path
+    critical_path: list[UUID] = []
+    current: UUID | None = makespan_op_id
+    while current is not None:
+        critical_path.append(current)
+        current = predecessor_on_path.get(current)
+    critical_path.reverse()
+
+    # Cap to destroy_size (take from the end — closer to makespan bottleneck)
+    if len(critical_path) > destroy_size:
+        critical_path = critical_path[-destroy_size:]
+
+    return set(critical_path)
+
+
 # All destroy operators (random, worst, related: Shaw/Ropke-Pisinger;
 #  machine_segment: domain heuristic for setup-chain disruption;
 #  precedence_chain: R8 order-based ejection for work-order level re-sequencing)
@@ -905,7 +1048,10 @@ def _has_precedence_violation(
         if operation is None or operation.predecessor_op_id is None:
             continue
         predecessor_assignment = assignments_by_op.get(operation.predecessor_op_id)
-        if predecessor_assignment is not None and assignment.start_time < predecessor_assignment.end_time:
+        if (
+            predecessor_assignment is not None
+            and assignment.start_time < predecessor_assignment.end_time
+        ):
             return True
     return False
 
@@ -1402,7 +1548,12 @@ class AlnsSolver(BaseSolver):
                         conflicting_blocker_end = next(
                             (
                                 blocker_end
-                                for blocker_assignment, blocker_start, blocker_end, blocker_resources in external_frozen_blockers
+                                for (
+                                    blocker_assignment,
+                                    blocker_start,
+                                    blocker_end,
+                                    blocker_resources,
+                                ) in external_frozen_blockers
                                 if (
                                     blocker_assignment.work_center_id == assignment.work_center_id
                                     or required_resource_ids & blocker_resources
@@ -1459,8 +1610,7 @@ class AlnsSolver(BaseSolver):
             ), changed_assignment_count
 
         # ------- Phase 1: Initial solution -------
-        from synaps.solvers.greedy_dispatch import BeamSearchDispatch
-        from synaps.solvers.greedy_dispatch import GreedyDispatch
+        from synaps.solvers.greedy_dispatch import BeamSearchDispatch, GreedyDispatch
 
         initial_solution_t0 = time.monotonic()
         warm_start_assignments: list[Assignment] = []
@@ -1598,11 +1748,17 @@ class AlnsSolver(BaseSolver):
 
                 if beam_valid and greedy_valid:
                     beam_cost = _objective_cost(
-                        _evaluate_objective(problem, list(beam_result.assignments), sdst, ops_by_id=ops_by_id),
+                        _evaluate_objective(
+                            problem, list(beam_result.assignments),
+                            sdst, ops_by_id=ops_by_id,
+                        ),
                         objective_weights,
                     )
                     greedy_cost = _objective_cost(
-                        _evaluate_objective(problem, list(greedy_result.assignments), sdst, ops_by_id=ops_by_id),
+                        _evaluate_objective(
+                            problem, list(greedy_result.assignments),
+                            sdst, ops_by_id=ops_by_id,
+                        ),
                         objective_weights,
                     )
                     if greedy_cost < beam_cost:
@@ -1692,7 +1848,6 @@ class AlnsSolver(BaseSolver):
         best_assignments = list(current_assignments)
         best_obj = current_obj
         best_cost = current_cost
-        best_cache = current_cache
 
         if sa_auto_calibration_enabled:
             sa_calibrated_base_temp, sa_calibration_samples = _calibrate_sa_temperature(
@@ -1880,7 +2035,9 @@ class AlnsSolver(BaseSolver):
                         test_candidate = frozen + cpsat_result
                         if (
                             not _has_machine_overlap(test_candidate)
-                            and not _violates_frozen_precedence(cpsat_result, frozen_by_op, ops_by_id)
+                            and not _violates_frozen_precedence(
+                                cpsat_result, frozen_by_op, ops_by_id,
+                            )
                         ):
                             new_assignments = cpsat_result
                             repair_used = "cpsat"
@@ -1983,7 +2140,6 @@ class AlnsSolver(BaseSolver):
                     best_assignments = list(candidate)
                     best_obj = candidate_obj
                     best_cost = candidate_cost
-                    best_cache = candidate_cache
                     current_assignments = candidate
                     current_obj = candidate_obj
                     current_cost = candidate_cost
@@ -2095,7 +2251,10 @@ class AlnsSolver(BaseSolver):
                     final_violations_before_recovery,
                 )
                 best_assignments = recovered_assignments
-                final_obj = _evaluate_objective(problem, best_assignments, sdst, ops_by_id=ops_by_id)
+                final_obj = _evaluate_objective(
+                    problem, best_assignments, sdst,
+                    ops_by_id=ops_by_id,
+                )
                 final_cost = _objective_cost(final_obj, objective_weights)
                 violations = recovered_violations
                 final_violation_recovered = True

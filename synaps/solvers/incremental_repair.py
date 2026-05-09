@@ -152,7 +152,9 @@ class IncrementalRepair(BaseSolver):
 
         repaired: list[Assignment] = []
         scheduled_ids: set[Any] = {a.operation_id for a in frozen}
-        scheduled_by_op: dict[Any, Assignment] = {assignment.operation_id: assignment for assignment in frozen}
+        scheduled_by_op: dict[Any, Assignment] = {
+            assignment.operation_id: assignment for assignment in frozen
+        }
         machine_idx = MachineIndex(dispatch_context)
         for assignment in frozen:
             machine_idx.add(assignment)

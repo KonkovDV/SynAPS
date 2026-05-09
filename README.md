@@ -46,6 +46,12 @@ What is implemented and verified in this repository:
 - RHC now treats `time_limit_exhausted_before_search && iterations_completed == 0` on the ALNS lane as an explicit fallback condition (`inner_time_limit_exhausted_before_search`) instead of accepting a zero-search inner result
 - RHC now records `budget_guard_skipped_initial_search` when oversized ALNS windows are short-circuited into explicit fallback rather than burning the whole window budget in phase-1 seed generation
 - RHC candidate scoring is wired through the NumPy/native batch seam when acceleration is available
+- Typed RHC policy presets (`RhcPolicy`, `RhcPolicySpec`) replace the 120-line duplicated kwargs literal in the solver registry; backward-compatible legacy-kwargs path emits `DeprecationWarning`
+- Cross-window variable fixing (L-RHO) detects stable operation signatures between consecutive windows and feeds them as `fixed_op_ids` into the ALNS inner solver
+- Auxiliary-resource pool lower bound (`_compute_auxiliary_resource_lb`) is verified by dedicated regression tests (`tests/test_lower_bounds_arc.py`)
+- LBBD solvers now emit symmetric `ub_evolution` alongside `lb_evolution` in solver metadata
+- Release-date admission frontier (`op_earliest`) is tested for correct window-boundary blocking (`tests/test_rhc_admission_module.py`)
+- Property-based budget predicate tests (`tests/test_rhc_budget_property.py`) validate monotonicity, non-negativity, and cap-reduction invariants of the ALNS inner-window budget scaler via Hypothesis
 - The TypeScript control-plane validates JSON contracts, executes the real Python kernel for solve/repair, and CI bootstraps the Python runtime before `control-plane` integration tests
 - Pinned GitHub Actions security workflows cover Python, TypeScript, and Rust surfaces via CodeQL, and publish OSSF Scorecards SARIF results
 

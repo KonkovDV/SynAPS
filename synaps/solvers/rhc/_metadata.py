@@ -77,6 +77,7 @@ def build_inner_window_summary(
     fallback_reason: str | None = None,
     fallback_iterations: int | None = None,
     exception_message: str | None = None,
+    stable_ops_count: int | None = None,
 ) -> dict[str, Any]:
     """Build the per-window telemetry dict appended to `inner_window_summaries`.
 
@@ -115,6 +116,8 @@ def build_inner_window_summary(
         summary["fallback_iterations"] = fallback_iterations
     if exception_message is not None:
         summary["inner_exception_message"] = exception_message
+    if stable_ops_count is not None:
+        summary["cross_window_stable_ops_count"] = stable_ops_count
 
     if inner_result is None:
         summary["inner_status"] = "not_run"

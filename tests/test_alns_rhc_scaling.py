@@ -17,8 +17,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
-from hypothesis import given, settings
-from hypothesis import strategies as st
+from hypothesis import given, settings, strategies as st
 
 from synaps.model import (
     Operation,
@@ -621,8 +620,8 @@ class TestAlnsSolver:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """ALNS should prefer a frozen-compatible initial seed when frozen context exists."""
-        from synaps.model import Assignment
         import synaps.solvers.alns_solver as alns_module
+        from synaps.model import Assignment
         from synaps.solvers.greedy_dispatch import GreedyDispatch
 
         problem = _make_3state_problem(n_orders=2, ops_per_order=2)
@@ -1543,7 +1542,7 @@ class TestRhcSolver:
     def test_rhc_precedence_ready_filter_caps_due_frontier_to_window_reachable_prefix(
         self,
     ) -> None:
-        """Optional precedence-ready filtering should drop due-frontier chain ops beyond the window."""
+        """Precedence-ready filter should drop chain ops beyond window."""
         from synaps.solvers.rhc import RhcSolver
 
         problem = _make_adaptive_admission_chain_problem(n_ops=12)
@@ -1570,7 +1569,7 @@ class TestRhcSolver:
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Precedence-ready filtering must reject successors whose predecessor is not window-reachable."""
+        """Reject successors whose predecessor is not window-reachable."""
         from synaps.solvers.rhc import RhcSolver
 
         order_id = uuid4()
@@ -1648,7 +1647,7 @@ class TestRhcSolver:
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Low-fill admitted pools should temporarily fall back to the raw due/admission frontier."""
+        """Low-fill pools should fall back to raw due/admission frontier."""
         from synaps.solvers.rhc import RhcSolver
 
         problem = _make_due_dense_starved_frontier_problem(n_ops=20)
@@ -1895,7 +1894,7 @@ class TestRhcSolver:
 
     def test_rhc_per_window_telemetry_consistency_with_config(self) -> None:
         """Regression: per-window metadata must not contradict solve_kwargs config.
-        
+
         If admission_full_scan_enabled=False in solve_kwargs, per-window summaries
         should not contain "admission_full_scan_enabled": True (which would be confusing).
         Per-window summaries should only report *facts* (triggered, added_ops, final_pool),
@@ -1923,10 +1922,10 @@ class TestRhcSolver:
             SolverStatus.OPTIMAL,
             SolverStatus.ERROR,
         )
-        
+
         # Check: global metadata should reflect config correctly
         assert result.metadata["admission_full_scan_enabled"] is False
-        
+
         # Check: per-window summaries must not write contradictory "admission_full_scan_enabled"
         # (they should only write facts like "full_scan_triggered", never config values)
         for window_summary in result.metadata.get("inner_window_summaries", []):
@@ -1940,8 +1939,10 @@ class TestRhcSolver:
                     window_summary["admission_full_scan_enabled"]
                     == result.metadata["admission_full_scan_enabled"]
                 ), (
-                    f"per-window admission_full_scan_enabled={window_summary['admission_full_scan_enabled']} "
-                    f"contradicts global config={result.metadata['admission_full_scan_enabled']}"
+                    "per-window admission_full_scan_enabled="
+                    f"{window_summary['admission_full_scan_enabled']} "
+                    "contradicts global config="
+                    f"{result.metadata['admission_full_scan_enabled']}"
                 )
 
 

@@ -44,14 +44,13 @@ in-place repair).
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from synaps.model import Assignment
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-    from datetime import datetime
     from uuid import UUID
 
     from synaps.model import Operation
@@ -350,6 +349,44 @@ def select_backtracking_assignments(
         [committed_assignment_by_op[op_id] for op_id in rewound_ids],
         key=lambda assignment: assignment.start_time,
     )
+
+
+# ---------------------------------------------------------------------------
+# Cross-window stable-op detection (L-RHO variable fixing)
+# ---------------------------------------------------------------------------
+
+
+def detect_cross_window_stable_ops(
+    *,
+    prev_committed_by_op: Mapping[UUID, Assignment],
+    curr_committed_by_op: Mapping[UUID, Assignment],
+    tolerance_minutes: float = 1.0,
+) -> set[UUID]:
+    """Return ops whose signature is unchanged across two consecutive windows.
+
+    Signature equality is defined as:
+    ``(work_center_id, start_time_offset)`` within ``tolerance_minutes``.
+    If either window lacks the op, it is not stable.
+
+    Academic basis:
+        - L-RHO variable fixing (Liang et al. 2023, Omega): freezing
+          operations whose temporal position has converged across rolling
+          windows reduces the effective search space of the inner solver
+          without changing the global optimum when the fixing tolerance is
+          smaller than the inner-window resolution.
+    """
+    stable: set[UUID] = set()
+    for op_id, curr in curr_committed_by_op.items():
+        prev = prev_committed_by_op.get(op_id)
+        if prev is None:
+            continue
+        if curr.work_center_id != prev.work_center_id:
+            continue
+        curr_offset = (curr.start_time - datetime.min).total_seconds() / 60.0
+        prev_offset = (prev.start_time - datetime.min).total_seconds() / 60.0
+        if abs(curr_offset - prev_offset) <= tolerance_minutes + 1e-9:
+            stable.add(op_id)
+    return stable
 
 
 # ---------------------------------------------------------------------------

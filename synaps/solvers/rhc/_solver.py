@@ -58,8 +58,10 @@ from synaps.solvers.rhc._budget import (
     scale_alns_inner_budget as _scale_alns_inner_budget,
 )
 from synaps.solvers.rhc._metadata import build_inner_window_summary
+from synaps.solvers.rhc._policy import RhcPolicy, resolve_policy
 from synaps.solvers.rhc._window import (
     collect_commit_candidates as _collect_commit_candidates,
+    detect_cross_window_stable_ops as _detect_cross_window_stable_ops,
     reanchor_inner_assignments as _reanchor_inner_assignments,
     select_backtracking_assignments as _select_backtracking_assignments,
     stabilize_temporal_consistency as _stabilize_temporal_consistency,
@@ -79,7 +81,7 @@ class RhcSolver(BaseSolver):
     Each window is solved independently (via ALNS, CP-SAT, or any BaseSolver),
     with frozen commitments from prior windows providing boundary conditions.
 
-    Parameters:
+    Parameters (legacy kwargs still accepted with DeprecationWarning):
         window_minutes: Width of the active scheduling window (default 480 = 8h)
         overlap_minutes: Look-ahead overlap between windows (default 120 = 2h)
         inner_solver: Which solver to use per window ("alns" or "cpsat", default "alns")
@@ -87,11 +89,33 @@ class RhcSolver(BaseSolver):
         max_ops_per_window: Hard cap on operations per window (default 5000)
     """
 
+    def __init__(
+        self,
+        *,
+        policy: RhcPolicy | None = None,
+        overrides: dict[str, Any] | None = None,
+    ) -> None:
+        self._policy = policy
+        self._overrides = overrides
+
     @property
     def name(self) -> str:
         return "rhc"
 
     def solve(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
+        # Policy-first resolution: preset → overrides → legacy kwargs.
+        if self._policy is not None:
+            _, policy_kwargs = resolve_policy(
+                policy=self._policy,
+                overrides=self._overrides,
+            )
+            # Legacy kwargs still win as final override for backward compat.
+            kwargs = {**policy_kwargs, **kwargs}
+        elif kwargs:
+            # Pure legacy path — emit deprecation warning once.
+            _, legacy_kwargs = resolve_policy(**kwargs)
+            kwargs = legacy_kwargs
+
         t0 = time.monotonic()
         time_budget_t0 = t0
         acceleration_status = get_acceleration_status()
@@ -512,6 +536,9 @@ class RhcSolver(BaseSolver):
         committed_assignments: list[Assignment] = []
         committed_assignment_by_op: dict[UUID, Assignment] = {}
         committed_op_ids: set[UUID] = set()
+        prev_committed_by_op: dict[UUID, Assignment] = {}
+        cross_window_stable_ops: set[UUID] = set()
+        cross_window_variable_fixing_enabled = True
         window_start_offset = 0.0
         window_count = 0
         admission_cursor = 0
@@ -609,6 +636,9 @@ class RhcSolver(BaseSolver):
                     fallback_reason=fallback_reason,
                     fallback_iterations=fallback_iterations,
                     exception_message=exception_message,
+                    stable_ops_count=len(cross_window_stable_ops)
+                    if cross_window_variable_fixing_enabled
+                    else None,
                 )
             )
 
@@ -1026,7 +1056,9 @@ class RhcSolver(BaseSolver):
                             admission_full_scan_recovered_ops += full_scan_recovered_ops
                             filtered_by_admission = 0
                             logger.info(
-                                "RHC window %d escalated to capped full-scan frontier: +%d candidates (final pool=%d)",
+                                "RHC window %d escalated to capped "
+                                "full-scan frontier: +%d candidates "
+                                "(final pool=%d)",
                                 window_count,
                                 full_scan_recovered_ops,
                                 window_full_scan_final_pool,
@@ -1508,6 +1540,10 @@ class RhcSolver(BaseSolver):
                             effective_inner_kwargs["dynamic_no_improve_enabled"] = (
                                 dynamic_no_improve_enabled
                             )
+                            if cross_window_variable_fixing_enabled and cross_window_stable_ops:
+                                effective_inner_kwargs["fixed_op_ids"] = list(
+                                    cross_window_stable_ops
+                                )
                             effective_inner_kwargs["no_improve_due_alpha"] = no_improve_due_alpha
                             effective_inner_kwargs["no_improve_candidate_beta"] = (
                                 no_improve_candidate_beta
@@ -1613,7 +1649,10 @@ class RhcSolver(BaseSolver):
                             should_skip_alns_presearch = legacy_alns_presearch_guard_hit
                         if should_skip_alns_presearch:
                             alns_presearch_budget_guard_skipped_windows += 1
-                            if legacy_alns_presearch_guard_hit and not budget_guard_estimated_run_hit:
+                            if (
+                                legacy_alns_presearch_guard_hit
+                                and not budget_guard_estimated_run_hit
+                            ):
                                 logger.info(
                                     "RHC window %d skipped ALNS pre-search: %d ops exceed guard "
                                     "limit=%d at per-window budget %.2fs",
@@ -1622,7 +1661,10 @@ class RhcSolver(BaseSolver):
                                     alns_presearch_max_window_ops,
                                     per_window_limit,
                                 )
-                            elif alns_budget_auto_scaling_enabled and alns_budget_profile is not None:
+                            elif (
+                                alns_budget_auto_scaling_enabled
+                                and alns_budget_profile is not None
+                            ):
                                 logger.info(
                                     "RHC window %d skipped ALNS pre-search: estimated run %.2fs "
                                     "exceeds per-window budget %.2fs (iters=%d destroy=%d)",
@@ -1729,6 +1771,12 @@ class RhcSolver(BaseSolver):
                             committed_assignments.append(assignment)
                             committed_assignment_by_op[op_id] = assignment
                             committed_op_ids.add(op_id)
+                        if cross_window_variable_fixing_enabled:
+                            cross_window_stable_ops = _detect_cross_window_stable_ops(
+                                prev_committed_by_op=prev_committed_by_op,
+                                curr_committed_by_op=committed_assignment_by_op,
+                            )
+                            prev_committed_by_op = dict(committed_assignment_by_op)
                         previous_window_tail_assignments = sorted(
                             [
                                 assignment
@@ -1856,7 +1904,8 @@ class RhcSolver(BaseSolver):
                         inner_exception_logs_emitted += 1
                     elif inner_exception_logs_emitted == max_inner_exception_logs:
                         logger.warning(
-                            "RHC inner solver exception log sample cap reached; suppressing additional stack traces"
+                            "RHC inner solver exception log sample "
+                            "cap reached; suppressing additional stack traces"
                         )
                         inner_exception_logs_emitted += 1
 
@@ -1988,6 +2037,12 @@ class RhcSolver(BaseSolver):
                     committed_assignments.append(assignment)
                     committed_assignment_by_op[op_id] = assignment
                     committed_op_ids.add(op_id)
+                if cross_window_variable_fixing_enabled:
+                    cross_window_stable_ops = _detect_cross_window_stable_ops(
+                        prev_committed_by_op=prev_committed_by_op,
+                        curr_committed_by_op=committed_assignment_by_op,
+                    )
+                    prev_committed_by_op = dict(committed_assignment_by_op)
 
                 if inner_solver_name != "greedy":
                     inner_fallback_windows += 1
@@ -2492,6 +2547,12 @@ class RhcSolver(BaseSolver):
                 "fallback_repair_skipped": fallback_repair_skipped,
                 "fallback_repair_time_limited": fallback_repair_time_limited,
                 "ops_unscheduled": total_ops - scheduled_count,
+                "cross_window_variable_fixing_enabled": cross_window_variable_fixing_enabled,
+                "cross_window_stable_ops_total": len(cross_window_stable_ops),
+                "cross_window_stable_ops_count_per_window": [
+                    s.get("cross_window_stable_ops_count", 0)
+                    for s in inner_window_summaries
+                ],
                 "inner_window_summaries": inner_window_summaries,
             },
         )
@@ -2616,7 +2677,7 @@ class RhcSolver(BaseSolver):
         )
         for key in direct_keys:
             value = domain_attributes.get(key)
-            if isinstance(value, (int, float)):
+            if isinstance(value, int | float):
                 return max(0.0, min(float(value), horizon_minutes))
 
         absolute_keys = ("release_at", "release_datetime", "release_date")

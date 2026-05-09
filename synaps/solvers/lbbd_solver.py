@@ -19,13 +19,13 @@ from __future__ import annotations
 
 import os
 import time
+import warnings
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
-import warnings
 
-import highspy  # type: ignore[import-untyped]
+import highspy
 import numpy as np
 
 from synaps.model import (
@@ -133,6 +133,7 @@ class LbbdSolver(BaseSolver):
         # ones whose effect is realised by the master solve in iteration N
         # (and therefore the ones to attribute the LB delta to).
         lb_evolution: list[float] = []
+        ub_evolution: list[float] = []
         prev_master_bound: float = 0.0
         prev_iteration_cut_kinds: list[str] = []
 
@@ -159,6 +160,7 @@ class LbbdSolver(BaseSolver):
                 greedy_makespan = greedy_result.objective.makespan_minutes
                 if greedy_makespan < best_ub:
                     best_ub = greedy_makespan
+                    ub_evolution.append(best_ub)
                     best_assignments = list(greedy_result.assignments)
                     best_objective = greedy_result.objective
                     greedy_warm_start_used = True
@@ -259,6 +261,7 @@ class LbbdSolver(BaseSolver):
             # Track best feasible solution
             if ub < best_ub:
                 best_ub = ub
+                ub_evolution.append(best_ub)
                 best_assignments = sub_assignments
                 best_objective = _compute_objective(
                     problem,
@@ -458,13 +461,18 @@ class LbbdSolver(BaseSolver):
                 "iterations": len(iteration_log),
                 "lower_bound": reported_lb,
                 "upper_bound": best_ub,
-                "gap": (best_ub - reported_lb) / max(best_ub, 1e-9) if best_ub < float("inf") else None,
+                "gap": (
+                    (best_ub - reported_lb) / max(best_ub, 1e-9)
+                    if best_ub < float("inf")
+                    else None
+                ),
                 "lower_bound_method": "master_relaxation_benders",
                 "lower_bound_components": {
                     "master_relaxation_lb": reported_lb,
                 },
                 "iteration_log": iteration_log,
                 "lb_evolution": lb_evolution,
+                "ub_evolution": ub_evolution,
                 "cut_kind_lb_contribution": cut_kind_lb_contribution,
                 "gap_threshold": gap_threshold,
                 "setup_relaxation": setup_relaxation,
@@ -1385,7 +1393,10 @@ def _post_assemble_assignments(
 
     horizon_start = problem.planning_horizon_start
     makespan = (
-        max((assignment.end_time - horizon_start).total_seconds() / 60.0 for assignment in assignments)
+        max(
+            (a.end_time - horizon_start).total_seconds() / 60.0
+            for a in assignments
+        )
         if assignments
         else 0.0
     )

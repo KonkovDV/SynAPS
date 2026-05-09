@@ -142,6 +142,12 @@ class TestDomainModel:
         assert "duplicate aux_requirement key" in message
 
     def test_schedule_problem_autofills_predecessor_chain_from_seq_in_order(self) -> None:
+        """Predecessor autofill happens via normalize_schedule_problem_data()
+        which is called automatically in the mode='before' validator.
+
+        Operations passed without predecessor_op_id are normalized before
+        the cross-reference validator runs.
+        """
         horizon_start = datetime(2026, 6, 1, tzinfo=UTC)
         order = Order(external_ref="ORD-CHAIN", due_date=datetime(2026, 6, 2, tzinfo=UTC))
         state = State(code="A")
@@ -171,6 +177,8 @@ class TestDomainModel:
             eligible_wc_ids=[work_center.id],
         )
 
+        # The mode="before" validator auto-fills predecessor_op_id
+        # via normalize_schedule_problem_data().
         problem = ScheduleProblem(
             states=[state],
             orders=[order],
@@ -185,6 +193,7 @@ class TestDomainModel:
         assert problem.operations[1].predecessor_op_id == op_1.id
         assert problem.operations[2].predecessor_op_id == op_2.id
 
+        # Round-trip: dumped + re-validated should be stable.
         dumped = problem.model_dump()
         restored = ScheduleProblem.model_validate(dumped)
         assert restored.operations[1].predecessor_op_id == op_1.id

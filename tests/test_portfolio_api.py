@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import timedelta
 
 from synaps import recommend_repair_radius, repair_schedule, solve_schedule
@@ -11,8 +12,6 @@ from synaps.solvers.greedy_dispatch import GreedyDispatch
 from synaps.solvers.router import SolveRegime, SolverRoutingContext
 from synaps.validation import verify_schedule_result
 from tests.conftest import HORIZON_START
-
-from collections import Counter
 
 
 def test_solve_schedule_routes_small_nominal_problem(simple_problem: ScheduleProblem) -> None:

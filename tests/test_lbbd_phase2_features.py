@@ -6,22 +6,22 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from synaps.model import (
+    Assignment,
     Operation,
     Order,
     ScheduleProblem,
-    Assignment,
     SetupEntry,
     SolverStatus,
     State,
     WorkCenter,
 )
 from synaps.solvers._lbbd_cuts import (
-    compute_machine_transition_floor as _compute_machine_transition_floor_plain,
-    compute_machine_tsp_lower_bound as _compute_machine_tsp_lb_plain,
-    compute_sequence_independent_setup_lower_bound as _compute_setup_lb_plain,
     # Parity check aliases — same underlying helpers, ensure both solvers share logic
     compute_machine_transition_floor as _compute_machine_transition_floor_hd,
+    compute_machine_transition_floor as _compute_machine_transition_floor_plain,
+    compute_machine_tsp_lower_bound as _compute_machine_tsp_lb_plain,
     compute_sequence_independent_setup_lower_bound as _compute_setup_lb_hd,
+    compute_sequence_independent_setup_lower_bound as _compute_setup_lb_plain,
 )
 from synaps.solvers.lbbd_hd_solver import LbbdHdSolver
 from synaps.solvers.lbbd_solver import LbbdSolver
@@ -189,10 +189,10 @@ def test_lbbd_metadata_exposes_lb_evolution_and_cut_kind_contribution() -> None:
     lb_evolution = metadata["lb_evolution"]
     assert isinstance(lb_evolution, list)
     assert len(lb_evolution) == metadata["iterations"]
-    assert all(isinstance(value, (int, float)) for value in lb_evolution)
+    assert all(isinstance(value, int | float) for value in lb_evolution)
     # LB cannot strictly decrease across iterations: each new master is
     # solved with at least as many cuts as the previous one.
-    for previous_lb, next_lb in zip(lb_evolution, lb_evolution[1:]):
+    for previous_lb, next_lb in zip(lb_evolution, lb_evolution[1:], strict=False):
         assert next_lb + 1e-6 >= previous_lb
 
     contribution = metadata["cut_kind_lb_contribution"]
@@ -252,7 +252,7 @@ def test_lbbd_hd_metadata_exposes_master_lb_telemetry() -> None:
     lb_evolution = metadata["lb_evolution"]
     assert isinstance(lb_evolution, list)
     assert len(lb_evolution) == metadata["iterations"]
-    for previous_lb, next_lb in zip(lb_evolution, lb_evolution[1:]):
+    for previous_lb, next_lb in zip(lb_evolution, lb_evolution[1:], strict=False):
         assert next_lb + 1e-6 >= previous_lb
 
     contribution = metadata["cut_kind_lb_contribution"]
@@ -340,14 +340,21 @@ def test_gap_threshold_is_configurable(simple_problem: ScheduleProblem) -> None:
 def test_setup_relaxation_floor_drops_to_zero_when_zero_transition_exists() -> None:
     problem = _make_setup_dense_problem()
     work_center = problem.work_centers[0]
-    eligible_by_op = {operation.id: list(operation.eligible_wc_ids) for operation in problem.operations}
+    eligible_by_op = {
+        operation.id: list(operation.eligible_wc_ids)
+        for operation in problem.operations
+    }
     setup_lookup = {
         (entry.work_center_id, entry.from_state_id, entry.to_state_id): entry.setup_minutes
         for entry in problem.setup_matrix
     }
 
-    assert _compute_machine_transition_floor_plain(problem, eligible_by_op, work_center.id, setup_lookup) == 0.0
-    assert _compute_machine_transition_floor_hd(problem, eligible_by_op, work_center.id, setup_lookup) == 0.0
+    assert _compute_machine_transition_floor_plain(
+        problem, eligible_by_op, work_center.id, setup_lookup,
+    ) == 0.0
+    assert _compute_machine_transition_floor_hd(
+        problem, eligible_by_op, work_center.id, setup_lookup,
+    ) == 0.0
 
 
 def test_setup_cost_lower_bound_uses_state_mix_not_realized_sequence_cost() -> None:

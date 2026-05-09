@@ -17,6 +17,7 @@ from synaps.solvers.lbbd_hd_solver import LbbdHdSolver
 from synaps.solvers.lbbd_solver import LbbdSolver
 from synaps.solvers.pareto_slice_solver import ParetoSliceCpSatSolver
 from synaps.solvers.rhc import RhcSolver
+from synaps.solvers.rhc._policy import RhcPolicy, RhcPolicySpec, build_solve_kwargs_from_spec
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -74,65 +75,19 @@ def _build_rhc() -> BaseSolver:
 
 
 def _rhc_alns_solve_kwargs(*, window_minutes: int, overlap_minutes: int) -> dict[str, object]:
-    return {
-        "window_minutes": window_minutes,
-        "overlap_minutes": overlap_minutes,
-        "inner_solver": "alns",
-        "time_limit_s": 600,
-        "alns_inner_window_time_cap_s": 180,
-        "max_ops_per_window": 5000,
-        "candidate_pool_factor": 2.0,
-        # R2: raised from 2.0 to 6.0 — 2.0 only covered 1200 min of a 43200-min
-        # 30-day horizon, admitting <700 ops/window. 6.0 gives ~3600 min lookahead.
-        "due_admission_horizon_factor": 6.0,
-        "admission_tail_weight": 0.5,
-        "progressive_admission_relaxation_enabled": True,
-        # R4: disabled — at 50K startup <1/3 of ops are precedence-ready;
-        # the filter killed ~66% of the full-scan pool before any chains built.
-        "precedence_ready_candidate_filter_enabled": False,
-        "admission_relaxation_min_fill_ratio": 0.30,
-        # R3: enabled — only full-scan can fill windows when due-admission gate is
-        # restrictive. DOE evidence: 480/120 + full_scan admits 1531 ops vs 228.
-        "admission_full_scan_enabled": True,
-        "alns_budget_auto_scaling_enabled": True,
-        "alns_presearch_max_window_ops": 5000,
-        "alns_budget_estimated_repair_s_per_destroyed_op": 0.125,
-        "hybrid_inner_routing_enabled": False,
-        "hybrid_inner_solver": "cpsat",
-        "hybrid_due_pressure_threshold": 0.35,
-        "hybrid_candidate_pressure_threshold": 4.0,
-        "hybrid_max_ops": 1500,
-        "backtracking_enabled": True,
-        "backtracking_tail_minutes": 60,
-        "backtracking_max_ops": 24,
-        "hybrid_inner_kwargs": {
-            "num_workers": 4,
+    """Return the canonical ALNS-RHC kwargs for a given geometry.
+
+    Source of truth is ``synaps.solvers.rhc._policy.PRESETS``; this helper
+    only injects the two runtime geometry overrides.
+    """
+    spec = RhcPolicySpec.from_preset(RhcPolicy.BALANCED)
+    return build_solve_kwargs_from_spec(
+        spec,
+        overrides={
+            "window_minutes": window_minutes,
+            "overlap_minutes": overlap_minutes,
         },
-        "inner_fallback_kpi_threshold": 0.10,
-        "inner_kwargs": {
-            "max_iterations": 100,
-            "destroy_fraction": 0.03,
-            "min_destroy": 10,
-            "max_destroy": 40,
-            "max_no_improve_iters": 30,
-            "use_cpsat_repair": False,
-            "repair_time_limit_s": 5,
-            "repair_num_workers": 1,
-            "cpsat_max_destroy_ops": 32,
-            "sa_auto_calibration_enabled": True,
-            # R6: raised from 5 to 20 — Pepels (2014) recommends ≥10-50 worsening
-            # samples for reliable SA temperature estimation.
-            "sa_calibration_trials": 20,
-            "dynamic_sa_enabled": True,
-            "sa_due_alpha": 0.35,
-            "sa_candidate_beta": 0.15,
-            "sa_pressure_cooling_gamma": 0.0015,
-            # R5: sa_temp_min is now computed as 0.01*T_0 post-calibration in
-            # AlnsSolver.solve(); this value serves as the floor before calibration.
-            "sa_temp_min": 50.0,
-            "sa_temp_max": 500.0,
-        },
-    }
+    )
 
 
 _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
@@ -339,7 +294,9 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
     # ---- RHC variants (10k–100k+ operations) ----
     "RHC-ALNS": SolverRegistration(
         factory=_build_rhc,
-        solve_kwargs=_rhc_alns_solve_kwargs(window_minutes=480, overlap_minutes=120),
+        solve_kwargs=build_solve_kwargs_from_spec(
+            RhcPolicySpec.from_preset(RhcPolicy.BALANCED)
+        ),
         description=(
             "Receding Horizon Control with ALNS inner solver. "
             "8-hour windows, 2-hour overlap, max 5000 ops/window, "
@@ -349,7 +306,9 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
     ),
     "RHC-ALNS-100K": SolverRegistration(
         factory=_build_rhc,
-        solve_kwargs=_rhc_alns_solve_kwargs(window_minutes=300, overlap_minutes=90),
+        solve_kwargs=build_solve_kwargs_from_spec(
+            RhcPolicySpec.from_preset(RhcPolicy.SEARCH_ENTRY)
+        ),
         description=(
             "Named 100K+ RHC-ALNS search-entry profile. "
             "5-hour windows, 90-minute overlap, greedy-only repair, and the April 2026 "

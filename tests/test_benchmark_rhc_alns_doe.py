@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_study_rhc_50k_propagates_seed_to_alns_inner_kwargs(monkeypatch, tmp_path: Path) -> None:
@@ -253,7 +256,10 @@ def test_geometry_doe_separates_process_and_solve_outcomes(
 ) -> None:
     import benchmark.study_rhc_alns_geometry_doe as geometry_module
 
-    def fake_run_with_timeout(*, n_ops, n_machines, n_states, solver_name, solver_kwargs, seed, timeout_s):
+    def fake_run_with_timeout(
+        *, n_ops, n_machines, n_states, solver_name,
+        solver_kwargs, seed, timeout_s,
+    ):
         if seed == 2:
             return None, True, None
         return (

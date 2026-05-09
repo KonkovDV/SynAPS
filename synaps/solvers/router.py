@@ -253,8 +253,10 @@ def route_solver_config(
             return SolverRoutingDecision(
                 solver_config="RHC-GREEDY",
                 reason=(
-                    "feasibility-first runtime policy uses the cheapest horizon-decomposed "
-                    f"coverage path for {op_count} nominal operations when no generous latency hint is present"
+                    "feasibility-first runtime policy uses the cheapest "
+                    "horizon-decomposed coverage path for "
+                    f"{op_count} nominal operations when no generous "
+                    "latency hint is present"
                 ),
             )
 

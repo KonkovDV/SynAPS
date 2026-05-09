@@ -82,5 +82,34 @@ Latest bounded-100K interpretation:
 - `benchmark/studies/2026-05-08-rhc-100k-audit-v11-post-bounded-seed-cap` closes that deeper initial-seed stall family on current `master`: `RHC-ALNS` reaches `7236/100000` in `90.255s`, `RHC-GREEDY` reaches `7230/100000` in `90.365s`, two bounded windows are observed, fallback repair does run, and the run no longer reports `solver_metadata.error`.
 - `v11` is still not proof of productive ALNS search at `100k`; it is the proof that the bounded acceptance gate is closed and that the remaining 100K work is now a yield-optimization problem rather than a catastrophic-stall problem.
 
+## Fixed in May 2026 Wave 2 (Post-Audit Extension)
+
+10. **Typed RHC policy layer (R10 / B1).**
+` synaps/solvers/rhc/_policy.py ` introduces `RhcPolicy` enum (COVERAGE_FIRST, BALANCED, SEARCH_ENTRY, BOUNDED_100K), typed `RhcPolicySpec`, `AdmissionSpec`, `BudgetSpec`, `GuardSpec`, `InnerSpec`, and canonical `PRESETS`. The `RhcSolver` constructor now accepts `(policy, overrides)` with backward-compatible legacy-kwargs deprecation path. `synaps.solvers.registry` deduplicates the four ALNS-RHC profiles via `build_solve_kwargs_from_spec()`, eliminating the 120-line duplicated `_rhc_alns_solve_kwargs` literal.
+
+11. **Cross-window variable fixing (R11 / B2).**
+`detect_cross_window_stable_ops` in `synaps/solvers/rhc/_window.py` identifies operations whose `(work_center_id, start_time_offset)` signature is stable across two consecutive windows (within `tolerance_minutes`). The RHC solver feeds these `fixed_op_ids` into the ALNS inner solver (`AlnsSolver` already supports `fixed_op_ids` since P3.1), and emits `cross_window_stable_ops_count` per-window telemetry plus `cross_window_variable_fixing_enabled` in final metadata.
+
+12. **ARC lower-bound regression tests (R17 / B3).**
+`tests/test_lower_bounds_arc.py` locks the auxiliary-resource pool bound: `pool_size=1` with 3×60 min ops must yield `auxiliary_resource_lb ≥ 180`, and `pool_size=3` must not dominate the precedence critical path LB. This closes the R4-tech-debt TODO on `_compute_auxiliary_resource_lb` contract verification.
+
+13. **LBBD UB trajectory telemetry (R6 / B5).**
+`ub_evolution` is now collected alongside `lb_evolution` in `LbbdSolver` and exported in solver metadata, closing the asymmetric LB-only trajectory gap identified in the audit.
+
+14. **Release-date admission frontier test (R20 / C).**
+`test_op_earliest_exceeds_window_boundary_blocks_admission` in `tests/test_rhc_admission_module.py` verifies that `advance_admission_frontier` correctly blocks admission when the release-date fallback (`op_earliest`) exceeds the window boundary.
+
+15. **Property-based budget predicate tests (R21 / C).**
+`tests/test_rhc_budget_property.py` uses Hypothesis to check three invariants of `scale_alns_inner_budget`: (a) smaller time limits do not increase effective caps, (b) all outputs are non-negative, (c) doubling the limit does not reduce max iterations.
+
+16. **Rust native parity tests.**
+`tests/test_native_objective_parity.py` and `tests/test_native_stabilize_parity.py` test native-vs-Python `evaluate_objective_batch` and `stabilize_temporal_batch` for deterministic parity. The Rust source already included `py.allow_threads` (GIL release), `Vec<bool>` visited bitmap (O(n) cycle fallback), and `total_cmp` NaN guards.
+
+## Still Open After Wave 2
+
+- Native acceleration build is blocked on Windows by missing MSVC linker (`link.exe`). The GNU toolchain (`stable-x86_64-pc-windows-gnu`) can compile but the Python extension import path is not fully validated in CI.
+- The `RHC-ALNS-100K` bounded rail still needs a productive active-search regime; current `v11` closes the catastrophic-stall gate but `search_active_window_rate` remains `0.0`.
+- Academic documentation for the BHK TSP lower bound and AUGMECON2 frontier remain as inline TODOs rather than rendered references.
+
 Note:
 The repository `.venv` is still not usable for the full Windows benchmark-validation path. Focused pytest runs succeed there, but OR-Tools imports fail on the bounded-100K benchmark path with `OSError: [WinError 193] %1 is not a valid Win32 application`. This is an environment defect, not part of the solver-code fixes above.

@@ -39,6 +39,19 @@ from typing import Any
 # Time-cap policy
 # ---------------------------------------------------------------------------
 
+# Fallback defaults for ALNS inner-solve parameters when not provided
+# via effective_kwargs.  Extracted from inline literals to satisfy R14
+# (magic-number elimination) from the 2026-05-01 audit.
+DEFAULT_MAX_ITERATIONS: int = 500
+DEFAULT_MIN_DESTROY: int = 20
+DEFAULT_MAX_DESTROY: int = 300
+DEFAULT_DESTROY_FRACTION: float = 0.05
+DEFAULT_REPAIR_TIME_LIMIT_S: float = 10.0
+
+# Floor values used in the budget linearization.
+EFFECTIVE_REPAIR_FLOOR_S: float = 0.01
+ITERATION_TIME_FLOOR_S: float = 0.1
+
 
 @dataclass(frozen=True)
 class InnerWindowTimeCapPolicy:
@@ -209,16 +222,16 @@ def scale_alns_inner_budget(
     """
     requested_max_iterations = max(
         1,
-        int(effective_kwargs.get("max_iterations", 500)),
+        int(effective_kwargs.get("max_iterations", DEFAULT_MAX_ITERATIONS)),
     )
-    min_destroy = max(1, int(effective_kwargs.get("min_destroy", 20)))
+    min_destroy = max(1, int(effective_kwargs.get("min_destroy", DEFAULT_MIN_DESTROY)))
     requested_max_destroy = max(
         min_destroy,
-        int(effective_kwargs.get("max_destroy", 300)),
+        int(effective_kwargs.get("max_destroy", DEFAULT_MAX_DESTROY)),
     )
     repair_time_limit_s = max(
         1.0,
-        float(effective_kwargs.get("repair_time_limit_s", 10.0)),
+        float(effective_kwargs.get("repair_time_limit_s", DEFAULT_REPAIR_TIME_LIMIT_S)),
     )
 
     # Resolution priority for the per-op repair cost (R2 EMA calibration):
@@ -227,11 +240,13 @@ def scale_alns_inner_budget(
     #   3. Fallback derived from the requested per-iteration repair budget.
     if override_estimated_repair_s_per_destroyed_op is not None:
         estimated_repair_s_per_destroyed_op = max(
-            0.01, float(override_estimated_repair_s_per_destroyed_op)
+            EFFECTIVE_REPAIR_FLOOR_S,
+            float(override_estimated_repair_s_per_destroyed_op),
         )
     elif policy.estimated_repair_s_per_destroyed_op_raw is not None:
         estimated_repair_s_per_destroyed_op = max(
-            0.01, float(policy.estimated_repair_s_per_destroyed_op_raw)
+            EFFECTIVE_REPAIR_FLOOR_S,
+            float(policy.estimated_repair_s_per_destroyed_op_raw),
         )
     else:
         estimated_repair_s_per_destroyed_op = (
@@ -252,7 +267,7 @@ def scale_alns_inner_budget(
 
     destroy_fraction = max(
         0.0,
-        float(effective_kwargs.get("destroy_fraction", 0.05)),
+        float(effective_kwargs.get("destroy_fraction", DEFAULT_DESTROY_FRACTION)),
     )
     requested_destroy_size = max(
         min_destroy,
@@ -265,7 +280,7 @@ def scale_alns_inner_budget(
     )
     estimated_destroy_size = min(requested_destroy_size, effective_max_destroy)
     estimated_iteration_seconds = max(
-        0.1,
+        ITERATION_TIME_FLOOR_S,
         estimated_destroy_size * estimated_repair_s_per_destroyed_op,
     )
     effective_max_iterations = min(
@@ -273,7 +288,7 @@ def scale_alns_inner_budget(
         max(1, int(per_window_limit / estimated_iteration_seconds)),
     )
     effective_repair_time_limit_s = max(
-        0.1,
+        ITERATION_TIME_FLOOR_S,
         min(
             policy.dynamic_repair_time_limit_max_s,
             max(

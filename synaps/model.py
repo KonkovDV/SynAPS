@@ -9,7 +9,6 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, model_validator
 
-
 MAX_SCHEDULE_STATES = 10_000
 MAX_SCHEDULE_ORDERS = 200_000
 MAX_SCHEDULE_OPERATIONS = 200_000

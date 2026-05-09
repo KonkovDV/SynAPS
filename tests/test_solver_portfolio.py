@@ -260,7 +260,7 @@ def test_route_solver_rhc_alns_for_60k_ops_with_latency_budget() -> None:
     assert "Receding Horizon" in decision.reason
 
 
-def test_route_solver_feasibility_first_prefers_greedy_over_lbbd_for_medium_nominal_instances() -> None:
+def test_route_feasibility_first_greedy_for_medium_nominal() -> None:
     problem = make_simple_problem(n_orders=40, ops_per_order=4)
 
     decision = route_solver_config(
@@ -275,7 +275,7 @@ def test_route_solver_feasibility_first_prefers_greedy_over_lbbd_for_medium_nomi
     assert "feasibility-first" in decision.reason
 
 
-def test_route_solver_feasibility_first_prefers_rhc_greedy_for_ultra_large_nominal_instances_without_latency_hint() -> None:
+def test_route_feasibility_first_rhc_greedy_for_ultra_large_nominal() -> None:
     problem = make_simple_problem(n_orders=15000, ops_per_order=4)
 
     decision = route_solver_config(

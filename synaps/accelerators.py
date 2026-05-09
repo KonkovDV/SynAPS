@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import os
+from collections import deque
 from math import exp, log
 from typing import TYPE_CHECKING, Any
 
@@ -26,6 +27,10 @@ _native_compute_rhc_candidate_metrics_batch: (
 ) = None
 _native_compute_rhc_candidate_metrics_batch_np: Callable[..., Any] | None = None
 _native_compute_rhc_candidate_metrics_batch_np_jagged: Callable[..., Any] | None = None
+_native_evaluate_objective_batch: (
+    Callable[..., tuple[float, float, float, float, float]] | None
+) = None
+_native_stabilize_temporal_batch: Callable[..., tuple[int, int, int]] | None = None
 
 if os.getenv("SYNAPS_DISABLE_NATIVE_ACCELERATION") == "1":
     _native_compute_atcs_log_score = None
@@ -34,6 +39,8 @@ if os.getenv("SYNAPS_DISABLE_NATIVE_ACCELERATION") == "1":
     _native_compute_rhc_candidate_metrics_batch = None
     _native_compute_rhc_candidate_metrics_batch_np = None
     _native_compute_rhc_candidate_metrics_batch_np_jagged = None
+    _native_evaluate_objective_batch = None
+    _native_stabilize_temporal_batch = None
 else:
     try:
         _synaps_native = importlib.import_module("synaps_native")
@@ -45,6 +52,8 @@ else:
         _native_compute_rhc_candidate_metrics_batch = None
         _native_compute_rhc_candidate_metrics_batch_np = None
         _native_compute_rhc_candidate_metrics_batch_np_jagged = None
+        _native_evaluate_objective_batch = None
+        _native_stabilize_temporal_batch = None
     else:
         _native_compute_atcs_log_score = getattr(
             _synaps_native,
@@ -74,6 +83,16 @@ else:
         _native_compute_rhc_candidate_metrics_batch_np_jagged = getattr(
             _synaps_native,
             "compute_rhc_candidate_metrics_batch_np_jagged",
+            None,
+        )
+        _native_evaluate_objective_batch = getattr(
+            _synaps_native,
+            "evaluate_objective_batch",
+            None,
+        )
+        _native_stabilize_temporal_batch = getattr(
+            _synaps_native,
+            "stabilize_temporal_batch",
             None,
         )
 
@@ -151,6 +170,12 @@ def get_acceleration_status() -> dict[str, Any]:
         "rhc_candidate_metrics_np_jagged_backend": "native"
         if _native_compute_rhc_candidate_metrics_batch_np_jagged is not None
         else "python",
+        "objective_batch_backend": "native"
+        if _native_evaluate_objective_batch is not None
+        else "python",
+        "stabilize_temporal_batch_backend": "native"
+        if _native_stabilize_temporal_batch is not None
+        else "python",
         "native_module": "synaps_native"
         if any(
             backend is not None
@@ -159,6 +184,8 @@ def get_acceleration_status() -> dict[str, Any]:
                 _native_compute_atcs_log_scores_batch,
                 _native_resource_capacity_window_is_feasible,
                 _native_compute_rhc_candidate_metrics_batch,
+                _native_evaluate_objective_batch,
+                _native_stabilize_temporal_batch,
             )
         )
         else None,
@@ -212,6 +239,24 @@ def compute_atcs_log_scores_batch(
                 k3,
             )
         ]
+
+    # Prefer numpy vectorized path when available (10–20x faster on large batches).
+    if _HAS_NUMPY:
+        w_np = np.maximum(np.asarray(weights, dtype=np.float64), 1e-9)
+        p_np = np.maximum(np.asarray(processing_minutes, dtype=np.float64), 0.1)
+        s_np = np.asarray(slack, dtype=np.float64)
+        su_np = np.asarray(setup_minutes, dtype=np.float64)
+        sc_np = np.asarray(setup_scale, dtype=np.float64)
+        ml_np = np.asarray(material_loss, dtype=np.float64)
+
+        scores = (
+            np.log(w_np)
+            - np.log(p_np)
+            - s_np / (k1 * ready_p_bar)
+            - np.where(su_np > 0.0, su_np / (k2 * sc_np), 0.0)
+            - np.where(ml_np > 0.0, ml_np / (k3 * material_scale), 0.0)
+        )
+        return [float(v) for v in scores]
 
     return [
         (
@@ -459,11 +504,224 @@ def compute_rhc_candidate_metrics_batch_np(
     )
 
 
+def evaluate_objective_batch(
+    *,
+    end_offsets: list[float],
+    wc_indices: list[int],
+    state_ids: list[int],
+    order_indices: list[int],
+    sdst_setup_flat: list[float],
+    sdst_loss_flat: list[float],
+    n_wc: int,
+    n_states: int,
+    order_due_offsets: list[float],
+    w_makespan: float,
+    w_setup: float,
+    w_loss: float,
+    w_tardiness: float,
+) -> tuple[float, float, float, float, float]:
+    """Evaluate aggregated objective from flat assignment arrays.
+
+    Native seam with a deterministic Python fallback that mirrors the
+    Rust ``machine_objective_kernel`` logic exactly.
+    """
+    if _native_evaluate_objective_batch is not None and _HAS_NUMPY:
+        return _native_evaluate_objective_batch(
+            np.asarray(end_offsets, dtype=np.float64),
+            np.asarray(wc_indices, dtype=np.int64),
+            np.asarray(state_ids, dtype=np.int64),
+            np.asarray(order_indices, dtype=np.int64),
+            np.asarray(sdst_setup_flat, dtype=np.float64),
+            np.asarray(sdst_loss_flat, dtype=np.float64),
+            n_wc,
+            n_states,
+            np.asarray(order_due_offsets, dtype=np.float64),
+            w_makespan,
+            w_setup,
+            w_loss,
+            w_tardiness,
+        )
+
+    n = len(end_offsets)
+    by_machine: list[list[int]] = [[] for _ in range(n_wc)]
+    for i in range(n):
+        m = wc_indices[i]
+        if 0 <= m < n_wc:
+            by_machine[m].append(i)
+
+    total_makespan = 0.0
+    total_setup = 0.0
+    total_loss = 0.0
+
+    for m, indices in enumerate(by_machine):
+        if not indices:
+            continue
+        indices_sorted = sorted(indices, key=lambda i: end_offsets[i])
+        makespan = end_offsets[indices_sorted[-1]]
+        total_makespan = max(total_makespan, makespan)
+        wc_offset = m * n_states * n_states
+        for a, b in zip(indices_sorted, indices_sorted[1:], strict=False):
+            ps = state_ids[a]
+            cs = state_ids[b]
+            if ps >= 0 and cs >= 0:
+                ps_u = int(ps)
+                cs_u = int(cs)
+                if ps_u < n_states and cs_u < n_states:
+                    idx = wc_offset + ps_u * n_states + cs_u
+                    total_setup += sdst_setup_flat[idx]
+                    total_loss += sdst_loss_flat[idx]
+
+    n_orders = len(order_due_offsets)
+    order_completion = [0.0] * n_orders
+    for i in range(n):
+        oi = order_indices[i]
+        if 0 <= oi < n_orders and end_offsets[i] > order_completion[oi]:
+            order_completion[oi] = end_offsets[i]
+
+    total_tardiness = 0.0
+    for j in range(n_orders):
+        tard = order_completion[j] - order_due_offsets[j]
+        if tard > 0.0:
+            total_tardiness += tard
+
+    cost = (
+        w_makespan * total_makespan
+        + w_setup * total_setup
+        + w_loss * total_loss
+        + w_tardiness * total_tardiness
+    )
+    return (cost, total_makespan, total_setup, total_loss, total_tardiness)
+
+
+def stabilize_temporal_batch(
+    *,
+    start_offsets: list[float],
+    end_offsets: list[float],
+    wc_indices: list[int],
+    state_ids: list[int],
+    predecessor_ids: list[int],
+    sdst_setup_flat: list[float],
+    n_wc: int,
+    n_states: int,
+    max_passes: int = 8,
+) -> tuple[int, int, int]:
+    """Repair temporal consistency in-place on flat offset arrays.
+
+    Native seam with a deterministic Python fallback that mirrors the
+    Rust ``stabilize_temporal_batch`` logic exactly.
+    """
+    if _native_stabilize_temporal_batch is not None and _HAS_NUMPY:
+        start_arr = np.asarray(start_offsets, dtype=np.float64)
+        end_arr = np.asarray(end_offsets, dtype=np.float64)
+        result = _native_stabilize_temporal_batch(
+            start_arr,
+            end_arr,
+            np.asarray(wc_indices, dtype=np.int64),
+            np.asarray(state_ids, dtype=np.int64),
+            np.asarray(predecessor_ids, dtype=np.int64),
+            np.asarray(sdst_setup_flat, dtype=np.float64),
+            n_wc,
+            n_states,
+            max_passes,
+        )
+        # Copy mutated values back into Python lists so the caller sees
+        # the same side-effect as the native path.
+        start_offsets[:] = start_arr.tolist()
+        end_offsets[:] = end_arr.tolist()
+        return result
+
+    n = len(start_offsets)
+    indegree = [0] * n
+    successors: list[list[int]] = [[] for _ in range(n)]
+    for i in range(n):
+        p = predecessor_ids[i]
+        if p >= 0:
+            p_u = int(p)
+            if p_u < n:
+                indegree[i] += 1
+                successors[p_u].append(i)
+
+    queue = deque([i for i in range(n) if indegree[i] == 0])
+    topo_order: list[int] = []
+    while queue:
+        node = queue.popleft()
+        topo_order.append(node)
+        for succ in successors[node]:
+            indegree[succ] -= 1
+            if indegree[succ] == 0:
+                queue.append(succ)
+
+    visited = [False] * n
+    for node in topo_order:
+        visited[node] = True
+    for i in range(n):
+        if not visited[i]:
+            topo_order.append(i)
+
+    precedence_shifts = 0
+    machine_shifts = 0
+    passes = 0
+
+    for pass_idx in range(max_passes):
+        changed = False
+        passes = pass_idx + 1
+
+        for i in topo_order:
+            p = predecessor_ids[i]
+            if p < 0:
+                continue
+            p_u = int(p)
+            if p_u >= n:
+                continue
+            if start_offsets[i] < end_offsets[p_u]:
+                delta = end_offsets[p_u] - start_offsets[i]
+                start_offsets[i] += delta
+                end_offsets[i] += delta
+                precedence_shifts += 1
+                changed = True
+
+        by_machine: list[list[int]] = [[] for _ in range(n_wc)]
+        for i in range(n):
+            m = wc_indices[i]
+            if 0 <= m < n_wc:
+                by_machine[m].append(i)
+
+        for machine_indices in by_machine:
+            machine_indices.sort(key=lambda i: start_offsets[i])
+            for prev, curr in zip(machine_indices, machine_indices[1:], strict=False):
+                required_setup = 0.0
+                ps = state_ids[prev]
+                cs = state_ids[curr]
+                m = wc_indices[curr]
+                if ps >= 0 and cs >= 0 and 0 <= m < n_wc:
+                    ps_u = int(ps)
+                    cs_u = int(cs)
+                    if ps_u < n_states and cs_u < n_states:
+                        required_setup = sdst_setup_flat[
+                            m * n_states * n_states + ps_u * n_states + cs_u
+                        ]
+
+                min_start = end_offsets[prev] + required_setup
+                if start_offsets[curr] < min_start:
+                    delta = min_start - start_offsets[curr]
+                    start_offsets[curr] += delta
+                    end_offsets[curr] += delta
+                    machine_shifts += 1
+                    changed = True
+
+        if not changed:
+            break
+
+    return (passes, precedence_shifts, machine_shifts)
+
+
 __all__ = [
     "compute_atcs_log_score",
     "compute_atcs_log_scores_batch",
     "compute_rhc_candidate_metrics_batch",
     "compute_rhc_candidate_metrics_batch_np",
+    "evaluate_objective_batch",
     "get_acceleration_status",
     "resource_capacity_window_is_feasible",
+    "stabilize_temporal_batch",
 ]

@@ -71,6 +71,20 @@ class TestAdvanceAdmissionFrontier:
         assert new_ids == [op.id]
         assert cursor == 1
 
+    def test_op_earliest_exceeds_window_boundary_blocks_admission(self) -> None:
+        """R20: release-date frontier — op_earliest > window_boundary blocks admission
+        when admission offset is absent (fallback path)."""
+        op = _OpStub(id=_new_id(), order_id=_new_id())
+        new_ids, cursor = advance_admission_frontier(
+            cursor=0,
+            ops_sorted_by_admission=[op],
+            op_admission_offset_by_id={},  # missing → falls back to op_earliest
+            op_earliest={op.id: 150.0},
+            window_boundary=100.0,
+        )
+        assert new_ids == []
+        assert cursor == 0
+
     def test_resumes_from_existing_cursor_position(self) -> None:
         ops = [_OpStub(id=_new_id(), order_id=_new_id()) for _ in range(3)]
         offsets = {ops[0].id: 0.0, ops[1].id: 50.0, ops[2].id: 200.0}

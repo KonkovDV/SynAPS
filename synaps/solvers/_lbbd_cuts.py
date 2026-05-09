@@ -19,10 +19,10 @@ silent divergence that would otherwise occur as cut formulations evolve.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from uuid import UUID
 
     from synaps.model import Assignment, Operation, ScheduleProblem

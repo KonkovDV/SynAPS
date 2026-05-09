@@ -8,8 +8,7 @@ gates any further structural change to the RHC main loop.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Any
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from synaps.model import Assignment
@@ -19,8 +18,7 @@ from synaps.solvers.rhc._window import (
     stabilize_temporal_consistency,
 )
 
-
-HORIZON_START = datetime(2026, 4, 1, 8, 0, 0, tzinfo=timezone.utc)
+HORIZON_START = datetime(2026, 4, 1, 8, 0, 0, tzinfo=UTC)
 
 
 @dataclass

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import subprocess
 import sys
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_native_rhc_candidate_acceleration_study_writes_report(tmp_path: Path) -> None:
