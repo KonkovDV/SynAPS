@@ -17,6 +17,7 @@ import logging
 import math
 import random
 import time
+from collections import deque
 from dataclasses import dataclass
 from datetime import timedelta
 from enum import Enum
@@ -37,6 +38,13 @@ from synaps.solvers._dispatch_support import (
     recompute_assignment_setups,
 )
 from synaps.solvers.feasibility_checker import FeasibilityChecker
+
+try:
+    import numpy as np
+
+    _HAS_NUMPY = True
+except ImportError:  # pragma: no cover
+    _HAS_NUMPY = False
 from synaps.solvers.lower_bounds import compute_relaxed_makespan_lower_bound
 from synaps.solvers.sdst_matrix import SdstMatrix
 
@@ -63,9 +71,43 @@ class RepairOutcome:
     reason: str
 
 
+@dataclass(frozen=True, slots=True)
+class AlnsIterationRecord:
+    """Per-iteration ALNS metrics record for convergence diagnostics.
+
+    Used when ``record_iteration_metrics=True`` to capture a bounded trace
+    (max 500 records) of the ALNS search trajectory.
+    """
+
+    iteration: int
+    operator_name: str
+    destroy_size: int
+    repair_status: str  # "feasible", "timeout", "infeasible"
+    candidate_cost: float
+    best_cost: float
+    temperature: float
+    accepted: bool
+    improved: bool
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a plain dict for metadata embedding."""
+        return {
+            "iteration": self.iteration,
+            "operator_name": self.operator_name,
+            "destroy_size": self.destroy_size,
+            "repair_status": self.repair_status,
+            "candidate_cost": self.candidate_cost,
+            "best_cost": self.best_cost,
+            "temperature": self.temperature,
+            "accepted": self.accepted,
+            "improved": self.improved,
+        }
+
+
 # ---------------------------------------------------------------------------
 # Objective evaluation
 # ---------------------------------------------------------------------------
+
 
 def _evaluate_objective(
     problem: ScheduleProblem,
@@ -83,9 +125,7 @@ def _evaluate_objective(
         ops_by_id = {op.id: op for op in problem.operations}
 
     # Makespan
-    makespan = max(
-        (a.end_time - horizon_start).total_seconds() / 60.0 for a in assignments
-    )
+    makespan = max((a.end_time - horizon_start).total_seconds() / 60.0 for a in assignments)
 
     # Setup and material loss from machine sequences
     total_setup = 0.0
@@ -135,6 +175,7 @@ def _objective_cost(obj: ObjectiveValues, weights: dict[str, float]) -> float:
 # ---------------------------------------------------------------------------
 # Incremental objective evaluation (P2.1 — avoids full re-sort every iter)
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class _MachineObjectiveCache:
@@ -328,7 +369,12 @@ def _evaluate_objective_incremental(
 #                (Shaw 1998)
 #   machine_segment — contiguous segment removal from one machine
 #                to break high-cost setup chains (domain heuristic)
+#   precedence_chain — R8 order-based ejection chain removal
+#                (Voudouris & Tsang 1999; Ropke & Pisinger 2006 §3.3)
+#   critical_path — longest-path bottleneck-chain removal via topological DP
+#                (Kelley & Walker 1959; Adams, Balas & Zawack 1988)
 # ---------------------------------------------------------------------------
+
 
 def _destroy_random(
     assignments: list[Assignment],
@@ -358,28 +404,40 @@ def _destroy_worst(
 
     Picks operations whose machine-local setup contribution (predecessor→self
     + self→successor) is highest.
+
+    When the native accelerator is available, delegates scoring to Rust for
+    parallel per-machine computation. Falls back to the Python reference loop
+    when native is unavailable.
     """
     if ops_by_id is None:
         ops_by_id = {op.id: op for op in problem.operations}
-    by_machine: dict[Any, list[Assignment]] = {}
-    for a in assignments:
-        by_machine.setdefault(a.work_center_id, []).append(a)
 
-    op_cost: dict[UUID, float] = {}
-    for wc_id, machine_assignments in by_machine.items():
-        machine_assignments.sort(key=lambda a: a.start_time)
-        for i, a in enumerate(machine_assignments):
-            cost = 0.0
-            op = ops_by_id[a.operation_id]
-            if i > 0:
-                prev_op = ops_by_id[machine_assignments[i - 1].operation_id]
-                cost += sdst.get_setup(wc_id, prev_op.state_id, op.state_id)
-                cost += sdst.get_material_loss(wc_id, prev_op.state_id, op.state_id)
-            if i < len(machine_assignments) - 1:
-                next_op = ops_by_id[machine_assignments[i + 1].operation_id]
-                cost += sdst.get_setup(wc_id, op.state_id, next_op.state_id)
-                cost += sdst.get_material_loss(wc_id, op.state_id, next_op.state_id)
-            op_cost[a.operation_id] = cost
+    # --- Try native scoring path ---
+    native_scores = _destroy_worst_native_scores(assignments, sdst, ops_by_id)
+    if native_scores is not None:
+        # native_scores is a dict[UUID, float] of per-operation costs
+        op_cost = native_scores
+    else:
+        # --- Python reference implementation (authoritative) ---
+        by_machine: dict[Any, list[Assignment]] = {}
+        for a in assignments:
+            by_machine.setdefault(a.work_center_id, []).append(a)
+
+        op_cost: dict[UUID, float] = {}
+        for wc_id, machine_assignments in by_machine.items():
+            machine_assignments.sort(key=lambda a: a.start_time)
+            for i, a in enumerate(machine_assignments):
+                cost = 0.0
+                op = ops_by_id[a.operation_id]
+                if i > 0:
+                    prev_op = ops_by_id[machine_assignments[i - 1].operation_id]
+                    cost += sdst.get_setup(wc_id, prev_op.state_id, op.state_id)
+                    cost += sdst.get_material_loss(wc_id, prev_op.state_id, op.state_id)
+                if i < len(machine_assignments) - 1:
+                    next_op = ops_by_id[machine_assignments[i + 1].operation_id]
+                    cost += sdst.get_setup(wc_id, op.state_id, next_op.state_id)
+                    cost += sdst.get_material_loss(wc_id, op.state_id, next_op.state_id)
+                op_cost[a.operation_id] = cost
 
     # Sort by cost descending, add randomness to avoid deterministic loops
     ranked = sorted(op_cost.items(), key=lambda x: -x[1])
@@ -397,6 +455,81 @@ def _destroy_worst(
         destroyed.add(pick)
         remaining_ids.remove(pick)
     return destroyed
+
+
+def _destroy_worst_native_scores(
+    assignments: list[Assignment],
+    sdst: SdstMatrix,
+    ops_by_id: dict[Any, Any],
+) -> dict[UUID, float] | None:
+    """Attempt native scoring for _destroy_worst. Returns None if unavailable.
+
+    Builds the CSR machine-sorted structure and delegates to the native
+    compute_destroy_worst_scores function. The native function computes
+    setup-cost contributions only (not material loss) — matching the design
+    spec for the native acceleration path.
+    """
+    if not _HAS_NUMPY:
+        return None
+
+    from synaps.accelerators import compute_destroy_worst_scores_native
+
+    # Build CSR machine grouping sorted by start_time
+    by_machine: dict[Any, list[tuple[int, Assignment]]] = {}
+    assign_idx_map: dict[UUID, int] = {}
+    for idx, a in enumerate(assignments):
+        assign_idx_map[a.operation_id] = idx
+        by_machine.setdefault(a.work_center_id, []).append((idx, a))
+
+    n_assignments = len(assignments)
+    n_machines = len(by_machine)
+
+    # Build CSR offsets and indices
+    machine_offsets = np.zeros(n_machines + 1, dtype=np.int64)
+    assignment_indices_list: list[int] = []
+
+    for m_idx, (wc_id, machine_assigns) in enumerate(by_machine.items()):
+        # Sort by start_time within each machine
+        machine_assigns.sort(key=lambda x: x[1].start_time)
+        machine_offsets[m_idx + 1] = machine_offsets[m_idx] + len(machine_assigns)
+        for orig_idx, _a in machine_assigns:
+            assignment_indices_list.append(orig_idx)
+
+    assignment_indices = np.array(assignment_indices_list, dtype=np.int64)
+
+    # Build per-assignment state indices and wc indices
+    state_ids = np.zeros(n_assignments, dtype=np.int64)
+    wc_indices = np.zeros(n_assignments, dtype=np.int64)
+
+    for idx, a in enumerate(assignments):
+        op = ops_by_id[a.operation_id]
+        si = sdst.state_id_to_idx.get(op.state_id, -1)
+        wi = sdst.wc_id_to_idx.get(a.work_center_id, -1)
+        state_ids[idx] = si
+        wc_indices[idx] = wi
+
+    # Flatten SDST setup matrix to float64
+    sdst_setup_flat = sdst.setup_minutes.astype(np.float64).ravel()
+
+    result = compute_destroy_worst_scores_native(
+        machine_offsets=machine_offsets,
+        assignment_indices=assignment_indices,
+        state_ids=state_ids,
+        sdst_setup_flat=sdst_setup_flat,
+        wc_indices=wc_indices,
+        n_wc=sdst.n_wc,
+        n_states=sdst.n_states,
+    )
+
+    if result is None:
+        return None
+
+    # Map back to operation UUIDs
+    scores: dict[UUID, float] = {}
+    for idx, a in enumerate(assignments):
+        scores[a.operation_id] = float(result[idx])
+
+    return scores
 
 
 def _destroy_related(
@@ -443,9 +576,7 @@ def _destroy_related(
         # R7: Temporal proximity — operations closer in time are more related
         # (Ropke & Pisinger 2006: temporal relatedness prevents idle-time gaps
         # from decoupling structurally adjacent operations).
-        time_gap_minutes = abs(
-            (a.start_time - seed_assignment.start_time).total_seconds() / 60.0
-        )
+        time_gap_minutes = abs((a.start_time - seed_assignment.start_time).total_seconds() / 60.0)
         score += time_gap_minutes * 0.01
         relatedness.append((score, a.operation_id))
 
@@ -526,9 +657,7 @@ def _destroy_precedence_chain(
 
     # Prefer orders that fit fully within destroy_size (clean chain removal)
     valid_orders = [
-        (oid, oids)
-        for oid, oids in ops_by_order.items()
-        if 1 <= len(oids) <= destroy_size
+        (oid, oids) for oid, oids in ops_by_order.items() if 1 <= len(oids) <= destroy_size
     ]
     if valid_orders:
         order_id, op_ids = rng.choice(valid_orders)
@@ -679,18 +808,220 @@ def _destroy_critical_path(
     if len(critical_path) > destroy_size:
         critical_path = critical_path[-destroy_size:]
 
+    # Extend when critical path is shorter than destroy_size:
+    # Add operations adjacent (predecessor/successor in machine sequence) to
+    # critical-path nodes on the same machines, sorted by their setup
+    # contribution (from the SDST matrix).
+    if len(critical_path) < destroy_size:
+        critical_set = set(critical_path)
+
+        # Build index: operation_id -> position in its machine sequence
+        op_to_machine_pos: dict[UUID, tuple[Any, int]] = {}
+        for wc_id, machine_seq in by_machine.items():
+            for i, a in enumerate(machine_seq):
+                op_to_machine_pos[a.operation_id] = (wc_id, i)
+
+        # Collect candidate operations that are adjacent to critical-path nodes
+        # in the machine sequence (immediate predecessor or successor)
+        candidates: list[tuple[float, UUID]] = []
+        seen_candidates: set[UUID] = set()
+
+        for cp_op_id in critical_path:
+            pos_info = op_to_machine_pos.get(cp_op_id)
+            if pos_info is None:
+                continue
+            wc_id, idx = pos_info
+            machine_seq = by_machine[wc_id]
+
+            # Check immediate predecessor and successor in machine sequence
+            for neighbor_idx in (idx - 1, idx + 1):
+                if neighbor_idx < 0 or neighbor_idx >= len(machine_seq):
+                    continue
+                neighbor_a = machine_seq[neighbor_idx]
+                neighbor_op_id = neighbor_a.operation_id
+                if neighbor_op_id in critical_set or neighbor_op_id in seen_candidates:
+                    continue
+                seen_candidates.add(neighbor_op_id)
+
+                # Compute setup contribution: predecessor→self + self→successor
+                neighbor_op = ops_by_id.get(neighbor_op_id)
+                if neighbor_op is None:
+                    continue
+                cost = 0.0
+                if neighbor_idx > 0:
+                    prev_op = ops_by_id.get(machine_seq[neighbor_idx - 1].operation_id)
+                    if prev_op is not None:
+                        cost += sdst.get_setup(wc_id, prev_op.state_id, neighbor_op.state_id)
+                if neighbor_idx < len(machine_seq) - 1:
+                    next_op = ops_by_id.get(machine_seq[neighbor_idx + 1].operation_id)
+                    if next_op is not None:
+                        cost += sdst.get_setup(wc_id, neighbor_op.state_id, next_op.state_id)
+                candidates.append((cost, neighbor_op_id))
+
+        # Sort by setup contribution descending (highest cost first)
+        candidates.sort(key=lambda x: -x[0])
+
+        # Fill up to destroy_size
+        for _cost, op_id in candidates:
+            if len(critical_set) >= destroy_size:
+                break
+            critical_set.add(op_id)
+
+        return critical_set
+
     return set(critical_path)
+
+
+def _destroy_due_pressure(
+    assignments: list[Assignment],
+    problem: ScheduleProblem,
+    sdst: SdstMatrix,
+    destroy_size: int,
+    rng: random.Random,
+    *,
+    ops_by_id: dict[Any, Any] | None = None,
+) -> set[UUID]:
+    """Remove operations from orders with the highest weighted tardiness.
+
+    Ranks orders by ``tardiness × order_weight`` (descending), then from each
+    top-tardy order selects operations that are temporally latest in the order
+    chain (highest ``end_time``).  Destroying the tail of an order is the
+    cheapest way to recover tardiness, since the final operations are the ones
+    missing the due date — moving them backward in time reduces the order's
+    completion and therefore its tardiness contribution.
+
+    Order weight follows the repository convention used by the greedy dispatcher
+    (``greedy_dispatch.py``): ``priority / 500.0``, which normalises around the
+    default priority of 500.
+
+    Fallback semantics (task 2.2):
+        When no orders are currently tardy, the operator falls back to orders
+        with the smallest positive slack (``due_offset - latest_end_offset``).
+        Smallest-slack orders are closest to becoming tardy and therefore the
+        most valuable to re-optimise before they slip.  Within each such
+        order, operations are selected in descending ``end_time`` order — the
+        same temporally-latest-first policy used in the tardy branch.
+
+    Successor closure (task 2.3):
+        The returned set is a raw selection; callers wrap the result in
+        ``_expand_successor_closure`` (see the ALNS main loop), which keeps the
+        invariant that transitive successors of destroyed operations are also
+        destroyed.
+
+    Academic basis:
+        - Pinedo (2012, *Scheduling: Theory, Algorithms, and Systems* §3):
+          weighted tardiness is the standard tardiness objective in
+          single-machine and job-shop scheduling.
+        - Ropke & Pisinger (2006, Transportation Science): problem-specific
+          destroy operators focused on the dominant cost component outperform
+          uniform random removal in ALNS.
+    """
+    if not assignments:
+        return set()
+
+    if ops_by_id is None:
+        ops_by_id = {op.id: op for op in problem.operations}
+
+    horizon_start = problem.planning_horizon_start
+    orders_by_id = {order.id: order for order in problem.orders}
+
+    # Compute per-order latest end offset (minutes from horizon_start) and
+    # group assignments by order for later selection.
+    order_latest_end: dict[Any, float] = {}
+    assignments_by_order: dict[Any, list[Assignment]] = {}
+    for a in assignments:
+        op = ops_by_id.get(a.operation_id)
+        if op is None:
+            continue
+        end_offset = (a.end_time - horizon_start).total_seconds() / 60.0
+        prev = order_latest_end.get(op.order_id)
+        if prev is None or end_offset > prev:
+            order_latest_end[op.order_id] = end_offset
+        assignments_by_order.setdefault(op.order_id, []).append(a)
+
+    # Compute weighted tardiness per order.
+    # weight = priority / 500.0 (greedy_dispatch.py convention: normalise around
+    # the default priority of 500).
+    weighted_tardiness: list[tuple[float, Any]] = []
+    for order_id, latest_end in order_latest_end.items():
+        order = orders_by_id.get(order_id)
+        if order is None:
+            continue
+        due_offset = (order.due_date - horizon_start).total_seconds() / 60.0
+        tardiness = max(0.0, latest_end - due_offset)
+        if tardiness <= 0.0:
+            continue
+        weight = order.priority / 500.0
+        weighted_tardiness.append((tardiness * weight, order_id))
+
+    # Task 2.2: when no orders are tardy, fall back to orders with the
+    # smallest positive slack (due_offset - latest_end_offset).  Orders that
+    # are closest to slipping are the most valuable to re-optimise.
+    if not weighted_tardiness:
+        positive_slack: list[tuple[float, Any]] = []
+        for order_id, latest_end in order_latest_end.items():
+            order = orders_by_id.get(order_id)
+            if order is None:
+                continue
+            due_offset = (order.due_date - horizon_start).total_seconds() / 60.0
+            slack = due_offset - latest_end
+            if slack <= 0.0:
+                # No positive slack: either already tardy (handled above) or
+                # exactly on the due date; skip.
+                continue
+            positive_slack.append((slack, order_id))
+
+        if not positive_slack:
+            return set()
+
+        # Rank by ascending slack (smallest slack first = most urgent).
+        positive_slack.sort(key=lambda x: x[0])
+
+        destroyed: set[UUID] = set()
+        for _slack, order_id in positive_slack:
+            if len(destroyed) >= destroy_size:
+                break
+            order_assignments = assignments_by_order.get(order_id, [])
+            order_assignments.sort(key=lambda a: a.end_time, reverse=True)
+            for a in order_assignments:
+                if len(destroyed) >= destroy_size:
+                    break
+                destroyed.add(a.operation_id)
+
+        return destroyed
+
+    # Rank tardy orders by weighted tardiness (descending).
+    weighted_tardiness.sort(key=lambda x: -x[0])
+
+    # Walk top-tardy orders and, within each, destroy operations in
+    # descending end_time order (temporally latest first).
+    destroyed: set[UUID] = set()
+    for _score, order_id in weighted_tardiness:
+        if len(destroyed) >= destroy_size:
+            break
+        order_assignments = assignments_by_order.get(order_id, [])
+        order_assignments.sort(key=lambda a: a.end_time, reverse=True)
+        for a in order_assignments:
+            if len(destroyed) >= destroy_size:
+                break
+            destroyed.add(a.operation_id)
+
+    return destroyed
 
 
 # All destroy operators (random, worst, related: Shaw/Ropke-Pisinger;
 #  machine_segment: domain heuristic for setup-chain disruption;
-#  precedence_chain: R8 order-based ejection for work-order level re-sequencing)
+#  precedence_chain: R8 order-based ejection for work-order level re-sequencing;
+#  critical_path: Kelley/Walker & Adams-Balas-Zawack bottleneck-chain removal;
+#  due_pressure: Pinedo weighted-tardiness order-tail removal with slack fallback)
 DESTROY_OPERATORS = [
     ("random", _destroy_random),
     ("worst", _destroy_worst),
     ("related", _destroy_related),
     ("machine_segment", _destroy_machine_segment),
     ("precedence_chain", _destroy_precedence_chain),
+    ("critical_path", _destroy_critical_path),
+    ("due_pressure", _destroy_due_pressure),
 ]
 
 
@@ -731,10 +1062,10 @@ def _cap_destroy_set_preserving_successor_closure(
     while len(capped) > max_destroy:
         roots = sorted(
             [
-            op_id
-            for op_id in capped
-            if (ops_by_id.get(op_id) is None)
-            or (ops_by_id[op_id].predecessor_op_id not in capped)
+                op_id
+                for op_id in capped
+                if (ops_by_id.get(op_id) is None)
+                or (ops_by_id[op_id].predecessor_op_id not in capped)
             ],
             key=str,
         )
@@ -753,6 +1084,7 @@ def _cap_destroy_set_preserving_successor_closure(
 # ---------------------------------------------------------------------------
 # Repair via CP-SAT (Laborie & Godard 2007: LNS + CP)
 # ---------------------------------------------------------------------------
+
 
 def _repair_cpsat_outcome(
     problem: ScheduleProblem,
@@ -836,9 +1168,7 @@ def _repair_cpsat_outcome(
             0,
             int(
                 round(
-                    (
-                        frozen_predecessor.end_time - problem.planning_horizon_start
-                    ).total_seconds()
+                    (frozen_predecessor.end_time - problem.planning_horizon_start).total_seconds()
                     / 60.0
                 )
             ),
@@ -852,9 +1182,7 @@ def _repair_cpsat_outcome(
         work_centers=problem.work_centers,
         setup_matrix=problem.setup_matrix,
         auxiliary_resources=problem.auxiliary_resources,
-        aux_requirements=[
-            r for r in problem.aux_requirements if r.operation_id in needed_ids
-        ],
+        aux_requirements=[r for r in problem.aux_requirements if r.operation_id in needed_ids],
         planning_horizon_start=problem.planning_horizon_start,
         planning_horizon_end=problem.planning_horizon_end,
     )
@@ -1003,6 +1331,7 @@ def _repair_greedy(
 # Machine overlap check (guard for CP-SAT repair sub-problem gaps)
 # ---------------------------------------------------------------------------
 
+
 def _has_machine_overlap(assignments: list[Assignment]) -> bool:
     """Return True if any two assignments overlap on the same machine."""
     by_machine: dict[Any, list[Assignment]] = {}
@@ -1060,6 +1389,7 @@ def _has_precedence_violation(
 # SA acceptance (Ropke & Pisinger 2006 §4.3)
 # ---------------------------------------------------------------------------
 
+
 def _sa_accept(
     delta_cost: float,
     temperature: float,
@@ -1088,9 +1418,7 @@ def _update_operator_weights_for_segment(
         return []
 
     segment_rewards = [
-        operator_scores[idx] / operator_attempts[idx]
-        if operator_attempts[idx] > 0
-        else 0.0
+        operator_scores[idx] / operator_attempts[idx] if operator_attempts[idx] > 0 else 0.0
         for idx in range(n_operators)
     ]
     reward_mass = sum(max(reward, 0.0) for reward in segment_rewards)
@@ -1109,6 +1437,141 @@ def _update_operator_weights_for_segment(
     ]
     total = sum(blended)
     return [weight / total for weight in blended]
+
+
+def _normalize_initial_operator_weights(
+    raw: Any,
+    operator_names: list[str],
+) -> list[float]:
+    """Normalize caller-supplied initial operator weights to a probability vector.
+
+    Handles three input forms:
+      - ``None`` → uniform ``[1/n]*n``
+      - ``dict[str, float]`` → filter to positive finite floats matching
+        *operator_names*; fill missing with mean of recognized; normalize to
+        sum 1.0. If ALL names are missing/invalid → log warning, uniform.
+      - ``list[float]`` (or tuple) → if length matches and all values are
+        non-negative finite → normalize. Otherwise log warning, uniform.
+      - Any other type → log warning, uniform.
+
+    Returns a list of floats summing to 1.0 with length == len(operator_names).
+    """
+    n = len(operator_names)
+    if n == 0:
+        return []
+
+    uniform: list[float] = [1.0 / n] * n
+
+    if raw is None:
+        return uniform
+
+    if isinstance(raw, dict):
+        # Extract recognized positive finite values
+        recognized: list[tuple[int, float]] = []
+        for idx, name in enumerate(operator_names):
+            val = raw.get(name)
+            if val is not None:
+                try:
+                    fval = float(val)
+                except (TypeError, ValueError):
+                    continue
+                if fval > 0.0 and math.isfinite(fval):
+                    recognized.append((idx, fval))
+
+        if not recognized:
+            logger.warning(
+                "initial_operator_weights dict has no recognized positive finite "
+                "entries for current operators — falling back to uniform weights"
+            )
+            return uniform
+
+        # Fill missing names with mean of recognized values
+        mean_recognized = sum(v for _, v in recognized) / len(recognized)
+        recognized_indices = {idx for idx, _ in recognized}
+        weights = [0.0] * n
+        for idx, val in recognized:
+            weights[idx] = val
+        for idx in range(n):
+            if idx not in recognized_indices:
+                weights[idx] = mean_recognized
+
+        weight_sum = sum(weights)
+        if weight_sum <= 0.0:
+            return uniform
+        return [w / weight_sum for w in weights]
+
+    if isinstance(raw, (list, tuple)):
+        if len(raw) != n:
+            logger.warning(
+                "initial_operator_weights list length %d does not match "
+                "operator count %d — falling back to uniform weights",
+                len(raw),
+                n,
+            )
+            return uniform
+
+        # Validate all non-negative finite
+        parsed: list[float] = []
+        for val in raw:
+            try:
+                fval = float(val)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "initial_operator_weights list contains non-numeric value — "
+                    "falling back to uniform weights"
+                )
+                return uniform
+            if not math.isfinite(fval) or fval < 0.0:
+                logger.warning(
+                    "initial_operator_weights list contains negative or non-finite "
+                    "value — falling back to uniform weights"
+                )
+                return uniform
+            parsed.append(fval)
+
+        weight_sum = sum(parsed)
+        if weight_sum <= 0.0:
+            return uniform
+        return [w / weight_sum for w in parsed]
+
+    # Unrecognized type
+    logger.warning(
+        "initial_operator_weights has unrecognized type %s — "
+        "falling back to uniform weights",
+        type(raw).__name__,
+    )
+    return uniform
+
+
+def _compute_effective_temperature(
+    *,
+    base_temp: float,
+    due_pressure: float,
+    candidate_pressure: float,
+    due_alpha: float,
+    candidate_beta: float,
+    min_temp: float,
+    max_temp: float,
+) -> float:
+    """Compute the pressure-adjusted SA temperature, clamped to [min_temp, max_temp].
+
+    Pure function — no side effects, no logging, no state reads. Mirrors the
+    inline formula currently used in the ALNS main loop and post-calibration
+    recompute.
+
+        factor    = 1.0 + due_alpha * due_pressure + candidate_beta * candidate_pressure
+        effective = base_temp * factor
+        return max(min_temp, min(max_temp, effective))
+
+    Audit note (2026-05-10): the current ALNS search behavior is that the
+    effective temperature is NON-DECREASING with increasing ``due_pressure``
+    (holding all else fixed) — higher pressure widens SA exploration. The
+    earlier design-doc claim that temperature should decrease monotonically
+    with pressure was rejected by the audit. Do not invert this formula.
+    """
+    factor = 1.0 + due_alpha * due_pressure + candidate_beta * candidate_pressure
+    effective = base_temp * factor
+    return max(min_temp, min(max_temp, effective))
 
 
 def _calibrate_sa_temperature(
@@ -1193,6 +1656,7 @@ def _calibrate_sa_temperature(
 # Main ALNS solver
 # ---------------------------------------------------------------------------
 
+
 class AlnsSolver(BaseSolver):
     """Adaptive Large Neighborhood Search with Micro-CP-SAT repair.
 
@@ -1234,9 +1698,7 @@ class AlnsSolver(BaseSolver):
             1,
             int(kwargs.get("repair_num_workers", kwargs.get("num_workers", 1))),
         )
-        sa_auto_calibration_enabled: bool = bool(
-            kwargs.get("sa_auto_calibration_enabled", False)
-        )
+        sa_auto_calibration_enabled: bool = bool(kwargs.get("sa_auto_calibration_enabled", False))
         # R6: default raised from 5 to 15 — Pepels (2014, C&OR) recommends ≥10-50
         # worsening samples for reliable SA temperature estimation. 5 gave ≥40%
         # variance at 50K scale, reducing strict-lane reproducibility.
@@ -1255,32 +1717,24 @@ class AlnsSolver(BaseSolver):
             max(0.0, float(kwargs.get("operator_weight_reset_mix", 0.2))),
         )
         max_no_improve_base_iters: int = int(kwargs.get("max_no_improve_iters", 0))
-        dynamic_no_improve_enabled: bool = bool(
-            kwargs.get("dynamic_no_improve_enabled", False)
-        )
+        dynamic_no_improve_enabled: bool = bool(kwargs.get("dynamic_no_improve_enabled", False))
         due_pressure: float = max(0.0, float(kwargs.get("due_pressure", 0.0)))
         candidate_pressure: float = max(
             0.0,
             float(kwargs.get("candidate_pressure", 0.0)),
         )
         no_improve_due_alpha: float = float(kwargs.get("no_improve_due_alpha", 0.6))
-        no_improve_candidate_beta: float = float(
-            kwargs.get("no_improve_candidate_beta", 0.4)
-        )
+        no_improve_candidate_beta: float = float(kwargs.get("no_improve_candidate_beta", 0.4))
         dynamic_sa_enabled: bool = bool(kwargs.get("dynamic_sa_enabled", True))
         sa_due_alpha: float = float(kwargs.get("sa_due_alpha", 0.35))
         sa_candidate_beta: float = float(kwargs.get("sa_candidate_beta", 0.15))
-        sa_pressure_cooling_gamma: float = float(
-            kwargs.get("sa_pressure_cooling_gamma", 0.0015)
-        )
+        sa_pressure_cooling_gamma: float = float(kwargs.get("sa_pressure_cooling_gamma", 0.0015))
         sa_temp_min: float = float(kwargs.get("sa_temp_min", 50.0))
         sa_temp_max: float = float(kwargs.get("sa_temp_max", 500.0))
         no_improve_min_iters: int = int(
             kwargs.get(
                 "no_improve_min_iters",
-                max(1, max_no_improve_base_iters // 2)
-                if max_no_improve_base_iters > 0
-                else 0,
+                max(1, max_no_improve_base_iters // 2) if max_no_improve_base_iters > 0 else 0,
             )
         )
         no_improve_max_iters: int = int(
@@ -1291,16 +1745,12 @@ class AlnsSolver(BaseSolver):
         )
         seed: int = int(kwargs.get("random_seed", 42))
         initial_beam_op_limit: int = int(kwargs.get("initial_beam_op_limit", 60))
-        frozen_initial_repair_max_ops: int = int(
-            kwargs.get("frozen_initial_repair_max_ops", 512)
-        )
+        frozen_initial_repair_max_ops: int = int(kwargs.get("frozen_initial_repair_max_ops", 512))
         frozen_initial_repair_min_remaining_time_s: float = float(
             kwargs.get("frozen_initial_repair_min_remaining_time_s", 30.0)
         )
         use_cpsat_repair: bool = bool(kwargs.get("use_cpsat_repair", True))
-        cpsat_max_destroy_ops: int = int(
-            kwargs.get("cpsat_max_destroy_ops", min(20, max_destroy))
-        )
+        cpsat_max_destroy_ops: int = int(kwargs.get("cpsat_max_destroy_ops", min(20, max_destroy)))
         objective_weights: dict[str, float] = dict(
             kwargs.get(
                 "objective_weights",
@@ -1315,9 +1765,7 @@ class AlnsSolver(BaseSolver):
         }
         frozen_predecessor_end_offsets = {
             op_id: float(offset)
-            for op_id, offset in dict(
-                kwargs.get("frozen_predecessor_end_offsets", {})
-            ).items()
+            for op_id, offset in dict(kwargs.get("frozen_predecessor_end_offsets", {})).items()
         }
 
         # P3.1: Variable fixing — exclude stable ops from destroy
@@ -1325,18 +1773,29 @@ class AlnsSolver(BaseSolver):
         fixed_op_ids: set[UUID] = set(fixed_op_ids_raw) if fixed_op_ids_raw else set()
 
         # P3.2: Adaptive destroy sizing (Deng et al. 2026)
-        adaptive_destroy_enabled: bool = bool(
-            kwargs.get("adaptive_destroy_enabled", False)
-        )
-        adaptive_destroy_grow_rate: float = float(
-            kwargs.get("adaptive_destroy_grow_rate", 1.15)
-        )
+        adaptive_destroy_enabled: bool = bool(kwargs.get("adaptive_destroy_enabled", False))
+        adaptive_destroy_grow_rate: float = float(kwargs.get("adaptive_destroy_grow_rate", 1.15))
         adaptive_destroy_shrink_rate: float = float(
             kwargs.get("adaptive_destroy_shrink_rate", 0.85)
         )
 
         # P3.3: EMA repair-time tracking
         ema_repair_alpha: float = float(kwargs.get("ema_repair_alpha", 0.3))
+
+        # B3 (Task 7): Convergence diagnostics — per-iteration trace control
+        record_iteration_metrics: bool = bool(kwargs.get("record_iteration_metrics", False))
+        max_iteration_records: int = max(1, int(kwargs.get("max_iteration_records", 500)))
+
+        # C2 (Task 12.1): Initial operator weights — dict[str, float] | list[float] | None
+        initial_operator_weights_raw = kwargs.get("initial_operator_weights")
+
+        # C4 (Task 3b.1): Cross-window operator bias — independent from telemetry flag.
+        # When enabled AND cross_window_hints indicate high setup cost concentration,
+        # applies a bounded boost (max 15%) to setup-disrupting operators.
+        cross_window_operator_bias_enabled: bool = bool(
+            kwargs.get("cross_window_operator_bias_enabled", False)
+        )
+        cross_window_hints = kwargs.get("cross_window_hints")
 
         max_no_improve_iters = max_no_improve_base_iters
         if dynamic_no_improve_enabled and max_no_improve_base_iters > 0:
@@ -1365,22 +1824,26 @@ class AlnsSolver(BaseSolver):
         sa_pressure_factor = 1.0
         if dynamic_sa_enabled:
             sa_pressure_factor += (
-                sa_due_alpha * due_pressure
-                + sa_candidate_beta * candidate_pressure
+                sa_due_alpha * due_pressure + sa_candidate_beta * candidate_pressure
             )
-        effective_sa_initial_temp = min(
-            sa_temp_max,
-            max(sa_temp_min, sa_calibrated_base_temp * sa_pressure_factor),
+        # Initial effective SA temperature via _compute_effective_temperature.
+        # sa_pressure_factor is retained for the cooling-rate adjustment below
+        # and for metadata/logging; the temperature clamp itself delegates to
+        # the pure helper.
+        effective_sa_initial_temp = _compute_effective_temperature(
+            base_temp=sa_calibrated_base_temp,
+            due_pressure=due_pressure,
+            candidate_pressure=candidate_pressure,
+            due_alpha=sa_due_alpha if dynamic_sa_enabled else 0.0,
+            candidate_beta=sa_candidate_beta if dynamic_sa_enabled else 0.0,
+            min_temp=sa_temp_min,
+            max_temp=sa_temp_max,
         )
         effective_sa_cooling_rate = min(
             0.9999,
             max(
                 0.90,
-                sa_cooling_rate
-                + (
-                    sa_pressure_cooling_gamma
-                    * max(0.0, sa_pressure_factor - 1.0)
-                ),
+                sa_cooling_rate + (sa_pressure_cooling_gamma * max(0.0, sa_pressure_factor - 1.0)),
             ),
         )
 
@@ -1417,6 +1880,16 @@ class AlnsSolver(BaseSolver):
                     "warm_start_supplied_assignments": warm_start_supplied_assignments,
                     "warm_start_completed_assignments": warm_start_completed_assignments,
                     "warm_start_rejected_reason": warm_start_rejected_reason,
+                    # C1 (Task 9.4): explicit ALNS-scoped warm-start signals for RHC
+                    # telemetry. `alns_warm_start_used` mirrors `warm_start_used`
+                    # but is prefixed to avoid ambiguity with RHC-owned keys.
+                    # `alns_warm_start_coverage` is the fraction of operations in
+                    # the current (sub-)problem that the caller-supplied warm
+                    # start covered before any greedy fill or rejection.
+                    "alns_warm_start_used": warm_start_used,
+                    "alns_warm_start_coverage": round(
+                        warm_start_supplied_assignments / max(n_ops, 1), 6
+                    ),
                     "initial_solution_ms": elapsed_ms,
                     "time_limit_exhausted_before_search": (
                         bool(time_limit_exhausted_before_search)
@@ -1443,10 +1916,7 @@ class AlnsSolver(BaseSolver):
 
         def _initial_seed_timed_out(result: ScheduleResult) -> bool:
             metadata = result.metadata or {}
-            return (
-                result.status == SolverStatus.TIMEOUT
-                or bool(metadata.get("partial_schedule"))
-            )
+            return result.status == SolverStatus.TIMEOUT or bool(metadata.get("partial_schedule"))
 
         def _reanchor_against_frozen(
             assignments: list[Assignment],
@@ -1454,9 +1924,7 @@ class AlnsSolver(BaseSolver):
             if not assignments or not frozen_assignments:
                 return list(assignments), 0
 
-            original_by_op = {
-                assignment.operation_id: assignment for assignment in assignments
-            }
+            original_by_op = {assignment.operation_id: assignment for assignment in assignments}
             scheduled_assignments = [
                 assignment
                 for assignment in frozen_assignments
@@ -1466,13 +1934,9 @@ class AlnsSolver(BaseSolver):
                 [
                     (
                         assignment,
-                        (
-                            assignment.start_time - problem.planning_horizon_start
-                        ).total_seconds()
+                        (assignment.start_time - problem.planning_horizon_start).total_seconds()
                         / 60.0,
-                        (
-                            assignment.end_time - problem.planning_horizon_start
-                        ).total_seconds()
+                        (assignment.end_time - problem.planning_horizon_start).total_seconds()
                         / 60.0,
                         set(assignment.aux_resource_ids),
                     )
@@ -1513,13 +1977,10 @@ class AlnsSolver(BaseSolver):
                         )
                     }
                     if operation.predecessor_op_id is not None:
-                        predecessor_assignment = anchored_by_op.get(
-                            operation.predecessor_op_id
-                        )
+                        predecessor_assignment = anchored_by_op.get(operation.predecessor_op_id)
                         if predecessor_assignment is not None:
                             predecessor_end = (
-                                predecessor_assignment.end_time
-                                - problem.planning_horizon_start
+                                predecessor_assignment.end_time - problem.planning_horizon_start
                             ).total_seconds() / 60.0
                             earliest_start = max(earliest_start, predecessor_end)
                         elif operation.predecessor_op_id in original_by_op:
@@ -1729,9 +2190,7 @@ class AlnsSolver(BaseSolver):
                     elif warm_start_rejected_reason is None:
                         warm_start_rejected_reason = "frozen_greedy_seed_infeasible"
                 elif warm_start_rejected_reason is None:
-                    warm_start_rejected_reason = (
-                        f"frozen_greedy_seed_{frozen_seed_outcome.reason}"
-                    )
+                    warm_start_rejected_reason = f"frozen_greedy_seed_{frozen_seed_outcome.reason}"
             elif warm_start_rejected_reason is None:
                 warm_start_rejected_reason = "frozen_greedy_seed_skipped_budget_or_size"
 
@@ -1749,15 +2208,19 @@ class AlnsSolver(BaseSolver):
                 if beam_valid and greedy_valid:
                     beam_cost = _objective_cost(
                         _evaluate_objective(
-                            problem, list(beam_result.assignments),
-                            sdst, ops_by_id=ops_by_id,
+                            problem,
+                            list(beam_result.assignments),
+                            sdst,
+                            ops_by_id=ops_by_id,
                         ),
                         objective_weights,
                     )
                     greedy_cost = _objective_cost(
                         _evaluate_objective(
-                            problem, list(greedy_result.assignments),
-                            sdst, ops_by_id=ops_by_id,
+                            problem,
+                            list(greedy_result.assignments),
+                            sdst,
+                            ops_by_id=ops_by_id,
                         ),
                         objective_weights,
                     )
@@ -1801,9 +2264,7 @@ class AlnsSolver(BaseSolver):
                         time_limit_exhausted_before_search=True,
                     )
                 if not _is_valid_complete_schedule(list(initial_result.assignments)):
-                    return _initial_generation_error_result(
-                        "initial solution generation failed"
-                    )
+                    return _initial_generation_error_result("initial solution generation failed")
 
         if initial_result is not None and frozen_assignments:
             reanchored_initial_assignments, _ = _reanchor_against_frozen(
@@ -1818,9 +2279,7 @@ class AlnsSolver(BaseSolver):
                     update={"assignments": reanchored_initial_assignments}
                 )
             else:
-                return _initial_generation_error_result(
-                    "initial solution generation failed"
-                )
+                return _initial_generation_error_result("initial solution generation failed")
 
         initial_solution_ms = int((time.monotonic() - initial_solution_t0) * 1000)
         time_limit_exhausted_before_search = (time.monotonic() - t0) > time_limit_s
@@ -1839,7 +2298,9 @@ class AlnsSolver(BaseSolver):
         }
         # Build per-machine cache for incremental evaluation
         current_cache = _build_machine_objective_cache(
-            problem, current_assignments, sdst,
+            problem,
+            current_assignments,
+            sdst,
             ops_by_id=ops_by_id,
             horizon_start=horizon_start,
             order_due_offsets=order_due_offsets,
@@ -1872,22 +2333,108 @@ class AlnsSolver(BaseSolver):
                 # effectively reducing SA to a hill-climber after very few iters.
                 # Pepels (2014): T_min = 0.01 * T_0 is the recommended lower end.
                 sa_temp_min = max(sa_temp_min, 0.01 * sa_calibrated_base_temp)
-                # Recompute effective initial temperature with calibrated base.
-                effective_sa_initial_temp = min(
-                    sa_temp_max,
-                    max(sa_temp_min, sa_calibrated_base_temp * sa_pressure_factor),
+                # Recompute effective initial temperature with calibrated base
+                # via _compute_effective_temperature.
+                effective_sa_initial_temp = _compute_effective_temperature(
+                    base_temp=sa_calibrated_base_temp,
+                    due_pressure=due_pressure,
+                    candidate_pressure=candidate_pressure,
+                    due_alpha=sa_due_alpha if dynamic_sa_enabled else 0.0,
+                    candidate_beta=sa_candidate_beta if dynamic_sa_enabled else 0.0,
+                    min_temp=sa_temp_min,
+                    max_temp=sa_temp_max,
                 )
 
         # ------- Phase 2: ALNS operator selection (Roulette Wheel) -------
         n_operators = len(DESTROY_OPERATORS)
+        operator_names = [name for name, _ in DESTROY_OPERATORS]
         operator_scores = [0.0] * n_operators
         operator_attempts = [0] * n_operators
-        operator_weights = [1.0 / n_operators] * n_operators
+
+        # C2 (Task 12.1): Process initial_operator_weights kwarg via helper.
+        # Prefer dict keyed by operator name (robust to DESTROY_OPERATORS reordering).
+        initial_normalized_weights = _normalize_initial_operator_weights(
+            initial_operator_weights_raw, operator_names
+        )
+        operator_weights = list(initial_normalized_weights)
+
+        # Snapshot initial weights for metadata (after normalization)
+        initial_operator_weights_dict = {
+            name: round(w, 6) for name, w in zip(operator_names, operator_weights)
+        }
+
+        # C4 (Task 3b.2–3b.4): Bounded cross-window operator bias.
+        # Applied once at initialization (before the main loop). Does NOT modify
+        # weights during the loop. When the flag is off or hints are absent,
+        # behavior is identical to baseline.
+        cross_window_bias_applied = False
+        cross_window_bias_operator_deltas: dict[str, float] = {
+            name: 0.0 for name in operator_names
+        }
+
+        if (
+            cross_window_operator_bias_enabled
+            and cross_window_hints
+            and isinstance(cross_window_hints, list)
+            and len(cross_window_hints) > 0
+        ):
+            # Compute setup concentration signal: average max machine setup cost
+            # across all hint windows, normalized to [0, 1].
+            total_max_setup = 0.0
+            valid_hint_count = 0
+            for hint in cross_window_hints:
+                setup_by_machine = getattr(hint, "setup_cost_by_machine", None)
+                if setup_by_machine and isinstance(setup_by_machine, dict):
+                    machine_costs = [
+                        v for v in setup_by_machine.values()
+                        if isinstance(v, (int, float)) and v > 0
+                    ]
+                    if machine_costs:
+                        total_max_setup += max(machine_costs)
+                        valid_hint_count += 1
+
+            if valid_hint_count > 0:
+                avg_max_setup = total_max_setup / valid_hint_count
+                # Normalize signal to [0, 1] — 100 minutes of setup cost is
+                # considered full saturation.
+                signal = min(1.0, avg_max_setup / 100.0)
+                # Bounded boost: max 15% of the operator's own weight.
+                boost_factor = min(0.15, signal * 0.15)
+
+                if boost_factor > 0.0:
+                    pre_bias_weights = list(operator_weights)
+
+                    # Primary boost: machine_segment
+                    for idx, name in enumerate(operator_names):
+                        if name == "machine_segment":
+                            operator_weights[idx] += boost_factor * operator_weights[idx]
+                        elif name == "worst":
+                            # Secondary boost: worst gets half the boost
+                            operator_weights[idx] += (boost_factor * 0.5) * operator_weights[idx]
+
+                    # 3b.3: Floor — no operator weight below 1/(n_operators * 10)
+                    # i.e., 10% of uniform weight. This prevents any operator from
+                    # being zeroed out.
+                    weight_floor = 1.0 / (n_operators * 10)
+                    for idx in range(n_operators):
+                        if operator_weights[idx] < weight_floor:
+                            operator_weights[idx] = weight_floor
+
+                    # Re-normalize to sum 1.0
+                    weight_sum = sum(operator_weights)
+                    if weight_sum > 0.0:
+                        operator_weights = [w / weight_sum for w in operator_weights]
+
+                    cross_window_bias_applied = True
+                    cross_window_bias_operator_deltas = {
+                        name: round(operator_weights[idx] - pre_bias_weights[idx], 6)
+                        for idx, name in enumerate(operator_names)
+                    }
 
         # Score rewards (Ropke & Pisinger 2006 §4.2)
         sigma_1 = 33.0  # new global best
-        sigma_2 = 9.0   # better than current
-        sigma_3 = 3.0   # accepted (SA)
+        sigma_2 = 9.0  # better than current
+        sigma_3 = 3.0  # accepted (SA)
 
         temperature = effective_sa_initial_temp
 
@@ -1911,8 +2458,13 @@ class AlnsSolver(BaseSolver):
         sa_worsening_rejected = 0
         repair_rejection_reasons: dict[str, int] = {}
         iterations_completed = 0
+        accepted_iterations = 0
         no_improve_streak = 0
         no_improve_early_stop = False
+        stagnation_iteration: int | None = None
+        # B3 (Task 7.4): Cumulative per-operator tracking (never reset)
+        cumulative_operator_attempts = [0] * n_operators
+        cumulative_operator_improvements = [0] * n_operators
         # P3.3: EMA repair-time tracker
         ema_repair_ms: float = 0.0
         ema_repair_samples: int = 0
@@ -1926,6 +2478,17 @@ class AlnsSolver(BaseSolver):
             destroy_size,
             max_iterations,
             fixed_ops_applied,
+        )
+
+        # B3 (Task 7.3): Per-iteration trace — bounded via deque(maxlen=N).
+        # Oldest-dropped via deque(maxlen=N). When the trace exceeds
+        # max_iteration_records, the oldest records are silently discarded.
+        # This keeps memory bounded while preserving the most recent
+        # convergence behavior.
+        iteration_trace: deque[AlnsIterationRecord] = (
+            deque(maxlen=max_iteration_records)
+            if record_iteration_metrics
+            else deque(maxlen=0)
         )
 
         # ------- Phase 3: Main ALNS loop -------
@@ -1962,7 +2525,11 @@ class AlnsSolver(BaseSolver):
                 )
 
                 destroyed_ids = destroy_fn(
-                    current_assignments, problem, sdst, effective_destroy_size, rng,
+                    current_assignments,
+                    problem,
+                    sdst,
+                    effective_destroy_size,
+                    rng,
                     ops_by_id=ops_by_id,
                 )
 
@@ -1994,10 +2561,7 @@ class AlnsSolver(BaseSolver):
                 frozen = frozen_assignments + internal_frozen
                 frozen_by_op = dict(frozen_assignments_by_op)
                 frozen_by_op.update(
-                    {
-                        assignment.operation_id: assignment
-                        for assignment in internal_frozen
-                    }
+                    {assignment.operation_id: assignment for assignment in internal_frozen}
                 )
 
                 # Repair — primary depends on use_cpsat_repair flag
@@ -2033,11 +2597,12 @@ class AlnsSolver(BaseSolver):
                         # CP-SAT sub-problem doesn't see frozen timelines, so verify
                         # no returned assignment overlaps a frozen one on the same machine.
                         test_candidate = frozen + cpsat_result
-                        if (
-                            not _has_machine_overlap(test_candidate)
-                            and not _violates_frozen_precedence(
-                                cpsat_result, frozen_by_op, ops_by_id,
-                            )
+                        if not _has_machine_overlap(
+                            test_candidate
+                        ) and not _violates_frozen_precedence(
+                            cpsat_result,
+                            frozen_by_op,
+                            ops_by_id,
                         ):
                             new_assignments = cpsat_result
                             repair_used = "cpsat"
@@ -2066,11 +2631,10 @@ class AlnsSolver(BaseSolver):
                     if greedy_outcome.status == RepairStatus.FEASIBLE:
                         greedy_repair_assignments = list(greedy_outcome.assignments)
                         test_candidate = frozen + greedy_repair_assignments
-                        if (
-                            not _has_machine_overlap(test_candidate)
-                            and not _violates_frozen_precedence(
-                                greedy_repair_assignments, frozen_by_op, ops_by_id
-                            )
+                        if not _has_machine_overlap(
+                            test_candidate
+                        ) and not _violates_frozen_precedence(
+                            greedy_repair_assignments, frozen_by_op, ops_by_id
                         ):
                             new_assignments = greedy_repair_assignments
                             repair_used = "greedy"
@@ -2115,7 +2679,8 @@ class AlnsSolver(BaseSolver):
                 # Affected = machines that had destroyed ops + machines that got repaired ops
                 affected_machine_ids: set[Any] = set()
                 destroyed_assignment_map = {
-                    a.operation_id: a for a in current_assignments
+                    a.operation_id: a
+                    for a in current_assignments
                     if a.operation_id in destroyed_ids
                 }
                 for a in destroyed_assignment_map.values():
@@ -2124,7 +2689,9 @@ class AlnsSolver(BaseSolver):
                     affected_machine_ids.add(a.work_center_id)
 
                 candidate_obj, candidate_cache = _evaluate_objective_incremental(
-                    problem, candidate, sdst,
+                    problem,
+                    candidate,
+                    sdst,
                     ops_by_id=ops_by_id,
                     horizon_start=horizon_start,
                     affected_machine_ids=affected_machine_ids,
@@ -2149,7 +2716,11 @@ class AlnsSolver(BaseSolver):
                     no_improve_streak = 0
                     logger.debug(
                         "ALNS iter %d: new best (cost=%.1f, makespan=%.1f, %s destroy, %s repair)",
-                        iteration, best_cost, best_obj.makespan_minutes, op_name, repair_used,
+                        iteration,
+                        best_cost,
+                        best_obj.makespan_minutes,
+                        op_name,
+                        repair_used,
                     )
                 elif _sa_accept(delta, temperature, rng):
                     current_assignments = candidate
@@ -2172,6 +2743,14 @@ class AlnsSolver(BaseSolver):
                 operator_scores[selected_op_idx] += score_reward
                 operator_attempts[selected_op_idx] += 1
 
+                # B3 (Task 7.4): Cumulative per-operator tracking (never reset)
+                cumulative_operator_attempts[selected_op_idx] += 1
+                if score_reward >= sigma_1:
+                    cumulative_operator_improvements[selected_op_idx] += 1
+                # Track accepted iterations (improved OR SA-accepted)
+                if score_reward > 0.0:
+                    accepted_iterations += 1
+
                 # Update operator weights on segment boundaries and reset the segment.
                 if iteration % operator_weight_segment_length == 0:
                     operator_weights = _update_operator_weights_for_segment(
@@ -2181,6 +2760,23 @@ class AlnsSolver(BaseSolver):
                     )
                     operator_scores = [0.0] * n_operators
                     operator_attempts = [0] * n_operators
+
+                # B3 (Task 7.3): Record per-iteration metrics when enabled.
+                # The boolean check is near-zero overhead when disabled.
+                if record_iteration_metrics:
+                    iteration_trace.append(
+                        AlnsIterationRecord(
+                            iteration=iteration,
+                            operator_name=op_name,
+                            destroy_size=len(destroyed_ids),
+                            repair_status="feasible",  # only reached when repair succeeded
+                            candidate_cost=candidate_cost,
+                            best_cost=best_cost,
+                            temperature=temperature,
+                            accepted=score_reward > 0.0,
+                            improved=score_reward >= sigma_1,
+                        )
+                    )
 
                 # P3.3: Update EMA repair time
                 iter_repair_ms = 0
@@ -2218,6 +2814,7 @@ class AlnsSolver(BaseSolver):
 
                 if max_no_improve_iters > 0 and no_improve_streak >= max_no_improve_iters:
                     no_improve_early_stop = True
+                    stagnation_iteration = iteration
                     logger.info(
                         "ALNS early stop: no improvements for %d consecutive iterations",
                         no_improve_streak,
@@ -2246,13 +2843,14 @@ class AlnsSolver(BaseSolver):
             recovered_violations = checker.check(problem, recovered_assignments)
             if not recovered_violations:
                 logger.warning(
-                    "ALNS final incumbent had %d violations; "
-                    "recovering to initial solution",
+                    "ALNS final incumbent had %d violations; recovering to initial solution",
                     final_violations_before_recovery,
                 )
                 best_assignments = recovered_assignments
                 final_obj = _evaluate_objective(
-                    problem, best_assignments, sdst,
+                    problem,
+                    best_assignments,
+                    sdst,
                     ops_by_id=ops_by_id,
                 )
                 final_cost = _objective_cost(final_obj, objective_weights)
@@ -2275,9 +2873,15 @@ class AlnsSolver(BaseSolver):
             "ALNS finished: %d iterations, %d improvements, cost=%.1f, "
             "makespan=%.1f min, %d cpsat repairs, %d greedy repairs, "
             "%d feasibility failures, %d violations, %d ms",
-            iterations_completed, improvements, final_cost,
-            final_obj.makespan_minutes, cpsat_repairs, greedy_repairs,
-            feasibility_failures, len(violations), elapsed_ms,
+            iterations_completed,
+            improvements,
+            final_cost,
+            final_obj.makespan_minutes,
+            cpsat_repairs,
+            greedy_repairs,
+            feasibility_failures,
+            len(violations),
+            elapsed_ms,
         )
 
         return ScheduleResult(
@@ -2290,6 +2894,31 @@ class AlnsSolver(BaseSolver):
             metadata={
                 "iterations_completed": iterations_completed,
                 "improvements": improvements,
+                # B3 (Task 7.4): Aggregate convergence metadata — always present
+                "accepted_iterations": accepted_iterations,
+                "improved_iterations": improvements,
+                "operator_attempt_counts": {
+                    name: cumulative_operator_attempts[i]
+                    for i, (name, _) in enumerate(DESTROY_OPERATORS)
+                },
+                "operator_improvement_counts": {
+                    name: cumulative_operator_improvements[i]
+                    for i, (name, _) in enumerate(DESTROY_OPERATORS)
+                },
+                "alns_final_operator_weights": {
+                    name: round(operator_weights[i], 6)
+                    for i, (name, _) in enumerate(DESTROY_OPERATORS)
+                },
+                # C2 (Task 12.1): Operator name list and initial weights for
+                # weight-persistence diagnostics across RHC windows.
+                "alns_operator_names": operator_names,
+                "alns_initial_operator_weights": initial_operator_weights_dict,
+                # C4 (Task 3b.4): Cross-window operator bias metadata — always
+                # present regardless of whether bias was applied.
+                "cross_window_bias_applied": cross_window_bias_applied,
+                "cross_window_bias_operator_deltas": cross_window_bias_operator_deltas,
+                "stagnation_detected": no_improve_early_stop,
+                "stagnation_iteration": stagnation_iteration,
                 "cpsat_repair_attempts": cpsat_repair_attempts,
                 "cpsat_repairs": cpsat_repairs,
                 "cpsat_repair_skips_large_destroy": cpsat_repair_skips_large_destroy,
@@ -2305,15 +2934,8 @@ class AlnsSolver(BaseSolver):
                 "observed_repair_s_per_destroyed_op": (
                     (cpsat_repair_ms_total + greedy_repair_ms_total)
                     / 1000.0
-                    / (
-                        cpsat_repair_total_destroy_size
-                        + greedy_repair_total_destroy_size
-                    )
-                    if (
-                        cpsat_repair_total_destroy_size
-                        + greedy_repair_total_destroy_size
-                    )
-                    > 0
+                    / (cpsat_repair_total_destroy_size + greedy_repair_total_destroy_size)
+                    if (cpsat_repair_total_destroy_size + greedy_repair_total_destroy_size) > 0
                     else None
                 ),
                 "repair_rejection_reasons": repair_rejection_reasons,
@@ -2322,6 +2944,16 @@ class AlnsSolver(BaseSolver):
                 "warm_start_supplied_assignments": warm_start_supplied_assignments,
                 "warm_start_completed_assignments": warm_start_completed_assignments,
                 "warm_start_rejected_reason": warm_start_rejected_reason,
+                # C1 (Task 9.4): explicit ALNS-scoped warm-start signals for RHC
+                # telemetry. `alns_warm_start_used` mirrors `warm_start_used`
+                # but is prefixed to avoid ambiguity with RHC-owned keys.
+                # `alns_warm_start_coverage` is the fraction of operations in
+                # the current (sub-)problem that the caller-supplied warm
+                # start covered before any greedy fill or rejection.
+                "alns_warm_start_used": warm_start_used,
+                "alns_warm_start_coverage": round(
+                    warm_start_supplied_assignments / max(n_ops, 1), 6
+                ),
                 "initial_beam_op_limit": initial_beam_op_limit,
                 "frozen_initial_repair_max_ops": frozen_initial_repair_max_ops,
                 "frozen_initial_repair_min_remaining_time_s": (
@@ -2396,9 +3028,17 @@ class AlnsSolver(BaseSolver):
                 ),
                 "lower_bound_method": "relaxed_precedence_capacity",
                 "lower_bound_components": lower_bound.as_metadata(),
-                "improvement_pct": round(
-                    (1 - final_cost / max(initial_cost, 1e-9)) * 100, 2
+                # Audit task 6.2 / 6.3: ALNS-scoped lower bound + gap ratio
+                # using the conventional relative-gap formula (denominator is
+                # max(LB, 1e-6)), compared against the makespan (never the
+                # weighted ALNS cost) per audit correction.
+                "alns_lower_bound": round(lower_bound.value, 4),
+                "alns_gap_ratio": round(
+                    max(final_obj.makespan_minutes - lower_bound.value, 0.0)
+                    / max(lower_bound.value, 1e-6),
+                    6,
                 ),
+                "improvement_pct": round((1 - final_cost / max(initial_cost, 1e-9)) * 100, 2),
                 # P3.1: Variable fixing metadata
                 "fixed_ops_applied": fixed_ops_applied,
                 # P3.2: Adaptive destroy metadata
@@ -2407,5 +3047,15 @@ class AlnsSolver(BaseSolver):
                 # P3.3: EMA repair-time metadata
                 "ema_repair_ms": round(ema_repair_ms, 2),
                 "ema_repair_samples": ema_repair_samples,
+                # B3 (Task 7.3): Per-iteration convergence trace (only when enabled)
+                **(
+                    {
+                        "alns_iteration_trace": [
+                            record.to_dict() for record in iteration_trace
+                        ]
+                    }
+                    if record_iteration_metrics
+                    else {}
+                ),
             },
         )

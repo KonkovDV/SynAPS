@@ -31,6 +31,8 @@ _native_evaluate_objective_batch: (
     Callable[..., tuple[float, float, float, float, float]] | None
 ) = None
 _native_stabilize_temporal_batch: Callable[..., tuple[int, int, int]] | None = None
+_native_NativeSdstBatchLookup: type | None = None
+_native_compute_destroy_worst_scores: Callable[..., Any] | None = None
 
 if os.getenv("SYNAPS_DISABLE_NATIVE_ACCELERATION") == "1":
     _native_compute_atcs_log_score = None
@@ -41,6 +43,8 @@ if os.getenv("SYNAPS_DISABLE_NATIVE_ACCELERATION") == "1":
     _native_compute_rhc_candidate_metrics_batch_np_jagged = None
     _native_evaluate_objective_batch = None
     _native_stabilize_temporal_batch = None
+    _native_NativeSdstBatchLookup = None
+    _native_compute_destroy_worst_scores = None
 else:
     try:
         _synaps_native = importlib.import_module("synaps_native")
@@ -54,6 +58,8 @@ else:
         _native_compute_rhc_candidate_metrics_batch_np_jagged = None
         _native_evaluate_objective_batch = None
         _native_stabilize_temporal_batch = None
+        _native_NativeSdstBatchLookup = None
+        _native_compute_destroy_worst_scores = None
     else:
         _native_compute_atcs_log_score = getattr(
             _synaps_native,
@@ -93,6 +99,16 @@ else:
         _native_stabilize_temporal_batch = getattr(
             _synaps_native,
             "stabilize_temporal_batch",
+            None,
+        )
+        _native_NativeSdstBatchLookup = getattr(
+            _synaps_native,
+            "NativeSdstBatchLookup",
+            None,
+        )
+        _native_compute_destroy_worst_scores = getattr(
+            _synaps_native,
+            "compute_destroy_worst_scores",
             None,
         )
 
@@ -176,6 +192,12 @@ def get_acceleration_status() -> dict[str, Any]:
         "stabilize_temporal_batch_backend": "native"
         if _native_stabilize_temporal_batch is not None
         else "python",
+        "sdst_batch_lookup_backend": "native"
+        if _native_NativeSdstBatchLookup is not None
+        else "python",
+        "destroy_worst_scores_backend": "native"
+        if _native_compute_destroy_worst_scores is not None
+        else "python",
         "native_module": "synaps_native"
         if any(
             backend is not None
@@ -186,6 +208,7 @@ def get_acceleration_status() -> dict[str, Any]:
                 _native_compute_rhc_candidate_metrics_batch,
                 _native_evaluate_objective_batch,
                 _native_stabilize_temporal_batch,
+                _native_NativeSdstBatchLookup,
             )
         )
         else None,
@@ -715,13 +738,106 @@ def stabilize_temporal_batch(
     return (passes, precedence_shifts, machine_shifts)
 
 
+def native_sdst_batch_lookup(
+    setup_values_flat: np.ndarray,
+    n_wc: int,
+    n_states: int,
+    wc_indices: np.ndarray,
+    from_state_indices: np.ndarray,
+    to_state_indices: np.ndarray,
+) -> np.ndarray | None:
+    """Try native batch SDST lookup. Returns None if native unavailable.
+
+    This is the acceleration seam for SdstMatrix.get_setup_batch(). When the
+    native module is available, it constructs a NativeSdstBatchLookup instance
+    and performs the batch lookup in a single FFI call. When unavailable,
+    returns None so the caller can fall back to numpy fancy indexing.
+
+    Args:
+        setup_values_flat: flattened [n_wc, n_states, n_states] float64 array
+        n_wc: number of work centers
+        n_states: number of states
+        wc_indices: int64 array of work center indices
+        from_state_indices: int64 array of from-state indices
+        to_state_indices: int64 array of to-state indices
+
+    Returns:
+        numpy float64 array of setup values, or None if native is unavailable.
+    """
+    if _native_NativeSdstBatchLookup is None or not _HAS_NUMPY:
+        return None
+
+    try:
+        lookup = _native_NativeSdstBatchLookup(
+            setup_values_flat.ravel().tolist(),
+            n_wc,
+            n_states,
+        )
+        result = lookup.get_setup_batch(
+            np.ascontiguousarray(wc_indices, dtype=np.int64),
+            np.ascontiguousarray(from_state_indices, dtype=np.int64),
+            np.ascontiguousarray(to_state_indices, dtype=np.int64),
+        )
+        return np.asarray(result, dtype=np.float64)
+    except Exception:
+        return None
+
+
+def compute_destroy_worst_scores_native(
+    machine_offsets: np.ndarray,
+    assignment_indices: np.ndarray,
+    state_ids: np.ndarray,
+    sdst_setup_flat: np.ndarray,
+    wc_indices: np.ndarray,
+    n_wc: int,
+    n_states: int,
+) -> np.ndarray | None:
+    """Try native destroy worst scoring. Returns None if native unavailable.
+
+    This is the acceleration seam for _destroy_worst setup-cost scoring.
+    When the native module is available, it computes per-operation setup-cost
+    contributions in a single FFI call using rayon parallelism. When unavailable,
+    returns None so the caller can fall back to the Python reference loop.
+
+    Args:
+        machine_offsets: int64 CSR row pointers [n_machines + 1]
+        assignment_indices: int64 flat sorted assignment indices per machine
+        state_ids: int64 per-assignment state indices [n_assignments]
+        sdst_setup_flat: float64 flattened [n_wc, n_states, n_states] setup values
+        wc_indices: int64 per-assignment work center indices [n_assignments]
+        n_wc: number of work centers
+        n_states: number of states
+
+    Returns:
+        numpy float64 array of per-assignment scores, or None if native is unavailable.
+    """
+    if _native_compute_destroy_worst_scores is None or not _HAS_NUMPY:
+        return None
+
+    try:
+        result = _native_compute_destroy_worst_scores(
+            np.ascontiguousarray(machine_offsets, dtype=np.int64),
+            np.ascontiguousarray(assignment_indices, dtype=np.int64),
+            np.ascontiguousarray(state_ids, dtype=np.int64),
+            np.ascontiguousarray(sdst_setup_flat, dtype=np.float64),
+            np.ascontiguousarray(wc_indices, dtype=np.int64),
+            n_wc,
+            n_states,
+        )
+        return np.asarray(result, dtype=np.float64)
+    except Exception:
+        return None
+
+
 __all__ = [
     "compute_atcs_log_score",
     "compute_atcs_log_scores_batch",
+    "compute_destroy_worst_scores_native",
     "compute_rhc_candidate_metrics_batch",
     "compute_rhc_candidate_metrics_batch_np",
     "evaluate_objective_batch",
     "get_acceleration_status",
+    "native_sdst_batch_lookup",
     "resource_capacity_window_is_feasible",
     "stabilize_temporal_batch",
 ]

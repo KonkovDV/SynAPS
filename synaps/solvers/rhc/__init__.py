@@ -5,8 +5,15 @@ Public API — import from here, not from submodules:
 """
 from __future__ import annotations
 
+from synaps.solvers.rhc._cross_window import WindowQualitySummary
 from synaps.solvers.rhc._policy import RhcPolicy, RhcPolicySpec
 from synaps.solvers.rhc._solver import RhcSolver
 from synaps.solvers.rhc._state import RhcWindowState
 
-__all__ = ["RhcPolicy", "RhcPolicySpec", "RhcSolver", "RhcWindowState"]
+__all__ = [
+    "RhcPolicy",
+    "RhcPolicySpec",
+    "RhcSolver",
+    "RhcWindowState",
+    "WindowQualitySummary",
+]

@@ -50,6 +50,11 @@ from synaps.solvers.rhc._admission import (
     compute_precedence_closed_set,
     count_admitted_candidates,
 )
+from synaps.solvers.rhc._cross_window import (
+    QUALITY_BUFFER_MAXLEN,
+    WindowQualitySummary,
+    compute_window_quality_summary,
+)
 from synaps.solvers.rhc._budget import (
     AlnsBudgetPolicy,
     EmpiricalRepairCostEstimator,
@@ -59,6 +64,7 @@ from synaps.solvers.rhc._budget import (
 )
 from synaps.solvers.rhc._metadata import build_inner_window_summary
 from synaps.solvers.rhc._policy import RhcPolicy, resolve_policy
+from synaps.solvers.rhc._warm_start import filter_warm_start_assignments
 from synaps.solvers.rhc._window import (
     collect_commit_candidates as _collect_commit_candidates,
     detect_cross_window_stable_ops as _detect_cross_window_stable_ops,
@@ -599,6 +605,15 @@ class RhcSolver(BaseSolver):
         base_window_span_minutes = max(float(window_minutes + overlap_minutes), 1.0)
         inner_window_summaries: list[dict[str, Any]] = []
         previous_window_tail_assignments: list[Assignment] = []
+        # C2 (Task 12.4): Persist ALNS operator weights across RHC windows.
+        _previous_window_operator_weights: dict[str, float] | None = None
+        # C3 (Task 3a): Cross-window quality telemetry buffer.
+        cross_window_learning_enabled: bool = bool(
+            kwargs.get("cross_window_learning_enabled", False)
+        )
+        quality_summary_buffer: deque[WindowQualitySummary] = deque(
+            maxlen=QUALITY_BUFFER_MAXLEN
+        )
 
         def append_inner_window_summary(
             *,
@@ -1373,6 +1388,7 @@ class RhcSolver(BaseSolver):
 
             # ------ Attempt inner solver on the window sub-problem ------
             window_solved_via_inner = False
+            warm_selection = None  # Populated by filter_warm_start_assignments if inner solver runs
             commit_boundary = window_start_offset + window_minutes
             committed_before_window = len(committed_op_ids)
             inner_result: ScheduleResult | None = None
@@ -1479,25 +1495,34 @@ class RhcSolver(BaseSolver):
                         inner_rejection_reason = "inner_skipped_low_budget"
                     else:
                         effective_inner_kwargs = dict(selected_inner_kwargs)
-                        external_window_warm_start_by_op = {
-                            op_id: assignment
-                            for op_id, assignment in external_warm_start_by_op.items()
-                            if op_id in window_op_ids
-                            and op_id not in frozen_committed_op_ids
-                        }
-                        warm_start_by_op = dict(external_window_warm_start_by_op)
-                        if external_window_warm_start_by_op:
-                            external_warm_start_used_windows += 1
+                        # Combine all warm-start sources into one candidate list.
+                        all_warm_candidates: list[Assignment] = []
+                        # Track which candidates came from external warm-start
+                        # so we can preserve the external_warm_start_used_windows counter.
+                        has_external_candidates = False
+                        for op_id, assignment in external_warm_start_by_op.items():
+                            if op_id in window_op_ids:
+                                all_warm_candidates.append(assignment)
+                                has_external_candidates = True
                         for assignment in previous_window_tail_assignments:
                             if assignment.operation_id in window_op_ids:
-                                warm_start_by_op[assignment.operation_id] = assignment
+                                all_warm_candidates.append(assignment)
                         if rewound_assignments:
                             for assignment in rewound_assignments:
                                 if assignment.operation_id in window_op_ids:
-                                    warm_start_by_op[assignment.operation_id] = assignment
-                        if warm_start_by_op:
+                                    all_warm_candidates.append(assignment)
+
+                        warm_selection = filter_warm_start_assignments(
+                            all_warm_candidates,
+                            active_window_op_ids=window_op_ids,
+                            frozen_committed_op_ids=frozen_committed_op_ids,
+                            frozen_boundary_assignments=frozen_committed_assignments,
+                        )
+                        if has_external_candidates:
+                            external_warm_start_used_windows += 1
+                        if warm_selection.assignments:
                             effective_inner_kwargs["warm_start_assignments"] = sorted(
-                                warm_start_by_op.values(),
+                                warm_selection.assignments,
                                 key=lambda assignment: assignment.start_time,
                             )
                         if frozen_committed_assignments:
@@ -1540,6 +1565,18 @@ class RhcSolver(BaseSolver):
                             effective_inner_kwargs["dynamic_no_improve_enabled"] = (
                                 dynamic_no_improve_enabled
                             )
+                            # C2 (Task 12.4): Pass previous window's operator
+                            # weights to seed the adaptive mechanism.
+                            if _previous_window_operator_weights is not None:
+                                effective_inner_kwargs["initial_operator_weights"] = (
+                                    _previous_window_operator_weights
+                                )
+                            # C3 (Task 3a.4): Pass cross-window quality hints
+                            # when learning is enabled and buffer is non-empty.
+                            if cross_window_learning_enabled and quality_summary_buffer:
+                                effective_inner_kwargs["cross_window_hints"] = list(
+                                    quality_summary_buffer
+                                )
                             if cross_window_variable_fixing_enabled and cross_window_stable_ops:
                                 effective_inner_kwargs["fixed_op_ids"] = list(
                                     cross_window_stable_ops
@@ -1721,6 +1758,13 @@ class RhcSolver(BaseSolver):
                                 "observed_repair_s_per_destroyed_op"
                             )
                         )
+                        # C2 (Task 12.4): Persist final operator weights for
+                        # the next window's ALNS initialization.
+                        _extracted_weights = (inner_result.metadata or {}).get(
+                            "alns_final_operator_weights"
+                        )
+                        if isinstance(_extracted_weights, dict) and _extracted_weights:
+                            _previous_window_operator_weights = _extracted_weights
 
                     alns_budget_exhausted_before_search = bool(
                         selected_inner_solver_name == "alns"
@@ -1798,6 +1842,26 @@ class RhcSolver(BaseSolver):
                                     op_machine_stability[oid] = (wc, prev[1] + 1)
                                 else:
                                     op_machine_stability[oid] = (wc, 1)
+
+                        # C3 (Task 3a.3): Compute and append cross-window
+                        # quality summary after each successful window solve.
+                        # window_start_offset was already advanced by
+                        # window_minutes, so actual span = end - start + step.
+                        _window_span = max(
+                            window_end_offset - window_start_offset + window_minutes,
+                            base_window_span_minutes,
+                        )
+                        quality_summary_buffer.append(
+                            compute_window_quality_summary(
+                                window_index=window_count,
+                                assignments=boundary_aware_assignments,
+                                window_span_minutes=_window_span,
+                                order_due_offsets=order_due_offsets,
+                                ops_by_id=ops_by_id,
+                                horizon_start=horizon_start,
+                            )
+                        )
+
                         append_inner_window_summary(
                             window=window_count,
                             ops_in_window=len(clean_window_ops),
@@ -1811,6 +1875,10 @@ class RhcSolver(BaseSolver):
                             due_drift_minutes=window_due_drift_minutes,
                             spillover_ops=window_spillover,
                         )
+                        if warm_selection is not None and warm_selection.rejected_reason_counts:
+                            inner_window_summaries[-1]["warm_start_rejected_reason_counts"] = (
+                                dict(warm_selection.rejected_reason_counts)
+                            )
                         if window_admission_relaxed:
                             inner_window_summaries[-1]["admission_relaxed"] = True
                             inner_window_summaries[-1][
@@ -2078,6 +2146,10 @@ class RhcSolver(BaseSolver):
                         fallback_iterations=fallback_iterations,
                         exception_message=inner_exception_message,
                     )
+                    if warm_selection is not None and warm_selection.rejected_reason_counts:
+                        inner_window_summaries[-1]["warm_start_rejected_reason_counts"] = (
+                            dict(warm_selection.rejected_reason_counts)
+                        )
                     if window_admission_relaxed:
                         inner_window_summaries[-1]["admission_relaxed"] = True
                         inner_window_summaries[-1][

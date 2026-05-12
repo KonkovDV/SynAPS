@@ -43,7 +43,17 @@ def _strict_cpsat_replay_parameters() -> dict[str, bool]:
 
 
 def _tail_cvar(values: list[float], alpha: float) -> float:
-    """Compute empirical CVaR_alpha (tail mean beyond VaR_alpha)."""
+    """Compute empirical CVaR_alpha (tail mean beyond VaR_alpha).
+
+    CVaR (Conditional Value at Risk) is defined as the expected value of the
+    distribution in the tail beyond the VaR_alpha quantile.  This implementation
+    computes the empirical tail mean: it finds the VaR (the alpha-quantile value),
+    then returns the mean of all observations >= VaR.  For an empty input list the
+    function returns 0.0.
+
+    The property CVaR >= VaR holds by construction since the tail mean is taken
+    over values that are all >= VaR.
+    """
 
     if not values:
         return 0.0
@@ -410,6 +420,17 @@ def _evaluate_quality_gate(
             "objective_degradation": objective_ok,
         }
 
+        # Task 10.4: Explicit gate_violations list for actionable diagnostics.
+        gate_violations: list[str] = []
+        if not feasibility_ok:
+            gate_violations.append("feasibility_below_threshold")
+        if not checks["scheduled_ratio"]:
+            gate_violations.append("scheduled_ratio_below_threshold")
+        if not fallback_ok:
+            gate_violations.append("inner_fallback_ratio_exceeded")
+        if not objective_ok and "objective_degradation" in required_checks:
+            gate_violations.append("objective_degradation_exceeded")
+
         results[key] = {
             "baseline_key": baseline_key,
             "profile": profile,
@@ -421,6 +442,7 @@ def _evaluate_quality_gate(
             "max_inner_fallback_ratio": max_inner_fallback_ratio,
             "checks": checks,
             "required_checks": required_checks,
+            "gate_violations": gate_violations,
             "passed": all(checks[name] for name in required_checks),
         }
 
@@ -952,6 +974,13 @@ def _summarize_solver_records(
                         float(summary["warm_start_completed_assignments"])
                     )
 
+    # Task 10.1/10.2: Inter-seed coefficient of variation for makespan.
+    # Edge cases: fewer than 2 values → 0.0, mean ≤ 0 → 0.0.
+    if len(makespans) >= 2 and statistics.mean(makespans) > 0:
+        inter_seed_cv_makespan = statistics.stdev(makespans) / statistics.mean(makespans)
+    else:
+        inter_seed_cv_makespan = 0.0
+
     summary: dict[str, Any] = {
         "instance_count": len(records),
         "process_completed_count": sum(1 for value in process_outcomes if value == "completed"),
@@ -976,6 +1005,8 @@ def _summarize_solver_records(
         ),
         "cvar_alpha": round(cvar_alpha, 4),
         "cvar_makespan_minutes": round(_tail_cvar(makespans, cvar_alpha), 2),
+        "inter_seed_cv_makespan": round(inter_seed_cv_makespan, 6),
+        "high_variance": inter_seed_cv_makespan > 0.15,
     }
     summary["process_completed_rate"] = round(
         summary["process_completed_count"] / max(1, summary["instance_count"]),

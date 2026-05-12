@@ -1018,12 +1018,296 @@ fn stabilize_temporal_batch<'py>(
 }
 
 // ---------------------------------------------------------------------------
+// Task 11b: Native SDST Batch Lookup — dense 3D storage with vectorized batch API.
+//
+// Academic basis: reducing FFI overhead by batching many lookups into a single
+// call. For dense state spaces (3–20 states, typical in SynAPS), the underlying
+// storage is a flat Vec<f64> indexed as [wc_idx * n_states * n_states + from_idx * n_states + to_idx].
+// This gives O(1) per-element lookup with excellent cache locality for sequential access.
+// ---------------------------------------------------------------------------
+
+#[pyclass]
+struct NativeSdstBatchLookup {
+    /// Flattened dense 3D storage: setup_values[wc_idx * n_states * n_states + from_idx * n_states + to_idx]
+    setup_values: Vec<f64>,
+    n_wc: usize,
+    n_states: usize,
+}
+
+#[pymethods]
+impl NativeSdstBatchLookup {
+    /// Construct from a flat array of setup values.
+    ///
+    /// Args:
+    ///     setup_values_flat: flattened [n_wc, n_states, n_states] array of f64
+    ///     n_wc: number of work centers
+    ///     n_states: number of states
+    ///
+    /// The flat array must have exactly n_wc * n_states * n_states elements.
+    #[new]
+    fn new(setup_values_flat: Vec<f64>, n_wc: usize, n_states: usize) -> PyResult<Self> {
+        let expected_len = n_wc * n_states * n_states;
+        if setup_values_flat.len() != expected_len {
+            return Err(PyValueError::new_err(format!(
+                "NativeSdstBatchLookup: setup_values_flat length {} != expected {} (n_wc={} * n_states={} * n_states={})",
+                setup_values_flat.len(), expected_len, n_wc, n_states, n_states
+            )));
+        }
+        Ok(Self {
+            setup_values: setup_values_flat,
+            n_wc,
+            n_states,
+        })
+    }
+
+    /// Single-triple lookup. Returns 0.0 for out-of-bounds indices.
+    fn get_setup(&self, wc_idx: usize, from_state_idx: usize, to_state_idx: usize) -> f64 {
+        if wc_idx >= self.n_wc || from_state_idx >= self.n_states || to_state_idx >= self.n_states {
+            return 0.0;
+        }
+        let idx = wc_idx * self.n_states * self.n_states
+            + from_state_idx * self.n_states
+            + to_state_idx;
+        self.setup_values[idx]
+    }
+
+    /// Batch lookup — accepts numpy int64 index arrays and returns a numpy float64 array.
+    ///
+    /// All three index arrays must have the same length N. Returns an array of N
+    /// setup values. Out-of-bounds indices produce 0.0 in the corresponding output slot.
+    fn get_setup_batch<'py>(
+        &self,
+        py: Python<'py>,
+        wc_indices: PyReadonlyArray1<'py, i64>,
+        from_state_indices: PyReadonlyArray1<'py, i64>,
+        to_state_indices: PyReadonlyArray1<'py, i64>,
+    ) -> PyResult<Py<PyArray1<f64>>> {
+        let wc = wc_indices.as_slice()?;
+        let from_s = from_state_indices.as_slice()?;
+        let to_s = to_state_indices.as_slice()?;
+
+        let n = wc.len();
+        if from_s.len() != n || to_s.len() != n {
+            return Err(PyValueError::new_err(
+                "NativeSdstBatchLookup.get_setup_batch: all index arrays must have identical lengths",
+            ));
+        }
+
+        let n_wc = self.n_wc;
+        let n_states = self.n_states;
+        let values = &self.setup_values;
+
+        // Pre-allocate output numpy array
+        let out = PyArray1::<f64>::zeros(py, n, false);
+        let out_ptr = SendPtr(unsafe { out.as_slice_mut().unwrap().as_mut_ptr() });
+
+        // Release GIL for parallel batch lookup
+        py.allow_threads(|| {
+            (0..n)
+                .into_par_iter()
+                .with_min_len(RAYON_MIN_CHUNK)
+                .for_each(|i| {
+                    let wi = wc[i];
+                    let fi = from_s[i];
+                    let ti = to_s[i];
+
+                    let val = if wi < 0
+                        || fi < 0
+                        || ti < 0
+                        || (wi as usize) >= n_wc
+                        || (fi as usize) >= n_states
+                        || (ti as usize) >= n_states
+                    {
+                        0.0
+                    } else {
+                        let idx = (wi as usize) * n_states * n_states
+                            + (fi as usize) * n_states
+                            + (ti as usize);
+                        values[idx]
+                    };
+
+                    // SAFETY: each rayon task writes to a unique index i — no data races.
+                    unsafe {
+                        out_ptr.write_at(i, val);
+                    }
+                });
+        });
+
+        Ok(out.into())
+    }
+
+    #[getter]
+    fn n_wc(&self) -> usize {
+        self.n_wc
+    }
+
+    #[getter]
+    fn n_states(&self) -> usize {
+        self.n_states
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Task 4.1 + 4.2: Native ALNS Destroy Worst Scoring.
+//
+// Computes per-operation setup-cost contributions for the "worst removal"
+// destroy operator. For each assignment i on machine m:
+//   score = setup(pred→i) + setup(i→succ) - setup(pred→succ)
+// Edge cases:
+//   - First on machine: score = setup(i→succ)
+//   - Last on machine: score = setup(pred→i)
+//   - Alone on machine: score = 0.0
+//
+// Input is structure-of-arrays with CSR machine grouping. Python remains
+// responsible for UUID→index mapping; this function operates on integer indices.
+// ---------------------------------------------------------------------------
+
+#[pyfunction]
+fn compute_destroy_worst_scores<'py>(
+    py: Python<'py>,
+    // CSR machine grouping: machine_offsets[m]..machine_offsets[m+1] gives
+    // the range of assignment indices belonging to machine m (sorted by start_time).
+    machine_offsets: PyReadonlyArray1<'py, i64>,
+    // Flat array of assignment indices per machine (the CSR column data).
+    // Each value is an index into the state_ids array.
+    assignment_indices: PyReadonlyArray1<'py, i64>,
+    // Per-assignment state IDs (integer indices into the SDST state dimension).
+    state_ids: PyReadonlyArray1<'py, i64>,
+    // Dense SDST setup values flattened as [n_wc * n_states * n_states].
+    sdst_setup_flat: PyReadonlyArray1<'py, f64>,
+    // Per-assignment work center index (integer index into the SDST wc dimension).
+    wc_indices: PyReadonlyArray1<'py, i64>,
+    // Dimensions
+    n_wc: usize,
+    n_states: usize,
+) -> PyResult<Py<PyArray1<f64>>> {
+    let offsets = machine_offsets.as_slice()?;
+    let indices = assignment_indices.as_slice()?;
+    let states = state_ids.as_slice()?;
+    let sdst = sdst_setup_flat.as_slice()?;
+    let wc = wc_indices.as_slice()?;
+
+    let n_machines = if offsets.is_empty() {
+        0
+    } else {
+        offsets.len() - 1
+    };
+    let n_assignments = states.len();
+
+    if wc.len() != n_assignments {
+        return Err(PyValueError::new_err(
+            "compute_destroy_worst_scores: state_ids and wc_indices must have identical lengths",
+        ));
+    }
+    let expected_sdst_len = n_wc * n_states * n_states;
+    if sdst.len() != expected_sdst_len {
+        return Err(PyValueError::new_err(
+            "compute_destroy_worst_scores: sdst_setup_flat must have length n_wc * n_states * n_states",
+        ));
+    }
+
+    // Pre-allocate output array (one score per assignment)
+    let out = PyArray1::<f64>::zeros(py, n_assignments, false);
+    let out_ptr = SendPtr(unsafe { out.as_slice_mut().unwrap().as_mut_ptr() });
+
+    py.allow_threads(|| {
+        (0..n_machines)
+            .into_par_iter()
+            .for_each(|m| {
+                let row_start = offsets[m] as usize;
+                let row_end = offsets[m + 1] as usize;
+                let machine_len = row_end - row_start;
+
+                if machine_len == 0 {
+                    return;
+                }
+
+                for pos in 0..machine_len {
+                    let assign_idx = indices[row_start + pos] as usize;
+                    if assign_idx >= n_assignments {
+                        continue;
+                    }
+
+                    let wc_idx = wc[assign_idx] as usize;
+                    if wc_idx >= n_wc {
+                        // SAFETY: unique index per assignment
+                        unsafe { out_ptr.write_at(assign_idx, 0.0) };
+                        continue;
+                    }
+
+                    let wc_offset = wc_idx * n_states * n_states;
+                    let curr_state = states[assign_idx];
+
+                    if curr_state < 0 || (curr_state as usize) >= n_states {
+                        unsafe { out_ptr.write_at(assign_idx, 0.0) };
+                        continue;
+                    }
+
+                    let cs = curr_state as usize;
+                    let mut score = 0.0;
+
+                    // Setup cost from predecessor to current
+                    if pos > 0 {
+                        let prev_idx = indices[row_start + pos - 1] as usize;
+                        if prev_idx < n_assignments {
+                            let prev_state = states[prev_idx];
+                            if prev_state >= 0 && (prev_state as usize) < n_states {
+                                let ps = prev_state as usize;
+                                score += sdst[wc_offset + ps * n_states + cs];
+                            }
+                        }
+                    }
+
+                    // Setup cost from current to successor
+                    if pos < machine_len - 1 {
+                        let next_idx = indices[row_start + pos + 1] as usize;
+                        if next_idx < n_assignments {
+                            let next_state = states[next_idx];
+                            if next_state >= 0 && (next_state as usize) < n_states {
+                                let ns = next_state as usize;
+                                score += sdst[wc_offset + cs * n_states + ns];
+                            }
+                        }
+                    }
+
+                    // Subtract setup cost from predecessor directly to successor
+                    // (the cost that would remain if we remove this operation)
+                    if pos > 0 && pos < machine_len - 1 {
+                        let prev_idx = indices[row_start + pos - 1] as usize;
+                        let next_idx = indices[row_start + pos + 1] as usize;
+                        if prev_idx < n_assignments && next_idx < n_assignments {
+                            let prev_state = states[prev_idx];
+                            let next_state = states[next_idx];
+                            if prev_state >= 0
+                                && next_state >= 0
+                                && (prev_state as usize) < n_states
+                                && (next_state as usize) < n_states
+                            {
+                                let ps = prev_state as usize;
+                                let ns = next_state as usize;
+                                score -= sdst[wc_offset + ps * n_states + ns];
+                            }
+                        }
+                    }
+
+                    // SAFETY: each assignment_idx is unique across the CSR structure,
+                    // so each rayon task writes to a disjoint output index.
+                    unsafe { out_ptr.write_at(assign_idx, score) };
+                }
+            });
+    });
+
+    Ok(out.into())
+}
+
+// ---------------------------------------------------------------------------
 // Module registration.
 // ---------------------------------------------------------------------------
 
 #[pymodule]
 fn synaps_native(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<SynApsEngine>()?;
+    module.add_class::<NativeSdstBatchLookup>()?;
     module.add_function(wrap_pyfunction!(compute_atcs_log_score, module)?)?;
     module.add_function(wrap_pyfunction!(compute_atcs_log_scores_batch, module)?)?;
     module.add_function(wrap_pyfunction!(resource_capacity_window_is_feasible, module)?)?;
@@ -1035,5 +1319,6 @@ fn synaps_native(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> 
     )?)?;
     module.add_function(wrap_pyfunction!(evaluate_objective_batch, module)?)?;
     module.add_function(wrap_pyfunction!(stabilize_temporal_batch, module)?)?;
+    module.add_function(wrap_pyfunction!(compute_destroy_worst_scores, module)?)?;
     Ok(())
 }

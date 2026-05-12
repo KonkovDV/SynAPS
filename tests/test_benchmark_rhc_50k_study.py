@@ -1000,3 +1000,110 @@ def test_study_rhc_50k_quality_gate_scheduled_ratio_ci_gate(
     )
     assert report_fail["quality_gate"]["results"]["RHC-ALNS"]["checks"]["scheduled_ratio"] is False
     assert report_fail["quality_gate"]["results"]["RHC-ALNS"]["passed"] is False
+
+
+# ---------------------------------------------------------------------------
+# Task 10.5: Property test — CVaR ≥ VaR for _tail_cvar
+# ---------------------------------------------------------------------------
+
+import math as _math
+
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
+from benchmark.study_rhc_50k import _tail_cvar
+
+
+@given(
+    values=st.lists(
+        st.floats(min_value=0.01, max_value=10000.0),
+        min_size=1,
+        max_size=100,
+    ),
+    alpha=st.floats(min_value=0.5, max_value=0.99),
+)
+@settings(max_examples=300)
+def test_tail_cvar_geq_var_property(values: list[float], alpha: float) -> None:
+    """**Validates: Requirements 10.3** — CVaR ≥ VaR for all non-empty positive float lists."""
+    cvar = _tail_cvar(values, alpha)
+    sorted_values = sorted(values)
+    var_index = min(
+        len(sorted_values) - 1,
+        max(0, _math.ceil(alpha * len(sorted_values)) - 1),
+    )
+    var_alpha = sorted_values[var_index]
+    assert cvar >= var_alpha, (
+        f"CVaR ({cvar}) must be >= VaR ({var_alpha}) for alpha={alpha}, values={values}"
+    )
+
+
+def test_tail_cvar_empty_list_returns_zero() -> None:
+    """**Validates: Requirements 10.3** — Empty list returns 0.0."""
+    assert _tail_cvar([], 0.95) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Task 10.6: Unit test — high_variance flag and inter_seed_cv_makespan
+# ---------------------------------------------------------------------------
+
+
+def _make_solver_record(makespan: float) -> dict:
+    """Build a minimal solver record compatible with _summarize_solver_records."""
+    return {
+        "process_outcome": "completed",
+        "solve_outcome": "completed",
+        "statistics": {
+            "wall_time_s_mean": 1.0,
+            "verification_time_ms": 10,
+        },
+        "results": {
+            "makespan_minutes": makespan,
+            "total_setup_minutes": 10.0,
+            "assignments": 100,
+            "process_outcome": "completed",
+            "solve_outcome": "completed",
+        },
+        "verification": {"feasible": True},
+        "benchmark_config": {"n_ops": 100},
+        "solver_metadata": {},
+    }
+
+
+def test_high_variance_false_when_cv_zero() -> None:
+    """Identical makespans → CV=0 → high_variance=False."""
+    from benchmark.study_rhc_50k import _summarize_solver_records
+
+    records = [_make_solver_record(100.0) for _ in range(3)]
+    summary = _summarize_solver_records(records, cvar_alpha=0.95)
+    assert summary["inter_seed_cv_makespan"] == 0.0
+    assert summary["high_variance"] is False
+
+
+def test_high_variance_true_when_cv_exceeds_threshold() -> None:
+    """Makespans [100, 200, 300] → CV ≈ 0.408 > 0.15 → high_variance=True."""
+    from benchmark.study_rhc_50k import _summarize_solver_records
+
+    records = [_make_solver_record(m) for m in [100.0, 200.0, 300.0]]
+    summary = _summarize_solver_records(records, cvar_alpha=0.95)
+    assert summary["inter_seed_cv_makespan"] > 0.15
+    assert summary["high_variance"] is True
+
+
+def test_high_variance_false_when_cv_below_threshold() -> None:
+    """Makespans [100, 105, 110] → CV ≈ 0.041 ≤ 0.15 → high_variance=False."""
+    from benchmark.study_rhc_50k import _summarize_solver_records
+
+    records = [_make_solver_record(m) for m in [100.0, 105.0, 110.0]]
+    summary = _summarize_solver_records(records, cvar_alpha=0.95)
+    assert summary["inter_seed_cv_makespan"] <= 0.15
+    assert summary["high_variance"] is False
+
+
+def test_single_seed_cv_zero_and_no_high_variance() -> None:
+    """Single-seed run → CV=0.0, high_variance=False."""
+    from benchmark.study_rhc_50k import _summarize_solver_records
+
+    records = [_make_solver_record(100.0)]
+    summary = _summarize_solver_records(records, cvar_alpha=0.95)
+    assert summary["inter_seed_cv_makespan"] == 0.0
+    assert summary["high_variance"] is False

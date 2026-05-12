@@ -55,9 +55,28 @@ INNER_SUMMARY_METADATA_KEYS: tuple[str, ...] = (
     "warm_start_supplied_assignments",
     "warm_start_completed_assignments",
     "warm_start_rejected_reason",
+    "warm_start_rejected_reason_counts",
     "budget_guard_skipped_initial_search",
     "inner_status_override",
     "inner_solver_executed",
+    # C2 (Task 12): Operator weight persistence metadata.
+    "alns_operator_names",
+    "alns_initial_operator_weights",
+    "alns_final_operator_weights",
+    # B1 (Task 6): Gap and lower-bound metadata.
+    "alns_gap_ratio",
+    "alns_lower_bound",
+    "lower_bound_components",
+    # B3 (Task 7): Convergence diagnostics metadata.
+    "stagnation_detected",
+    "stagnation_iteration",
+    "accepted_iterations",
+    "improved_iterations",
+    "operator_attempt_counts",
+    "operator_improvement_counts",
+    # C4 (Task 3b): Cross-window operator bias metadata.
+    "cross_window_bias_applied",
+    "cross_window_bias_operator_deltas",
 )
 
 

@@ -382,9 +382,10 @@ def detect_cross_window_stable_ops(
             continue
         if curr.work_center_id != prev.work_center_id:
             continue
-        curr_offset = (curr.start_time - datetime.min).total_seconds() / 60.0
-        prev_offset = (prev.start_time - datetime.min).total_seconds() / 60.0
-        if abs(curr_offset - prev_offset) <= tolerance_minutes + 1e-9:
+        delta_minutes = abs(
+            (curr.start_time - prev.start_time).total_seconds()
+        ) / 60.0
+        if delta_minutes <= tolerance_minutes + 1e-9:
             stable.add(op_id)
     return stable
 

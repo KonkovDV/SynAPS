@@ -13,6 +13,40 @@ if TYPE_CHECKING:
     from synaps.model import ScheduleProblem
 
 
+logger = logging.getLogger(__name__)
+
+
+def _clamp_non_negative(
+    name: str,
+    raw_value: float,
+    *,
+    operation_count: int,
+    machine_count: int,
+) -> float:
+    """Clamp a lower-bound quantity to ``[0, +inf)`` with telemetry on negatives.
+
+    Any valid relaxation of a makespan is non-negative by construction. A
+    negative intermediate value therefore always signals a pathological input
+    (empty eligible-machine sets, zero-duration operations, precedence cycles,
+    auxiliary-resource mismatches) or an upstream bug. Clamping keeps the
+    aggregated lower bound sound and prevents ``as_metadata`` from surfacing
+    misleading negative numbers downstream, while the WARNING log preserves
+    observability so the offending input can still be diagnosed.
+    """
+
+    if raw_value < 0.0:
+        logger.warning(
+            "lower_bound_component_clamped: component=%s raw_value=%.6f "
+            "operation_count=%d machine_count=%d",
+            name,
+            raw_value,
+            operation_count,
+            machine_count,
+        )
+        return 0.0
+    return raw_value
+
+
 @dataclass(frozen=True)
 class MakespanLowerBound:
     """Relaxed lower-bound decomposition for schedule makespan."""
@@ -123,10 +157,7 @@ def compute_relaxed_makespan_lower_bound(problem: ScheduleProblem) -> MakespanLo
     for operation in problem.operations:
         eligible_work_centers = operation.eligible_wc_ids or all_work_center_ids
         min_duration = min(
-            max(
-                1.0,
-                operation.base_duration_min / work_centers_by_id[work_center_id].speed_factor,
-            )
+            operation.base_duration_min / work_centers_by_id[work_center_id].speed_factor
             for work_center_id in eligible_work_centers
         )
         min_duration_by_op[operation.id] = min_duration
@@ -161,7 +192,7 @@ def compute_relaxed_makespan_lower_bound(problem: ScheduleProblem) -> MakespanLo
         # Precedence graph contains a cycle — topological sort is incomplete.
         # Fall back to flat ordering which yields a weaker (degenerate) lower
         # bound.  This signals upstream data corruption that should be fixed.
-        logging.getLogger(__name__).warning(
+        logger.warning(
             "precedence_cycle_detected: topological sort covered %d of %d "
             "operations — lower bound will be weaker than expected",
             len(topo_order),
@@ -196,12 +227,55 @@ def compute_relaxed_makespan_lower_bound(problem: ScheduleProblem) -> MakespanLo
 
     auxiliary_resource_lb = _compute_auxiliary_resource_lb(problem, min_duration_by_op)
 
-    lower_bound = max(
+    # Defensive clamp: any valid relaxation of a makespan is non-negative by
+    # construction. If a component comes out negative (malformed input or an
+    # upstream bug), clamp it to 0 so the aggregated LB and as_metadata() are
+    # never contaminated, and emit a WARNING so the anomaly stays observable.
+    operation_count = len(problem.operations)
+    machine_count = len(problem.work_centers)
+    precedence_critical_path_lb = _clamp_non_negative(
+        "precedence_critical_path_lb",
+        precedence_critical_path_lb,
+        operation_count=operation_count,
+        machine_count=machine_count,
+    )
+    average_capacity_lb = _clamp_non_negative(
+        "average_capacity_lb",
+        average_capacity_lb,
+        operation_count=operation_count,
+        machine_count=machine_count,
+    )
+    exclusive_machine_lb = _clamp_non_negative(
+        "exclusive_machine_lb",
+        exclusive_machine_lb,
+        operation_count=operation_count,
+        machine_count=machine_count,
+    )
+    max_operation_lb = _clamp_non_negative(
+        "max_operation_lb",
+        max_operation_lb,
+        operation_count=operation_count,
+        machine_count=machine_count,
+    )
+    auxiliary_resource_lb = _clamp_non_negative(
+        "auxiliary_resource_lb",
+        auxiliary_resource_lb,
+        operation_count=operation_count,
+        machine_count=machine_count,
+    )
+
+    raw_lower_bound = max(
         precedence_critical_path_lb,
         average_capacity_lb,
         exclusive_machine_lb,
         max_operation_lb,
         auxiliary_resource_lb,
+    )
+    lower_bound = _clamp_non_negative(
+        "aggregate_value",
+        raw_lower_bound,
+        operation_count=operation_count,
+        machine_count=machine_count,
     )
     return MakespanLowerBound(
         value=lower_bound,
