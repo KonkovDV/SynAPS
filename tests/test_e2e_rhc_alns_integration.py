@@ -58,23 +58,32 @@ def problem_500():
 
 
 def _solve_rhc(problem, *, cross_window_learning_enabled: bool = False, **extra_kwargs):
-    """Run RHC-ALNS with the standard E2E configuration (Task 13a.2)."""
-    kwargs = {
+    """Run RHC-ALNS with the standard E2E configuration (Task 13a.2).
+
+    Uses the typed RhcPolicy + RhcPolicySpec overrides pattern to avoid
+    deprecation warnings from raw kwargs.  See Task 15 migration notes.
+    """
+    from synaps.solvers.rhc._policy import RhcPolicySpec, build_solve_kwargs_from_spec
+
+    from synaps.solvers.rhc import RhcPolicy
+
+    spec = RhcPolicySpec.from_preset(RhcPolicy.BALANCED)
+    kwargs = build_solve_kwargs_from_spec(spec, overrides={
         "inner_solver": "alns",
         "window_minutes": 120,
         "overlap_minutes": 30,
-        "time_limit_s": 120,
         "inner_kwargs": {
             "max_iterations": 30,
             "max_no_improve_iters": 15,
             "record_iteration_metrics": True,
             "max_iteration_records": 100,
         },
-        "cross_window_learning_enabled": cross_window_learning_enabled,
-        "random_seed": 42,
-    }
+    })
+    kwargs["time_limit_s"] = 120
+    kwargs["random_seed"] = 42
+    kwargs["cross_window_learning_enabled"] = cross_window_learning_enabled
     kwargs.update(extra_kwargs)
-    solver = RhcSolver()
+    solver = RhcSolver(policy=RhcPolicy.BALANCED)
     return solver.solve(problem, **kwargs)
 
 

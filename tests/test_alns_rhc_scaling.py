@@ -1118,6 +1118,37 @@ class TestAlnsSolver:
 
 
 class TestRhcSolver:
+    # ─────────────────────────────────────────────────────────────────────────
+    # Migration pattern for future test authors (Task 15.4):
+    #
+    # Legacy (deprecated — triggers DeprecationWarning):
+    #     solver = RhcSolver()
+    #     result = solver.solve(problem, window_minutes=240, inner_solver="greedy", ...)
+    #
+    # New pattern — use RhcPolicy enum + overrides:
+    #     from synaps.solvers.rhc import RhcSolver, RhcPolicy
+    #     from synaps.solvers.rhc._policy import build_solve_kwargs_from_spec, RhcPolicySpec
+    #
+    #     spec = RhcPolicySpec.from_preset(RhcPolicy.BALANCED)
+    #     kwargs = build_solve_kwargs_from_spec(spec, overrides={
+    #         "window_minutes": 240,
+    #         "overlap_minutes": 60,
+    #         "inner_solver": "greedy",
+    #         "time_limit_s": 30,
+    #         "max_ops_per_window": 100,
+    #         "inner_kwargs": {"max_iterations": 15},
+    #     })
+    #     solver = RhcSolver(policy=RhcPolicy.BALANCED)
+    #     result = solver.solve(problem, **kwargs)
+    #
+    # Or more concisely via constructor overrides:
+    #     solver = RhcSolver(policy=RhcPolicy.BALANCED, overrides={...})
+    #     result = solver.solve(problem)
+    #
+    # The key difference: RhcSolver(policy=...) suppresses the deprecation
+    # warning and routes through the typed policy resolution path.
+    # ─────────────────────────────────────────────────────────────────────────
+
     def test_rhc_estimate_window_operation_cap_uses_machine_capacity(self) -> None:
         """RHC should derive a window budget from machine-time capacity and mean duration."""
         from synaps.solvers.rhc import RhcSolver
@@ -1265,19 +1296,21 @@ class TestRhcSolver:
 
     def test_rhc_schedules_all_operations(self) -> None:
         """RHC must schedule all operations across windows."""
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
+        from synaps.solvers.rhc._policy import RhcPolicySpec, build_solve_kwargs_from_spec
         from synaps.validation import verify_schedule_result
 
         problem = _make_3state_problem(n_orders=10, ops_per_order=3)
-        solver = RhcSolver()
-        result = solver.solve(
-            problem,
-            window_minutes=240,
-            overlap_minutes=60,
-            inner_solver="greedy",
-            time_limit_s=30,
-            max_ops_per_window=100,
-        )
+        spec = RhcPolicySpec.from_preset(RhcPolicy.BALANCED)
+        kwargs = build_solve_kwargs_from_spec(spec, overrides={
+            "window_minutes": 240,
+            "overlap_minutes": 60,
+            "inner_solver": "greedy",
+            "max_ops_per_window": 100,
+        })
+        kwargs["time_limit_s"] = 30
+        solver = RhcSolver(policy=RhcPolicy.BALANCED)
+        result = solver.solve(problem, **kwargs)
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
         assert len(result.assignments) == len(problem.operations)
 
@@ -1382,18 +1415,20 @@ class TestRhcSolver:
 
     def test_rhc_metadata_tracks_due_pressure_and_candidate_peak(self) -> None:
         """RHC should expose scaling metadata for candidate-pool pressure and due-date pulls."""
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
+        from synaps.solvers.rhc._policy import RhcPolicySpec, build_solve_kwargs_from_spec
 
         problem = _make_due_pressure_chain_problem()
-        solver = RhcSolver()
-        result = solver.solve(
-            problem,
-            window_minutes=120,
-            overlap_minutes=30,
-            inner_solver="greedy",
-            time_limit_s=30,
-            max_ops_per_window=10,
-        )
+        spec = RhcPolicySpec.from_preset(RhcPolicy.BALANCED)
+        kwargs = build_solve_kwargs_from_spec(spec, overrides={
+            "window_minutes": 120,
+            "overlap_minutes": 30,
+            "inner_solver": "greedy",
+            "max_ops_per_window": 10,
+        })
+        kwargs["time_limit_s"] = 30
+        solver = RhcSolver(policy=RhcPolicy.BALANCED)
+        result = solver.solve(problem, **kwargs)
 
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
         assert result.metadata["preprocessing_ms"] >= 0
@@ -1853,7 +1888,8 @@ class TestRhcSolver:
         """Backtracking should re-inject recent committed assignments into the next inner window."""
         import synaps.solvers.alns_solver as alns_module
         from synaps.solvers.greedy_dispatch import GreedyDispatch
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
+        from synaps.solvers.rhc._policy import RhcPolicySpec, build_solve_kwargs_from_spec
 
         problem = _make_long_chain_problem(18)
         captured_window_ops: list[list[UUID]] = []
@@ -1864,22 +1900,23 @@ class TestRhcSolver:
 
         monkeypatch.setattr(alns_module.AlnsSolver, "solve", fake_alns_solve)
 
-        result = RhcSolver().solve(
-            problem,
-            window_minutes=60,
-            overlap_minutes=0,
-            inner_solver="alns",
-            time_limit_s=30,
-            max_ops_per_window=18,
-            max_windows=2,
-            backtracking_enabled=True,
-            backtracking_tail_minutes=20,
-            backtracking_max_ops=4,
-            inner_kwargs={
+        spec = RhcPolicySpec.from_preset(RhcPolicy.BALANCED)
+        kwargs = build_solve_kwargs_from_spec(spec, overrides={
+            "window_minutes": 60,
+            "overlap_minutes": 0,
+            "inner_solver": "alns",
+            "max_ops_per_window": 18,
+            "backtracking_enabled": True,
+            "backtracking_tail_minutes": 20,
+            "backtracking_max_ops": 4,
+            "inner_kwargs": {
                 "max_iterations": 5,
                 "use_cpsat_repair": False,
             },
-        )
+        })
+        kwargs["time_limit_s"] = 30
+        solver = RhcSolver(policy=RhcPolicy.BALANCED)
+        result = solver.solve(problem, max_windows=2, **kwargs)
 
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL, SolverStatus.ERROR)
         assert len(captured_window_ops) >= 2
@@ -2112,19 +2149,18 @@ class TestRhcInnerSolver:
 
     def test_rhc_with_alns_inner_produces_feasible_result(self) -> None:
         """RHC-ALNS must produce a feasible schedule using ALNS per window."""
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
+        from synaps.solvers.rhc._policy import RhcPolicySpec, build_solve_kwargs_from_spec
         from synaps.validation import verify_schedule_result
 
         problem = _make_3state_problem(n_orders=12, ops_per_order=3)
-        solver = RhcSolver()
-        result = solver.solve(
-            problem,
-            window_minutes=360,
-            overlap_minutes=60,
-            inner_solver="alns",
-            time_limit_s=60,
-            max_ops_per_window=100,
-            inner_kwargs={
+        spec = RhcPolicySpec.from_preset(RhcPolicy.BALANCED)
+        kwargs = build_solve_kwargs_from_spec(spec, overrides={
+            "window_minutes": 360,
+            "overlap_minutes": 60,
+            "inner_solver": "alns",
+            "max_ops_per_window": 100,
+            "inner_kwargs": {
                 "max_iterations": 30,
                 "time_limit_s": 15,
                 "destroy_fraction": 0.2,
@@ -2132,7 +2168,10 @@ class TestRhcInnerSolver:
                 "max_destroy": 8,
                 "repair_time_limit_s": 3,
             },
-        )
+        })
+        kwargs["time_limit_s"] = 60
+        solver = RhcSolver(policy=RhcPolicy.BALANCED)
+        result = solver.solve(problem, **kwargs)
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
         assert len(result.assignments) == len(problem.operations)
         assert result.metadata["inner_solver"] == "alns"
