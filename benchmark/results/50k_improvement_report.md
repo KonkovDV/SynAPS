@@ -115,16 +115,23 @@ kernel parity (exact/1e-10) is verified separately.
 
 ### 5.2 Pending Full 50K Metrics (requires manual run)
 
-| Metric | Baseline (RHC-GREEDY) | Improved (RHC-ALNS) | Notes |
-|--------|----------------------|---------------------|-------|
-| Makespan (minutes) | _pending_ | _pending_ | Mean across ≥3 seeds |
-| Wall-time (seconds) | _pending_ | _pending_ | Mean across ≥3 seeds |
-| Gap ratio | _pending_ | _pending_ | `(makespan - LB) / LB` |
-| Inter-seed CV | _pending_ | _pending_ | Target: ≤ 0.15 |
-| `high_variance` | _pending_ | _pending_ | Flag if CV > 0.15 |
-| Inner fallback ratio | _pending_ | _pending_ | Target: ≤ 0.10 |
-| Scheduled ratio | _pending_ | _pending_ | Target: ≥ 0.90 |
-| Quality gate | _pending_ | _pending_ | All checks must pass |
+| Metric | Baseline (RHC-GREEDY) | Improved (RHC-ALNS) | FAST_50K | Notes |
+|--------|----------------------|---------------------|----------|-------|
+| Makespan (minutes) | 11,287 | 12,459 | 8,016 | seed=1, time_limit hit |
+| Wall-time (seconds) | 601 | 1,201 | 601 | time_limit=600/1200/600 |
+| Scheduled ratio | 0.355 | 0.387 | 0.245 | partial (timeout) |
+| Gap ratio | _pending_ | _pending_ | _pending_ | requires feasible run |
+| Inter-seed CV | 0.0 | 0.0 | 0.0 | single seed |
+| `high_variance` | false | false | false | single seed |
+| Inner fallback ratio | 0.0 | 1.0 | 1.0 | **key finding** |
+| Scheduled ops | 17,757 | 19,296 | 12,230 | of 49,871 total |
+| Windows solved | 23 | ~25 | 31 | before timeout |
+
+**Key finding (2026-05-12):** `inner_fallback_ratio = 1.0` on both ALNS presets means
+the ALNS solver never completes its iteration phase within the per-window budget.
+The initial seed generation (Python `GreedyDispatch` on 600–1000 ops) consumes
+10–30 seconds, exhausting the 60–180s per-window time cap before ALNS can iterate.
+**Next priority: Task 20 (Greedy Repair in Rust)** to reduce seed time from 10–30s to <1s.
 
 ### 5.3 Historical Reference (single-seed, 2026-05-01 artifact)
 

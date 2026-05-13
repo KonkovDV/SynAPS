@@ -2310,6 +2310,95 @@ class AlnsSolver(BaseSolver):
         best_obj = current_obj
         best_cost = current_cost
 
+        # ─── Task 18: Adaptive Iteration Budget + Warm-Start Skip ───────────
+        # These features reduce iteration budget for "easy" windows where the
+        # warm-start already provides a near-optimal solution.
+
+        # Task 18.2: Warm-start skip when gap < threshold.
+        # If the warm-start solution is already within `warm_start_skip_threshold_gap`
+        # of the lower bound, skip ALNS entirely and commit the warm-start directly.
+        # Default 0.0 = disabled (conservative); set to 0.03 for aggressive skip.
+        warm_start_skip_threshold_gap: float = float(
+            kwargs.get("warm_start_skip_threshold_gap", 0.0)
+        )
+        alns_skipped_warm_start_sufficient = False
+        alns_skip_gap: float | None = None
+
+        if warm_start_skip_threshold_gap > 0 and warm_start_used:
+            ws_makespan = current_obj.makespan_minutes
+            ws_gap = (ws_makespan - lower_bound.value) / max(lower_bound.value, 1e-6)
+            if ws_gap <= warm_start_skip_threshold_gap:
+                # Warm-start is already near-optimal — skip ALNS entirely.
+                alns_skipped_warm_start_sufficient = True
+                alns_skip_gap = round(ws_gap, 6)
+                elapsed_ms = int((time.monotonic() - t0) * 1000)
+                recompute_assignment_setups(best_assignments, dispatch_context)
+                final_obj = _evaluate_objective(
+                    problem, best_assignments, sdst, ops_by_id=ops_by_id
+                )
+                return ScheduleResult(
+                    solver_name=self.name,
+                    status=SolverStatus.FEASIBLE,
+                    assignments=best_assignments,
+                    objective=final_obj,
+                    duration_ms=elapsed_ms,
+                    random_seed=seed,
+                    metadata={
+                        "alns_skipped_warm_start_sufficient": True,
+                        "alns_skip_gap": alns_skip_gap,
+                        "iterations_completed": 0,
+                        "improvements": 0,
+                        "accepted_iterations": 0,
+                        "improved_iterations": 0,
+                        "stagnation_detected": False,
+                        "stagnation_iteration": None,
+                        "warm_start_used": warm_start_used,
+                        "warm_start_supplied_assignments": warm_start_supplied_assignments,
+                        "warm_start_completed_assignments": warm_start_completed_assignments,
+                        "warm_start_rejected_reason": warm_start_rejected_reason,
+                        "alns_warm_start_used": warm_start_used,
+                        "alns_warm_start_coverage": round(
+                            warm_start_supplied_assignments / max(n_ops, 1), 6
+                        ),
+                        "initial_solver": initial_solver_name,
+                        "initial_solution_ms": initial_solution_ms,
+                        "time_limit_exhausted_before_search": False,
+                        "max_iterations": max_iterations,
+                        "max_no_improve_iters": max_no_improve_iters,
+                        "lower_bound": round(lower_bound.value, 4),
+                        "alns_lower_bound": round(lower_bound.value, 4),
+                        "alns_gap_ratio": round(
+                            max(final_obj.makespan_minutes - lower_bound.value, 0.0)
+                            / max(lower_bound.value, 1e-6),
+                            6,
+                        ),
+                        "lower_bound_components": lower_bound.as_metadata(),
+                    },
+                )
+
+        # Task 18.1: Reduce max_no_improve_iters for high-coverage warm-starts.
+        # When warm-start coverage > 80%, the initial solution is already good;
+        # fewer stagnation-patience iterations are needed.
+        warm_start_coverage = warm_start_supplied_assignments / max(n_ops, 1)
+        if warm_start_used and warm_start_coverage > 0.8:
+            if max_no_improve_iters > 15:
+                max_no_improve_iters = 15
+
+        # Task 18.3: Adaptive iteration scaling.
+        # Scale max_iterations proportionally to (1 - warm_start_coverage):
+        # full coverage → 10% of budget (floor), no coverage → full budget.
+        # Default False (conservative); RHC can enable via inner_kwargs.
+        adaptive_iteration_scaling: bool = bool(
+            kwargs.get("adaptive_iteration_scaling", False)
+        )
+        adaptive_iteration_scaling_applied = False
+        original_max_iterations = max_iterations
+
+        if adaptive_iteration_scaling and warm_start_used:
+            scale_factor = max(0.1, 1.0 - warm_start_coverage)
+            max_iterations = max(5, int(max_iterations * scale_factor))
+            adaptive_iteration_scaling_applied = True
+
         if sa_auto_calibration_enabled:
             sa_calibrated_base_temp, sa_calibration_samples = _calibrate_sa_temperature(
                 problem,
@@ -3047,6 +3136,12 @@ class AlnsSolver(BaseSolver):
                 # P3.3: EMA repair-time metadata
                 "ema_repair_ms": round(ema_repair_ms, 2),
                 "ema_repair_samples": ema_repair_samples,
+                # Task 18: Adaptive iteration budget metadata
+                "alns_skipped_warm_start_sufficient": alns_skipped_warm_start_sufficient,
+                "adaptive_iteration_scaling": adaptive_iteration_scaling,
+                "adaptive_iteration_scaling_applied": adaptive_iteration_scaling_applied,
+                "max_iterations": max_iterations,
+                "original_max_iterations": original_max_iterations,
                 # B3 (Task 7.3): Per-iteration convergence trace (only when enabled)
                 **(
                     {

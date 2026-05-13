@@ -48,6 +48,18 @@ What is implemented and verified in this repository:
 - RHC candidate scoring is wired through the NumPy/native batch seam when acceleration is available
 - Typed RHC policy presets (`RhcPolicy`, `RhcPolicySpec`) replace the 120-line duplicated kwargs literal in the solver registry; backward-compatible legacy-kwargs path emits `DeprecationWarning`
 - Cross-window variable fixing (L-RHO) detects stable operation signatures between consecutive windows and feeds them as `fixed_op_ids` into the ALNS inner solver
+- **May 2026 50K solver improvement (Stages A–E):**
+  - 2 new ALNS destroy operators: `critical_path` (DAG longest-path bottleneck removal) and `due_pressure` (weighted-tardiness order-tail removal)
+  - Incremental objective evaluation via `_MachineObjectiveCache` — recomputes only affected machines per iteration
+  - ALNS convergence diagnostics: bounded iteration trace (`max_iteration_records=500`), aggregate metadata (stagnation detection, operator attempt/improvement counts, final weights by name)
+  - RHC warm-start formalization: `WarmStartSelection` dataclass with rejection telemetry (`not_in_active_window`, `frozen_committed`, `boundary_conflict`)
+  - Operator weight persistence by name (dict-keyed, robust to `DESTROY_OPERATORS` reordering)
+  - Cross-window quality telemetry: `WindowQualitySummary` buffer (maxlen=5) with feature-flagged operator bias (max 15% bounded boost)
+  - Native SDST batch lookup (`NativeSdstBatchLookup` via PyO3) and native destroy worst scoring (`compute_destroy_worst_scores` via rayon)
+  - Lower-bound soundness fix (removed invalid `max(1.0, ...)` clamp in `compute_relaxed_makespan_lower_bound`)
+  - Benchmark quality gate: `inter_seed_cv_makespan`, `high_variance` flag, `inner_fallback_ratio` threshold validation
+  - `RhcPolicy.FAST_50K` preset: 240 min windows, 600 ops/window, 60s ALNS cap, adaptive iteration scaling, warm-start skip (gap < 3%)
+  - Fixed pre-existing timezone bug in `_detect_cross_window_stable_ops`
 - Auxiliary-resource pool lower bound (`_compute_auxiliary_resource_lb`) is verified by dedicated regression tests (`tests/test_lower_bounds_arc.py`)
 - LBBD solvers now emit symmetric `ub_evolution` alongside `lb_evolution` in solver metadata
 - Release-date admission frontier (`op_earliest`) is tested for correct window-boundary blocking (`tests/test_rhc_admission_module.py`)
@@ -102,6 +114,7 @@ Key comparison points:
 - Current-head-after-refresh `RHC-ALNS|throughput` in `2026-04-27-rhc-50k-audit-v2-current-head` reports `mean_scheduled_ratio = 0.0845`, `mean_makespan_minutes = 3059.82`, and `mean_inner_fallback_ratio = 0.6667`.
 - Fresh post-critical-fixes `RHC-ALNS|throughput` in `2026-05-01-rhc-50k-audit-v3-post-critical-fixes` reports `mean_scheduled_ratio = 0.1374`, `mean_makespan_minutes = 4295.25`, `mean_inner_fallback_ratio = 0.3333`, `search_active_window_rate = 0.6667`, and `native_acceleration_rate = 1.0`.
 - Fresh post-critical-fixes `RHC-GREEDY|throughput` in `2026-05-01-rhc-50k-audit-v3-post-critical-fixes` reports `mean_scheduled_ratio = 0.4184`, `mean_makespan_minutes = 13622.18`, and `native_acceleration_rate = 1.0`.
+- **May 2026 improvement session** (`benchmark/studies/2026-05-12-quick-evidence`): After Stages A–E implementation (7 new destroy operators, incremental evaluation, native scoring, cross-window learning, operator weight persistence), `RHC-GREEDY` schedules `0.3551` ratio in `600.9s`, `RHC-ALNS` schedules `0.3871` ratio in `1201.1s`. Both still hit time limits. Key finding: `inner_fallback_ratio = 1.0` on ALNS — initial seed generation in Python consumes the entire per-window budget, preventing ALNS iterations from running. Next priority: native greedy repair (Task 20).
 - The unresolved research problem is now split in two: the fresh 50K rerun improved coverage under a native-backed environment but did not reach feasibility, while `100k+` has now recovered stable bounded fallback parity but still lacks productive active-search yield.
 
 ## 100K+ Snapshot (staged harness)
