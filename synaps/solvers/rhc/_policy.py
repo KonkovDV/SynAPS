@@ -24,6 +24,7 @@ class RhcPolicy(Enum):
     BALANCED = "balanced"                  # default 8h/2h ALNS
     SEARCH_ENTRY = "search-entry"          # 100K tight-geometry profile
     BOUNDED_100K = "bounded-100k"            # aggressive 5h/90m ALNS
+    FAST_50K = "fast-50k"                  # 50K wall-time optimized
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,6 +178,74 @@ PRESETS: dict[RhcPolicy, RhcPolicySpec] = {
         inner=InnerSpec(
             inner_kwargs=_PRESET_ALNS_INNER_KWARGS,
             hybrid_inner_kwargs=_PRESET_HYBRID_INNER_KWARGS,
+        ),
+    ),
+    # FAST_50K: Optimized for 50K-scale instances where wall-time matters more
+    # than per-window optimality. Smaller windows (240 min) reduce per-window
+    # operation count from ~1000 to ~500, yielding 2-4x faster ALNS per window.
+    # Aggressive warm-start skip (gap < 3%) and adaptive iteration scaling
+    # further reduce unnecessary computation on well-seeded windows.
+    RhcPolicy.FAST_50K: RhcPolicySpec(
+        admission=AdmissionSpec(
+            window_minutes=240,
+            overlap_minutes=60,
+            max_ops_per_window=600,
+            candidate_pool_factor=2.0,
+            due_admission_horizon_factor=6.0,
+            admission_tail_weight=0.5,
+            progressive_admission_relaxation_enabled=True,
+            precedence_ready_candidate_filter_enabled=False,
+            admission_relaxation_min_fill_ratio=0.30,
+            admission_full_scan_enabled=True,
+        ),
+        budget=BudgetSpec(
+            alns_inner_window_time_cap_s=60.0,
+            alns_inner_window_time_cap_scale_threshold_ops=2000,
+            alns_inner_window_time_cap_scaled_s=60.0,
+            alns_budget_auto_scaling_enabled=True,
+            alns_budget_estimated_repair_s_per_destroyed_op=0.125,
+            alns_dynamic_repair_budget_enabled=True,
+            alns_dynamic_repair_s_per_destroyed_op=0.1,
+            alns_dynamic_repair_time_limit_min_s=1.0,
+            alns_dynamic_repair_time_limit_max_s=3.0,
+            alns_presearch_max_window_ops=2000,
+        ),
+        guards=GuardSpec(
+            fallback_repair_enabled=True,
+            backtracking_enabled=True,
+            backtracking_tail_minutes=30.0,
+            backtracking_max_ops=12,
+            inner_fallback_kpi_threshold=0.10,
+            inner_solver_min_budget_s=0.0,
+        ),
+        inner=InnerSpec(
+            inner_kwargs={
+                "max_iterations": 50,
+                "destroy_fraction": 0.05,
+                "min_destroy": 5,
+                "max_destroy": 25,
+                "max_no_improve_iters": 15,
+                "use_cpsat_repair": False,
+                "repair_time_limit_s": 3,
+                "repair_num_workers": 1,
+                "cpsat_max_destroy_ops": 20,
+                "sa_auto_calibration_enabled": True,
+                "sa_calibration_trials": 10,
+                "dynamic_sa_enabled": True,
+                "sa_due_alpha": 0.35,
+                "sa_candidate_beta": 0.15,
+                "sa_pressure_cooling_gamma": 0.002,
+                "sa_temp_min": 50.0,
+                "sa_temp_max": 500.0,
+                "adaptive_iteration_scaling": True,
+                "warm_start_skip_threshold_gap": 0.03,
+            },
+            hybrid_inner_routing_enabled=False,
+            hybrid_inner_solver="cpsat",
+            hybrid_due_pressure_threshold=0.35,
+            hybrid_candidate_pressure_threshold=4.0,
+            hybrid_max_ops=800,
+            hybrid_inner_kwargs={"num_workers": 4},
         ),
     ),
 }
