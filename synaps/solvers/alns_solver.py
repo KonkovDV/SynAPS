@@ -1363,7 +1363,7 @@ def _try_native_greedy_repair(
         ops_by_id = {op.id: op for op in problem.operations}
         wc_id_to_idx = {wc.id: idx for idx, wc in enumerate(problem.work_centers)}
         state_id_to_idx = {s.id: idx for idx, s in enumerate(problem.states)}
-        idx_to_wc_id = {idx: wc.id for wc.id, idx in wc_id_to_idx.items()}
+        idx_to_wc_id = {idx: wc_id for wc_id, idx in wc_id_to_idx.items()}
         n_wc = len(problem.work_centers)
         n_states = len(problem.states)
         horizon_start = problem.planning_horizon_start
@@ -1623,7 +1623,7 @@ def _try_native_initial_seed(
         # Build index mappings
         wc_id_to_idx = {wc.id: idx for idx, wc in enumerate(problem.work_centers)}
         state_id_to_idx = {s.id: idx for idx, s in enumerate(problem.states)}
-        idx_to_wc_id = {idx: wc.id for wc.id, idx in wc_id_to_idx.items()}
+        idx_to_wc_id = {idx: wc_id for wc_id, idx in wc_id_to_idx.items()}
         n_wc = len(problem.work_centers)
         n_states = len(problem.states)
         horizon_start = problem.planning_horizon_start
