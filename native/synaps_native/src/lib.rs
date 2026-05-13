@@ -1301,6 +1301,179 @@ fn compute_destroy_worst_scores<'py>(
 }
 
 // ---------------------------------------------------------------------------
+// Task 20.1: Greedy Repair Batch — simplified greedy dispatch in Rust.
+//
+// Assigns operations in topological order to their earliest-available eligible
+// machine, respecting:
+//   - Precedence constraints (operation can't start before predecessor ends)
+//   - Machine availability (no overlap on same machine)
+//   - Setup times (SDST between consecutive operations on same machine)
+//
+// This is a SIMPLIFIED greedy — no auxiliary resource constraints, no gap-insertion.
+// It is meant as a fast initial seed for ALNS repair, not a full feasibility-
+// guaranteed dispatch. Operations MUST be provided in valid topological order
+// (predecessors before successors).
+//
+// The main loop is sequential (topological dependency prevents parallelism),
+// but per-operation eligible-machine scanning is a tight inner loop that
+// benefits from cache-friendly linear access patterns.
+//
+// Academic basis: greedy dispatch heuristics for FJSP (Brandimarte 1993,
+// Mastrolilli & Gambardella 2000). Speed factor per machine models heterogeneous
+// parallel machines (Pm||Cmax variant).
+// ---------------------------------------------------------------------------
+
+#[pyfunction]
+fn greedy_repair_batch<'py>(
+    py: Python<'py>,
+    // Operation data (N operations, in topological order)
+    base_durations: PyReadonlyArray1<'py, f64>,      // [N] duration in minutes
+    predecessor_indices: PyReadonlyArray1<'py, i64>,  // [N] -1 = no predecessor
+    // Eligible machines per operation (CSR format)
+    eligible_offsets: PyReadonlyArray1<'py, i64>,     // [N+1] CSR row pointers
+    eligible_indices: PyReadonlyArray1<'py, i64>,     // flat eligible machine indices
+    // SDST data
+    state_ids: PyReadonlyArray1<'py, i64>,           // [N] state index per operation
+    sdst_setup_flat: PyReadonlyArray1<'py, f64>,     // [n_wc * n_states * n_states]
+    n_wc: usize,
+    n_states: usize,
+    // Machine speed factors
+    speed_factors: PyReadonlyArray1<'py, f64>,       // [n_wc]
+) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<i64>>)> {
+    let durations = base_durations.as_slice()?;
+    let preds = predecessor_indices.as_slice()?;
+    let elig_off = eligible_offsets.as_slice()?;
+    let elig_idx = eligible_indices.as_slice()?;
+    let states = state_ids.as_slice()?;
+    let sdst = sdst_setup_flat.as_slice()?;
+    let speeds = speed_factors.as_slice()?;
+
+    let n = durations.len();
+
+    // Validate input dimensions
+    if preds.len() != n || states.len() != n {
+        return Err(PyValueError::new_err(
+            "greedy_repair_batch: base_durations, predecessor_indices, and state_ids must have identical lengths",
+        ));
+    }
+    if elig_off.len() != n + 1 {
+        return Err(PyValueError::new_err(
+            "greedy_repair_batch: eligible_offsets must have length N+1",
+        ));
+    }
+    if speeds.len() != n_wc {
+        return Err(PyValueError::new_err(
+            "greedy_repair_batch: speed_factors must have length n_wc",
+        ));
+    }
+    let expected_sdst_len = n_wc * n_states * n_states;
+    if sdst.len() != expected_sdst_len {
+        return Err(PyValueError::new_err(
+            "greedy_repair_batch: sdst_setup_flat must have length n_wc * n_states * n_states",
+        ));
+    }
+
+    // Pre-allocate output arrays
+    let out_starts = PyArray1::<f64>::zeros(py, n, false);
+    let out_ends = PyArray1::<f64>::zeros(py, n, false);
+    let out_machines = PyArray1::<i64>::zeros(py, n, false);
+
+    let starts_slice = unsafe { out_starts.as_slice_mut()? };
+    let ends_slice = unsafe { out_ends.as_slice_mut()? };
+    let machines_slice = unsafe { out_machines.as_slice_mut()? };
+
+    // Release GIL during computation — the main loop is sequential but
+    // avoids holding the GIL for potentially long 50K-operation dispatches.
+    py.allow_threads(|| {
+        // Per-machine state: availability time and last state index
+        let mut machine_available_at = vec![0.0f64; n_wc];
+        let mut machine_last_state = vec![-1i64; n_wc];
+
+        // Per-operation end time (for predecessor lookups)
+        let mut op_end = vec![0.0f64; n];
+
+        for i in 0..n {
+            // Predecessor constraint
+            let pred_end = if preds[i] >= 0 {
+                let pred_idx = preds[i] as usize;
+                if pred_idx < n {
+                    op_end[pred_idx]
+                } else {
+                    0.0
+                }
+            } else {
+                0.0
+            };
+
+            let row_start = elig_off[i] as usize;
+            let row_end = elig_off[i + 1] as usize;
+
+            let mut best_start = f64::INFINITY;
+            let mut best_end = f64::INFINITY;
+            let mut best_machine: i64 = -1;
+
+            // Scan eligible machines for earliest completion
+            for k in row_start..row_end {
+                let m = elig_idx[k] as usize;
+                if m >= n_wc {
+                    continue;
+                }
+
+                // Duration adjusted by machine speed factor
+                let speed = speeds[m];
+                let duration = if speed > 0.0 {
+                    durations[i] / speed
+                } else {
+                    durations[i]
+                };
+
+                // Setup time from previous operation on this machine
+                let setup = if machine_last_state[m] >= 0 && states[i] >= 0 {
+                    let prev_s = machine_last_state[m] as usize;
+                    let curr_s = states[i] as usize;
+                    if prev_s < n_states && curr_s < n_states {
+                        sdst[m * n_states * n_states + prev_s * n_states + curr_s]
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                };
+
+                // Earliest start respecting both predecessor and machine availability + setup
+                let earliest = pred_end.max(machine_available_at[m] + setup);
+                let end = earliest + duration;
+
+                if end < best_end {
+                    best_start = earliest;
+                    best_end = end;
+                    best_machine = m as i64;
+                }
+            }
+
+            // Fallback: if no eligible machine found (shouldn't happen with valid input),
+            // assign to machine 0 with a large penalty offset.
+            if best_machine < 0 {
+                best_machine = 0;
+                best_start = pred_end + 1_000_000.0;
+                best_end = best_start + durations[i];
+            }
+
+            starts_slice[i] = best_start;
+            ends_slice[i] = best_end;
+            machines_slice[i] = best_machine;
+            op_end[i] = best_end;
+
+            let bm = best_machine as usize;
+            machine_available_at[bm] = best_end;
+            machine_last_state[bm] = states[i];
+        }
+    });
+
+    Ok((out_starts.into(), out_ends.into(), out_machines.into()))
+}
+
+// ---------------------------------------------------------------------------
 // Module registration.
 // ---------------------------------------------------------------------------
 
@@ -1320,5 +1493,6 @@ fn synaps_native(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> 
     module.add_function(wrap_pyfunction!(evaluate_objective_batch, module)?)?;
     module.add_function(wrap_pyfunction!(stabilize_temporal_batch, module)?)?;
     module.add_function(wrap_pyfunction!(compute_destroy_worst_scores, module)?)?;
+    module.add_function(wrap_pyfunction!(greedy_repair_batch, module)?)?;
     Ok(())
 }

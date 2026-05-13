@@ -33,6 +33,7 @@ _native_evaluate_objective_batch: (
 _native_stabilize_temporal_batch: Callable[..., tuple[int, int, int]] | None = None
 _native_NativeSdstBatchLookup: type | None = None
 _native_compute_destroy_worst_scores: Callable[..., Any] | None = None
+_native_greedy_repair_batch: Callable[..., Any] | None = None
 
 if os.getenv("SYNAPS_DISABLE_NATIVE_ACCELERATION") == "1":
     _native_compute_atcs_log_score = None
@@ -45,6 +46,7 @@ if os.getenv("SYNAPS_DISABLE_NATIVE_ACCELERATION") == "1":
     _native_stabilize_temporal_batch = None
     _native_NativeSdstBatchLookup = None
     _native_compute_destroy_worst_scores = None
+    _native_greedy_repair_batch = None
 else:
     try:
         _synaps_native = importlib.import_module("synaps_native")
@@ -60,6 +62,7 @@ else:
         _native_stabilize_temporal_batch = None
         _native_NativeSdstBatchLookup = None
         _native_compute_destroy_worst_scores = None
+        _native_greedy_repair_batch = None
     else:
         _native_compute_atcs_log_score = getattr(
             _synaps_native,
@@ -109,6 +112,11 @@ else:
         _native_compute_destroy_worst_scores = getattr(
             _synaps_native,
             "compute_destroy_worst_scores",
+            None,
+        )
+        _native_greedy_repair_batch = getattr(
+            _synaps_native,
+            "greedy_repair_batch",
             None,
         )
 
@@ -197,6 +205,9 @@ def get_acceleration_status() -> dict[str, Any]:
         else "python",
         "destroy_worst_scores_backend": "native"
         if _native_compute_destroy_worst_scores is not None
+        else "python",
+        "greedy_repair_batch_backend": "native"
+        if _native_greedy_repair_batch is not None
         else "python",
         "native_module": "synaps_native"
         if any(
@@ -829,6 +840,63 @@ def compute_destroy_worst_scores_native(
         return None
 
 
+def greedy_repair_batch_native(
+    base_durations: np.ndarray,
+    predecessor_indices: np.ndarray,
+    eligible_offsets: np.ndarray,
+    eligible_indices: np.ndarray,
+    state_ids: np.ndarray,
+    sdst_setup_flat: np.ndarray,
+    n_wc: int,
+    n_states: int,
+    speed_factors: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    """Try native greedy repair. Returns None if native unavailable.
+
+    Dispatches operations in topological order to earliest-available machines,
+    respecting predecessor constraints, SDST setup times, and machine speed
+    factors. This is a simplified greedy (no aux resources, no gap insertion)
+    intended for ALNS inner repair where speed matters more than optimality.
+
+    Args:
+        base_durations: [N] float64 operation durations in minutes
+        predecessor_indices: [N] int64, -1 = no predecessor
+        eligible_offsets: [N+1] int64 CSR row pointers for eligible machines
+        eligible_indices: flat int64 eligible machine indices
+        state_ids: [N] int64 state index per operation
+        sdst_setup_flat: [n_wc * n_states * n_states] float64 setup matrix
+        n_wc: number of work centers (machines)
+        n_states: number of states
+        speed_factors: [n_wc] float64 machine speed factors
+
+    Returns:
+        (start_offsets, end_offsets, assigned_machine_indices) as numpy arrays,
+        or None if native is unavailable.
+    """
+    if _native_greedy_repair_batch is None or not _HAS_NUMPY:
+        return None
+
+    try:
+        starts, ends, machines = _native_greedy_repair_batch(
+            np.ascontiguousarray(base_durations, dtype=np.float64),
+            np.ascontiguousarray(predecessor_indices, dtype=np.int64),
+            np.ascontiguousarray(eligible_offsets, dtype=np.int64),
+            np.ascontiguousarray(eligible_indices, dtype=np.int64),
+            np.ascontiguousarray(state_ids, dtype=np.int64),
+            np.ascontiguousarray(sdst_setup_flat, dtype=np.float64),
+            n_wc,
+            n_states,
+            np.ascontiguousarray(speed_factors, dtype=np.float64),
+        )
+        return (
+            np.asarray(starts, dtype=np.float64),
+            np.asarray(ends, dtype=np.float64),
+            np.asarray(machines, dtype=np.int64),
+        )
+    except Exception:
+        return None
+
+
 __all__ = [
     "compute_atcs_log_score",
     "compute_atcs_log_scores_batch",
@@ -837,6 +905,7 @@ __all__ = [
     "compute_rhc_candidate_metrics_batch_np",
     "evaluate_objective_batch",
     "get_acceleration_status",
+    "greedy_repair_batch_native",
     "native_sdst_batch_lookup",
     "resource_capacity_window_is_feasible",
     "stabilize_temporal_batch",
