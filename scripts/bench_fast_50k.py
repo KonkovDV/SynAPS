@@ -15,7 +15,7 @@ print(f"Instance: {len(problem.operations)} ops, {len(problem.work_centers)} mac
 # FAST_50K run
 spec = RhcPolicySpec.from_preset(RhcPolicy.FAST_50K)
 kwargs = build_solve_kwargs_from_spec(spec)
-kwargs["time_limit_s"] = 600
+kwargs["time_limit_s"] = 1200
 kwargs["random_seed"] = 1
 
 print("\n--- FAST_50K ---")

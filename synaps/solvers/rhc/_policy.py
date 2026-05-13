@@ -185,6 +185,8 @@ PRESETS: dict[RhcPolicy, RhcPolicySpec] = {
     # operation count from ~1000 to ~500, yielding 2-4x faster ALNS per window.
     # Aggressive warm-start skip (gap < 3%) and adaptive iteration scaling
     # further reduce unnecessary computation on well-seeded windows.
+    # v2 (2026-05-13): Raised time cap from 60s to 180s after native initial
+    # seed reduced Phase 1 from 10s to 1ms — ALNS now has real iteration budget.
     RhcPolicy.FAST_50K: RhcPolicySpec(
         admission=AdmissionSpec(
             window_minutes=240,
@@ -199,9 +201,9 @@ PRESETS: dict[RhcPolicy, RhcPolicySpec] = {
             admission_full_scan_enabled=True,
         ),
         budget=BudgetSpec(
-            alns_inner_window_time_cap_s=60.0,
+            alns_inner_window_time_cap_s=180.0,
             alns_inner_window_time_cap_scale_threshold_ops=2000,
-            alns_inner_window_time_cap_scaled_s=60.0,
+            alns_inner_window_time_cap_scaled_s=180.0,
             alns_budget_auto_scaling_enabled=True,
             alns_budget_estimated_repair_s_per_destroyed_op=0.125,
             alns_dynamic_repair_budget_enabled=True,
