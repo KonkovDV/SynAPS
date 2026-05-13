@@ -1598,6 +1598,221 @@ def _try_native_greedy_repair(
         return None
 
 
+def _try_native_initial_seed(
+    problem: ScheduleProblem,
+    *,
+    frozen_assignments: list[Assignment],
+    ops_by_id: dict[Any, Any],
+    frozen_assignments_by_op: dict[Any, Assignment],
+) -> list[Assignment] | None:
+    """Attempt native greedy dispatch for ALL operations as ALNS initial seed.
+
+    Reuses greedy_repair_batch with disrupted_op_ids = all problem operations.
+    Returns a list of Assignments or None if native is unavailable/fails.
+    """
+    import time as _time
+
+    from synaps.accelerators import greedy_repair_batch_native
+    from synaps.accelerators import _native_greedy_repair_batch
+
+    # Early exit: if native function is not available, don't waste time building arrays
+    if _native_greedy_repair_batch is None:
+        return None
+
+    try:
+        # Build index mappings
+        wc_id_to_idx = {wc.id: idx for idx, wc in enumerate(problem.work_centers)}
+        state_id_to_idx = {s.id: idx for idx, s in enumerate(problem.states)}
+        idx_to_wc_id = {idx: wc.id for wc.id, idx in wc_id_to_idx.items()}
+        n_wc = len(problem.work_centers)
+        n_states = len(problem.states)
+        horizon_start = problem.planning_horizon_start
+
+        # Build topological order of ALL operations in the problem.
+        # Operations are already in topological order in problem.operations
+        # (predecessor always appears before dependent).
+        all_op_ids = [op.id for op in problem.operations]
+        n = len(all_op_ids)
+        if n == 0:
+            return None
+
+        # Map op IDs to local indices for predecessor resolution
+        local_idx = {op_id: i for i, op_id in enumerate(all_op_ids)}
+
+        base_durations = np.empty(n, dtype=np.float64)
+        predecessor_indices = np.full(n, -1, dtype=np.int64)
+        state_ids = np.empty(n, dtype=np.int64)
+
+        # CSR for eligible machines
+        eligible_offsets = np.empty(n + 1, dtype=np.int64)
+        eligible_flat: list[int] = []
+        eligible_offsets[0] = 0
+
+        # Compute frozen machine availability from frozen_assignments
+        # machine_available_at[m] = max end offset of frozen assignments on machine m
+        machine_available_at = np.zeros(n_wc, dtype=np.float64)
+        machine_last_state = np.full(n_wc, -1, dtype=np.int64)
+
+        # Sort frozen assignments by end time per machine to get last state
+        frozen_by_machine: dict[int, list[Assignment]] = {}
+        for fa in frozen_assignments:
+            m_idx = wc_id_to_idx.get(fa.work_center_id)
+            if m_idx is not None:
+                frozen_by_machine.setdefault(m_idx, []).append(fa)
+
+        for m_idx, machine_fas in frozen_by_machine.items():
+            machine_fas.sort(key=lambda a: a.end_time)
+            last_fa = machine_fas[-1]
+            end_offset = (last_fa.end_time - horizon_start).total_seconds() / 60.0
+            machine_available_at[m_idx] = end_offset
+            # Last state on this machine
+            last_op = ops_by_id.get(last_fa.operation_id)
+            if last_op is not None:
+                si = state_id_to_idx.get(last_op.state_id, -1)
+                machine_last_state[m_idx] = si
+
+        # Predecessor end offsets from frozen assignments (for ops whose
+        # predecessor is in the frozen set)
+        frozen_end_offsets: dict[Any, float] = {}
+        for fa in frozen_assignments:
+            end_offset = (fa.end_time - horizon_start).total_seconds() / 60.0
+            frozen_end_offsets[fa.operation_id] = end_offset
+
+        for i, op_id in enumerate(all_op_ids):
+            op = ops_by_id[op_id]
+            base_durations[i] = float(op.base_duration_min)
+            state_ids[i] = state_id_to_idx.get(op.state_id, -1)
+
+            # Predecessor: within the problem set (local index)
+            if op.predecessor_op_id is not None:
+                local_pred = local_idx.get(op.predecessor_op_id)
+                if local_pred is not None:
+                    predecessor_indices[i] = local_pred
+                # else: predecessor is in frozen set — handled in post-processing
+
+            # Eligible machines
+            eligible_wc_indices = []
+            for wc_id in op.eligible_wc_ids:
+                wc_idx = wc_id_to_idx.get(wc_id)
+                if wc_idx is not None:
+                    eligible_wc_indices.append(wc_idx)
+            eligible_flat.extend(eligible_wc_indices)
+            eligible_offsets[i + 1] = len(eligible_flat)
+
+        eligible_indices_arr = np.array(eligible_flat, dtype=np.int64)
+
+        # Build SDST flat matrix and speed factors
+        sdst_setup_flat = np.zeros(n_wc * n_states * n_states, dtype=np.float64)
+        for entry in problem.setup_matrix:
+            wi = wc_id_to_idx.get(entry.work_center_id)
+            fi = state_id_to_idx.get(entry.from_state_id)
+            ti = state_id_to_idx.get(entry.to_state_id)
+            if wi is not None and fi is not None and ti is not None:
+                sdst_setup_flat[wi * n_states * n_states + fi * n_states + ti] = float(
+                    entry.setup_minutes
+                )
+
+        speed_factors = np.array(
+            [wc.speed_factor for wc in problem.work_centers], dtype=np.float64
+        )
+
+        # Call native — dispatches from time 0 with no initial machine state.
+        # Post-process to account for frozen state.
+        native_result = greedy_repair_batch_native(
+            base_durations=base_durations,
+            predecessor_indices=predecessor_indices,
+            eligible_offsets=eligible_offsets,
+            eligible_indices=eligible_indices_arr,
+            state_ids=state_ids,
+            sdst_setup_flat=sdst_setup_flat,
+            n_wc=n_wc,
+            n_states=n_states,
+            speed_factors=speed_factors,
+        )
+
+        if native_result is None:
+            return None
+
+        start_offsets, end_offsets, assigned_machine_indices = native_result
+
+        # Post-process: shift operations to respect frozen machine availability
+        # and frozen predecessor constraints.
+        # Single forward pass in topological order (all_op_ids is already topological).
+        op_end_offset = np.copy(end_offsets)
+
+        for i, op_id in enumerate(all_op_ids):
+            op = ops_by_id[op_id]
+            m = int(assigned_machine_indices[i])
+            if m < 0 or m >= n_wc:
+                return None  # Invalid machine assignment
+
+            # Minimum start from frozen predecessor
+            min_start = machine_available_at[m]
+
+            # Check frozen predecessor constraint
+            if op.predecessor_op_id is not None and op.predecessor_op_id not in local_idx:
+                pred_end = frozen_end_offsets.get(op.predecessor_op_id, 0.0)
+                min_start = max(min_start, pred_end)
+
+            # Check local predecessor constraint (already handled by native, but
+            # we need to account for our shifts)
+            if predecessor_indices[i] >= 0:
+                local_pred_idx = int(predecessor_indices[i])
+                min_start = max(min_start, op_end_offset[local_pred_idx])
+
+            # Setup time from machine's last state
+            setup = 0.0
+            curr_state = int(state_ids[i])
+            prev_state = int(machine_last_state[m])
+            if (
+                prev_state >= 0
+                and curr_state >= 0
+                and prev_state < n_states
+                and curr_state < n_states
+            ):
+                setup = sdst_setup_flat[
+                    m * n_states * n_states + prev_state * n_states + curr_state
+                ]
+
+            actual_start = max(float(start_offsets[i]), min_start + setup)
+            duration = float(end_offsets[i] - start_offsets[i])
+            actual_end = actual_start + duration
+
+            start_offsets[i] = actual_start
+            end_offsets[i] = actual_end
+            op_end_offset[i] = actual_end
+
+            # Update machine state for next operation on this machine
+            machine_available_at[m] = actual_end
+            machine_last_state[m] = curr_state
+
+        # Convert to Assignment objects
+        seed_assignments: list[Assignment] = []
+        for i, op_id in enumerate(all_op_ids):
+            m = int(assigned_machine_indices[i])
+            wc_id = idx_to_wc_id.get(m)
+            if wc_id is None:
+                return None  # Can't map machine index back
+
+            start_dt = horizon_start + timedelta(minutes=float(start_offsets[i]))
+            end_dt = horizon_start + timedelta(minutes=float(end_offsets[i]))
+
+            seed_assignments.append(
+                Assignment(
+                    operation_id=op_id,
+                    work_center_id=wc_id,
+                    start_time=start_dt,
+                    end_time=end_dt,
+                )
+            )
+
+        return seed_assignments
+
+    except Exception:
+        # Any error in native path — silently fall through to Python
+        return None
+
+
 def _repair_greedy(
     problem: ScheduleProblem,
     frozen_assignments: list[Assignment],
@@ -2081,6 +2296,11 @@ class AlnsSolver(BaseSolver):
         )
         cross_window_hints = kwargs.get("cross_window_hints")
 
+        # Task 24.1: Native initial seed — use Rust greedy_repair_batch for Phase 1.
+        native_initial_seed_enabled: bool = bool(
+            kwargs.get("native_initial_seed_enabled", True)
+        )
+
         max_no_improve_iters = max_no_improve_base_iters
         if dynamic_no_improve_enabled and max_no_improve_base_iters > 0:
             scaled_no_improve = int(
@@ -2175,6 +2395,10 @@ class AlnsSolver(BaseSolver):
                         warm_start_supplied_assignments / max(n_ops, 1), 6
                     ),
                     "initial_solution_ms": elapsed_ms,
+                    "native_initial_seed_attempted": native_initial_seed_attempted,
+                    "native_initial_seed_used": native_initial_seed_used,
+                    "native_initial_seed_ms": native_initial_seed_ms,
+                    "native_initial_seed_fallback_reason": native_initial_seed_fallback_reason,
                     "time_limit_exhausted_before_search": (
                         bool(time_limit_exhausted_before_search)
                         if time_limit_exhausted_before_search is not None
@@ -2478,6 +2702,42 @@ class AlnsSolver(BaseSolver):
             elif warm_start_rejected_reason is None:
                 warm_start_rejected_reason = "frozen_greedy_seed_skipped_budget_or_size"
 
+        # Task 24: Native initial seed — fast path using Rust greedy_repair_batch.
+        # Dispatches ALL operations in topological order to earliest-available machines.
+        # If valid → use as initial solution, skip Python GreedyDispatch entirely.
+        native_initial_seed_attempted = False
+        native_initial_seed_used = False
+        native_initial_seed_ms = 0
+        native_initial_seed_fallback_reason: str | None = None
+
+        if native_initial_seed_enabled and initial_result is None:
+            native_initial_seed_attempted = True
+            t_native = time.monotonic()
+
+            native_seed_result = _try_native_initial_seed(
+                problem,
+                frozen_assignments=frozen_assignments,
+                ops_by_id=ops_by_id,
+                frozen_assignments_by_op=frozen_assignments_by_op,
+            )
+            native_initial_seed_ms = int((time.monotonic() - t_native) * 1000)
+
+            if native_seed_result is not None:
+                # Validate the native seed
+                if _is_valid_complete_schedule(native_seed_result):
+                    recompute_assignment_setups(native_seed_result, dispatch_context)
+                    initial_solver_name = "native_greedy"
+                    native_initial_seed_used = True
+                    initial_result = ScheduleResult(
+                        solver_name=self.name,
+                        status=SolverStatus.FEASIBLE,
+                        assignments=native_seed_result,
+                    )
+                else:
+                    native_initial_seed_fallback_reason = "native_seed_infeasible"
+            else:
+                native_initial_seed_fallback_reason = "native_unavailable_or_failed"
+
         if initial_result is None:
             if n_ops <= initial_beam_op_limit:
                 beam_result = BeamSearchDispatch(beam_width=3).solve(problem)
@@ -2646,6 +2906,10 @@ class AlnsSolver(BaseSolver):
                         ),
                         "initial_solver": initial_solver_name,
                         "initial_solution_ms": initial_solution_ms,
+                        "native_initial_seed_attempted": native_initial_seed_attempted,
+                        "native_initial_seed_used": native_initial_seed_used,
+                        "native_initial_seed_ms": native_initial_seed_ms,
+                        "native_initial_seed_fallback_reason": native_initial_seed_fallback_reason,
                         "time_limit_exhausted_before_search": False,
                         "max_iterations": max_iterations,
                         "max_no_improve_iters": max_no_improve_iters,
@@ -3335,6 +3599,10 @@ class AlnsSolver(BaseSolver):
                 "cpsat_max_destroy_ops": cpsat_max_destroy_ops,
                 "repair_num_workers": repair_num_workers,
                 "initial_solution_ms": initial_solution_ms,
+                "native_initial_seed_attempted": native_initial_seed_attempted,
+                "native_initial_seed_used": native_initial_seed_used,
+                "native_initial_seed_ms": native_initial_seed_ms,
+                "native_initial_seed_fallback_reason": native_initial_seed_fallback_reason,
                 "time_limit_exhausted_before_search": time_limit_exhausted_before_search,
                 "max_no_improve_iters": max_no_improve_iters,
                 "max_no_improve_base_iters": max_no_improve_base_iters,
