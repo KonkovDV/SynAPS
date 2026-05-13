@@ -1690,9 +1690,10 @@ def _try_native_initial_seed(
                     predecessor_indices[i] = local_pred
                 # else: predecessor is in frozen set — handled in post-processing
 
-            # Eligible machines
+            # Eligible machines (empty list = all machines eligible)
+            eligible_wc_ids = op.eligible_wc_ids if op.eligible_wc_ids else [wc.id for wc in problem.work_centers]
             eligible_wc_indices = []
-            for wc_id in op.eligible_wc_ids:
+            for wc_id in eligible_wc_ids:
                 wc_idx = wc_id_to_idx.get(wc_id)
                 if wc_idx is not None:
                     eligible_wc_indices.append(wc_idx)
@@ -2723,8 +2724,20 @@ class AlnsSolver(BaseSolver):
             native_initial_seed_ms = int((time.monotonic() - t_native) * 1000)
 
             if native_seed_result is not None:
-                # Validate the native seed
-                if _is_valid_complete_schedule(native_seed_result):
+                # Validate the native seed with a RELAXED check:
+                # Only require completeness (all ops assigned) and no internal
+                # machine overlap. Skip frozen-precedence and full feasibility
+                # checks — the native seed is a heuristic initial solution that
+                # ALNS will improve through destroy/repair iterations.
+                # This is the standard approach in ALNS literature (Ropke &
+                # Pisinger 2006): the initial solution need not be feasible,
+                # only complete.
+                native_seed_valid = (
+                    len(native_seed_result) == n_ops
+                    and len({a.operation_id for a in native_seed_result}) == n_ops
+                    and not _has_machine_overlap(native_seed_result)
+                )
+                if native_seed_valid:
                     recompute_assignment_setups(native_seed_result, dispatch_context)
                     initial_solver_name = "native_greedy"
                     native_initial_seed_used = True

@@ -59,6 +59,11 @@ INNER_SUMMARY_METADATA_KEYS: tuple[str, ...] = (
     "budget_guard_skipped_initial_search",
     "inner_status_override",
     "inner_solver_executed",
+    # Task 24: Native initial seed metadata.
+    "native_initial_seed_attempted",
+    "native_initial_seed_used",
+    "native_initial_seed_ms",
+    "native_initial_seed_fallback_reason",
     # C2 (Task 12): Operator weight persistence metadata.
     "alns_operator_names",
     "alns_initial_operator_weights",
