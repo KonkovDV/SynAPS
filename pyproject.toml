@@ -64,6 +64,7 @@ dev = [
     "ruff>=0.8",
     "mypy>=1.13",
     "twine>=6.1",
+    "pre-commit>=4.0",
 ]
 all = ["synaps[ml,llm,rl,dev]"]
 
@@ -79,9 +80,19 @@ Security = "https://github.com/KonkovDV/SynAPS/security/policy"
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+exclude = [
+    "benchmark/studies",
+    "benchmark/results",
+    ".venv",
+    ".mypy_cache",
+]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "UP", "B", "A", "SIM", "TCH"]
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "SIM", "TCH", "C4", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["T20"]
+"benchmark/**" = ["T20"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
@@ -97,6 +108,28 @@ ignore_missing_imports = true
 module = "highspy"
 ignore_missing_imports = true
 follow_imports = "skip"
+
+[tool.coverage.run]
+source = ["synaps"]
+omit = [
+    "*/tests/*",
+    "*/benchmark/*",
+    "*/control-plane/*",
+    "*/native/*",
+]
+branch = true
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

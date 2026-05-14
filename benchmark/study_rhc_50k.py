@@ -141,9 +141,7 @@ def _summarize_inner_windows(inner_window_summaries: list[dict[str, Any]]) -> di
             4,
         ),
         "budget_guard_skipped_windows": budget_guard_skipped_windows,
-        "time_limit_exhausted_before_search_windows": (
-            time_limit_exhausted_before_search_windows
-        ),
+        "time_limit_exhausted_before_search_windows": (time_limit_exhausted_before_search_windows),
         "fallback_windows": fallback_windows,
         "total_iterations_completed": sum(iterations),
         "mean_iterations_completed": round(statistics.mean(iterations), 2),
@@ -333,8 +331,7 @@ def _run_two_phase_refinement_case(
             "two_phase_assignment_delta": len(result.assignments)
             - len(baseline_result.assignments),
             "two_phase_makespan_improvement_min": round(
-                baseline_result.objective.makespan_minutes
-                - result.objective.makespan_minutes,
+                baseline_result.objective.makespan_minutes - result.objective.makespan_minutes,
                 2,
             ),
         }
@@ -379,16 +376,10 @@ def _evaluate_quality_gate(
 
     for key, summary in summaries.items():
         solver_name, _, lane_suffix = key.partition("|")
-        baseline_key = (
-            f"{baseline_solver}|{lane_suffix}"
-            if lane_suffix
-            else baseline_solver
-        )
+        baseline_key = f"{baseline_solver}|{lane_suffix}" if lane_suffix else baseline_solver
         baseline_summary = summaries.get(baseline_key)
         baseline_makespan = (
-            float(baseline_summary.get("mean_makespan_minutes", 0.0))
-            if baseline_summary
-            else 0.0
+            float(baseline_summary.get("mean_makespan_minutes", 0.0)) if baseline_summary else 0.0
         )
         current_makespan = float(summary.get("mean_makespan_minutes", 0.0))
 
@@ -413,8 +404,7 @@ def _evaluate_quality_gate(
         checks = {
             "feasibility": feasibility_ok,
             "scheduled_ratio": (
-                float(summary.get("mean_scheduled_ratio", 0.0))
-                >= min_scheduled_ratio
+                float(summary.get("mean_scheduled_ratio", 0.0)) >= min_scheduled_ratio
             ),
             "fallback_ratio": fallback_ok,
             "objective_degradation": objective_ok,
@@ -679,9 +669,7 @@ def study_rhc_50k(
         report["quality_gate"] = {"enabled": False}
 
     evidence_scope = (
-        report["summary_by_solver_lane"]
-        if lane == "both"
-        else report["summary_by_solver"]
+        report["summary_by_solver_lane"] if lane == "both" else report["summary_by_solver"]
     )
     report["evidence"] = _build_study_evidence(
         records=records,
@@ -847,9 +835,7 @@ def _study_industrial_50k(
     }
     if quality_gate_enabled:
         gate_scope = (
-            report["summary_by_solver_lane"]
-            if lane == "both"
-            else report["summary_by_solver"]
+            report["summary_by_solver_lane"] if lane == "both" else report["summary_by_solver"]
         )
         report["quality_gate"] = {
             "enabled": True,
@@ -870,9 +856,7 @@ def _study_industrial_50k(
         report["quality_gate"] = {"enabled": False}
 
     evidence_scope = (
-        report["summary_by_solver_lane"]
-        if lane == "both"
-        else report["summary_by_solver"]
+        report["summary_by_solver_lane"] if lane == "both" else report["summary_by_solver"]
     )
     report["evidence"] = _build_study_evidence(
         records=records,
@@ -891,11 +875,19 @@ def _summarize_solver_records(
     cvar_alpha: float,
 ) -> dict[str, Any]:
     process_outcomes = [
-        str(record.get("process_outcome", record.get("results", {}).get("process_outcome", "completed")))
+        str(
+            record.get(
+                "process_outcome", record.get("results", {}).get("process_outcome", "completed")
+            )
+        )
         for record in records
     ]
     solve_outcomes = [
-        str(record.get("solve_outcome", record.get("results", {}).get("solve_outcome", "solver_error")))
+        str(
+            record.get(
+                "solve_outcome", record.get("results", {}).get("solve_outcome", "solver_error")
+            )
+        )
         for record in records
     ]
 
@@ -904,8 +896,7 @@ def _summarize_solver_records(
     makespans = [record["results"]["makespan_minutes"] for record in records]
     setup_minutes = [record["results"]["total_setup_minutes"] for record in records]
     assigned_counts = [
-        float(record.get("results", {}).get("assignments", 0.0))
-        for record in records
+        float(record.get("results", {}).get("assignments", 0.0)) for record in records
     ]
     total_ops = [
         float(
@@ -1048,8 +1039,7 @@ def _summarize_solver_records(
         )
     if fallback_kpi_pass_flags:
         summary["inner_fallback_kpi_pass_rate"] = round(
-            sum(1 for passed in fallback_kpi_pass_flags if passed)
-            / len(fallback_kpi_pass_flags),
+            sum(1 for passed in fallback_kpi_pass_flags if passed) / len(fallback_kpi_pass_flags),
             3,
         )
     if native_acceleration_flags:
@@ -1060,8 +1050,7 @@ def _summarize_solver_records(
         )
     if warm_start_window_flags:
         summary["mean_warm_start_window_rate"] = round(
-            sum(1 for used in warm_start_window_flags if used)
-            / len(warm_start_window_flags),
+            sum(1 for used in warm_start_window_flags if used) / len(warm_start_window_flags),
             3,
         )
     if warm_start_completed_counts:
@@ -1069,9 +1058,7 @@ def _summarize_solver_records(
             statistics.mean(warm_start_completed_counts),
             3,
         )
-    summary["inner_window_summary"] = _summarize_inner_windows(
-        flattened_inner_window_summaries
-    )
+    summary["inner_window_summary"] = _summarize_inner_windows(flattened_inner_window_summaries)
     return summary
 
 

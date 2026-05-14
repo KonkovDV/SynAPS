@@ -28,6 +28,13 @@ if TYPE_CHECKING:
 
     from synaps.model import Operation
 
+__all__ = [
+    "advance_admission_frontier",
+    "advance_due_frontier",
+    "compute_precedence_closed_set",
+    "count_admitted_candidates",
+]
+
 
 def advance_admission_frontier(
     *,
@@ -103,15 +110,10 @@ def compute_precedence_closed_set(
         changed = False
         for op_id in tuple(closure):
             operation = ops_by_id.get(op_id)
-            predecessor_id = (
-                operation.predecessor_op_id if operation is not None else None
-            )
+            predecessor_id = operation.predecessor_op_id if operation is not None else None
             if predecessor_id is None:
                 continue
-            if (
-                predecessor_id in closure
-                or predecessor_id in resolved_predecessor_ids
-            ):
+            if predecessor_id in closure or predecessor_id in resolved_predecessor_ids:
                 continue
             closure.discard(op_id)
             changed = True
@@ -138,7 +140,6 @@ def count_admitted_candidates(
     admitted = sum(
         1
         for op_id in raw_candidate_ids
-        if op_admission_offset_by_id.get(op_id, op_earliest.get(op_id, 0.0))
-        < window_boundary
+        if op_admission_offset_by_id.get(op_id, op_earliest.get(op_id, 0.0)) < window_boundary
     )
     return admitted if admitted else len(raw_candidate_ids)

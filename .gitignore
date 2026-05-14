@@ -57,6 +57,7 @@ docs/_extra/
 # Benchmark outputs
 benchmark/results/
 benchmark/studies/
+benchmark/instances/
 .benchmarks/
 /test_results.txt
 
@@ -73,6 +74,14 @@ benchmark/studies/
 
 # Local-only markdown archive (not published)
 archive/
+
+# Scratch / agent temporary scripts (never commit)
+apply_*.py
+debug_*.py
+fix_indent*.py
+fix_rhc_indent*.py
+inspect_*.py
+inspect_rhc*.py
 
 # Upstream reference snapshots (local donor exploration, never committed)
 _synaps_upstream_ref/

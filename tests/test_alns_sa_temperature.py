@@ -23,36 +23,25 @@ from hypothesis import assume, given, settings
 
 from synaps.solvers.alns_solver import _compute_effective_temperature
 
-
 # ---------------------------------------------------------------------------
 # Shared strategies
 # ---------------------------------------------------------------------------
 
 
-_BASE_TEMP = st.floats(
-    min_value=1e-3, max_value=1e6, allow_nan=False, allow_infinity=False
-)
-_PRESSURE = st.floats(
-    min_value=0.0, max_value=1000.0, allow_nan=False, allow_infinity=False
-)
+_BASE_TEMP = st.floats(min_value=1e-3, max_value=1e6, allow_nan=False, allow_infinity=False)
+_PRESSURE = st.floats(min_value=0.0, max_value=1000.0, allow_nan=False, allow_infinity=False)
 # Allow negative alpha/beta so the clamp property also exercises shrinking
 # (and potentially negative) factors, not just the repo-default positive
 # direction.
-_COEFFICIENT = st.floats(
-    min_value=-10.0, max_value=10.0, allow_nan=False, allow_infinity=False
-)
+_COEFFICIENT = st.floats(min_value=-10.0, max_value=10.0, allow_nan=False, allow_infinity=False)
 _POSITIVE_COEFFICIENT = st.floats(
     min_value=1e-3, max_value=10.0, allow_nan=False, allow_infinity=False
 )
 _NEGATIVE_COEFFICIENT = st.floats(
     min_value=-10.0, max_value=-1e-3, allow_nan=False, allow_infinity=False
 )
-_MIN_TEMP = st.floats(
-    min_value=0.0, max_value=100.0, allow_nan=False, allow_infinity=False
-)
-_POSITIVE_DELTA = st.floats(
-    min_value=1e-3, max_value=1e6, allow_nan=False, allow_infinity=False
-)
+_MIN_TEMP = st.floats(min_value=0.0, max_value=100.0, allow_nan=False, allow_infinity=False)
+_POSITIVE_DELTA = st.floats(min_value=1e-3, max_value=1e6, allow_nan=False, allow_infinity=False)
 
 
 # ---------------------------------------------------------------------------
@@ -299,9 +288,7 @@ class TestSaCalibrationAcceptanceProbability:
         the solver's calibration sampling loop produces after its own
         filtering.
         """
-        calibrated_temperature = _calibrate_temperature_from_deltas(
-            deltas, target_probability
-        )
+        calibrated_temperature = _calibrate_temperature_from_deltas(deltas, target_probability)
         assert calibrated_temperature > 0.0
         assert math.isfinite(calibrated_temperature)
 
@@ -310,21 +297,13 @@ class TestSaCalibrationAcceptanceProbability:
         # the calibration formula enforces).
         mean_delta = sum(deltas) / len(deltas)
         fixed_point_acceptance = math.exp(-mean_delta / calibrated_temperature)
-        assert math.isclose(
-            fixed_point_acceptance, target_probability, rel_tol=1e-9, abs_tol=1e-12
-        )
+        assert math.isclose(fixed_point_acceptance, target_probability, rel_tol=1e-9, abs_tol=1e-12)
 
         # Empirical check: mean per-delta acceptance probability stays
         # within 10% of the target on realistic delta spreads.
-        empirical_acceptances = [
-            math.exp(-delta / calibrated_temperature) for delta in deltas
-        ]
-        mean_empirical_acceptance = sum(empirical_acceptances) / len(
-            empirical_acceptances
-        )
-        relative_error = (
-            abs(mean_empirical_acceptance - target_probability) / target_probability
-        )
+        empirical_acceptances = [math.exp(-delta / calibrated_temperature) for delta in deltas]
+        mean_empirical_acceptance = sum(empirical_acceptances) / len(empirical_acceptances)
+        relative_error = abs(mean_empirical_acceptance - target_probability) / target_probability
         assert relative_error <= 0.10, (
             f"empirical mean acceptance {mean_empirical_acceptance:.4f} "
             f"deviates {relative_error * 100:.2f}% from target "
@@ -368,9 +347,7 @@ class TestSaCalibrationAcceptanceProbability:
                 accept_count += 1
 
         empirical_probability = accept_count / n_sa_steps
-        relative_error = (
-            abs(empirical_probability - target_probability) / target_probability
-        )
+        relative_error = abs(empirical_probability - target_probability) / target_probability
         assert relative_error <= 0.10, (
             f"simulated acceptance {empirical_probability:.4f} "
             f"deviates {relative_error * 100:.2f}% from target "
@@ -392,6 +369,4 @@ class TestSaCalibrationAcceptanceProbability:
         mean_positive_delta = sum(deltas) / len(deltas)
         solver_temperature = -mean_positive_delta / math.log(target)
 
-        assert math.isclose(
-            harness_temperature, solver_temperature, rel_tol=1e-12, abs_tol=1e-15
-        )
+        assert math.isclose(harness_temperature, solver_temperature, rel_tol=1e-12, abs_tol=1e-15)

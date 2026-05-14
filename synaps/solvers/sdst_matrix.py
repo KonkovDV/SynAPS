@@ -106,12 +106,8 @@ class SdstMatrix:
         - Future: when density < 0.3 and n_states > 50, will select csr_python
           or csr_native if the native module is available.
         """
-        wc_id_to_idx: dict[UUID, int] = {
-            wc.id: i for i, wc in enumerate(problem.work_centers)
-        }
-        state_id_to_idx: dict[UUID, int] = {
-            s.id: i for i, s in enumerate(problem.states)
-        }
+        wc_id_to_idx: dict[UUID, int] = {wc.id: i for i, wc in enumerate(problem.work_centers)}
+        state_id_to_idx: dict[UUID, int] = {s.id: i for i, s in enumerate(problem.states)}
         n_wc = len(wc_id_to_idx)
         n_states = len(state_id_to_idx)
 
@@ -204,11 +200,7 @@ class SdstMatrix:
 
     def memory_bytes(self) -> int:
         """Total memory footprint of the numpy arrays."""
-        return (
-            self.setup_minutes.nbytes
-            + self.material_loss.nbytes
-            + self.energy_kwh.nbytes
-        )
+        return self.setup_minutes.nbytes + self.material_loss.nbytes + self.energy_kwh.nbytes
 
     def get_setup_batch(
         self,

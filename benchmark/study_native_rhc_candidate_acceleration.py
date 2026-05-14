@@ -11,14 +11,14 @@ performance tracking at 50k+/100k+/500k+ candidate counts.
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
 import json
-from pathlib import Path
 import platform
-from random import Random
 import statistics
 import sys
 import time
+from contextlib import contextmanager
+from pathlib import Path
+from random import Random
 from typing import TYPE_CHECKING, Any
 
 from synaps import accelerators

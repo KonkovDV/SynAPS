@@ -72,8 +72,7 @@ class ParetoSliceCpSatSolver(BaseSolver):
         except KeyError as exc:
             supported = ", ".join(sorted(values))
             raise ValueError(
-                "Unsupported primary_objective "
-                f"'{primary_objective}'. Expected one of: {supported}"
+                f"Unsupported primary_objective '{primary_objective}'. Expected one of: {supported}"
             ) from exc
 
     def _is_candidate_better(

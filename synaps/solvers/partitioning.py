@@ -89,9 +89,7 @@ def partition_machines(
         if cluster_ops <= max_ops_per_cluster:
             refined.append(cluster)
         else:
-            refined.extend(
-                _split_cluster(cluster, ops_per_machine, max_ops_per_cluster)
-            )
+            refined.extend(_split_cluster(cluster, ops_per_machine, max_ops_per_cluster))
 
     # Remove empty clusters
     return [c for c in refined if c]

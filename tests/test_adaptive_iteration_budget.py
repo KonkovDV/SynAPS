@@ -11,8 +11,6 @@ import random
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-import pytest
-
 from synaps.model import (
     Assignment,
     Operation,
@@ -25,7 +23,6 @@ from synaps.model import (
 )
 from synaps.solvers.alns_solver import AlnsSolver
 from synaps.solvers.greedy_dispatch import GreedyDispatch
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Fixtures

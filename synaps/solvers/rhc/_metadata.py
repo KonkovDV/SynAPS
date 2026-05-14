@@ -161,9 +161,7 @@ def build_inner_window_summary(
     if inner_time_limit_s is not None:
         budget_ms = int(round(inner_time_limit_s * 1000.0))
         if inner_result.duration_ms > budget_ms:
-            summary["inner_time_budget_overrun_ms"] = (
-                inner_result.duration_ms - budget_ms
-            )
+            summary["inner_time_budget_overrun_ms"] = inner_result.duration_ms - budget_ms
     if hasattr(inner_result.error_category, "value"):
         summary["inner_error_category"] = inner_result.error_category.value
     for key in INNER_SUMMARY_METADATA_KEYS:

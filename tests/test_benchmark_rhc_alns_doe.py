@@ -13,11 +13,13 @@ def test_study_rhc_50k_propagates_seed_to_alns_inner_kwargs(monkeypatch, tmp_pat
     captured_kwargs: list[dict] = []
 
     def fake_run_scaling_case(*, n_ops, n_machines, n_states, solver_name, solver_kwargs, seed):
-        captured_kwargs.append({
-            "solver_name": solver_name,
-            "solver_kwargs": solver_kwargs,
-            "seed": seed,
-        })
+        captured_kwargs.append(
+            {
+                "solver_name": solver_name,
+                "solver_kwargs": solver_kwargs,
+                "seed": seed,
+            }
+        )
         return {
             "status": "error",
             "feasible": False,
@@ -122,10 +124,7 @@ def test_study_rhc_50k_both_lanes_apply_worker_profiles(
         assert kwargs["solver_kwargs"]["inner_kwargs"]["random_seed"] == 11
         assert kwargs["solver_kwargs"]["hybrid_inner_kwargs"]["random_seed"] == 11
 
-    lanes = sorted(
-        comparison["lane"]
-        for comparison in report["records"][0]["comparisons"]
-    )
+    lanes = sorted(comparison["lane"] for comparison in report["records"][0]["comparisons"])
     assert lanes == ["strict", "throughput"]
 
 
@@ -257,8 +256,14 @@ def test_geometry_doe_separates_process_and_solve_outcomes(
     import benchmark.study_rhc_alns_geometry_doe as geometry_module
 
     def fake_run_with_timeout(
-        *, n_ops, n_machines, n_states, solver_name,
-        solver_kwargs, seed, timeout_s,
+        *,
+        n_ops,
+        n_machines,
+        n_states,
+        solver_name,
+        solver_kwargs,
+        seed,
+        timeout_s,
     ):
         if seed == 2:
             return None, True, None

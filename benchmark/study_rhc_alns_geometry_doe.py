@@ -9,6 +9,7 @@ transition from pre-search guard/fallback behavior to genuine ALNS search on
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import math
 import os
@@ -41,9 +42,7 @@ def _tail_cvar(values: list[float], alpha: float) -> float:
 def _parse_geometry(value: str) -> tuple[int, int]:
     pieces = value.replace("/", ":").split(":")
     if len(pieces) != 2:
-        raise argparse.ArgumentTypeError(
-            f"Invalid geometry '{value}'. Expected WINDOW:OVERLAP."
-        )
+        raise argparse.ArgumentTypeError(f"Invalid geometry '{value}'. Expected WINDOW:OVERLAP.")
     try:
         window_minutes = int(pieces[0])
         overlap_minutes = int(pieces[1])
@@ -189,10 +188,8 @@ def _run_scaling_case_with_timeout(
     except Exception as exc:
         return None, False, str(exc)
     finally:
-        try:
+        with contextlib.suppress(OSError):
             Path(out_path).unlink(missing_ok=True)
-        except OSError:
-            pass
 
 
 def _summarize_inner_windows(inner_window_summaries: list[dict[str, Any]]) -> dict[str, Any]:
@@ -215,7 +212,9 @@ def _summarize_inner_windows(inner_window_summaries: list[dict[str, Any]]) -> di
     improvements = [int(summary.get("improvements", 0)) for summary in inner_window_summaries]
     ops_in_window = [int(summary.get("ops_in_window", 0)) for summary in inner_window_summaries]
     fallback_windows = sum(
-        1 for summary in inner_window_summaries if summary.get("resolution_mode") == "fallback_greedy"
+        1
+        for summary in inner_window_summaries
+        if summary.get("resolution_mode") == "fallback_greedy"
     )
     budget_guard_skipped_windows = sum(
         1
@@ -250,14 +249,18 @@ def _render_markdown_table(config_summaries: list[dict[str, Any]]) -> str:
     lines = [
         "# RHC-ALNS Geometry DOE",
         "",
-        "| geometry | proc-completed | solve-completed | solver-errors | censored | fallback | guard-skipped | search-active | total-iters | mean-iters-active | scheduled-ratio | assigned-ops | wall-time-s |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| geometry | proc-completed | solve-completed | solver-errors | censored | "
+        "fallback | guard-skipped | search-active | total-iters | mean-iters-active | "
+        "scheduled-ratio | assigned-ops | wall-time-s |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",  # noqa: E501
     ]
     for config in config_summaries:
         summary = config["summary"]
         inner = summary["inner_window_summary"]
         lines.append(
-            "| {geometry} | {process_completed} | {solve_completed} | {solver_errors} | {censored} | {fallback:.4f} | {guard} | {active:.4f} | {iters} | {active_iters:.2f} | {sched:.4f} | {assigned:.0f} | {wall:.2f} |".format(
+            "| {geometry} | {process_completed} | {solve_completed} | {solver_errors} | "
+            "{censored} | {fallback:.4f} | {guard} | {active:.4f} | {iters} | "
+            "{active_iters:.2f} | {sched:.4f} | {assigned:.0f} | {wall:.2f} |".format(
                 geometry=config["geometry_label"],
                 process_completed=summary["process_completed_seed_count"],
                 solve_completed=summary["solve_completed_seed_count"],
@@ -440,9 +443,7 @@ def run_rhc_alns_geometry_doe(
                 }
             )
 
-        process_completed_runs = [
-            run for run in runs if run.get("process_outcome") == "completed"
-        ]
+        process_completed_runs = [run for run in runs if run.get("process_outcome") == "completed"]
         solve_completed_runs = [
             run for run in process_completed_runs if run.get("solve_outcome") == "completed"
         ]
@@ -452,10 +453,14 @@ def run_rhc_alns_geometry_doe(
         censored_count = len(runs) - len(process_completed_runs)
 
         assigned_ops = [float(run["assigned_ops"]) for run in process_completed_runs] or [0.0]
-        scheduled_ratios = [float(run["scheduled_ratio"]) for run in process_completed_runs] or [0.0]
+        scheduled_ratios = [float(run["scheduled_ratio"]) for run in process_completed_runs] or [
+            0.0
+        ]
         makespans = [float(run["makespan_minutes"]) for run in process_completed_runs] or [0.0]
         wall_times = [float(run["wall_time_s"]) for run in process_completed_runs] or [0.0]
-        fallback_ratios = [float(run["inner_fallback_ratio"]) for run in process_completed_runs] or [0.0]
+        fallback_ratios = [
+            float(run["inner_fallback_ratio"]) for run in process_completed_runs
+        ] or [0.0]
         guard_skips = [
             float(run["alns_presearch_budget_guard_skipped_windows"])
             for run in process_completed_runs

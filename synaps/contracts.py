@@ -10,7 +10,7 @@ from uuid import UUID  # noqa: TC003
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from synaps.model import (  # noqa: TC001
+from synaps.model import (
     MAX_SCHEDULE_OPERATIONS,
     Assignment,
     ScheduleProblem,
@@ -133,9 +133,7 @@ class SolveRequest(BaseModel):
         has_inline_problem = self.problem is not None
         has_instance_ref = self.problem_instance_ref is not None
         if has_inline_problem == has_instance_ref:
-            raise ValueError(
-                "SolveRequest requires exactly one of problem or problem_instance_ref"
-            )
+            raise ValueError("SolveRequest requires exactly one of problem or problem_instance_ref")
         if self.problem_slice is not None and not has_instance_ref:
             raise ValueError("problem_slice requires problem_instance_ref")
         return self
@@ -256,9 +254,7 @@ def _select_order_ids_for_slice(
         missing_order_ids = requested_order_ids.difference(selected_order_ids)
         if missing_order_ids:
             missing_summary = ", ".join(sorted(missing_order_ids))
-            raise ValueError(
-                f"problem_slice.order_ids contains unknown orders: {missing_summary}"
-            )
+            raise ValueError(f"problem_slice.order_ids contains unknown orders: {missing_summary}")
         return selected_order_ids
 
     selected_order_ids = []
@@ -379,8 +375,7 @@ def _slice_problem_payload(
     sliced_payload["auxiliary_resources"] = [
         resource
         for resource in auxiliary_resources
-        if isinstance(resource.get("id"), str)
-        and str(resource["id"]) in selected_aux_resource_ids
+        if isinstance(resource.get("id"), str) and str(resource["id"]) in selected_aux_resource_ids
     ]
     return sliced_payload
 
@@ -490,21 +485,21 @@ def write_contract_schemas(output_dir: Path) -> list[Path]:
 
 __all__ = [
     "CONTRACT_VERSION",
-    "ContractVersionError",
     "SUPPORTED_CONTRACT_VERSIONS",
-    "check_contract_version",
-    "parse_repair_request_json",
-    "parse_solve_request_json",
+    "ContractVersionError",
+    "ProblemInstanceSlice",
     "RepairRequest",
     "RepairResponse",
     "RoutingContextContract",
     "SolveOptions",
-    "ProblemInstanceSlice",
     "SolveRequest",
     "SolveResponse",
     "build_contract_schema_bundle",
+    "check_contract_version",
     "execute_repair_request",
     "execute_solve_request",
+    "parse_repair_request_json",
+    "parse_solve_request_json",
     "resolve_solve_request_problem",
     "write_contract_schemas",
 ]

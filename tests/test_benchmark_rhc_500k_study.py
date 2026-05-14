@@ -139,14 +139,10 @@ def test_study_rhc_500k_reports_summary_and_quality_gate(
     assert "cvar_makespan_minutes" in report["summary_by_config"][alns_key]
     assert "mean_inner_fallback_ratio" in report["summary_by_config"][alns_key]
     greedy_run = next(
-        run
-        for run in report["scale_records"][0]["runs"]
-        if run["solver_label"] == "RHC-GREEDY"
+        run for run in report["scale_records"][0]["runs"] if run["solver_label"] == "RHC-GREEDY"
     )
     alns_run = next(
-        run
-        for run in report["scale_records"][0]["runs"]
-        if run["solver_label"] == "RHC-ALNS"
+        run for run in report["scale_records"][0]["runs"] if run["solver_label"] == "RHC-ALNS"
     )
     assert greedy_run["results"]["acceleration"] == {
         "rhc_candidate_metrics_backend": "python",
@@ -399,11 +395,13 @@ def test_study_rhc_500k_lane_both_profiles_workers(
     captured_kwargs: list[dict] = []
 
     def fake_run_scaling_case(*, n_ops, n_machines, n_states, solver_name, solver_kwargs, seed):
-        captured_kwargs.append({
-            "solver_name": solver_name,
-            "solver_kwargs": solver_kwargs,
-            "seed": seed,
-        })
+        captured_kwargs.append(
+            {
+                "solver_name": solver_name,
+                "solver_kwargs": solver_kwargs,
+                "seed": seed,
+            }
+        )
         return {
             "status": "feasible",
             "feasible": True,
@@ -478,10 +476,7 @@ def test_study_rhc_500k_lane_both_profiles_workers(
         assert kwargs["solver_kwargs"]["precedence_ready_candidate_filter_enabled"] is False
         assert kwargs["solver_kwargs"]["admission_relaxation_min_fill_ratio"] == 0.30
         assert kwargs["solver_kwargs"]["alns_budget_auto_scaling_enabled"] is True
-        assert (
-            kwargs["solver_kwargs"]["alns_budget_estimated_repair_s_per_destroyed_op"]
-            == 0.125
-        )
+        assert kwargs["solver_kwargs"]["alns_budget_estimated_repair_s_per_destroyed_op"] == 0.125
         assert kwargs["solver_kwargs"]["hybrid_due_pressure_threshold"] == 0.35
         assert kwargs["solver_kwargs"]["hybrid_candidate_pressure_threshold"] == 4.0
 

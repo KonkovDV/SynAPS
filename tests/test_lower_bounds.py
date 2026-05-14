@@ -8,10 +8,12 @@ in the solver portfolio.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+import hypothesis.strategies as st
 import pytest
+from hypothesis import HealthCheck, given, settings
 
 from synaps.model import (
     AuxiliaryResource,
@@ -19,9 +21,12 @@ from synaps.model import (
     OperationAuxRequirement,
     Order,
     ScheduleProblem,
+    SetupEntry,
+    SolverStatus,
     State,
     WorkCenter,
 )
+from synaps.solvers.greedy_dispatch import GreedyDispatch
 from synaps.solvers.lower_bounds import MakespanLowerBound, compute_relaxed_makespan_lower_bound
 
 _HORIZON_START = datetime(2026, 4, 1, 8, 0, tzinfo=UTC)
@@ -157,18 +162,14 @@ class TestComputeRelaxedMakespanLowerBound:
 
     def test_max_parallel_machines_reduces_average_capacity_lb(self) -> None:
         # 1 machine, max_parallel=2 в†’ total capacity = 2 в†’ lb = (4Г—30)/2 = 60
-        problem = _make_problem(
-            n_ops=4, n_machines=1, base_duration_min=30, max_parallel=2
-        )
+        problem = _make_problem(n_ops=4, n_machines=1, base_duration_min=30, max_parallel=2)
         result = compute_relaxed_makespan_lower_bound(problem)
         assert result.average_capacity_lb == pytest.approx(60.0)
 
     def test_speed_factor_reduces_durations(self) -> None:
         # speed_factor=2.0 в†’ effective duration = 30/2 = 15 min per op
         # 4 ops, 1 machine, 1 parallel в†’ lb = 4 Г— 15 = 60
-        problem = _make_problem(
-            n_ops=4, n_machines=1, base_duration_min=30, speed_factor=2.0
-        )
+        problem = _make_problem(n_ops=4, n_machines=1, base_duration_min=30, speed_factor=2.0)
         result = compute_relaxed_makespan_lower_bound(problem)
         assert result.average_capacity_lb == pytest.approx(60.0)
 
@@ -378,12 +379,8 @@ class TestAuxiliaryResourceLowerBound:
 
         # Two machines: WC0 (speed=1.0, duration=60), WC1 (speed=2.0, duration=30)
         state = State(id=uuid4(), code="S0", label="State 0")
-        wc0 = WorkCenter(
-            id=uuid4(), code="WC0", capability_group="machining", speed_factor=1.0
-        )
-        wc1 = WorkCenter(
-            id=uuid4(), code="WC1", capability_group="machining", speed_factor=2.0
-        )
+        wc0 = WorkCenter(id=uuid4(), code="WC0", capability_group="machining", speed_factor=1.0)
+        wc1 = WorkCenter(id=uuid4(), code="WC1", capability_group="machining", speed_factor=2.0)
 
         # One operation, eligible on BOTH machines
         order = Order(id=uuid4(), external_ref="ORD-0", due_date=_HORIZON_END)
@@ -396,9 +393,7 @@ class TestAuxiliaryResourceLowerBound:
             eligible_wc_ids=[wc0.id, wc1.id],  # flexible
         )
 
-        fixture = AuxiliaryResource(
-            id=uuid4(), code="FIX-1", resource_type="fixture", pool_size=1
-        )
+        fixture = AuxiliaryResource(id=uuid4(), code="FIX-1", resource_type="fixture", pool_size=1)
         requirement = OperationAuxRequirement(
             operation_id=op.id,
             aux_resource_id=fixture.id,
@@ -556,15 +551,6 @@ class TestNonNegativeClampingRegression:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-from datetime import timedelta
-
-import hypothesis.strategies as st
-from hypothesis import HealthCheck, given, settings
-
-from synaps.solvers.greedy_dispatch import GreedyDispatch
-from synaps.model import SolverStatus, SetupEntry
-
-
 @st.composite
 def _random_schedule_problems(
     draw: st.DrawFn,
@@ -630,7 +616,8 @@ def _random_schedule_problems(
             Order(
                 id=order_id,
                 external_ref=f"ORD-{order_idx:04d}",
-                due_date=horizon_start + timedelta(hours=draw(st.integers(min_value=24, max_value=72))),
+                due_date=horizon_start
+                + timedelta(hours=draw(st.integers(min_value=24, max_value=72))),
                 priority=draw(st.integers(min_value=100, max_value=1000)),
             )
         )
@@ -644,9 +631,9 @@ def _random_schedule_problems(
             n_eligible = draw(st.integers(min_value=1, max_value=n_machines))
             eligible = [wc.id for wc in work_centers[:n_eligible]]
             # ~30% chance of depending on the previous op in the chain
-            use_predecessor = prev_op_id is not None and draw(
-                st.floats(min_value=0.0, max_value=1.0)
-            ) < 0.3
+            use_predecessor = (
+                prev_op_id is not None and draw(st.floats(min_value=0.0, max_value=1.0)) < 0.3
+            )
             operations.append(
                 Operation(
                     id=op_id,

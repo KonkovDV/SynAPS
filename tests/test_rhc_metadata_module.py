@@ -4,6 +4,7 @@ These tests lock in the wire-format contract of `build_inner_window_summary`
 so the `inner_window_summaries` trail stays stable during the rest of the
 Wave 4 R7 decomposition work.
 """
+
 from __future__ import annotations
 
 from synaps.model import (

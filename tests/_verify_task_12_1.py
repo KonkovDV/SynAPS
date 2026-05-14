@@ -1,4 +1,5 @@
 """Quick manual verification for Task 12.1: initial_operator_weights kwarg."""
+
 from __future__ import annotations
 
 import random
@@ -13,7 +14,7 @@ from synaps.model import (
     State,
     WorkCenter,
 )
-from synaps.solvers.alns_solver import AlnsSolver, DESTROY_OPERATORS
+from synaps.solvers.alns_solver import DESTROY_OPERATORS, AlnsSolver
 
 HORIZON_START = datetime(2026, 4, 1, 8, 0, tzinfo=UTC)
 HORIZON_END = datetime(2026, 4, 3, 20, 0, tzinfo=UTC)
@@ -46,8 +47,12 @@ def _make_small_problem(seed: int = 42) -> ScheduleProblem:
     for i in range(5):
         order_id = uuid4()
         orders.append(
-            Order(id=order_id, external_ref=f"ORD-{i:04d}",
-                  due_date=HORIZON_START + timedelta(hours=8 + i * 4), priority=500)
+            Order(
+                id=order_id,
+                external_ref=f"ORD-{i:04d}",
+                due_date=HORIZON_START + timedelta(hours=8 + i * 4),
+                priority=500,
+            )
         )
         prev_op_id = None
         for j in range(3):
@@ -55,16 +60,24 @@ def _make_small_problem(seed: int = 42) -> ScheduleProblem:
             eligible = rng.sample(wc_ids, rng.randint(2, 3))
             operations.append(
                 Operation(
-                    id=op_id, order_id=order_id, seq_in_order=j,
-                    state_id=rng.choice(state_ids), base_duration_min=rng.randint(15, 60),
-                    eligible_wc_ids=eligible, predecessor_op_id=prev_op_id,
+                    id=op_id,
+                    order_id=order_id,
+                    seq_in_order=j,
+                    state_id=rng.choice(state_ids),
+                    base_duration_min=rng.randint(15, 60),
+                    eligible_wc_ids=eligible,
+                    predecessor_op_id=prev_op_id,
                 )
             )
             prev_op_id = op_id
     return ScheduleProblem(
-        states=states, orders=orders, operations=operations,
-        work_centers=work_centers, setup_matrix=setup_entries,
-        planning_horizon_start=HORIZON_START, planning_horizon_end=HORIZON_END,
+        states=states,
+        orders=orders,
+        operations=operations,
+        work_centers=work_centers,
+        setup_matrix=setup_entries,
+        planning_horizon_start=HORIZON_START,
+        planning_horizon_end=HORIZON_END,
     )
 
 

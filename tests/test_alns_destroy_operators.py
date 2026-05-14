@@ -711,8 +711,8 @@ def _compute_critical_path_length(
     assigned_op_ids = set(start_offset)
 
     # Adjacency: node -> list of (successor, edge_gap)
-    successors: dict[Any, list[tuple[Any, float]]] = {op_id: [] for op_id in assigned_op_ids}
-    in_degree: dict[Any, int] = {op_id: 0 for op_id in assigned_op_ids}
+    successors: dict[Any, list[tuple[Any, float]]] = {op_id: [] for op_id in assigned_op_ids}  # noqa: C420
+    in_degree: dict[Any, int] = dict.fromkeys(assigned_op_ids, 0)
 
     # Precedence edges
     for op_id in assigned_op_ids:
@@ -2311,9 +2311,9 @@ def _compute_critical_ops_from_dag(
     assigned_op_ids = set(duration)
 
     # Build forward + backward adjacency
-    successors: dict[UUID, list[UUID]] = {op_id: [] for op_id in assigned_op_ids}
-    predecessors: dict[UUID, list[UUID]] = {op_id: [] for op_id in assigned_op_ids}
-    in_degree: dict[UUID, int] = {op_id: 0 for op_id in assigned_op_ids}
+    successors: dict[UUID, list[UUID]] = {op_id: [] for op_id in assigned_op_ids}  # noqa: C420
+    predecessors: dict[UUID, list[UUID]] = {op_id: [] for op_id in assigned_op_ids}  # noqa: C420
+    in_degree: dict[UUID, int] = dict.fromkeys(assigned_op_ids, 0)
 
     # Precedence edges
     for op_id in assigned_op_ids:
@@ -2387,9 +2387,7 @@ def _compute_critical_ops_from_dag(
     return longest_path, critical_ops
 
 
-def _count_critical_path_length(
-    assignments: list[Assignment], problem: ScheduleProblem
-) -> int:
+def _count_critical_path_length(assignments: list[Assignment], problem: ScheduleProblem) -> int:
     """Return the number of operations on the operator's chosen critical path.
 
     Mirrors the trace-back logic in ``_destroy_critical_path`` so that we
@@ -2409,8 +2407,8 @@ def _count_critical_path_length(
 
     assigned_op_ids = set(duration)
 
-    successors: dict[UUID, list[UUID]] = {op_id: [] for op_id in assigned_op_ids}
-    in_degree: dict[UUID, int] = {op_id: 0 for op_id in assigned_op_ids}
+    successors: dict[UUID, list[UUID]] = {op_id: [] for op_id in assigned_op_ids}  # noqa: C420
+    in_degree: dict[UUID, int] = dict.fromkeys(assigned_op_ids, 0)
     for op_id in assigned_op_ids:
         op = ops_by_id.get(op_id)
         if op is None:
@@ -2445,7 +2443,7 @@ def _count_critical_path_length(
         return len(assigned_op_ids)  # cycle fallback — operator degrades to random
 
     dist: dict[UUID, float] = {op_id: duration[op_id] for op_id in assigned_op_ids}
-    pred_on_path: dict[UUID, UUID | None] = {op_id: None for op_id in assigned_op_ids}
+    pred_on_path: dict[UUID, UUID | None] = dict.fromkeys(assigned_op_ids, None)
     for node in topo:
         node_d = dist[node]
         for succ in successors[node]:
@@ -2639,12 +2637,9 @@ class TestCriticalPathProperty:
         )
 
         # --- Property P1: longest path ≤ makespan ---------------------------
-        longest_path, critical_ops = _compute_critical_ops_from_dag(
-            assignments, problem
-        )
+        longest_path, critical_ops = _compute_critical_ops_from_dag(assignments, problem)
         assert not math.isnan(longest_path), (
-            "critical-path DP returned NaN — combined DAG has a cycle "
-            "(bug in edge construction)"
+            "critical-path DP returned NaN — combined DAG has a cycle (bug in edge construction)"
         )
 
         base = min(a.start_time for a in assignments)
@@ -2758,9 +2753,7 @@ class TestCriticalPathDurationInvariant:
         deadline=None,
         suppress_health_check=[HealthCheck.too_slow, HealthCheck.data_too_large],
     )
-    def test_critical_path_duration_le_makespan(
-        self, problem: ScheduleProblem
-    ) -> None:
+    def test_critical_path_duration_le_makespan(self, problem: ScheduleProblem) -> None:
         """For every greedy-generated feasible schedule, the duration of
         the operator's critical path must not exceed the schedule makespan.
 
@@ -2794,8 +2787,7 @@ class TestCriticalPathDurationInvariant:
 
         # Per-op duration lookup (minutes) — reused for the CP-duration sum.
         op_duration_min: dict[UUID, float] = {
-            a.operation_id: (a.end_time - a.start_time).total_seconds() / 60.0
-            for a in assignments
+            a.operation_id: (a.end_time - a.start_time).total_seconds() / 60.0 for a in assignments
         }
 
         # Step 1: compute the operator's own CP length so destroy_size
@@ -2960,9 +2952,7 @@ def _small_feasible_problems_with_tardy_mix(
             tight_hours = draw(st.integers(min_value=1, max_value=6))
             due_date = horizon_start + timedelta(hours=tight_hours)
         else:
-            due_date = horizon_start + timedelta(
-                days=draw(st.integers(min_value=3, max_value=8))
-            )
+            due_date = horizon_start + timedelta(days=draw(st.integers(min_value=3, max_value=8)))
         orders.append(
             Order(
                 id=order_id,
@@ -3022,9 +3012,7 @@ class TestDuePressureMedianTardinessHypothesisProperty:
         deadline=None,
         suppress_health_check=[HealthCheck.too_slow, HealthCheck.data_too_large],
     )
-    def test_destroyed_ops_above_median_weighted_tardiness(
-        self, problem: ScheduleProblem
-    ) -> None:
+    def test_destroyed_ops_above_median_weighted_tardiness(self, problem: ScheduleProblem) -> None:
         """For every feasible greedy schedule with at least one tardy order,
         every op returned by the RAW ``_destroy_due_pressure`` call belongs
         to an order whose weighted tardiness is >= the median weighted
@@ -3078,9 +3066,7 @@ class TestDuePressureMedianTardinessHypothesisProperty:
 
         # Top half: orders with score >= median.  Count their ops so we can
         # bound destroy_size safely.
-        top_half_order_ids = {
-            oid for oid, score in tardy_weighted.items() if score >= median_score
-        }
+        top_half_order_ids = {oid for oid, score in tardy_weighted.items() if score >= median_score}
         top_half_ops_count = sum(
             len(assignments_by_order.get(oid, [])) for oid in top_half_order_ids
         )

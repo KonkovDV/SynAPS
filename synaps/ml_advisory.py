@@ -112,9 +112,7 @@ def encode_problem_features(
     flexibility = profile.avg_eligible_work_centers / wc_count if wc_count > 0 and ops else 1.0
 
     # SDST ratio: fraction of setup entries with non-zero cost
-    sdst_ratio = (
-        profile.setup_nonzero_entry_count / max(profile.setup_entry_count, 1)
-    )
+    sdst_ratio = profile.setup_nonzero_entry_count / max(profile.setup_entry_count, 1)
 
     # Auxiliary utilization: fraction of operations with aux requirements
     aux_util = profile.aux_requirement_count / max(len(ops), 1)
@@ -209,8 +207,8 @@ class RuntimePredictor:
 
         # Rough time complexity models for each solver tier
         greed_ms = n * 0.5 + density * 10
-        cpsat_ms = n ** 1.8 * 0.01 * (1 + density) * (1 + contention * 0.5)
-        lbbd_ms = n ** 1.4 * 0.05 * (1 + density * 0.3)
+        cpsat_ms = n**1.8 * 0.01 * (1 + density) * (1 + contention * 0.5)
+        lbbd_ms = n**1.4 * 0.05 * (1 + density * 0.3)
 
         predictions = {
             "GREED": round(greed_ms, 1),
@@ -253,7 +251,7 @@ class RuntimePredictor:
             return self._predict_heuristic(features)
 
         solver_map = {0: "GREED", 1: "CPSAT-30", 2: "LBBD"}
-        recommended_idx = int(round(values[3]))
+        recommended_idx = round(values[3])
         recommended = solver_map.get(recommended_idx, "CPSAT-30")
 
         return RuntimeAdvisory(

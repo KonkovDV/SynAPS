@@ -5,6 +5,7 @@ from `synaps/solvers/rhc/_solver.py`. These cover the core scheduling
 decisions of one rolling-horizon iteration, so regression coverage here
 gates any further structural change to the RHC main loop.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

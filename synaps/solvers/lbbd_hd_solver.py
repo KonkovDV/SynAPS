@@ -191,6 +191,7 @@ class LbbdHdSolver(BaseSolver):
         # observed in iteration N is attributed to the cut kinds added in
         # iteration N-1 (the cuts that are first active in master N).
         lb_evolution: list[float] = []
+        ub_evolution: list[float] = []
         prev_master_bound: float = 0.0
         prev_iteration_cut_kinds: list[str] = []
         # R3 (2026-05-03): cut-pool deduplication. Identical (kind,
@@ -319,6 +320,7 @@ class LbbdHdSolver(BaseSolver):
             # Track best
             if ub < best_ub:
                 best_ub = ub
+                ub_evolution.append(best_ub)
                 best_assignments = sub_assignments
                 best_objective = _compute_objective(
                     problem, sub_assignments, sub_makespan,
@@ -425,6 +427,7 @@ class LbbdHdSolver(BaseSolver):
                 },
                 "iteration_log": iteration_log,
                 "lb_evolution": lb_evolution,
+                "ub_evolution": ub_evolution,
                 "cut_kind_lb_contribution": cut_kind_lb_contribution,
                 "gap_threshold": gap_threshold,
                 "setup_relaxation": setup_relaxation,
@@ -1495,14 +1498,18 @@ def _generate_all_cuts(
         ops_by_id,
     )
     if critical_ops and len(critical_ops) >= 2 and cp_duration > 0:
-        benders_cuts.append(
-            _BendersCut(
-                assignment_map=dict(assignment_map),
-                kind="critical_path",
-                rhs=cp_duration,
-                bottleneck_ops=set(critical_ops),
+        # R9 (2026-05-10): Only emit critical_path cut when the path
+        # contributes a meaningful fraction of the subproblem makespan.
+        cp_share = cp_duration / max(sub_makespan, 1e-9)
+        if cp_share >= 0.05:
+            benders_cuts.append(
+                _BendersCut(
+                    assignment_map=dict(assignment_map),
+                    kind="critical_path",
+                    rhs=cp_duration,
+                    bottleneck_ops=set(critical_ops),
+                )
             )
-        )
 
     # 5. Few-but-strong local branching cut (optional)
     if local_branching_enabled and assignment_map:

@@ -43,11 +43,11 @@ class MachineIndex:
     """
 
     __slots__ = (
-        "_context",
-        "_by_machine",
         "_all",
-        "_setup_window_starts",
+        "_by_machine",
+        "_context",
         "_resource_windows_cache",
+        "_setup_window_starts",
     )
 
     def __init__(self, context: DispatchContext) -> None:
@@ -84,7 +84,8 @@ class MachineIndex:
         return self._setup_window_starts
 
     def get_resource_windows(
-        self, required_resource_ids: set[Any],
+        self,
+        required_resource_ids: set[Any],
     ) -> dict[Any, ResourceWindowSeries]:
         key = frozenset(required_resource_ids)
         if key not in self._resource_windows_cache:

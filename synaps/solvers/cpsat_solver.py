@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import time
 from collections.abc import Mapping
 from datetime import timedelta
@@ -48,9 +49,7 @@ def _apply_sat_parameter_overrides(
         try:
             setattr(solver.parameters, key, raw_value)
         except (TypeError, ValueError) as exc:
-            raise ValueError(
-                f"Invalid CP-SAT parameter override {key}={raw_value!r}"
-            ) from exc
+            raise ValueError(f"Invalid CP-SAT parameter override {key}={raw_value!r}") from exc
 
         applied_value = getattr(solver.parameters, key)
         if isinstance(applied_value, bool | int | float | str):
@@ -221,21 +220,12 @@ class CpSatSolver(BaseSolver):
                     key=lambda assignment: assignment.start_time,
                 )
             ):
-                start_offset = int(
-                    round(
-                        (
-                            frozen_assignment.start_time - planning_horizon_start
-                        ).total_seconds()
-                        / 60.0
-                    )
+                start_offset = round(
+                    (frozen_assignment.start_time - planning_horizon_start).total_seconds()
+                    / 60.0
                 )
-                end_offset = int(
-                    round(
-                        (
-                            frozen_assignment.end_time - planning_horizon_start
-                        ).total_seconds()
-                        / 60.0
-                    )
+                end_offset = round(
+                    (frozen_assignment.end_time - planning_horizon_start).total_seconds() / 60.0
                 )
                 start_offset = max(0, min(start_offset, horizon))
                 end_offset = max(0, min(end_offset, horizon))
@@ -407,7 +397,7 @@ class CpSatSolver(BaseSolver):
         max_setup = max((entry.setup_minutes for entry in problem.setup_matrix), default=0)
         max_material_scaled = max(
             (
-                int(round(entry.material_loss * material_loss_scale))
+                round(entry.material_loss * material_loss_scale)
                 for entry in problem.setup_matrix
             ),
             default=0,
@@ -647,9 +637,7 @@ class CpSatSolver(BaseSolver):
         frozen_assignments: list[Assignment] = list(frozen_assignments_raw or [])
         frozen_predecessor_end_offsets = {
             op_id: int(offset)
-            for op_id, offset in dict(
-                kwargs.get("frozen_predecessor_end_offsets", {})
-            ).items()
+            for op_id, offset in dict(kwargs.get("frozen_predecessor_end_offsets", {})).items()
         }
         enable_symmetry_breaking = bool(kwargs.get("enable_symmetry_breaking", True))
 
@@ -679,8 +667,8 @@ class CpSatSolver(BaseSolver):
             for entry in solve_problem.setup_matrix
         }
         setup_material_lookup = {
-            (entry.work_center_id, entry.from_state_id, entry.to_state_id): int(
-                round(entry.material_loss * material_loss_scale)
+            (entry.work_center_id, entry.from_state_id, entry.to_state_id): round(
+                entry.material_loss * material_loss_scale
             )
             for entry in solve_problem.setup_matrix
         }
@@ -702,7 +690,7 @@ class CpSatSolver(BaseSolver):
             for work_center_id in eligible_by_op[operation.id]:
                 work_center = wc_by_id[work_center_id]
                 duration = max(
-                    1, int(round(operation.base_duration_min / work_center.speed_factor))
+                    1, round(operation.base_duration_min / work_center.speed_factor)
                 )
 
                 suffix = f"_{operation.id}_{work_center_id}"
@@ -784,9 +772,7 @@ class CpSatSolver(BaseSolver):
                 if len(group_work_centers) < 2:
                     continue
                 group_work_center_ids = {work_center.id for work_center in group_work_centers}
-                for work_center_a, work_center_b in zip(
-                    group_work_centers[:-1], group_work_centers[1:], strict=False
-                ):
+                for work_center_a, work_center_b in itertools.pairwise(group_work_centers):
                     presences_a: list[Any] = []
                     presences_b: list[Any] = []
                     for operation in solve_problem.operations:

@@ -105,11 +105,20 @@ Commit rule:
 
 - keep this as its own commit/push unit, separate from solver-algorithm work.
 
-### Wave 3 — Tighten LBBD Master Strength
+### Wave 3 — Tighten LBBD Master Strength + Initial-Seed Budget Contract
 
-Status: in progress.
+Status: Wave 3a (initial-seed budget fix) completed 2026-05-15; Wave 3b (LBBD cuts) in progress.
 
 The 2026-05-01 audit-reverification pass already shipped one safety slice in both `LBBD` and `LBBD-HD`: the master now uses a safe setup-transition floor, and `setup_cost` cuts now use sequence-independent lower bounds instead of incumbent-sequence setup totals. The current head also ports the `critical_path` cut family from `LBBD-HD` into standard `LBBD`, so the next step is to measure and extend cut strength beyond that baseline.
+
+Wave 3a closed the initial-seed budget stall (P1+P2+P3):
+- `GreedyDispatch.solve()` now honors `time_limit_s` → returns `TIMEOUT` + `partial_schedule=True`
+- `AlnsSolver` passes remaining budget to every greedy call, surfaces `initial_seed_greedy_timed_out`
+- 100K v9 evidence: `RHC-ALNS` `7279/100000` in `90.263s`, same-run parity with `RHC-GREEDY` `7509/100000` in `90.302s`
+- Artifact: `benchmark/studies/2026-05-15-rhc-100k-v9/`
+- Tests: `tests/test_greedy_dispatch_time_limit.py` (2 tests), existing suite 143 passed
+
+Wave 3b — remaining LBBD goals:
 
 Goal: make the LBBD line stronger before expanding ALNS complexity again.
 

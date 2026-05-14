@@ -100,8 +100,7 @@ def _compute_auxiliary_resource_lb(
         return 0.0
 
     pool_by_resource: dict[UUID, int] = {
-        resource.id: max(1, resource.pool_size)
-        for resource in problem.auxiliary_resources
+        resource.id: max(1, resource.pool_size) for resource in problem.auxiliary_resources
     }
     load_by_resource: dict[UUID, float] = defaultdict(float)
     for requirement in problem.aux_requirements:
@@ -110,15 +109,12 @@ def _compute_auxiliary_resource_lb(
         op_duration = min_duration_by_op.get(requirement.operation_id, 0.0)
         if op_duration <= 0.0:
             continue
-        load_by_resource[requirement.aux_resource_id] += (
-            op_duration * float(requirement.quantity_needed)
+        load_by_resource[requirement.aux_resource_id] += op_duration * float(
+            requirement.quantity_needed
         )
 
     return max(
-        (
-            load / pool_by_resource[resource_id]
-            for resource_id, load in load_by_resource.items()
-        ),
+        (load / pool_by_resource[resource_id] for resource_id, load in load_by_resource.items()),
         default=0.0,
     )
 
@@ -175,9 +171,7 @@ def compute_relaxed_makespan_lower_bound(problem: ScheduleProblem) -> MakespanLo
             indegree_by_op[operation.id] += 1
 
     topo_frontier = [
-        operation.id
-        for operation in problem.operations
-        if indegree_by_op.get(operation.id, 0) == 0
+        operation.id for operation in problem.operations if indegree_by_op.get(operation.id, 0) == 0
     ]
     topo_order: list[UUID] = []
     while topo_frontier:

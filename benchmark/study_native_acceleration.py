@@ -11,14 +11,14 @@ The output is a JSON report suitable for CI artifact storage.
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
 import json
-from pathlib import Path
 import platform
-from random import Random
 import statistics
 import sys
 import time
+from contextlib import contextmanager
+from pathlib import Path
+from random import Random
 from typing import TYPE_CHECKING, Any
 
 from synaps import accelerators
@@ -55,14 +55,8 @@ def _generate_vectors(size: int, seed: int) -> dict[str, Any]:
     # Slack mixes overdue and non-overdue cases.
     slack = [rng.uniform(-180.0, 720.0) for _ in range(size)]
 
-    setup_minutes = [
-        0.0 if rng.random() < 0.7 else rng.uniform(1.0, 45.0)
-        for _ in range(size)
-    ]
-    material_loss = [
-        0.0 if rng.random() < 0.8 else rng.uniform(0.1, 5.0)
-        for _ in range(size)
-    ]
+    setup_minutes = [0.0 if rng.random() < 0.7 else rng.uniform(1.0, 45.0) for _ in range(size)]
+    material_loss = [0.0 if rng.random() < 0.8 else rng.uniform(0.1, 5.0) for _ in range(size)]
 
     ready_p_bar = max(sum(processing) / max(size, 1), 1.0)
     setup_scale = [_mean_nonzero(setup_minutes)] * size

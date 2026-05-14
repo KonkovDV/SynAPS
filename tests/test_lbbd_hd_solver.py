@@ -43,10 +43,7 @@ def _make_medium_problem(
     with_aux: bool = False,
 ) -> ScheduleProblem:
     """Build a medium-size FJSP-SDST problem for LBBD-HD testing."""
-    states = [
-        State(id=uuid4(), code=f"ST-{i}", label=f"State {i}")
-        for i in range(n_states)
-    ]
+    states = [State(id=uuid4(), code=f"ST-{i}", label=f"State {i}") for i in range(n_states)]
     work_centers = [
         WorkCenter(
             id=uuid4(),
@@ -80,10 +77,16 @@ def _make_medium_problem(
     if with_aux:
         aux_resources = [
             AuxiliaryResource(
-                id=uuid4(), code="TOOL-1", resource_type="tool", pool_size=2,
+                id=uuid4(),
+                code="TOOL-1",
+                resource_type="tool",
+                pool_size=2,
             ),
             AuxiliaryResource(
-                id=uuid4(), code="CREW-1", resource_type="crew", pool_size=1,
+                id=uuid4(),
+                code="CREW-1",
+                resource_type="crew",
+                pool_size=1,
             ),
         ]
 
@@ -102,7 +105,7 @@ def _make_medium_problem(
         for op_idx in range(ops_per_order):
             op_id = uuid4()
             state = states[op_idx % n_states]
-            eligible = [wc.id for wc in work_centers[:max(2, n_machines // 2)]]
+            eligible = [wc.id for wc in work_centers[: max(2, n_machines // 2)]]
             operations.append(
                 Operation(
                     id=op_id,
@@ -188,13 +191,18 @@ class TestPartitioning:
     def test_arc_affinity_groups_together(self) -> None:
         """Machines sharing ARC resources should be in the same cluster when possible."""
         problem = _make_medium_problem(
-            n_orders=4, ops_per_order=2, n_machines=4, with_aux=True,
+            n_orders=4,
+            ops_per_order=2,
+            n_machines=4,
+            with_aux=True,
         )
         wcs = [wc.id for wc in problem.work_centers]
         assignment = {op.id: wcs[i % len(wcs)] for i, op in enumerate(problem.operations)}
 
         clusters = partition_machines(
-            problem, assignment, max_ops_per_cluster=200,
+            problem,
+            assignment,
+            max_ops_per_cluster=200,
         )
         # With a generous cap, ARC-linked machines should be co-clustered
         # (not split across many clusters)
@@ -211,7 +219,10 @@ class TestLbbdHdSolver:
         problem = _make_medium_problem(n_orders=3, ops_per_order=3, n_machines=3)
         solver = LbbdHdSolver()
         result = solver.solve(
-            problem, max_iterations=3, time_limit_s=60, use_warm_start=True,
+            problem,
+            max_iterations=3,
+            time_limit_s=60,
+            use_warm_start=True,
         )
 
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
@@ -222,7 +233,9 @@ class TestLbbdHdSolver:
         problem = _make_medium_problem(n_orders=3, ops_per_order=3, n_machines=3)
         solver = LbbdHdSolver()
         result = solver.solve(
-            problem, max_iterations=3, time_limit_s=60,
+            problem,
+            max_iterations=3,
+            time_limit_s=60,
         )
 
         assigned_ops = {a.operation_id for a in result.assignments}
@@ -233,7 +246,9 @@ class TestLbbdHdSolver:
         problem = _make_medium_problem(n_orders=3, ops_per_order=3, n_machines=3)
         solver = LbbdHdSolver()
         result = solver.solve(
-            problem, max_iterations=3, time_limit_s=60,
+            problem,
+            max_iterations=3,
+            time_limit_s=60,
         )
 
         checker = FeasibilityChecker()
@@ -244,7 +259,9 @@ class TestLbbdHdSolver:
         problem = _make_medium_problem(n_orders=3, ops_per_order=4, n_machines=3)
         solver = LbbdHdSolver()
         result = solver.solve(
-            problem, max_iterations=3, time_limit_s=60,
+            problem,
+            max_iterations=3,
+            time_limit_s=60,
         )
 
         assignment_map = {a.operation_id: a for a in result.assignments}
@@ -252,15 +269,15 @@ class TestLbbdHdSolver:
             if op.predecessor_op_id and op.predecessor_op_id in assignment_map:
                 pred = assignment_map[op.predecessor_op_id]
                 cur = assignment_map[op.id]
-                assert cur.start_time >= pred.end_time, (
-                    f"Op {op.id} starts before predecessor ends"
-                )
+                assert cur.start_time >= pred.end_time, f"Op {op.id} starts before predecessor ends"
 
     def test_metadata_structure(self) -> None:
         problem = _make_medium_problem(n_orders=2, ops_per_order=2, n_machines=2)
         solver = LbbdHdSolver()
         result = solver.solve(
-            problem, max_iterations=3, time_limit_s=60,
+            problem,
+            max_iterations=3,
+            time_limit_s=60,
         )
 
         assert "lower_bound" in result.metadata
@@ -280,7 +297,10 @@ class TestLbbdHdSolver:
         problem = _make_medium_problem(n_orders=5, ops_per_order=3, n_machines=3)
         solver = LbbdHdSolver()
         result = solver.solve(
-            problem, max_iterations=5, time_limit_s=60, use_warm_start=True,
+            problem,
+            max_iterations=5,
+            time_limit_s=60,
+            use_warm_start=True,
         )
 
         assert result.metadata.get("master_warm_start_iterations", 0) >= 1
@@ -296,11 +316,16 @@ class TestLbbdHdSolver:
     def test_with_aux_resources(self) -> None:
         """LBBD-HD should handle ARC constraints."""
         problem = _make_medium_problem(
-            n_orders=4, ops_per_order=3, n_machines=3, with_aux=True,
+            n_orders=4,
+            ops_per_order=3,
+            n_machines=3,
+            with_aux=True,
         )
         solver = LbbdHdSolver()
         result = solver.solve(
-            problem, max_iterations=3, time_limit_s=60,
+            problem,
+            max_iterations=3,
+            time_limit_s=60,
         )
 
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
@@ -310,7 +335,9 @@ class TestLbbdHdSolver:
         problem = _make_medium_problem(n_orders=5, ops_per_order=3, n_machines=3)
         solver = LbbdHdSolver()
         result = solver.solve(
-            problem, max_iterations=5, time_limit_s=60,
+            problem,
+            max_iterations=5,
+            time_limit_s=60,
         )
 
         # After multiple iterations, cuts should have been generated
@@ -356,9 +383,7 @@ class TestLbbdHdSolver:
             # With 32 ops and cap=10, we should see multiple clusters
             for entry in result.metadata["iteration_log"]:
                 if "cluster_count" in entry:
-                    assert entry["cluster_count"] >= 2, (
-                        "Expected multiple clusters with low cap"
-                    )
+                    assert entry["cluster_count"] >= 2, "Expected multiple clusters with low cap"
 
     def test_critical_path_tracks_machine_sequence_and_setup(self) -> None:
         state_a = State(id=uuid4(), code="STATE-A", label="State A")

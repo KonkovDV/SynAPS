@@ -13,8 +13,8 @@ Validates: Requirements 3.3, 9.3, 12.1, 12.2
 
 from __future__ import annotations
 
-from unittest.mock import patch
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -241,7 +241,8 @@ class TestCrossWindowBiasEffect:
         assert effective_on > effective_off, (
             f"Expected bias-on effective machine_segment weight ({effective_on}) > "
             f"bias-off effective weight ({effective_off}). "
-            f"Delta on={deltas_on['machine_segment']}, delta off={deltas_off.get('machine_segment', 0.0)}"
+            f"Delta on={deltas_on['machine_segment']}, "
+            f"delta off={deltas_off.get('machine_segment', 0.0)}"
         )
 
         # Verify the delta is positive and meaningful
@@ -252,9 +253,7 @@ class TestCrossWindowBiasEffect:
 
         # All deltas should be zero when bias is off
         for name, delta in deltas_off.items():
-            assert delta == 0.0, (
-                f"Operator '{name}' has non-zero delta {delta} when bias is off"
-            )
+            assert delta == 0.0, f"Operator '{name}' has non-zero delta {delta} when bias is off"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -297,15 +296,12 @@ class TestWarmStartMetadataInRhcOutput:
         summaries = metadata.get("inner_window_summaries", [])
 
         # We should have at least 2 window summaries.
-        assert len(summaries) >= 2, (
-            f"Expected at least 2 window summaries, got {len(summaries)}"
-        )
+        assert len(summaries) >= 2, f"Expected at least 2 window summaries, got {len(summaries)}"
 
         # Check that warm_start_used field is present in all summaries.
         for i, summary in enumerate(summaries):
             assert "warm_start_used" in summary, (
-                f"Window {i} summary missing 'warm_start_used' field. "
-                f"Keys: {list(summary.keys())}"
+                f"Window {i} summary missing 'warm_start_used' field. Keys: {list(summary.keys())}"
             )
 
         # After the first window, at least one window should have
@@ -329,12 +325,14 @@ class TestWarmStartMetadataInRhcOutput:
         assert has_warm_start_supplied, (
             "Expected at least one window (after the first) to have "
             "warm_start_supplied_assignments > 0. Summaries: "
-            + str([
-                {
-                    "window": s.get("window"),
-                    "warm_start_used": s.get("warm_start_used"),
-                    "warm_start_supplied_assignments": s.get("warm_start_supplied_assignments"),
-                }
-                for s in summaries
-            ])
+            + str(
+                [
+                    {
+                        "window": s.get("window"),
+                        "warm_start_used": s.get("warm_start_used"),
+                        "warm_start_supplied_assignments": s.get("warm_start_supplied_assignments"),
+                    }
+                    for s in summaries
+                ]
+            )
         )

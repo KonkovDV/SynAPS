@@ -179,8 +179,7 @@ class EmpiricalRepairCostEstimator:
             self.estimate = float(observed_s_per_op)
         else:
             self.estimate = (
-                self.alpha * float(observed_s_per_op)
-                + (1.0 - self.alpha) * self.estimate
+                self.alpha * float(observed_s_per_op) + (1.0 - self.alpha) * self.estimate
             )
         self.observation_count += 1
         return self.estimate
@@ -249,9 +248,7 @@ def scale_alns_inner_budget(
             float(policy.estimated_repair_s_per_destroyed_op_raw),
         )
     else:
-        estimated_repair_s_per_destroyed_op = (
-            repair_time_limit_s / max(1, requested_max_destroy)
-        )
+        estimated_repair_s_per_destroyed_op = repair_time_limit_s / max(1, requested_max_destroy)
 
     destroy_cap_from_budget = min(
         requested_max_destroy,

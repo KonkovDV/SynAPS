@@ -13,7 +13,6 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import hypothesis.strategies as st
-import numpy as np
 from hypothesis import given, settings
 
 from synaps.model import (
@@ -43,8 +42,7 @@ def _make_problem(
     """Build a minimal ScheduleProblem with given work centers and states."""
     states = [State(id=uuid4(), code=f"S-{i}", label=f"State {i}") for i in range(n_states)]
     work_centers = [
-        WorkCenter(id=uuid4(), code=f"WC-{i}", capability_group="machining")
-        for i in range(n_wc)
+        WorkCenter(id=uuid4(), code=f"WC-{i}", capability_group="machining") for i in range(n_wc)
     ]
 
     # Need at least one order and operation for a valid problem
@@ -85,14 +83,11 @@ def _make_dense_problem(n_wc: int, n_states: int) -> ScheduleProblem:
     """Build a problem with a fully populated setup matrix (all transitions)."""
     states = [State(id=uuid4(), code=f"S-{i}", label=f"State {i}") for i in range(n_states)]
     work_centers = [
-        WorkCenter(id=uuid4(), code=f"WC-{i}", capability_group="machining")
-        for i in range(n_wc)
+        WorkCenter(id=uuid4(), code=f"WC-{i}", capability_group="machining") for i in range(n_wc)
     ]
 
     order_id = uuid4()
-    orders = [
-        Order(id=order_id, external_ref="ORD-0001", due_date=HORIZON_END)
-    ]
+    orders = [Order(id=order_id, external_ref="ORD-0001", due_date=HORIZON_END)]
     operations = [
         Operation(
             id=uuid4(),
@@ -149,8 +144,7 @@ def schedule_problems_with_sdst(
 
     states = [State(id=uuid4(), code=f"S-{i}", label=f"State {i}") for i in range(n_states)]
     work_centers = [
-        WorkCenter(id=uuid4(), code=f"WC-{i}", capability_group="machining")
-        for i in range(n_wc)
+        WorkCenter(id=uuid4(), code=f"WC-{i}", capability_group="machining") for i in range(n_wc)
     ]
 
     order_id = uuid4()
@@ -229,8 +223,7 @@ class TestBackendLookupEquivalence:
 
         # Build set of populated triples
         populated = {
-            (e.work_center_id, e.from_state_id, e.to_state_id)
-            for e in problem.setup_matrix
+            (e.work_center_id, e.from_state_id, e.to_state_id) for e in problem.setup_matrix
         }
 
         # Check all possible triples — those not populated must return 0.0

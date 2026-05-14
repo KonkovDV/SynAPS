@@ -229,9 +229,7 @@ class GreedyDispatch(BaseSolver):
             # backends process the hot path with lower overhead.
             log_scores = compute_atcs_log_scores_batch(
                 weights=[record["weight"] for record in candidate_records],
-                processing_minutes=[
-                    record["processing_minutes"] for record in candidate_records
-                ],
+                processing_minutes=[record["processing_minutes"] for record in candidate_records],
                 slack=[
                     max(
                         record["due_offset"]
@@ -349,7 +347,7 @@ class BeamSearchDispatch(BaseSolver):
     the single-trajectory greedy approach on heavy SDST matrices.
 
     Memory: O(B · N) where N = number of operations.
-    Typical quality improvement: 20–50% reduction in makespan over greedy on
+    Typical quality improvement: 20-50% reduction in makespan over greedy on
     high-SDST instances with B=3..5.
     """
 
@@ -388,8 +386,7 @@ class BeamSearchDispatch(BaseSolver):
 
         for _step in range(total_ops):
             candidates: list[
-                tuple[float, list[Assignment], set[Any],
-                      dict[Any, float], list[Any]]
+                tuple[float, list[Assignment], set[Any], dict[Any, float], list[Any]]
             ] = []
 
             for assignments, scheduled_ops, op_end_offsets, remaining in beams:
@@ -403,7 +400,8 @@ class BeamSearchDispatch(BaseSolver):
                     continue
 
                 ready = [
-                    op for op in remaining
+                    op
+                    for op in remaining
                     if op.predecessor_op_id is None or op.predecessor_op_id in scheduled_ops
                 ]
                 if not ready:
@@ -442,14 +440,16 @@ class BeamSearchDispatch(BaseSolver):
                         speed = work_center.speed_factor if work_center is not None else 1.0
                         p_j = op.base_duration_min / speed
 
-                        candidate_records.append({
-                            "operation": op,
-                            "work_center_id": wc_id,
-                            "slot": slot,
-                            "due_offset": due_offset,
-                            "weight": w_j,
-                            "processing_minutes": p_j,
-                        })
+                        candidate_records.append(
+                            {
+                                "operation": op,
+                                "work_center_id": wc_id,
+                                "slot": slot,
+                                "due_offset": due_offset,
+                                "weight": w_j,
+                                "processing_minutes": p_j,
+                            }
+                        )
 
                 if not candidate_records:
                     continue  # Dead beam
@@ -458,11 +458,13 @@ class BeamSearchDispatch(BaseSolver):
                 local_setup_scale_by_wc: dict[Any, float] = {}
                 for wc_id in {r["work_center_id"] for r in candidate_records}:
                     nonzero = [
-                        r["slot"].setup_minutes for r in candidate_records
+                        r["slot"].setup_minutes
+                        for r in candidate_records
                         if r["work_center_id"] == wc_id and r["slot"].setup_minutes > 0
                     ]
                     local_setup_scale_by_wc[wc_id] = max(
-                        sum(nonzero) / max(len(nonzero), 1), 1.0,
+                        sum(nonzero) / max(len(nonzero), 1),
+                        1.0,
                     )
                 global_mat = [
                     r["slot"].material_loss
@@ -530,8 +532,7 @@ class BeamSearchDispatch(BaseSolver):
                     new_remaining = [op for op in remaining if op.id != best_op.id]
 
                     candidates.append(
-                        (score, new_assignments, new_scheduled,
-                         new_offsets, new_remaining),
+                        (score, new_assignments, new_scheduled, new_offsets, new_remaining),
                     )
 
             if not candidates:
@@ -539,18 +540,14 @@ class BeamSearchDispatch(BaseSolver):
 
             # Keep top-B beams by cumulative score proxy: use makespan as tiebreaker
             candidates.sort(key=lambda x: x[0], reverse=True)
-            beams = [
-                (c[1], c[2], c[3], c[4]) for c in candidates[: self._beam_width]
-            ]
+            beams = [(c[1], c[2], c[3], c[4]) for c in candidates[: self._beam_width]]
 
         # Select best completed beam by makespan
         best_result: tuple[list[Assignment], float] | None = None
         for assignments, _scheduled, _offsets, _rem in beams:
             if len(assignments) != total_ops:
                 continue
-            makespan = max(
-                (a.end_time - horizon_start).total_seconds() / 60.0 for a in assignments
-            )
+            makespan = max((a.end_time - horizon_start).total_seconds() / 60.0 for a in assignments)
             if best_result is None or makespan < best_result[1]:
                 best_result = (assignments, makespan)
 
@@ -576,7 +573,8 @@ class BeamSearchDispatch(BaseSolver):
                 prev_state = dispatch_context.ops_by_id[prev_op_id].state_id
                 curr_state = dispatch_context.ops_by_id[curr_op_id].state_id
                 total_material_loss += dispatch_context.material_loss.get(
-                    (wc_id, prev_state, curr_state), 0.0,
+                    (wc_id, prev_state, curr_state),
+                    0.0,
                 )
 
         order_completion: dict[Any, float] = {}

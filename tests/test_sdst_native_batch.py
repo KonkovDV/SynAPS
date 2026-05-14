@@ -13,7 +13,6 @@ from uuid import uuid4
 
 import hypothesis.strategies as st
 import numpy as np
-import pytest
 from hypothesis import given, settings
 
 from synaps.model import (
@@ -44,9 +43,7 @@ def _make_problem_with_entries(
 ) -> ScheduleProblem:
     """Build a ScheduleProblem from pre-built states, work_centers, and entries."""
     order_id = uuid4()
-    orders = [
-        Order(id=order_id, external_ref="ORD-0001", due_date=HORIZON_END)
-    ]
+    orders = [Order(id=order_id, external_ref="ORD-0001", due_date=HORIZON_END)]
     operations = [
         Operation(
             id=uuid4(),
@@ -72,8 +69,7 @@ def _make_dense_problem(n_wc: int, n_states: int) -> ScheduleProblem:
     """Build a problem with a fully populated setup matrix."""
     states = [State(id=uuid4(), code=f"S-{i}", label=f"State {i}") for i in range(n_states)]
     work_centers = [
-        WorkCenter(id=uuid4(), code=f"WC-{i}", capability_group="machining")
-        for i in range(n_wc)
+        WorkCenter(id=uuid4(), code=f"WC-{i}", capability_group="machining") for i in range(n_wc)
     ]
 
     setup_entries: list[SetupEntry] = []
@@ -102,15 +98,16 @@ def _make_dense_problem(n_wc: int, n_states: int) -> ScheduleProblem:
 
 
 @st.composite
-def batch_lookup_inputs(draw: st.DrawFn) -> tuple[ScheduleProblem, np.ndarray, np.ndarray, np.ndarray]:
+def batch_lookup_inputs(
+    draw: st.DrawFn,
+) -> tuple[ScheduleProblem, np.ndarray, np.ndarray, np.ndarray]:
     """Generate a random problem and random index vectors for batch lookup."""
     n_states = draw(st.integers(min_value=2, max_value=10))
     n_wc = draw(st.integers(min_value=1, max_value=8))
 
     states = [State(id=uuid4(), code=f"S-{i}", label=f"State {i}") for i in range(n_states)]
     work_centers = [
-        WorkCenter(id=uuid4(), code=f"WC-{i}", capability_group="machining")
-        for i in range(n_wc)
+        WorkCenter(id=uuid4(), code=f"WC-{i}", capability_group="machining") for i in range(n_wc)
     ]
 
     setup_entries: list[SetupEntry] = []
@@ -136,27 +133,33 @@ def batch_lookup_inputs(draw: st.DrawFn) -> tuple[ScheduleProblem, np.ndarray, n
     # Generate random index vectors (including some out-of-bounds to test 0.0 behavior)
     batch_size = draw(st.integers(min_value=1, max_value=50))
     wc_indices = np.array(
-        draw(st.lists(
-            st.integers(min_value=-1, max_value=n_wc),
-            min_size=batch_size,
-            max_size=batch_size,
-        )),
+        draw(
+            st.lists(
+                st.integers(min_value=-1, max_value=n_wc),
+                min_size=batch_size,
+                max_size=batch_size,
+            )
+        ),
         dtype=np.int64,
     )
     from_indices = np.array(
-        draw(st.lists(
-            st.integers(min_value=-1, max_value=n_states),
-            min_size=batch_size,
-            max_size=batch_size,
-        )),
+        draw(
+            st.lists(
+                st.integers(min_value=-1, max_value=n_states),
+                min_size=batch_size,
+                max_size=batch_size,
+            )
+        ),
         dtype=np.int64,
     )
     to_indices = np.array(
-        draw(st.lists(
-            st.integers(min_value=-1, max_value=n_states),
-            min_size=batch_size,
-            max_size=batch_size,
-        )),
+        draw(
+            st.lists(
+                st.integers(min_value=-1, max_value=n_states),
+                min_size=batch_size,
+                max_size=batch_size,
+            )
+        ),
         dtype=np.int64,
     )
 

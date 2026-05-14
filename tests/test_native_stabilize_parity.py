@@ -50,7 +50,7 @@ def test_stabilize_temporal_batch_python_fallback() -> None:
     # 2->1: prev=2 end=6+3=9, setup 0->1 = 1*2=2, min_start=11, curr start=5 -> shift by 6
     assert passes >= 1
     assert start_offsets[0] == 0.0  # unchanged
-    assert end_offsets[0] == 5.0   # unchanged
+    assert end_offsets[0] == 5.0  # unchanged
     assert start_offsets[2] >= 6.0
     assert start_offsets[1] >= 11.0
 

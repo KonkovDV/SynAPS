@@ -50,7 +50,7 @@ def generate_large_instance(
         n_machines: Number of work centers.
         n_states: Number of distinct product states.
         ops_per_order: Average operations per order.
-        machine_flexibility: Fraction of machines eligible per operation (0.05–1.0).
+        machine_flexibility: Fraction of machines eligible per operation (0.05-1.0).
         setup_density: Probability that a state transition has a non-zero setup.
         setup_range: Min/max setup time in minutes.
         material_loss_range: Min/max material loss per transition.
@@ -70,10 +70,7 @@ def generate_large_instance(
     horizon_end = horizon_start + timedelta(hours=horizon_hours)
 
     # States
-    states = [
-        State(id=uuid4(), code=f"S-{i:03d}", label=f"State {i}")
-        for i in range(n_states)
-    ]
+    states = [State(id=uuid4(), code=f"S-{i:03d}", label=f"State {i}") for i in range(n_states)]
 
     # Work centers
     work_centers = [
@@ -127,10 +124,7 @@ def generate_large_instance(
     # Pre-compute eligible machines per operation as indices
     n_eligible = max(1, int(n_machines * machine_flexibility))
     work_center_ids = [work_center.id for work_center in work_centers]
-    max_speed_factor = max(
-        max(work_center.speed_factor, 1e-6)
-        for work_center in work_centers
-    )
+    max_speed_factor = max(max(work_center.speed_factor, 1e-6) for work_center in work_centers)
 
     for order_idx in range(n_orders):
         if ops_created >= n_operations:
@@ -191,9 +185,7 @@ def generate_large_instance(
         due_flow_factor = rng.uniform(1.25, 2.10)
         due_slack_hours = rng.uniform(2.0, 36.0)
         due_offset_hours = (
-            release_offset_hours
-            + (min_process_hours * due_flow_factor)
-            + due_slack_hours
+            release_offset_hours + (min_process_hours * due_flow_factor) + due_slack_hours
         )
         due_offset_hours = min(due_offset_hours, horizon_hours)
 

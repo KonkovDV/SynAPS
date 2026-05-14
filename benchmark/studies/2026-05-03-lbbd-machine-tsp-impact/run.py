@@ -135,19 +135,22 @@ def _render_summary(records: list[dict[str, Any]]) -> str:
     for record in records:
         meta = record["metadata"]
         cuts = meta.get("cut_pool") or {}
-        kinds_str = ", ".join(
-            f"{kind}={count}" for kind, count in sorted((cuts.get("kinds") or {}).items())
-        ) or "_none_"
+        kinds_str = (
+            ", ".join(
+                f"{kind}={count}" for kind, count in sorted((cuts.get("kinds") or {}).items())
+            )
+            or "_none_"
+        )
         gap = meta.get("gap")
-        gap_str = f"{gap:.4f}" if isinstance(gap, (int, float)) else "-"
+        gap_str = f"{gap:.4f}" if isinstance(gap, int | float) else "-"
         lb_str = (
             f"{meta['lower_bound']:.2f}"
-            if isinstance(meta.get("lower_bound"), (int, float))
+            if isinstance(meta.get("lower_bound"), int | float)
             else "-"
         )
         ub_str = (
             f"{meta['upper_bound']:.2f}"
-            if isinstance(meta.get("upper_bound"), (int, float))
+            if isinstance(meta.get("upper_bound"), int | float)
             and meta["upper_bound"] != float("inf")
             else "-"
         )
@@ -198,19 +201,15 @@ def main() -> None:
     for instance_name in INSTANCE_NAMES:
         for enable_tsp in (False, True):
             print(
-                f"[run] instance={instance_name} "
-                f"enable_machine_tsp_cuts={enable_tsp}",
+                f"[run] instance={instance_name} enable_machine_tsp_cuts={enable_tsp}",
                 flush=True,
             )
             record = _run_one(instance_name, enable_tsp=enable_tsp)
             records.append(record)
             artefact_path = ARTIFACT_DIR / (
-                f"{instance_name}__"
-                f"{'tsp' if enable_tsp else 'baseline'}.json"
+                f"{instance_name}__{'tsp' if enable_tsp else 'baseline'}.json"
             )
-            artefact_path.write_text(
-                json.dumps(record, indent=2, default=str), encoding="utf-8"
-            )
+            artefact_path.write_text(json.dumps(record, indent=2, default=str), encoding="utf-8")
             print(
                 f"      LB={record['metadata'].get('lower_bound')} "
                 f"UB={record['metadata'].get('upper_bound')} "

@@ -99,72 +99,126 @@ BENCHMARK_SUITE: list[BenchmarkConfig] = [
     # 1K — all solvers should handle this easily
     {"n_ops": 1000, "n_machines": 20, "n_states": 10, "solver_name": "greedy", "solver_kwargs": {}},
     {"n_ops": 1000, "n_machines": 20, "n_states": 10, "solver_name": "beam-3", "solver_kwargs": {}},
-    {"n_ops": 1000, "n_machines": 20, "n_states": 10, "solver_name": "alns", "solver_kwargs": {
-        "max_iterations": 100, "time_limit_s": 30, "repair_time_limit_s": 3,
-        "min_destroy": 10, "max_destroy": 50,
-    }},
-
+    {
+        "n_ops": 1000,
+        "n_machines": 20,
+        "n_states": 10,
+        "solver_name": "alns",
+        "solver_kwargs": {
+            "max_iterations": 100,
+            "time_limit_s": 30,
+            "repair_time_limit_s": 3,
+            "min_destroy": 10,
+            "max_destroy": 50,
+        },
+    },
     # 5K — ALNS sweet spot
     {"n_ops": 5000, "n_machines": 50, "n_states": 15, "solver_name": "greedy", "solver_kwargs": {}},
-    {"n_ops": 5000, "n_machines": 50, "n_states": 15, "solver_name": "alns", "solver_kwargs": {
-        "max_iterations": 200, "time_limit_s": 60, "repair_time_limit_s": 5,
-        "min_destroy": 20, "max_destroy": 150,
-    }},
-
+    {
+        "n_ops": 5000,
+        "n_machines": 50,
+        "n_states": 15,
+        "solver_name": "alns",
+        "solver_kwargs": {
+            "max_iterations": 200,
+            "time_limit_s": 60,
+            "repair_time_limit_s": 5,
+            "min_destroy": 20,
+            "max_destroy": 150,
+        },
+    },
     # 10K — ALNS + RHC
     {
-        "n_ops": 10000, "n_machines": 50, "n_states": 15,
-        "solver_name": "greedy", "solver_kwargs": {},
+        "n_ops": 10000,
+        "n_machines": 50,
+        "n_states": 15,
+        "solver_name": "greedy",
+        "solver_kwargs": {},
     },
-    {"n_ops": 10000, "n_machines": 50, "n_states": 15, "solver_name": "alns", "solver_kwargs": {
-        "max_iterations": 300, "time_limit_s": 120, "repair_time_limit_s": 5,
-        "min_destroy": 30, "max_destroy": 200,
-    }},
-    {"n_ops": 10000, "n_machines": 50, "n_states": 15, "solver_name": "rhc-alns", "solver_kwargs": {
-        "window_minutes": 480, "overlap_minutes": 120, "inner_solver": "alns",
-        "time_limit_s": 120, "max_ops_per_window": 3000,
-        "inner_kwargs": {"max_iterations": 100, "time_limit_s": 30, "repair_time_limit_s": 3},
-    }},
-
+    {
+        "n_ops": 10000,
+        "n_machines": 50,
+        "n_states": 15,
+        "solver_name": "alns",
+        "solver_kwargs": {
+            "max_iterations": 300,
+            "time_limit_s": 120,
+            "repair_time_limit_s": 5,
+            "min_destroy": 30,
+            "max_destroy": 200,
+        },
+    },
+    {
+        "n_ops": 10000,
+        "n_machines": 50,
+        "n_states": 15,
+        "solver_name": "rhc-alns",
+        "solver_kwargs": {
+            "window_minutes": 480,
+            "overlap_minutes": 120,
+            "inner_solver": "alns",
+            "time_limit_s": 120,
+            "max_ops_per_window": 3000,
+            "inner_kwargs": {"max_iterations": 100, "time_limit_s": 30, "repair_time_limit_s": 3},
+        },
+    },
     # 50K — RHC-ALNS is the primary path
     {
-        "n_ops": 50000, "n_machines": 100, "n_states": 20,
-        "solver_name": "greedy", "solver_kwargs": {},
+        "n_ops": 50000,
+        "n_machines": 100,
+        "n_states": 20,
+        "solver_name": "greedy",
+        "solver_kwargs": {},
     },
     {
-        "n_ops": 50000, "n_machines": 100, "n_states": 20,
-        "solver_name": "rhc-greedy", "solver_kwargs": {
-        "window_minutes": 480, "overlap_minutes": 60, "inner_solver": "greedy",
-        "time_limit_s": 120, "max_ops_per_window": 10000,
-    }},
-    {
-        "n_ops": 50000, "n_machines": 100, "n_states": 20,
-        "solver_name": "rhc-alns", "solver_kwargs": {
-        "window_minutes": 480, "overlap_minutes": 120, "inner_solver": "alns",
-        "time_limit_s": 300, "alns_inner_window_time_cap_s": 180, "max_ops_per_window": 5000,
-        "progressive_admission_relaxation_enabled": True,
-        "precedence_ready_candidate_filter_enabled": True,
-        "admission_relaxation_min_fill_ratio": 0.30,
-        "alns_budget_auto_scaling_enabled": True,
-        "alns_budget_estimated_repair_s_per_destroyed_op": 0.125,
-        "hybrid_inner_routing_enabled": False,
-        "hybrid_inner_solver": "cpsat",
-        "hybrid_due_pressure_threshold": 0.35,
-        "hybrid_candidate_pressure_threshold": 4.0,
-        "hybrid_max_ops": 1500,
-        "inner_kwargs": {
-            "max_iterations": 100,
-            "destroy_fraction": 0.03,
-            "min_destroy": 10,
-            "max_destroy": 40,
-            "max_no_improve_iters": 30,
-            "use_cpsat_repair": False,
-            "repair_time_limit_s": 5,
-            "repair_num_workers": 1,
-            "cpsat_max_destroy_ops": 32,
-            "sa_auto_calibration_enabled": True,
+        "n_ops": 50000,
+        "n_machines": 100,
+        "n_states": 20,
+        "solver_name": "rhc-greedy",
+        "solver_kwargs": {
+            "window_minutes": 480,
+            "overlap_minutes": 60,
+            "inner_solver": "greedy",
+            "time_limit_s": 120,
+            "max_ops_per_window": 10000,
         },
-    }},
+    },
+    {
+        "n_ops": 50000,
+        "n_machines": 100,
+        "n_states": 20,
+        "solver_name": "rhc-alns",
+        "solver_kwargs": {
+            "window_minutes": 480,
+            "overlap_minutes": 120,
+            "inner_solver": "alns",
+            "time_limit_s": 300,
+            "alns_inner_window_time_cap_s": 180,
+            "max_ops_per_window": 5000,
+            "progressive_admission_relaxation_enabled": True,
+            "precedence_ready_candidate_filter_enabled": True,
+            "admission_relaxation_min_fill_ratio": 0.30,
+            "alns_budget_auto_scaling_enabled": True,
+            "alns_budget_estimated_repair_s_per_destroyed_op": 0.125,
+            "hybrid_inner_routing_enabled": False,
+            "hybrid_inner_solver": "cpsat",
+            "hybrid_due_pressure_threshold": 0.35,
+            "hybrid_candidate_pressure_threshold": 4.0,
+            "hybrid_max_ops": 1500,
+            "inner_kwargs": {
+                "max_iterations": 100,
+                "destroy_fraction": 0.03,
+                "min_destroy": 10,
+                "max_destroy": 40,
+                "max_no_improve_iters": 30,
+                "use_cpsat_repair": False,
+                "repair_time_limit_s": 5,
+                "repair_num_workers": 1,
+                "cpsat_max_destroy_ops": 32,
+                "sa_auto_calibration_enabled": True,
+            },
+        },
+    },
 ]
 
 
@@ -179,9 +233,9 @@ def main() -> None:
         n_ops = config["n_ops"]
         solver = config["solver_name"]
         print(
-            f"\n[{i + 1}/{len(BENCHMARK_SUITE)}] "
-            f"{solver} @ {n_ops:,} ops ... ",
-            end="", flush=True,
+            f"\n[{i + 1}/{len(BENCHMARK_SUITE)}] {solver} @ {n_ops:,} ops ... ",
+            end="",
+            flush=True,
         )
 
         try:

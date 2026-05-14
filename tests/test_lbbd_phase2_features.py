@@ -133,9 +133,7 @@ def test_machine_tsp_lower_bound_dominates_sequence_independent_floor() -> None:
         (entry.work_center_id, entry.from_state_id, entry.to_state_id): entry.setup_minutes
         for entry in problem.setup_matrix
     }
-    state_seq = [
-        ops_by_id[assignment.operation_id].state_id for assignment in assignments
-    ]
+    state_seq = [ops_by_id[assignment.operation_id].state_id for assignment in assignments]
 
     tsp_bound = _compute_machine_tsp_lb_plain(state_seq, work_center.id, setup_lookup)
     seq_independent_bound = _compute_setup_lb_plain(
@@ -341,20 +339,31 @@ def test_setup_relaxation_floor_drops_to_zero_when_zero_transition_exists() -> N
     problem = _make_setup_dense_problem()
     work_center = problem.work_centers[0]
     eligible_by_op = {
-        operation.id: list(operation.eligible_wc_ids)
-        for operation in problem.operations
+        operation.id: list(operation.eligible_wc_ids) for operation in problem.operations
     }
     setup_lookup = {
         (entry.work_center_id, entry.from_state_id, entry.to_state_id): entry.setup_minutes
         for entry in problem.setup_matrix
     }
 
-    assert _compute_machine_transition_floor_plain(
-        problem, eligible_by_op, work_center.id, setup_lookup,
-    ) == 0.0
-    assert _compute_machine_transition_floor_hd(
-        problem, eligible_by_op, work_center.id, setup_lookup,
-    ) == 0.0
+    assert (
+        _compute_machine_transition_floor_plain(
+            problem,
+            eligible_by_op,
+            work_center.id,
+            setup_lookup,
+        )
+        == 0.0
+    )
+    assert (
+        _compute_machine_transition_floor_hd(
+            problem,
+            eligible_by_op,
+            work_center.id,
+            setup_lookup,
+        )
+        == 0.0
+    )
 
 
 def test_setup_cost_lower_bound_uses_state_mix_not_realized_sequence_cost() -> None:
@@ -375,7 +384,5 @@ def test_setup_cost_lower_bound_uses_state_mix_not_realized_sequence_cost() -> N
         for entry in problem.setup_matrix
     }
 
-    assert (
-        _compute_setup_lb_plain(assignments, work_center.id, ops_by_id, setup_lookup) == 5.0
-    )
+    assert _compute_setup_lb_plain(assignments, work_center.id, ops_by_id, setup_lookup) == 5.0
     assert _compute_setup_lb_hd(assignments, work_center.id, ops_by_id, setup_lookup) == 5.0

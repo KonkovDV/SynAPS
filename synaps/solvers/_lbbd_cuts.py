@@ -83,9 +83,7 @@ def compute_machine_transition_floor(
     min_transition = float("inf")
     for from_state_id in relevant_state_ids:
         for to_state_id in relevant_state_ids:
-            transition = float(
-                setup_lookup.get((work_center_id, from_state_id, to_state_id), 0.0)
-            )
+            transition = float(setup_lookup.get((work_center_id, from_state_id, to_state_id), 0.0))
             if transition <= 0:
                 return 0.0
             min_transition = min(min_transition, transition)
@@ -167,9 +165,7 @@ def compute_machine_tsp_lower_bound(
         for j, to_state in enumerate(distinct):
             if i == j:
                 continue
-            cost[i][j] = float(
-                setup_lookup.get((work_center_id, from_state, to_state), 0.0)
-            )
+            cost[i][j] = float(setup_lookup.get((work_center_id, from_state, to_state), 0.0))
 
     full = 1 << n
     dp: list[list[float]] = [[inf] * n for _ in range(full)]

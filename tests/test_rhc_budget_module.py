@@ -5,6 +5,7 @@ Locks in the exact arithmetic of `resolve_inner_window_time_cap` and
 cannot drift the per-window budget contract that downstream telemetry
 and the ALNS solver depend on.
 """
+
 from __future__ import annotations
 
 from synaps.solvers.rhc._budget import (

@@ -30,7 +30,6 @@ from synaps.model import (
 from synaps.solvers.alns_solver import AlnsSolver
 from synaps.solvers.greedy_dispatch import GreedyDispatch
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Fixtures
 # ─────────────────────────────────────────────────────────────────────────────
@@ -166,9 +165,7 @@ class TestAlnsWarmStartMetadata:
         """Test 1: passing `warm_start_assignments=None` → greedy runs,
         `alns_warm_start_used=False`, `alns_warm_start_coverage=0.0`.
         """
-        problem = _make_small_feasible_problem(
-            n_orders=5, ops_per_order=3, n_machines=3, seed=42
-        )
+        problem = _make_small_feasible_problem(n_orders=5, ops_per_order=3, n_machines=3, seed=42)
         result = _solve_alns(problem, warm_start_assignments=None)
 
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL), (
@@ -194,9 +191,7 @@ class TestAlnsWarmStartMetadata:
         skipped, `alns_warm_start_used=True`, `alns_warm_start_coverage=1.0`,
         and the initial seed is the warm start itself.
         """
-        problem = _make_small_feasible_problem(
-            n_orders=5, ops_per_order=3, n_machines=3, seed=42
-        )
+        problem = _make_small_feasible_problem(n_orders=5, ops_per_order=3, n_machines=3, seed=42)
         warm = _greedy_warm_start(problem)
         # Sanity: full coverage of every operation.
         assert len(warm) == len(problem.operations)
@@ -232,21 +227,16 @@ class TestAlnsWarmStartMetadata:
         # With 0 iterations, the final makespan equals the warm-start makespan
         # (ALNS never got a chance to mutate it).
         warm_makespan = max(
-            (a.end_time - problem.planning_horizon_start).total_seconds() / 60.0
-            for a in warm
+            (a.end_time - problem.planning_horizon_start).total_seconds() / 60.0 for a in warm
         )
-        assert result.objective.makespan_minutes == pytest.approx(
-            warm_makespan, abs=1e-6
-        )
+        assert result.objective.makespan_minutes == pytest.approx(warm_makespan, abs=1e-6)
 
     def test_partial_warm_start_reports_fractional_coverage(self) -> None:
         """Test 3: passing a partial warm-start (subset of ops) →
         `alns_warm_start_used=True`, `alns_warm_start_coverage` in (0.0, 1.0).
         Greedy fills the remaining operations.
         """
-        problem = _make_small_feasible_problem(
-            n_orders=5, ops_per_order=3, n_machines=3, seed=42
-        )
+        problem = _make_small_feasible_problem(n_orders=5, ops_per_order=3, n_machines=3, seed=42)
         warm_full = _greedy_warm_start(problem)
         n_ops = len(problem.operations)
 
@@ -254,9 +244,7 @@ class TestAlnsWarmStartMetadata:
         # filler can legally repair the remaining operations (precedence-safe
         # split). We pick the first 2 orders' assignments.
         first_two_order_ids = {o.id for o in problem.orders[:2]}
-        partial_op_ids = {
-            op.id for op in problem.operations if op.order_id in first_two_order_ids
-        }
+        partial_op_ids = {op.id for op in problem.operations if op.order_id in first_two_order_ids}
         warm_partial = [a for a in warm_full if a.operation_id in partial_op_ids]
         assert 0 < len(warm_partial) < n_ops, (
             "Partial warm-start must be a strict subset for this test."
@@ -285,9 +273,7 @@ class TestAlnsWarmStartMetadata:
         )
 
         expected_coverage = round(len(warm_partial) / n_ops, 6)
-        assert md["alns_warm_start_coverage"] == pytest.approx(
-            expected_coverage, abs=1e-6
-        ), (
+        assert md["alns_warm_start_coverage"] == pytest.approx(expected_coverage, abs=1e-6), (
             f"alns_warm_start_coverage should equal supplied/n_ops = "
             f"{expected_coverage}, got {md['alns_warm_start_coverage']}"
         )
@@ -296,12 +282,10 @@ class TestAlnsWarmStartMetadata:
         if md["alns_warm_start_used"]:
             # Partial warm-start path succeeded: greedy must have filled the gap.
             assert md["warm_start_completed_assignments"] > 0, (
-                "Partial warm-start was consumed but no greedy completion is "
-                "recorded."
+                "Partial warm-start was consumed but no greedy completion is recorded."
             )
             assert (
-                md["warm_start_supplied_assignments"]
-                + md["warm_start_completed_assignments"]
+                md["warm_start_supplied_assignments"] + md["warm_start_completed_assignments"]
                 == n_ops
             )
             assert md["initial_solver"] == "warm_start"
@@ -320,9 +304,7 @@ class TestAlnsWarmStartMetadata:
         In both cases the solver must return a feasible schedule and the
         telemetry must truthfully reflect which path ran.
         """
-        problem = _make_small_feasible_problem(
-            n_orders=5, ops_per_order=3, n_machines=3, seed=42
-        )
+        problem = _make_small_feasible_problem(n_orders=5, ops_per_order=3, n_machines=3, seed=42)
         warm_full = _greedy_warm_start(problem)
 
         # Corrupt one assignment by pointing it at a work center the operation

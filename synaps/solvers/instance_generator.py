@@ -77,10 +77,7 @@ def generate_large_instance(
     wc_ids = [wc.id for wc in work_centers]
 
     # -- States --
-    states = [
-        State(id=uuid4(), code=f"S-{i:03d}", label=f"State {i}")
-        for i in range(num_states)
-    ]
+    states = [State(id=uuid4(), code=f"S-{i:03d}", label=f"State {i}") for i in range(num_states)]
     state_ids = [s.id for s in states]
 
     # -- Setup matrix (SDST entries) --

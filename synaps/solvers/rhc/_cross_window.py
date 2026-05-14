@@ -11,7 +11,6 @@ telemetry feature (see tasks.md Stage C / Task 3a).
 
 from __future__ import annotations
 
-from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -90,20 +89,14 @@ def compute_window_quality_summary(
 
     for assignment in assignments:
         wc_id = assignment.work_center_id
-        duration_minutes = (
-            (assignment.end_time - assignment.start_time).total_seconds() / 60.0
-        )
+        duration_minutes = (assignment.end_time - assignment.start_time).total_seconds() / 60.0
         machine_duration[wc_id] = machine_duration.get(wc_id, 0.0) + duration_minutes
-        machine_setup[wc_id] = machine_setup.get(wc_id, 0.0) + float(
-            assignment.setup_minutes
-        )
+        machine_setup[wc_id] = machine_setup.get(wc_id, 0.0) + float(assignment.setup_minutes)
 
         # Track order completion for tardiness.
         op = ops_by_id.get(assignment.operation_id)
         if op is not None:
-            end_offset = (
-                (assignment.end_time - horizon_start).total_seconds() / 60.0
-            )
+            end_offset = (assignment.end_time - horizon_start).total_seconds() / 60.0
             order_id = op.order_id
             if end_offset > order_latest_end.get(order_id, 0.0):
                 order_latest_end[order_id] = end_offset

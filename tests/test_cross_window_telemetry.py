@@ -15,7 +15,9 @@ from collections import deque
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+import hypothesis.strategies as st
 import pytest
+from hypothesis import given, settings
 
 from synaps.model import Assignment, Operation
 from synaps.solvers.rhc._cross_window import (
@@ -23,7 +25,6 @@ from synaps.solvers.rhc._cross_window import (
     WindowQualitySummary,
     compute_window_quality_summary,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Task 3a.5: Unit tests
@@ -133,16 +134,25 @@ class TestComputeWindowQualitySummary:
 
         ops_by_id = {
             op_1: Operation(
-                id=op_1, order_id=order_1, seq_in_order=0,
-                state_id=uuid4(), base_duration_min=60,
+                id=op_1,
+                order_id=order_1,
+                seq_in_order=0,
+                state_id=uuid4(),
+                base_duration_min=60,
             ),
             op_2: Operation(
-                id=op_2, order_id=order_1, seq_in_order=1,
-                state_id=uuid4(), base_duration_min=30,
+                id=op_2,
+                order_id=order_1,
+                seq_in_order=1,
+                state_id=uuid4(),
+                base_duration_min=30,
             ),
             op_3: Operation(
-                id=op_3, order_id=order_2, seq_in_order=0,
-                state_id=uuid4(), base_duration_min=45,
+                id=op_3,
+                order_id=order_2,
+                seq_in_order=0,
+                state_id=uuid4(),
+                base_duration_min=45,
             ),
         }
 
@@ -235,9 +245,7 @@ class TestHintPropagationLogic:
     def test_flag_disabled_buffer_nonempty_no_hints(self) -> None:
         """When flag=False and buffer non-empty → no cross_window_hints in kwargs."""
         cross_window_learning_enabled = False
-        quality_summary_buffer: deque[WindowQualitySummary] = deque(
-            maxlen=QUALITY_BUFFER_MAXLEN
-        )
+        quality_summary_buffer: deque[WindowQualitySummary] = deque(maxlen=QUALITY_BUFFER_MAXLEN)
         quality_summary_buffer.append(
             WindowQualitySummary(
                 window_index=0,
@@ -257,9 +265,7 @@ class TestHintPropagationLogic:
     def test_flag_enabled_buffer_nonempty_hints_present(self) -> None:
         """When flag=True and buffer non-empty → cross_window_hints in kwargs."""
         cross_window_learning_enabled = True
-        quality_summary_buffer: deque[WindowQualitySummary] = deque(
-            maxlen=QUALITY_BUFFER_MAXLEN
-        )
+        quality_summary_buffer: deque[WindowQualitySummary] = deque(maxlen=QUALITY_BUFFER_MAXLEN)
         quality_summary_buffer.append(
             WindowQualitySummary(
                 window_index=0,
@@ -281,9 +287,7 @@ class TestHintPropagationLogic:
     def test_flag_enabled_buffer_empty_no_hints(self) -> None:
         """When flag=True but buffer is empty → no cross_window_hints in kwargs."""
         cross_window_learning_enabled = True
-        quality_summary_buffer: deque[WindowQualitySummary] = deque(
-            maxlen=QUALITY_BUFFER_MAXLEN
-        )
+        quality_summary_buffer: deque[WindowQualitySummary] = deque(maxlen=QUALITY_BUFFER_MAXLEN)
 
         effective_inner_kwargs: dict = {}
         if cross_window_learning_enabled and quality_summary_buffer:
@@ -294,9 +298,7 @@ class TestHintPropagationLogic:
     def test_flag_disabled_buffer_empty_no_hints(self) -> None:
         """When flag=False and buffer is empty → no cross_window_hints in kwargs."""
         cross_window_learning_enabled = False
-        quality_summary_buffer: deque[WindowQualitySummary] = deque(
-            maxlen=QUALITY_BUFFER_MAXLEN
-        )
+        quality_summary_buffer: deque[WindowQualitySummary] = deque(maxlen=QUALITY_BUFFER_MAXLEN)
 
         effective_inner_kwargs: dict = {}
         if cross_window_learning_enabled and quality_summary_buffer:
@@ -308,9 +310,6 @@ class TestHintPropagationLogic:
 # ─────────────────────────────────────────────────────────────────────────────
 # Task 3a.6: Property test — buffer length never exceeds 5
 # ─────────────────────────────────────────────────────────────────────────────
-
-import hypothesis.strategies as st
-from hypothesis import given, settings
 
 
 @st.composite
@@ -324,14 +323,8 @@ def window_summary_sequence(draw: st.DrawFn):
     for i in range(n_windows):
         n_machines = draw(st.integers(min_value=0, max_value=5))
         machine_ids = [f"wc_{j}" for j in range(n_machines)]
-        utilization = {
-            m: draw(st.floats(min_value=0.0, max_value=1.0))
-            for m in machine_ids
-        }
-        setup_cost = {
-            m: draw(st.floats(min_value=0.0, max_value=100.0))
-            for m in machine_ids
-        }
+        utilization = {m: draw(st.floats(min_value=0.0, max_value=1.0)) for m in machine_ids}
+        setup_cost = {m: draw(st.floats(min_value=0.0, max_value=100.0)) for m in machine_ids}
         tardiness = draw(st.floats(min_value=0.0, max_value=1000.0))
         op_count = draw(st.integers(min_value=0, max_value=5000))
 
@@ -376,9 +369,6 @@ class TestBufferBoundedProperty:
         # And the buffer contains at most the last 5 summaries
         if len(summaries) >= QUALITY_BUFFER_MAXLEN:
             assert len(buffer) == QUALITY_BUFFER_MAXLEN
-            expected_indices = [
-                s.window_index
-                for s in summaries[-QUALITY_BUFFER_MAXLEN:]
-            ]
+            expected_indices = [s.window_index for s in summaries[-QUALITY_BUFFER_MAXLEN:]]
             actual_indices = [s.window_index for s in buffer]
             assert actual_indices == expected_indices

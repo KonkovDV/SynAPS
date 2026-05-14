@@ -97,8 +97,7 @@ def route_solver_config(
         return SolverRoutingDecision(
             solver_config="GREED",
             reason=(
-                "interactive regime prioritizes immediate feasible feedback over "
-                "global optimality"
+                "interactive regime prioritizes immediate feasible feedback over global optimality"
             ),
         )
 
@@ -109,8 +108,7 @@ def route_solver_config(
             return SolverRoutingDecision(
                 solver_config="CPSAT-10",
                 reason=(
-                    "small disruption window fits an exact CP-SAT patch within the "
-                    "latency budget"
+                    "small disruption window fits an exact CP-SAT patch within the latency budget"
                 ),
             )
         return SolverRoutingDecision(
@@ -292,8 +290,7 @@ def route_solver_config(
         return SolverRoutingDecision(
             solver_config="CPSAT-30",
             reason=(
-                "medium nominal instance with richer constraints still fits the exact "
-                "CP-SAT path"
+                "medium nominal instance with richer constraints still fits the exact CP-SAT path"
             ),
         )
 
@@ -410,12 +407,16 @@ def select_solver(
                 if advisory.confidence >= advisory_confidence_threshold:
                     try:
                         solver, solve_kwargs = create_solver(advisory.recommended_solver)
-                        return solver, solve_kwargs, SolverRoutingDecision(
-                            solver_config=advisory.recommended_solver,
-                            reason=(
-                                f"ML advisory (model={advisory.model_version}, "
-                                f"confidence={advisory.confidence:.2f}) overrode "
-                                f"deterministic choice ({deterministic.solver_config})"
+                        return (
+                            solver,
+                            solve_kwargs,
+                            SolverRoutingDecision(
+                                solver_config=advisory.recommended_solver,
+                                reason=(
+                                    f"ML advisory (model={advisory.model_version}, "
+                                    f"confidence={advisory.confidence:.2f}) overrode "
+                                    f"deterministic choice ({deterministic.solver_config})"
+                                ),
                             ),
                         )
                     except KeyError:

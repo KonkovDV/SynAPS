@@ -44,29 +44,53 @@ class TestCriticalPathExtension:
         # op_d is on machine A after op_b (order3, no precedence link)
         # op_e is on machine B (order3, no precedence link to anything on A)
         op_a = Operation(
-            id=uuid4(), order_id=order1.id, seq_in_order=1,
-            state_id=s1.id, base_duration_min=20, eligible_wc_ids=[wc_a.id],
+            id=uuid4(),
+            order_id=order1.id,
+            seq_in_order=1,
+            state_id=s1.id,
+            base_duration_min=20,
+            eligible_wc_ids=[wc_a.id],
         )
         op_b = Operation(
-            id=uuid4(), order_id=order1.id, seq_in_order=2,
-            state_id=s2.id, base_duration_min=20, eligible_wc_ids=[wc_a.id],
+            id=uuid4(),
+            order_id=order1.id,
+            seq_in_order=2,
+            state_id=s2.id,
+            base_duration_min=20,
+            eligible_wc_ids=[wc_a.id],
             predecessor_op_id=op_a.id,
         )
         op_c = Operation(
-            id=uuid4(), order_id=order2.id, seq_in_order=1,
-            state_id=s3.id, base_duration_min=5, eligible_wc_ids=[wc_a.id],
+            id=uuid4(),
+            order_id=order2.id,
+            seq_in_order=1,
+            state_id=s3.id,
+            base_duration_min=5,
+            eligible_wc_ids=[wc_a.id],
         )
         op_d = Operation(
-            id=uuid4(), order_id=order3.id, seq_in_order=1,
-            state_id=s1.id, base_duration_min=5, eligible_wc_ids=[wc_a.id],
+            id=uuid4(),
+            order_id=order3.id,
+            seq_in_order=1,
+            state_id=s1.id,
+            base_duration_min=5,
+            eligible_wc_ids=[wc_a.id],
         )
 
         # Setup costs: transition into/from op_d is expensive, op_c is cheap
         setup_entries = [
-            SetupEntry(work_center_id=wc_a.id, from_state_id=s3.id, to_state_id=s1.id, setup_minutes=3),   # c->a
-            SetupEntry(work_center_id=wc_a.id, from_state_id=s1.id, to_state_id=s2.id, setup_minutes=2),   # a->b
-            SetupEntry(work_center_id=wc_a.id, from_state_id=s2.id, to_state_id=s1.id, setup_minutes=50),  # b->d (high!)
-            SetupEntry(work_center_id=wc_b.id, from_state_id=s1.id, to_state_id=s2.id, setup_minutes=1),
+            SetupEntry(
+                work_center_id=wc_a.id, from_state_id=s3.id, to_state_id=s1.id, setup_minutes=3
+            ),  # c->a
+            SetupEntry(
+                work_center_id=wc_a.id, from_state_id=s1.id, to_state_id=s2.id, setup_minutes=2
+            ),  # a->b
+            SetupEntry(
+                work_center_id=wc_a.id, from_state_id=s2.id, to_state_id=s1.id, setup_minutes=50
+            ),  # b->d (high!)
+            SetupEntry(
+                work_center_id=wc_b.id, from_state_id=s1.id, to_state_id=s2.id, setup_minutes=1
+            ),
         ]
 
         problem = ScheduleProblem(
@@ -82,14 +106,30 @@ class TestCriticalPathExtension:
         # Machine A sequence (by start_time): op_c(0-5), op_a(5-25), op_b(25-45), op_d(45-50)
         base = datetime(2025, 1, 1)
         assignments = [
-            Assignment(operation_id=op_c.id, work_center_id=wc_a.id,
-                       start_time=base, end_time=base + timedelta(minutes=5)),
-            Assignment(operation_id=op_a.id, work_center_id=wc_a.id,
-                       start_time=base + timedelta(minutes=5), end_time=base + timedelta(minutes=25)),
-            Assignment(operation_id=op_b.id, work_center_id=wc_a.id,
-                       start_time=base + timedelta(minutes=25), end_time=base + timedelta(minutes=45)),
-            Assignment(operation_id=op_d.id, work_center_id=wc_a.id,
-                       start_time=base + timedelta(minutes=45), end_time=base + timedelta(minutes=50)),
+            Assignment(
+                operation_id=op_c.id,
+                work_center_id=wc_a.id,
+                start_time=base,
+                end_time=base + timedelta(minutes=5),
+            ),
+            Assignment(
+                operation_id=op_a.id,
+                work_center_id=wc_a.id,
+                start_time=base + timedelta(minutes=5),
+                end_time=base + timedelta(minutes=25),
+            ),
+            Assignment(
+                operation_id=op_b.id,
+                work_center_id=wc_a.id,
+                start_time=base + timedelta(minutes=25),
+                end_time=base + timedelta(minutes=45),
+            ),
+            Assignment(
+                operation_id=op_d.id,
+                work_center_id=wc_a.id,
+                start_time=base + timedelta(minutes=45),
+                end_time=base + timedelta(minutes=50),
+            ),
         ]
 
         sdst = SdstMatrix.from_problem(problem)
@@ -127,27 +167,71 @@ class TestCriticalPathExtension:
         # op2..op5 on machine A (separate orders, no precedence to each other)
         # Machine A sequence: op2, op3, op1, op4, op5
         op_x = Operation(
-            id=uuid4(), order_id=order1.id, seq_in_order=1,
-            state_id=s1.id, base_duration_min=100, eligible_wc_ids=[wc_b.id],
+            id=uuid4(),
+            order_id=order1.id,
+            seq_in_order=1,
+            state_id=s1.id,
+            base_duration_min=100,
+            eligible_wc_ids=[wc_b.id],
         )
-        op1 = Operation(id=uuid4(), order_id=order1.id, seq_in_order=2,
-                        state_id=s1.id, base_duration_min=5, eligible_wc_ids=[wc_a.id],
-                        predecessor_op_id=op_x.id)
-        op2 = Operation(id=uuid4(), order_id=order2.id, seq_in_order=1,
-                        state_id=s2.id, base_duration_min=5, eligible_wc_ids=[wc_a.id])
-        op3 = Operation(id=uuid4(), order_id=order3.id, seq_in_order=1,
-                        state_id=s3.id, base_duration_min=5, eligible_wc_ids=[wc_a.id])
-        op4 = Operation(id=uuid4(), order_id=order4.id, seq_in_order=1,
-                        state_id=s1.id, base_duration_min=5, eligible_wc_ids=[wc_a.id])
-        op5 = Operation(id=uuid4(), order_id=order5.id, seq_in_order=1,
-                        state_id=s2.id, base_duration_min=5, eligible_wc_ids=[wc_a.id])
+        op1 = Operation(
+            id=uuid4(),
+            order_id=order1.id,
+            seq_in_order=2,
+            state_id=s1.id,
+            base_duration_min=5,
+            eligible_wc_ids=[wc_a.id],
+            predecessor_op_id=op_x.id,
+        )
+        op2 = Operation(
+            id=uuid4(),
+            order_id=order2.id,
+            seq_in_order=1,
+            state_id=s2.id,
+            base_duration_min=5,
+            eligible_wc_ids=[wc_a.id],
+        )
+        op3 = Operation(
+            id=uuid4(),
+            order_id=order3.id,
+            seq_in_order=1,
+            state_id=s3.id,
+            base_duration_min=5,
+            eligible_wc_ids=[wc_a.id],
+        )
+        op4 = Operation(
+            id=uuid4(),
+            order_id=order4.id,
+            seq_in_order=1,
+            state_id=s1.id,
+            base_duration_min=5,
+            eligible_wc_ids=[wc_a.id],
+        )
+        op5 = Operation(
+            id=uuid4(),
+            order_id=order5.id,
+            seq_in_order=1,
+            state_id=s2.id,
+            base_duration_min=5,
+            eligible_wc_ids=[wc_a.id],
+        )
 
         setup_entries = [
-            SetupEntry(work_center_id=wc_a.id, from_state_id=s1.id, to_state_id=s2.id, setup_minutes=10),
-            SetupEntry(work_center_id=wc_a.id, from_state_id=s2.id, to_state_id=s3.id, setup_minutes=20),
-            SetupEntry(work_center_id=wc_a.id, from_state_id=s3.id, to_state_id=s1.id, setup_minutes=30),
-            SetupEntry(work_center_id=wc_a.id, from_state_id=s1.id, to_state_id=s3.id, setup_minutes=5),
-            SetupEntry(work_center_id=wc_b.id, from_state_id=s1.id, to_state_id=s2.id, setup_minutes=1),
+            SetupEntry(
+                work_center_id=wc_a.id, from_state_id=s1.id, to_state_id=s2.id, setup_minutes=10
+            ),
+            SetupEntry(
+                work_center_id=wc_a.id, from_state_id=s2.id, to_state_id=s3.id, setup_minutes=20
+            ),
+            SetupEntry(
+                work_center_id=wc_a.id, from_state_id=s3.id, to_state_id=s1.id, setup_minutes=30
+            ),
+            SetupEntry(
+                work_center_id=wc_a.id, from_state_id=s1.id, to_state_id=s3.id, setup_minutes=5
+            ),
+            SetupEntry(
+                work_center_id=wc_b.id, from_state_id=s1.id, to_state_id=s2.id, setup_minutes=1
+            ),
         ]
 
         problem = ScheduleProblem(
@@ -164,18 +248,42 @@ class TestCriticalPathExtension:
         # Machine A: op2(0-5), op3(5-10), op1(100-105), op4(105-110), op5(110-115)
         base = datetime(2025, 1, 1)
         assignments = [
-            Assignment(operation_id=op_x.id, work_center_id=wc_b.id,
-                       start_time=base, end_time=base + timedelta(minutes=100)),
-            Assignment(operation_id=op2.id, work_center_id=wc_a.id,
-                       start_time=base, end_time=base + timedelta(minutes=5)),
-            Assignment(operation_id=op3.id, work_center_id=wc_a.id,
-                       start_time=base + timedelta(minutes=5), end_time=base + timedelta(minutes=10)),
-            Assignment(operation_id=op1.id, work_center_id=wc_a.id,
-                       start_time=base + timedelta(minutes=100), end_time=base + timedelta(minutes=105)),
-            Assignment(operation_id=op4.id, work_center_id=wc_a.id,
-                       start_time=base + timedelta(minutes=105), end_time=base + timedelta(minutes=110)),
-            Assignment(operation_id=op5.id, work_center_id=wc_a.id,
-                       start_time=base + timedelta(minutes=110), end_time=base + timedelta(minutes=115)),
+            Assignment(
+                operation_id=op_x.id,
+                work_center_id=wc_b.id,
+                start_time=base,
+                end_time=base + timedelta(minutes=100),
+            ),
+            Assignment(
+                operation_id=op2.id,
+                work_center_id=wc_a.id,
+                start_time=base,
+                end_time=base + timedelta(minutes=5),
+            ),
+            Assignment(
+                operation_id=op3.id,
+                work_center_id=wc_a.id,
+                start_time=base + timedelta(minutes=5),
+                end_time=base + timedelta(minutes=10),
+            ),
+            Assignment(
+                operation_id=op1.id,
+                work_center_id=wc_a.id,
+                start_time=base + timedelta(minutes=100),
+                end_time=base + timedelta(minutes=105),
+            ),
+            Assignment(
+                operation_id=op4.id,
+                work_center_id=wc_a.id,
+                start_time=base + timedelta(minutes=105),
+                end_time=base + timedelta(minutes=110),
+            ),
+            Assignment(
+                operation_id=op5.id,
+                work_center_id=wc_a.id,
+                start_time=base + timedelta(minutes=110),
+                end_time=base + timedelta(minutes=115),
+            ),
         ]
 
         sdst = SdstMatrix.from_problem(problem)
@@ -218,11 +326,23 @@ class TestCriticalPathExtension:
 
         order = Order(id=uuid4(), external_ref="O1", due_date=datetime(2025, 1, 2))
 
-        op1 = Operation(id=uuid4(), order_id=order.id, seq_in_order=1,
-                        state_id=s1.id, base_duration_min=10, eligible_wc_ids=[wc_a.id])
-        op2 = Operation(id=uuid4(), order_id=order.id, seq_in_order=2,
-                        state_id=s2.id, base_duration_min=10, eligible_wc_ids=[wc_a.id],
-                        predecessor_op_id=op1.id)
+        op1 = Operation(
+            id=uuid4(),
+            order_id=order.id,
+            seq_in_order=1,
+            state_id=s1.id,
+            base_duration_min=10,
+            eligible_wc_ids=[wc_a.id],
+        )
+        op2 = Operation(
+            id=uuid4(),
+            order_id=order.id,
+            seq_in_order=2,
+            state_id=s2.id,
+            base_duration_min=10,
+            eligible_wc_ids=[wc_a.id],
+            predecessor_op_id=op1.id,
+        )
 
         problem = ScheduleProblem(
             operations=[op1, op2],
@@ -236,10 +356,18 @@ class TestCriticalPathExtension:
 
         base = datetime(2025, 1, 1)
         assignments = [
-            Assignment(operation_id=op1.id, work_center_id=wc_a.id,
-                       start_time=base, end_time=base + timedelta(minutes=10)),
-            Assignment(operation_id=op2.id, work_center_id=wc_a.id,
-                       start_time=base + timedelta(minutes=10), end_time=base + timedelta(minutes=20)),
+            Assignment(
+                operation_id=op1.id,
+                work_center_id=wc_a.id,
+                start_time=base,
+                end_time=base + timedelta(minutes=10),
+            ),
+            Assignment(
+                operation_id=op2.id,
+                work_center_id=wc_a.id,
+                start_time=base + timedelta(minutes=10),
+                end_time=base + timedelta(minutes=20),
+            ),
         ]
 
         sdst = SdstMatrix.from_problem(problem)
@@ -264,19 +392,47 @@ class TestCriticalPathExtension:
 
         # op1 on machine A, op2 on machine B (precedence: op1->op2)
         # op3 on machine A (adjacent to op1), op4 on machine B (adjacent to op2)
-        op1 = Operation(id=uuid4(), order_id=order1.id, seq_in_order=1,
-                        state_id=s1.id, base_duration_min=20, eligible_wc_ids=[wc_a.id])
-        op2 = Operation(id=uuid4(), order_id=order1.id, seq_in_order=2,
-                        state_id=s2.id, base_duration_min=20, eligible_wc_ids=[wc_b.id],
-                        predecessor_op_id=op1.id)
-        op3 = Operation(id=uuid4(), order_id=order2.id, seq_in_order=1,
-                        state_id=s2.id, base_duration_min=5, eligible_wc_ids=[wc_a.id])
-        op4 = Operation(id=uuid4(), order_id=order3.id, seq_in_order=1,
-                        state_id=s1.id, base_duration_min=5, eligible_wc_ids=[wc_b.id])
+        op1 = Operation(
+            id=uuid4(),
+            order_id=order1.id,
+            seq_in_order=1,
+            state_id=s1.id,
+            base_duration_min=20,
+            eligible_wc_ids=[wc_a.id],
+        )
+        op2 = Operation(
+            id=uuid4(),
+            order_id=order1.id,
+            seq_in_order=2,
+            state_id=s2.id,
+            base_duration_min=20,
+            eligible_wc_ids=[wc_b.id],
+            predecessor_op_id=op1.id,
+        )
+        op3 = Operation(
+            id=uuid4(),
+            order_id=order2.id,
+            seq_in_order=1,
+            state_id=s2.id,
+            base_duration_min=5,
+            eligible_wc_ids=[wc_a.id],
+        )
+        op4 = Operation(
+            id=uuid4(),
+            order_id=order3.id,
+            seq_in_order=1,
+            state_id=s1.id,
+            base_duration_min=5,
+            eligible_wc_ids=[wc_b.id],
+        )
 
         setup_entries = [
-            SetupEntry(work_center_id=wc_a.id, from_state_id=s1.id, to_state_id=s2.id, setup_minutes=10),
-            SetupEntry(work_center_id=wc_b.id, from_state_id=s2.id, to_state_id=s1.id, setup_minutes=20),
+            SetupEntry(
+                work_center_id=wc_a.id, from_state_id=s1.id, to_state_id=s2.id, setup_minutes=10
+            ),
+            SetupEntry(
+                work_center_id=wc_b.id, from_state_id=s2.id, to_state_id=s1.id, setup_minutes=20
+            ),
         ]
 
         problem = ScheduleProblem(
@@ -293,14 +449,30 @@ class TestCriticalPathExtension:
         # Machine A: op1(0-20), op3(20-25)
         # Machine B: op2(20-40), op4(40-45)
         assignments = [
-            Assignment(operation_id=op1.id, work_center_id=wc_a.id,
-                       start_time=base, end_time=base + timedelta(minutes=20)),
-            Assignment(operation_id=op3.id, work_center_id=wc_a.id,
-                       start_time=base + timedelta(minutes=20), end_time=base + timedelta(minutes=25)),
-            Assignment(operation_id=op2.id, work_center_id=wc_b.id,
-                       start_time=base + timedelta(minutes=20), end_time=base + timedelta(minutes=40)),
-            Assignment(operation_id=op4.id, work_center_id=wc_b.id,
-                       start_time=base + timedelta(minutes=40), end_time=base + timedelta(minutes=45)),
+            Assignment(
+                operation_id=op1.id,
+                work_center_id=wc_a.id,
+                start_time=base,
+                end_time=base + timedelta(minutes=20),
+            ),
+            Assignment(
+                operation_id=op3.id,
+                work_center_id=wc_a.id,
+                start_time=base + timedelta(minutes=20),
+                end_time=base + timedelta(minutes=25),
+            ),
+            Assignment(
+                operation_id=op2.id,
+                work_center_id=wc_b.id,
+                start_time=base + timedelta(minutes=20),
+                end_time=base + timedelta(minutes=40),
+            ),
+            Assignment(
+                operation_id=op4.id,
+                work_center_id=wc_b.id,
+                start_time=base + timedelta(minutes=40),
+                end_time=base + timedelta(minutes=45),
+            ),
         ]
 
         sdst = SdstMatrix.from_problem(problem)
@@ -330,8 +502,14 @@ class TestCriticalPathExtension:
         wc_a = WorkCenter(id=uuid4(), code="A", capability_group="grp1")
         s1 = State(id=uuid4(), code="S1")
         order = Order(id=uuid4(), external_ref="O1", due_date=datetime(2025, 1, 2))
-        op1 = Operation(id=uuid4(), order_id=order.id, seq_in_order=1,
-                        state_id=s1.id, base_duration_min=10, eligible_wc_ids=[wc_a.id])
+        op1 = Operation(
+            id=uuid4(),
+            order_id=order.id,
+            seq_in_order=1,
+            state_id=s1.id,
+            base_duration_min=10,
+            eligible_wc_ids=[wc_a.id],
+        )
 
         problem = ScheduleProblem(
             operations=[op1],

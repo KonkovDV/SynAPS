@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import math as _math
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import given, settings, strategies as st
+
+from benchmark.study_rhc_50k import _tail_cvar
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -15,11 +19,13 @@ def test_study_rhc_50k_propagates_seed_to_alns_inner_kwargs(monkeypatch, tmp_pat
     captured_kwargs: list[dict] = []
 
     def fake_run_scaling_case(*, n_ops, n_machines, n_states, solver_name, solver_kwargs, seed):
-        captured_kwargs.append({
-            "solver_name": solver_name,
-            "solver_kwargs": solver_kwargs,
-            "seed": seed,
-        })
+        captured_kwargs.append(
+            {
+                "solver_name": solver_name,
+                "solver_kwargs": solver_kwargs,
+                "seed": seed,
+            }
+        )
         return {
             "status": "error",
             "feasible": False,
@@ -127,10 +133,7 @@ def test_study_rhc_50k_both_lanes_apply_worker_profiles(
         assert kwargs["solver_kwargs"]["hybrid_inner_routing_enabled"] is False
         assert kwargs["solver_kwargs"]["hybrid_inner_kwargs"]["random_seed"] == 11
 
-    lanes = sorted(
-        comparison["lane"]
-        for comparison in report["records"][0]["comparisons"]
-    )
+    lanes = sorted(comparison["lane"] for comparison in report["records"][0]["comparisons"])
     assert lanes == ["strict", "throughput"]
 
 
@@ -879,12 +882,10 @@ def test_study_rhc_50k_max_push_both_lanes_keep_strict_worker_overrides(
     assert report["lane_mode"] == "both"
     assert len(captured_kwargs) == 2
     hybrid_workers = sorted(
-        kwargs["solver_kwargs"]["hybrid_inner_kwargs"]["num_workers"]
-        for kwargs in captured_kwargs
+        kwargs["solver_kwargs"]["hybrid_inner_kwargs"]["num_workers"] for kwargs in captured_kwargs
     )
     repair_workers = sorted(
-        kwargs["solver_kwargs"]["inner_kwargs"]["repair_num_workers"]
-        for kwargs in captured_kwargs
+        kwargs["solver_kwargs"]["inner_kwargs"]["repair_num_workers"] for kwargs in captured_kwargs
     )
     assert hybrid_workers == [1, 4]
     assert repair_workers == [1, 1]
@@ -954,9 +955,7 @@ def test_study_rhc_50k_quality_gate_scheduled_ratio_ci_gate(
     import benchmark.study_rhc_50k as study_module
 
     def make_fake(ratio: float):
-        def fake_run_scaling_case(
-            *, n_ops, n_machines, n_states, solver_name, solver_kwargs, seed
-        ):
+        def fake_run_scaling_case(*, n_ops, n_machines, n_states, solver_name, solver_kwargs, seed):
             return {
                 "status": "feasible" if ratio >= 1.0 else "error",
                 "feasible": ratio >= 1.0,
@@ -976,6 +975,7 @@ def test_study_rhc_50k_quality_gate_scheduled_ratio_ci_gate(
                 "sdst_memory_bytes": 0,
                 "metadata": {"inner_fallback_ratio": 0.0, "inner_fallback_kpi_passed": True},
             }
+
         return fake_run_scaling_case
 
     # Gate must PASS at 100% scheduled ratio
@@ -1005,13 +1005,6 @@ def test_study_rhc_50k_quality_gate_scheduled_ratio_ci_gate(
 # ---------------------------------------------------------------------------
 # Task 10.5: Property test — CVaR ≥ VaR for _tail_cvar
 # ---------------------------------------------------------------------------
-
-import math as _math
-
-from hypothesis import given, settings
-from hypothesis import strategies as st
-
-from benchmark.study_rhc_50k import _tail_cvar
 
 
 @given(

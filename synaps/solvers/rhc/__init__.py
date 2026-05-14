@@ -3,6 +3,7 @@
 Public API — import from here, not from submodules:
     from synaps.solvers.rhc import RhcSolver, RhcWindowState
 """
+
 from __future__ import annotations
 
 from synaps.solvers.rhc._cross_window import WindowQualitySummary

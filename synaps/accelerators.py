@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import itertools
 import os
 from collections import deque
 from math import exp, log
@@ -27,11 +28,12 @@ _native_compute_rhc_candidate_metrics_batch: (
 ) = None
 _native_compute_rhc_candidate_metrics_batch_np: Callable[..., Any] | None = None
 _native_compute_rhc_candidate_metrics_batch_np_jagged: Callable[..., Any] | None = None
-_native_evaluate_objective_batch: (
-    Callable[..., tuple[float, float, float, float, float]] | None
-) = None
+_native_evaluate_objective_batch: Callable[..., tuple[float, float, float, float, float]] | None = (
+    None
+)
 _native_stabilize_temporal_batch: Callable[..., tuple[int, int, int]] | None = None
-_native_NativeSdstBatchLookup: type | None = None
+_native_sdst_batch_lookup_cls: type | None = None
+_native_NativeSdstBatchLookup: type | None = None  # noqa: N816 - legacy test hook
 _native_compute_destroy_worst_scores: Callable[..., Any] | None = None
 _native_greedy_repair_batch: Callable[..., Any] | None = None
 
@@ -44,7 +46,8 @@ if os.getenv("SYNAPS_DISABLE_NATIVE_ACCELERATION") == "1":
     _native_compute_rhc_candidate_metrics_batch_np_jagged = None
     _native_evaluate_objective_batch = None
     _native_stabilize_temporal_batch = None
-    _native_NativeSdstBatchLookup = None
+    _native_sdst_batch_lookup_cls = None
+    _native_NativeSdstBatchLookup = None  # noqa: N816
     _native_compute_destroy_worst_scores = None
     _native_greedy_repair_batch = None
 else:
@@ -60,7 +63,8 @@ else:
         _native_compute_rhc_candidate_metrics_batch_np_jagged = None
         _native_evaluate_objective_batch = None
         _native_stabilize_temporal_batch = None
-        _native_NativeSdstBatchLookup = None
+        _native_sdst_batch_lookup_cls = None
+        _native_NativeSdstBatchLookup = None  # noqa: N816
         _native_compute_destroy_worst_scores = None
         _native_greedy_repair_batch = None
     else:
@@ -104,11 +108,12 @@ else:
             "stabilize_temporal_batch",
             None,
         )
-        _native_NativeSdstBatchLookup = getattr(
+        _native_sdst_batch_lookup_cls = getattr(
             _synaps_native,
             "NativeSdstBatchLookup",
             None,
         )
+        _native_NativeSdstBatchLookup = _native_sdst_batch_lookup_cls  # noqa: N816
         _native_compute_destroy_worst_scores = getattr(
             _synaps_native,
             "compute_destroy_worst_scores",
@@ -201,7 +206,7 @@ def get_acceleration_status() -> dict[str, Any]:
         if _native_stabilize_temporal_batch is not None
         else "python",
         "sdst_batch_lookup_backend": "native"
-        if _native_NativeSdstBatchLookup is not None
+        if _native_sdst_batch_lookup_cls is not None
         else "python",
         "destroy_worst_scores_backend": "native"
         if _native_compute_destroy_worst_scores is not None
@@ -219,7 +224,7 @@ def get_acceleration_status() -> dict[str, Any]:
                 _native_compute_rhc_candidate_metrics_batch,
                 _native_evaluate_objective_batch,
                 _native_stabilize_temporal_batch,
-                _native_NativeSdstBatchLookup,
+                _native_sdst_batch_lookup_cls,
             )
         )
         else None,
@@ -274,7 +279,7 @@ def compute_atcs_log_scores_batch(
             )
         ]
 
-    # Prefer numpy vectorized path when available (10–20x faster on large batches).
+    # Prefer numpy vectorized path when available (10-20x faster on large batches).
     if _HAS_NUMPY:
         w_np = np.maximum(np.asarray(weights, dtype=np.float64), 1e-9)
         p_np = np.maximum(np.asarray(processing_minutes, dtype=np.float64), 0.1)
@@ -297,16 +302,8 @@ def compute_atcs_log_scores_batch(
             log(max(weights[i], 1e-9))
             - log(max(processing_minutes[i], 0.1))
             - (slack[i] / (k1 * ready_p_bar))
-            - (
-                setup_minutes[i] / (k2 * setup_scale[i])
-                if setup_minutes[i] > 0
-                else 0.0
-            )
-            - (
-                material_loss[i] / (k3 * material_scale)
-                if material_loss[i] > 0
-                else 0.0
-            )
+            - (setup_minutes[i] / (k2 * setup_scale[i]) if setup_minutes[i] > 0 else 0.0)
+            - (material_loss[i] / (k3 * material_scale) if material_loss[i] > 0 else 0.0)
         )
         for i in range(n)
     ]
@@ -430,8 +427,7 @@ def compute_rhc_candidate_metrics_batch(
     for i, machine_indices in enumerate(eligible_machine_indices):
         if machine_indices:
             earliest_machine_ready = min(
-                machine_available_offsets[machine_idx]
-                for machine_idx in machine_indices
+                machine_available_offsets[machine_idx] for machine_idx in machine_indices
             )
         else:
             earliest_machine_ready = 0.0
@@ -594,7 +590,7 @@ def evaluate_objective_batch(
         makespan = end_offsets[indices_sorted[-1]]
         total_makespan = max(total_makespan, makespan)
         wc_offset = m * n_states * n_states
-        for a, b in zip(indices_sorted, indices_sorted[1:], strict=False):
+        for a, b in itertools.pairwise(indices_sorted):
             ps = state_ids[a]
             cs = state_ids[b]
             if ps >= 0 and cs >= 0:
@@ -722,7 +718,7 @@ def stabilize_temporal_batch(
 
         for machine_indices in by_machine:
             machine_indices.sort(key=lambda i: start_offsets[i])
-            for prev, curr in zip(machine_indices, machine_indices[1:], strict=False):
+            for prev, curr in itertools.pairwise(machine_indices):
                 required_setup = 0.0
                 ps = state_ids[prev]
                 cs = state_ids[curr]
@@ -775,11 +771,12 @@ def native_sdst_batch_lookup(
     Returns:
         numpy float64 array of setup values, or None if native is unavailable.
     """
-    if _native_NativeSdstBatchLookup is None or not _HAS_NUMPY:
+    lookup_cls = _native_NativeSdstBatchLookup
+    if lookup_cls is None or not _HAS_NUMPY:
         return None
 
     try:
-        lookup = _native_NativeSdstBatchLookup(
+        lookup = lookup_cls(
             setup_values_flat.ravel().tolist(),
             n_wc,
             n_states,

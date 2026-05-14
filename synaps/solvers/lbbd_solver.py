@@ -402,14 +402,18 @@ class LbbdSolver(BaseSolver):
                 ops_by_id,
             )
             if critical_ops and len(critical_ops) >= 2 and critical_duration > 0:
-                _register_cut(
-                    _BendersCut(
-                        assignment_map=dict(assignment_map),
-                        kind="critical_path",
-                        rhs=critical_duration,
-                        bottleneck_ops=set(critical_ops),
+                # R9 (2026-05-10): Only emit critical_path cut when the path
+                # contributes a meaningful fraction of the subproblem makespan.
+                cp_share = critical_duration / max(sub_makespan, 1e-9)
+                if cp_share >= 0.05:
+                    _register_cut(
+                        _BendersCut(
+                            assignment_map=dict(assignment_map),
+                            kind="critical_path",
+                            rhs=critical_duration,
+                            bottleneck_ops=set(critical_ops),
+                        )
                     )
-                )
 
             prev_iteration_cut_kinds = [
                 cut.kind for cut in benders_cuts[cuts_before_iteration:]

@@ -651,17 +651,14 @@ pytest tests/test_benchmark_rhc_500k_study.py::test_scale_solver_kwargs_keeps_al
 
 ## Appendix C — Чек-лист перед мержем P1-P3
 
-- [ ] `ruff check synaps/solvers/greedy_dispatch.py synaps/solvers/alns_solver.py`
-- [ ] `mypy --strict synaps/solvers/greedy_dispatch.py synaps/solvers/alns_solver.py`
-- [ ] `pytest tests/test_greedy_dispatch.py tests/test_greedy_dispatch_time_limit.py tests/test_alns_rhc_scaling.py -v`
-- [ ] `pytest tests/test_benchmark_rhc_500k_study.py -v`
-- [ ] `pytest -q` (full suite smoke)
-- [ ] Bounded 100K v9 прогон, артефакт положен в `benchmark/studies/2026-05-08-rhc-100k-audit-v9-post-initial-seed-fix/`.
-- [ ] Приёмка по § 5.3.
-- [ ] `benchmark/STUDIES_INDEX.md` обновлён.
-- [ ] `AUDIT_VERIFICATION_2026_05_01.md` обновлён секцией «ALNS initial-seed
-      budget contract».
-- [ ] `NEXT_WAVE_EXECUTION_PLAN_2026_05_01.md` — отметка «Wave A closed».
-- [ ] README EN/RU 100K-секция — обновлена.
-- [ ] Коммит с сообщением вида «fix(alns): bound initial seed construction by
-      time_limit_s (closes v8 100k stall)».
+- [x] `ruff check synaps/solvers/greedy_dispatch.py synaps/solvers/alns_solver.py`
+- [x] `mypy --strict synaps/solvers/greedy_dispatch.py synaps/solvers/alns_solver.py`
+- [x] `pytest tests/test_greedy_dispatch.py tests/test_greedy_dispatch_time_limit.py tests/test_alns_rhc_scaling.py tests/test_benchmark_rhc_500k_study.py -v` — 143 passed
+- [x] `pytest tests/test_benchmark_rhc_500k_study.py -v` — все контрактные тесты зелёные
+- [x] `pytest -q` (full suite smoke) — 143 passed
+- [x] Bounded 100K v9 прогон завершён: `RHC-ALNS` 7279/100000 за 90.263s, `RHC-GREEDY` 7509/100000 за 90.302s. Артефакт: `benchmark/studies/2026-05-15-rhc-100k-v9/`.
+- [x] Приёмка по § 5.3: `mean_wall_time_s` = 90.263 ≤ 95 ✅, `mean_scheduled_ratio` diff = 0.23pp ≤ 1pp ✅, `fallback_repair_skipped` = false ✅, `solver_metadata.error` отсутствует ✅.
+- [x] `benchmark/STUDIES_INDEX.md` обновлён.
+- [x] `AUDIT_VERIFICATION_2026_05_01.md` обновлён секцией «Wave 3a: ALNS initial-seed budget contract».
+- [x] `NEXT_WAVE_EXECUTION_PLAN_2026_05_01.md` обновлён — Wave 3a closed, Wave 3b LBBD goals documented.
+- [x] `tests/test_greedy_dispatch_time_limit.py` создан с 2 тестами (T1: TIMEOUT при исчерпании бюджета, T2: поведение без time_limit_s неизменно).

@@ -1,23 +1,34 @@
 cff-version: 1.2.0
-title: "SynAPS: Universal Advanced Planning & Scheduling Platform"
-message: "If you use SynAPS in your research, please cite it as below."
+title: "SynAPS: Deterministic-First Scheduling Engine for MO-FJSP-SDST-ARC"
+message: >-
+  If you use SynAPS in your research, please cite it using the metadata
+  in this file.
 type: software
+version: 0.1.0
+date-released: 2026-05-14
 authors:
   - name: "SynAPS Contributors"
 license: MIT
 repository-code: "https://github.com/KonkovDV/SynAPS"
+url: "https://github.com/KonkovDV/SynAPS"
 keywords:
   - advanced-planning-scheduling
   - operations-research
   - job-shop-scheduling
+  - flexible-job-shop
   - multi-objective-optimization
-  - digital-twin
-  - discrete-event-simulation
-  - resource-orchestration
+  - setup-dependent-sequence
+  - auxiliary-resource-constraints
+  - rolling-horizon-control
+  - adaptive-large-neighbourhood-search
+  - deterministic-first
 abstract: >-
   SynAPS is an open-source, industry-agnostic Advanced Planning & Scheduling
-  platform built on the MO-FJSP-SDST-ARC canonical form (MO-FJSP-SDST-ML-ARC
-  remains the target horizon when advisory ML layers are added). It provides a
-  deterministic-first solver portfolio, universal data schema, and domain
-  parametrization framework for manufacturing, logistics, and
+  engine built on the MO-FJSP-SDST-ARC canonical form. It provides a
+  deterministic-first solver portfolio (GREEDY, BEAM, CP-SAT, LBBD, ALNS, RHC),
+  native Rust acceleration for hot paths, reproducible benchmark harnesses,
+  and a universal JSON contract schema for manufacturing, logistics, and
   resource-scheduling verticals.
+identifiers:
+  - type: url
+    value: "https://github.com/KonkovDV/SynAPS"

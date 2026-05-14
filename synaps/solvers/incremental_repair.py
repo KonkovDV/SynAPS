@@ -31,7 +31,7 @@ class IncrementalRepair(BaseSolver):
     configurable neighbourhood radius, keeping all other assignments frozen.
 
     Radius policy:
-        BREAKDOWN  → 2 × setup_count downstream
+        BREAKDOWN  → 2 x setup_count downstream
         RUSH_ORDER → affected machine ± 30 min window
         MATERIAL   → same state group
         DEFAULT    → 5 operations forward
@@ -295,9 +295,7 @@ class IncrementalRepair(BaseSolver):
         for work_center_id, machine_assignments in by_machine.items():
             machine_assignments.sort(key=lambda assignment: assignment.start_time)
             for index in range(1, len(machine_assignments)):
-                previous_operation = ops_by_id.get(
-                    machine_assignments[index - 1].operation_id
-                )
+                previous_operation = ops_by_id.get(machine_assignments[index - 1].operation_id)
                 current_operation = ops_by_id.get(machine_assignments[index].operation_id)
                 if previous_operation is None or current_operation is None:
                     continue

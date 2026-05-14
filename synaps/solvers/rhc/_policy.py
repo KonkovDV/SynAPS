@@ -20,11 +20,11 @@ from typing import Any
 class RhcPolicy(Enum):
     """Named RHC geometry + solver family."""
 
-    COVERAGE_FIRST = "coverage-first"      # wide windows, ALNS inner
-    BALANCED = "balanced"                  # default 8h/2h ALNS
-    SEARCH_ENTRY = "search-entry"          # 100K tight-geometry profile
-    BOUNDED_100K = "bounded-100k"            # aggressive 5h/90m ALNS
-    FAST_50K = "fast-50k"                  # 50K wall-time optimized
+    COVERAGE_FIRST = "coverage-first"  # wide windows, ALNS inner
+    BALANCED = "balanced"  # default 8h/2h ALNS
+    SEARCH_ENTRY = "search-entry"  # 100K tight-geometry profile
+    BOUNDED_100K = "bounded-100k"  # aggressive 5h/90m ALNS
+    FAST_50K = "fast-50k"  # 50K wall-time optimized
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,18 +132,20 @@ _PRESET_HYBRID_INNER_KWARGS: dict[str, Any] = {
 }
 
 PRESETS: dict[RhcPolicy, RhcPolicySpec] = {
-    RhcPolicy.COVERAGE_FIRST: RhcPolicySpec(
-        admission=AdmissionSpec(
-            window_minutes=480,
-            overlap_minutes=120,
-        ),
-        budget=BudgetSpec(),
-        guards=GuardSpec(),
-        inner=InnerSpec(
-            inner_kwargs=_PRESET_ALNS_INNER_KWARGS,
-            hybrid_inner_kwargs=_PRESET_HYBRID_INNER_KWARGS,
-        ),
-    ),
+RhcPolicy.COVERAGE_FIRST: RhcPolicySpec(
+         admission=AdmissionSpec(
+             window_minutes=600,
+             overlap_minutes=180,
+             max_ops_per_window=8000,
+             candidate_pool_factor=2.5,
+         ),
+         budget=BudgetSpec(),
+         guards=GuardSpec(),
+         inner=InnerSpec(
+             inner_kwargs=_PRESET_ALNS_INNER_KWARGS,
+             hybrid_inner_kwargs=_PRESET_HYBRID_INNER_KWARGS,
+         ),
+     ),
     RhcPolicy.BALANCED: RhcPolicySpec(
         admission=AdmissionSpec(
             window_minutes=480,
@@ -277,18 +279,14 @@ def build_solve_kwargs_from_spec(
         "precedence_ready_candidate_filter_enabled": (
             spec.admission.precedence_ready_candidate_filter_enabled
         ),
-        "admission_relaxation_min_fill_ratio": (
-            spec.admission.admission_relaxation_min_fill_ratio
-        ),
+        "admission_relaxation_min_fill_ratio": (spec.admission.admission_relaxation_min_fill_ratio),
         "admission_full_scan_enabled": spec.admission.admission_full_scan_enabled,
         # budget
         "alns_inner_window_time_cap_s": spec.budget.alns_inner_window_time_cap_s,
         "alns_inner_window_time_cap_scale_threshold_ops": (
             spec.budget.alns_inner_window_time_cap_scale_threshold_ops
         ),
-        "alns_inner_window_time_cap_scaled_s": (
-            spec.budget.alns_inner_window_time_cap_scaled_s
-        ),
+        "alns_inner_window_time_cap_scaled_s": (spec.budget.alns_inner_window_time_cap_scaled_s),
         "alns_budget_auto_scaling_enabled": spec.budget.alns_budget_auto_scaling_enabled,
         "alns_budget_estimated_repair_s_per_destroyed_op": (
             spec.budget.alns_budget_estimated_repair_s_per_destroyed_op
@@ -348,8 +346,7 @@ def resolve_policy(
         policy = RhcPolicy.BALANCED
         if kwargs:
             warnings.warn(
-                "Passing raw kwargs to RhcSolver is deprecated; "
-                "use RhcPolicy + overrides instead.",
+                "Passing raw kwargs to RhcSolver is deprecated; use RhcPolicy + overrides instead.",
                 DeprecationWarning,
                 stacklevel=3,
             )

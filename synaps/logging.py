@@ -79,7 +79,7 @@ _configured = False
 
 def configure_logging(*, level: int = logging.INFO) -> None:
     """Attach the JSON formatter to the ``synaps`` logger hierarchy."""
-    global _configured  # noqa: PLW0603
+    global _configured
     if _configured:
         return
     handler = logging.StreamHandler(sys.stderr)

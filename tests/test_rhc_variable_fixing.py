@@ -21,17 +21,19 @@ def _make_assignment(op_id: object, wc_id: object, start_offset_min: float) -> A
 
 class TestDetectCrossWindowStableOps:
     def test_empty_both_returns_empty(self) -> None:
-        assert detect_cross_window_stable_ops(
-            prev_committed_by_op={}, curr_committed_by_op={}
-        ) == set()
+        assert (
+            detect_cross_window_stable_ops(prev_committed_by_op={}, curr_committed_by_op={})
+            == set()
+        )
 
     def test_disjoint_sets_returns_empty(self) -> None:
         a, b = uuid4(), uuid4()
         prev = {a: _make_assignment(a, uuid4(), 10.0)}
         curr = {b: _make_assignment(b, uuid4(), 10.0)}
-        assert detect_cross_window_stable_ops(
-            prev_committed_by_op=prev, curr_committed_by_op=curr
-        ) == set()
+        assert (
+            detect_cross_window_stable_ops(prev_committed_by_op=prev, curr_committed_by_op=curr)
+            == set()
+        )
 
     def test_same_signature_is_stable(self) -> None:
         a = uuid4()
@@ -46,18 +48,20 @@ class TestDetectCrossWindowStableOps:
         a = uuid4()
         prev = {a: _make_assignment(a, uuid4(), 10.0)}
         curr = {a: _make_assignment(a, uuid4(), 10.0)}
-        assert detect_cross_window_stable_ops(
-            prev_committed_by_op=prev, curr_committed_by_op=curr
-        ) == set()
+        assert (
+            detect_cross_window_stable_ops(prev_committed_by_op=prev, curr_committed_by_op=curr)
+            == set()
+        )
 
     def test_different_offset_not_stable(self) -> None:
         a = uuid4()
         wc = uuid4()
         prev = {a: _make_assignment(a, wc, 10.0)}
         curr = {a: _make_assignment(a, wc, 15.0)}
-        assert detect_cross_window_stable_ops(
-            prev_committed_by_op=prev, curr_committed_by_op=curr
-        ) == set()
+        assert (
+            detect_cross_window_stable_ops(prev_committed_by_op=prev, curr_committed_by_op=curr)
+            == set()
+        )
 
     def test_tolerance_boundary(self) -> None:
         a = uuid4()

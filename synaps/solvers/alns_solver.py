@@ -414,16 +414,17 @@ def _destroy_worst(
 
     # --- Try native scoring path ---
     native_scores = _destroy_worst_native_scores(assignments, sdst, ops_by_id)
+    op_cost_by_id: dict[UUID, float]
     if native_scores is not None:
         # native_scores is a dict[UUID, float] of per-operation costs
-        op_cost = native_scores
+        op_cost_by_id = native_scores
     else:
         # --- Python reference implementation (authoritative) ---
         by_machine: dict[Any, list[Assignment]] = {}
         for a in assignments:
             by_machine.setdefault(a.work_center_id, []).append(a)
 
-        op_cost: dict[UUID, float] = {}
+        op_cost_by_id = {}
         for wc_id, machine_assignments in by_machine.items():
             machine_assignments.sort(key=lambda a: a.start_time)
             for i, a in enumerate(machine_assignments):
@@ -437,10 +438,10 @@ def _destroy_worst(
                     next_op = ops_by_id[machine_assignments[i + 1].operation_id]
                     cost += sdst.get_setup(wc_id, op.state_id, next_op.state_id)
                     cost += sdst.get_material_loss(wc_id, op.state_id, next_op.state_id)
-                op_cost[a.operation_id] = cost
+                op_cost_by_id[a.operation_id] = cost
 
     # Sort by cost descending, add randomness to avoid deterministic loops
-    ranked = sorted(op_cost.items(), key=lambda x: -x[1])
+    ranked = sorted(op_cost_by_id.items(), key=lambda x: -x[1])
     destroyed: set[UUID] = set()
     p_worst = 0.8  # probability of picking the worst vs. random from top-50%
     for op_id, _ in ranked:
@@ -488,7 +489,7 @@ def _destroy_worst_native_scores(
     machine_offsets = np.zeros(n_machines + 1, dtype=np.int64)
     assignment_indices_list: list[int] = []
 
-    for m_idx, (wc_id, machine_assigns) in enumerate(by_machine.items()):
+    for m_idx, (_wc_id, machine_assigns) in enumerate(by_machine.items()):
         # Sort by start_time within each machine
         machine_assigns.sort(key=lambda x: x[1].start_time)
         machine_offsets[m_idx + 1] = machine_offsets[m_idx] + len(machine_assigns)
@@ -883,7 +884,7 @@ def _destroy_due_pressure(
 ) -> set[UUID]:
     """Remove operations from orders with the highest weighted tardiness.
 
-    Ranks orders by ``tardiness × order_weight`` (descending), then from each
+    Ranks orders by ``tardiness x order_weight`` (descending), then from each
     top-tardy order selects operations that are temporally latest in the order
     chain (highest ``end_time``).  Destroying the tail of an order is the
     cheapest way to recover tardiness, since the final operations are the ones
@@ -977,18 +978,18 @@ def _destroy_due_pressure(
         # Rank by ascending slack (smallest slack first = most urgent).
         positive_slack.sort(key=lambda x: x[0])
 
-        destroyed: set[UUID] = set()
+        slack_destroyed: set[UUID] = set()
         for _slack, order_id in positive_slack:
-            if len(destroyed) >= destroy_size:
+            if len(slack_destroyed) >= destroy_size:
                 break
             order_assignments = assignments_by_order.get(order_id, [])
             order_assignments.sort(key=lambda a: a.end_time, reverse=True)
             for a in order_assignments:
-                if len(destroyed) >= destroy_size:
+                if len(slack_destroyed) >= destroy_size:
                     break
-                destroyed.add(a.operation_id)
+                slack_destroyed.add(a.operation_id)
 
-        return destroyed
+        return slack_destroyed
 
     # Rank tardy orders by weighted tardiness (descending).
     weighted_tardiness.sort(key=lambda x: -x[0])
@@ -1166,11 +1167,9 @@ def _repair_cpsat_outcome(
 
         frozen_predecessor_end_offsets[op_id] = max(
             0,
-            int(
-                round(
-                    (frozen_predecessor.end_time - problem.planning_horizon_start).total_seconds()
-                    / 60.0
-                )
+            round(
+                (frozen_predecessor.end_time - problem.planning_horizon_start).total_seconds()
+                / 60.0
             ),
         )
 
@@ -1267,12 +1266,10 @@ def _repair_greedy_outcome(
     """Fallback greedy repair when CP-SAT is too slow for the sub-region.
 
     When native acceleration is available and ``use_native_greedy_repair`` is True,
-    attempts the Rust greedy repair first (10–30× faster). Falls back to the Python
+    attempts the Rust greedy repair first (10-30x faster). Falls back to the Python
     IncrementalRepair path if native is unavailable, returns invalid results, or
     fails feasibility validation.
     """
-    from synaps.accelerators import greedy_repair_batch_native
-
     op_positions = {op.id: index for index, op in enumerate(problem.operations)}
     disrupted_op_ids = sorted(destroyed_op_ids, key=op_positions.__getitem__)
 
@@ -1347,16 +1344,11 @@ def _try_native_greedy_repair(
     Returns None if native is unavailable, input construction fails, or the result
     fails basic validation.
     """
-    import time as _time
-
-    from synaps.accelerators import greedy_repair_batch_native
-    from synaps.accelerators import _native_greedy_repair_batch
+    from synaps.accelerators import _native_greedy_repair_batch, greedy_repair_batch_native
 
     # Early exit: if native function is not available, don't waste time building arrays
     if _native_greedy_repair_batch is None:
         return None
-
-    t0 = _time.monotonic()
 
     try:
         # Build index mappings
@@ -1455,9 +1447,7 @@ def _try_native_greedy_repair(
                     entry.setup_minutes
                 )
 
-        speed_factors = np.array(
-            [wc.speed_factor for wc in problem.work_centers], dtype=np.float64
-        )
+        speed_factors = np.array([wc.speed_factor for wc in problem.work_centers], dtype=np.float64)
 
         # The native function dispatches operations sequentially in the given order
         # (topological). However, it doesn't know about frozen predecessor constraints
@@ -1540,8 +1530,15 @@ def _try_native_greedy_repair(
             setup = 0.0
             curr_state = int(state_ids[i])
             prev_state = int(machine_last_state[m])
-            if prev_state >= 0 and curr_state >= 0 and prev_state < n_states and curr_state < n_states:
-                setup = sdst_setup_flat[m * n_states * n_states + prev_state * n_states + curr_state]
+            if (
+                prev_state >= 0
+                and curr_state >= 0
+                and prev_state < n_states
+                and curr_state < n_states
+            ):
+                setup = sdst_setup_flat[
+                    m * n_states * n_states + prev_state * n_states + curr_state
+                ]
 
             actual_start = max(float(start_offsets[i]), min_start + setup)
             duration = float(end_offsets[i] - start_offsets[i])
@@ -1559,8 +1556,8 @@ def _try_native_greedy_repair(
         repaired_assignments: list[Assignment] = []
         for i, op_id in enumerate(disrupted_op_ids):
             m = int(assigned_machine_indices[i])
-            wc_id = idx_to_wc_id.get(m)
-            if wc_id is None:
+            mapped_wc_id = idx_to_wc_id.get(m)
+            if mapped_wc_id is None:
                 return None  # Can't map machine index back
 
             start_dt = horizon_start + timedelta(minutes=float(start_offsets[i]))
@@ -1569,7 +1566,7 @@ def _try_native_greedy_repair(
             repaired_assignments.append(
                 Assignment(
                     operation_id=op_id,
-                    work_center_id=wc_id,
+                    work_center_id=mapped_wc_id,
                     start_time=start_dt,
                     end_time=end_dt,
                 )
@@ -1610,10 +1607,7 @@ def _try_native_initial_seed(
     Reuses greedy_repair_batch with disrupted_op_ids = all problem operations.
     Returns a list of Assignments or None if native is unavailable/fails.
     """
-    import time as _time
-
-    from synaps.accelerators import greedy_repair_batch_native
-    from synaps.accelerators import _native_greedy_repair_batch
+    from synaps.accelerators import _native_greedy_repair_batch, greedy_repair_batch_native
 
     # Early exit: if native function is not available, don't waste time building arrays
     if _native_greedy_repair_batch is None:
@@ -1691,7 +1685,9 @@ def _try_native_initial_seed(
                 # else: predecessor is in frozen set — handled in post-processing
 
             # Eligible machines (empty list = all machines eligible)
-            eligible_wc_ids = op.eligible_wc_ids if op.eligible_wc_ids else [wc.id for wc in problem.work_centers]
+            eligible_wc_ids = (
+                op.eligible_wc_ids if op.eligible_wc_ids else [wc.id for wc in problem.work_centers]
+            )
             eligible_wc_indices = []
             for wc_id in eligible_wc_ids:
                 wc_idx = wc_id_to_idx.get(wc_id)
@@ -1713,9 +1709,7 @@ def _try_native_initial_seed(
                     entry.setup_minutes
                 )
 
-        speed_factors = np.array(
-            [wc.speed_factor for wc in problem.work_centers], dtype=np.float64
-        )
+        speed_factors = np.array([wc.speed_factor for wc in problem.work_centers], dtype=np.float64)
 
         # Call native — dispatches from time 0 with no initial machine state.
         # Post-process to account for frozen state.
@@ -2000,7 +1994,7 @@ def _normalize_initial_operator_weights(
             return uniform
         return [w / weight_sum for w in weights]
 
-    if isinstance(raw, (list, tuple)):
+    if isinstance(raw, list | tuple):
         if len(raw) != n:
             logger.warning(
                 "initial_operator_weights list length %d does not match "
@@ -2036,8 +2030,7 @@ def _normalize_initial_operator_weights(
 
     # Unrecognized type
     logger.warning(
-        "initial_operator_weights has unrecognized type %s — "
-        "falling back to uniform weights",
+        "initial_operator_weights has unrecognized type %s — falling back to uniform weights",
         type(raw).__name__,
     )
     return uniform
@@ -2160,7 +2153,7 @@ def _calibrate_sa_temperature(
 class AlnsSolver(BaseSolver):
     """Adaptive Large Neighborhood Search with Micro-CP-SAT repair.
 
-    Designed for 5 000–50 000+ operation instances where monolithic CP-SAT
+    Designed for 5 000-50 000+ operation instances where monolithic CP-SAT
     and LBBD cannot converge in reasonable time.
 
     Architecture (Ropke & Pisinger 2006):
@@ -2298,20 +2291,16 @@ class AlnsSolver(BaseSolver):
         cross_window_hints = kwargs.get("cross_window_hints")
 
         # Task 24.1: Native initial seed — use Rust greedy_repair_batch for Phase 1.
-        native_initial_seed_enabled: bool = bool(
-            kwargs.get("native_initial_seed_enabled", True)
-        )
+        native_initial_seed_enabled: bool = bool(kwargs.get("native_initial_seed_enabled", True))
 
         max_no_improve_iters = max_no_improve_base_iters
         if dynamic_no_improve_enabled and max_no_improve_base_iters > 0:
-            scaled_no_improve = int(
-                round(
-                    max_no_improve_base_iters
-                    * (
-                        1.0
-                        + no_improve_due_alpha * due_pressure
-                        + no_improve_candidate_beta * candidate_pressure
-                    )
+            scaled_no_improve = round(
+                max_no_improve_base_iters
+                * (
+                    1.0
+                    + no_improve_due_alpha * due_pressure
+                    + no_improve_candidate_beta * candidate_pressure
                 )
             )
             max_no_improve_iters = min(
@@ -2941,17 +2930,14 @@ class AlnsSolver(BaseSolver):
         # When warm-start coverage > 80%, the initial solution is already good;
         # fewer stagnation-patience iterations are needed.
         warm_start_coverage = warm_start_supplied_assignments / max(n_ops, 1)
-        if warm_start_used and warm_start_coverage > 0.8:
-            if max_no_improve_iters > 15:
-                max_no_improve_iters = 15
+        if warm_start_used and warm_start_coverage > 0.8 and max_no_improve_iters > 15:
+            max_no_improve_iters = 15
 
         # Task 18.3: Adaptive iteration scaling.
         # Scale max_iterations proportionally to (1 - warm_start_coverage):
         # full coverage → 10% of budget (floor), no coverage → full budget.
         # Default False (conservative); RHC can enable via inner_kwargs.
-        adaptive_iteration_scaling: bool = bool(
-            kwargs.get("adaptive_iteration_scaling", False)
-        )
+        adaptive_iteration_scaling: bool = bool(kwargs.get("adaptive_iteration_scaling", False))
         adaptive_iteration_scaling_applied = False
         original_max_iterations = max_iterations
 
@@ -3010,17 +2996,15 @@ class AlnsSolver(BaseSolver):
 
         # Snapshot initial weights for metadata (after normalization)
         initial_operator_weights_dict = {
-            name: round(w, 6) for name, w in zip(operator_names, operator_weights)
+            name: round(w, 6) for name, w in zip(operator_names, operator_weights, strict=True)
         }
 
-        # C4 (Task 3b.2–3b.4): Bounded cross-window operator bias.
+        # C4 (Task 3b.2-3b.4): Bounded cross-window operator bias.
         # Applied once at initialization (before the main loop). Does NOT modify
         # weights during the loop. When the flag is off or hints are absent,
         # behavior is identical to baseline.
         cross_window_bias_applied = False
-        cross_window_bias_operator_deltas: dict[str, float] = {
-            name: 0.0 for name in operator_names
-        }
+        cross_window_bias_operator_deltas: dict[str, float] = dict.fromkeys(operator_names, 0.0)
 
         if (
             cross_window_operator_bias_enabled
@@ -3036,8 +3020,7 @@ class AlnsSolver(BaseSolver):
                 setup_by_machine = getattr(hint, "setup_cost_by_machine", None)
                 if setup_by_machine and isinstance(setup_by_machine, dict):
                     machine_costs = [
-                        v for v in setup_by_machine.values()
-                        if isinstance(v, (int, float)) and v > 0
+                        v for v in setup_by_machine.values() if isinstance(v, int | float) and v > 0
                     ]
                     if machine_costs:
                         total_max_setup += max(machine_costs)
@@ -3136,9 +3119,7 @@ class AlnsSolver(BaseSolver):
         # This keeps memory bounded while preserving the most recent
         # convergence behavior.
         iteration_trace: deque[AlnsIterationRecord] = (
-            deque(maxlen=max_iteration_records)
-            if record_iteration_metrics
-            else deque(maxlen=0)
+            deque(maxlen=max_iteration_records) if record_iteration_metrics else deque(maxlen=0)
         )
 
         # ------- Phase 3: Main ALNS loop -------
@@ -3709,11 +3690,7 @@ class AlnsSolver(BaseSolver):
                 "original_max_iterations": original_max_iterations,
                 # B3 (Task 7.3): Per-iteration convergence trace (only when enabled)
                 **(
-                    {
-                        "alns_iteration_trace": [
-                            record.to_dict() for record in iteration_trace
-                        ]
-                    }
+                    {"alns_iteration_trace": [record.to_dict() for record in iteration_trace]}
                     if record_iteration_metrics
                     else {}
                 ),

@@ -111,14 +111,14 @@ def build_problem_profile(problem: ScheduleProblem) -> ProblemProfile:
     # Resource contention: avg operations per eligible work center (higher = more contention).
     ops_per_wc: dict[object, int] = {}
     for operation in problem.operations:
-        targets = operation.eligible_wc_ids if operation.eligible_wc_ids else [
-            wc.id for wc in problem.work_centers
-        ]
+        targets = (
+            operation.eligible_wc_ids
+            if operation.eligible_wc_ids
+            else [wc.id for wc in problem.work_centers]
+        )
         for wc_id in targets:
             ops_per_wc[wc_id] = ops_per_wc.get(wc_id, 0) + 1
-    resource_contention = (
-        sum(ops_per_wc.values()) / len(ops_per_wc) if ops_per_wc else 0.0
-    )
+    resource_contention = sum(ops_per_wc.values()) / len(ops_per_wc) if ops_per_wc else 0.0
 
     return ProblemProfile(
         state_count=state_count,

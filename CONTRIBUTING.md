@@ -38,14 +38,31 @@ Before opening an issue or pull request, read:
 For most code changes, run:
 
 ```bash
-pytest tests/ -v
+# Quality gates (must pass)
+ruff check synaps tests benchmark
+ruff format --check synaps tests benchmark
 python -m mypy synaps --strict --no-error-summary
-ruff check synaps tests benchmark --select F,E9
+
+# Pre-commit (optional but recommended)
+pre-commit run -a
+
+# Tests
+pytest tests/ -v -m "not slow"
+
+# Packaging
 python -m build
 twine check dist/*
 ```
 
 If you change solver behavior, also include benchmark evidence or a clear explanation of why no benchmark delta is expected.
+
+### Quality Gate Policy
+
+All pull requests must pass:
+- `ruff check` — zero lint errors across `synaps/`, `tests/`, `benchmark/`
+- `ruff format --check` — all files already formatted
+- `mypy synaps --strict --no-error-summary` — zero type errors
+- Fast test suite (`pytest -m "not slow"`) — green
 
 ## Domain Parametrizations
 

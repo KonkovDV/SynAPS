@@ -150,8 +150,7 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
             "max_makespan_ratio": 1.10,
         },
         description=(
-            "Two-stage CP-SAT epsilon profile: minimise setup under a 10% "
-            "near-optimal makespan cap"
+            "Two-stage CP-SAT epsilon profile: minimise setup under a 10% near-optimal makespan cap"
         ),
     ),
     "CPSAT-EPS-TARD-110": SolverRegistration(
@@ -294,9 +293,7 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
     # ---- RHC variants (10k–100k+ operations) ----
     "RHC-ALNS": SolverRegistration(
         factory=_build_rhc,
-        solve_kwargs=build_solve_kwargs_from_spec(
-            RhcPolicySpec.from_preset(RhcPolicy.BALANCED)
-        ),
+        solve_kwargs=build_solve_kwargs_from_spec(RhcPolicySpec.from_preset(RhcPolicy.BALANCED)),
         description=(
             "Receding Horizon Control with ALNS inner solver. "
             "8-hour windows, 2-hour overlap, max 5000 ops/window, "
@@ -348,8 +345,7 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
             "admission_tail_weight": 0.5,
         },
         description=(
-            "Receding Horizon Control with greedy dispatch. "
-            "Fast baseline for 100 000+ ops."
+            "Receding Horizon Control with greedy dispatch. Fast baseline for 100 000+ ops."
         ),
     ),
 }

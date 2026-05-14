@@ -462,7 +462,7 @@ def _pick_eligible_work_centers(
     work_centers: list[WorkCenter],
     flexibility: float,
 ) -> list[UUID]:
-    base_count = max(1, int(round(len(work_centers) * flexibility)))
+    base_count = max(1, round(len(work_centers) * flexibility))
     jitter = rng.choice([-1, 0, 1]) if len(work_centers) > 2 else 0
     selection_count = min(len(work_centers), max(1, base_count + jitter))
     selected = rng.sample(work_centers, selection_count)

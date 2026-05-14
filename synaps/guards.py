@@ -16,7 +16,7 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from synaps.logging import get_logger
 from synaps.model import ScheduleResult, SolverErrorCategory, SolverStatus
@@ -65,7 +65,7 @@ def _get_rss_mb() -> int | None:
     from Linux (KB) for ``ru_maxrss`` units.  The previous heuristic based
     on value magnitude (> 1_000_000) was incorrect — on Linux a 1 GB process
     reports ~1_000_000 KB, which crossed the threshold and was erroneously
-    treated as macOS bytes, causing a ~1000× underestimate.
+    treated as macOS bytes, causing a ~1000x underestimate.
     """
     try:
         if os.name == "nt":
@@ -73,7 +73,7 @@ def _get_rss_mb() -> int | None:
             import ctypes.wintypes
 
             class PROCESS_MEMORY_COUNTERS(ctypes.Structure):  # noqa: N801
-                _fields_ = [
+                _fields_: ClassVar[list[tuple[str, type]]] = [
                     ("cb", ctypes.wintypes.DWORD),
                     ("PageFaultCount", ctypes.wintypes.DWORD),
                     ("PeakWorkingSetSize", ctypes.c_size_t),
@@ -169,9 +169,7 @@ def guarded_solve(
         existing_limit = effective_kwargs.get("time_limit_s")
         if existing_limit is not None:
             # Use the stricter of the two limits
-            effective_kwargs["time_limit_s"] = min(
-                int(existing_limit), limits.timeout_s
-            )
+            effective_kwargs["time_limit_s"] = min(int(existing_limit), limits.timeout_s)
         else:
             effective_kwargs["time_limit_s"] = limits.timeout_s
 

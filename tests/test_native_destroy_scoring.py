@@ -78,7 +78,7 @@ def _build_deterministic_problem(
     operations: list[Operation] = []
     assignments: list[Assignment] = []
 
-    total_ops = n_machines * ops_per_machine
+    n_machines * ops_per_machine
     for m_idx in range(n_machines):
         wc = work_centers[m_idx]
         for op_idx in range(ops_per_machine):
@@ -199,7 +199,7 @@ def _compute_native_scores(
     machine_offsets = np.zeros(n_machines + 1, dtype=np.int64)
     assignment_indices_list: list[int] = []
 
-    for m_idx, (wc_id, machine_assigns) in enumerate(by_machine.items()):
+    for m_idx, (_wc_id, machine_assigns) in enumerate(by_machine.items()):
         machine_assigns.sort(key=lambda x: x[1].start_time)
         machine_offsets[m_idx + 1] = machine_offsets[m_idx] + len(machine_assigns)
         for orig_idx, _a in machine_assigns:
@@ -301,8 +301,8 @@ class TestNativeDestroyScoreParity:
         for idx, a in enumerate(assignments):
             expected = python_scores[a.operation_id]
             actual = float(native_result[idx])
-            assert expected == 0.0, f"Python score should be 0.0 for single-op machine"
-            assert actual == 0.0, f"Native score should be 0.0 for single-op machine"
+            assert expected == 0.0, "Python score should be 0.0 for single-op machine"
+            assert actual == 0.0, "Native score should be 0.0 for single-op machine"
 
     def test_parity_two_ops_per_machine(self) -> None:
         """Two operations per machine: first and last edge cases."""

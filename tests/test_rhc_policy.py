@@ -15,10 +15,10 @@ from synaps.solvers.rhc._policy import (
 
 
 class TestPresets:
-    def test_coverage_first_has_480_120(self) -> None:
-        spec = RhcPolicySpec.from_preset(RhcPolicy.COVERAGE_FIRST)
-        assert spec.admission.window_minutes == 480
-        assert spec.admission.overlap_minutes == 120
+    def test_coverage_first_has_600_180(self) -> None:
+         spec = RhcPolicySpec.from_preset(RhcPolicy.COVERAGE_FIRST)
+         assert spec.admission.window_minutes == 600
+         assert spec.admission.overlap_minutes == 180
 
     def test_search_entry_has_300_90(self) -> None:
         spec = RhcPolicySpec.from_preset(RhcPolicy.SEARCH_ENTRY)
@@ -43,9 +43,7 @@ class TestOverrides:
 
     def test_dotted_override_wins(self) -> None:
         spec = RhcPolicySpec.from_preset(RhcPolicy.BALANCED)
-        kwargs = build_solve_kwargs_from_spec(
-            spec, overrides={"admission.window_minutes": 600}
-        )
+        kwargs = build_solve_kwargs_from_spec(spec, overrides={"admission.window_minutes": 600})
         assert kwargs["window_minutes"] == 600
 
     def test_unknown_override_ignored(self) -> None:

@@ -20,7 +20,6 @@ from synaps.model import (
     Operation,
     Order,
     ScheduleProblem,
-    ScheduleResult,
     SetupEntry,
     SolverStatus,
     State,
@@ -31,7 +30,6 @@ from synaps.solvers.rhc._warm_start import (
     WarmStartSelection,
     filter_warm_start_assignments,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -264,7 +262,8 @@ class TestFilterWarmStartAssignments:
         assert result.assignments == []
 
     def test_mixed_inputs(self) -> None:
-        """5 candidates: 2 accepted, 1 not_in_active_window, 1 frozen_committed, 1 boundary_conflict."""
+        """5 candidates: 2 accepted, 1 not_in_active_window, 1 frozen_committed,
+        1 boundary_conflict."""
         # IDs for the 5 candidates
         accepted_op_1 = uuid4()
         accepted_op_2 = uuid4()
@@ -364,16 +363,12 @@ class TestAllRejectedFallback:
         2. ALNS receives an empty warm-start → falls back to greedy
         3. Metadata reflects the fallback path
         """
-        problem = _make_small_feasible_problem(
-            n_orders=5, ops_per_order=3, n_machines=3, seed=42
-        )
+        problem = _make_small_feasible_problem(n_orders=5, ops_per_order=3, n_machines=3, seed=42)
 
         # Create candidates whose operation_ids are NOT in the problem's
         # active window (simulating total rejection at the RHC filter level).
         fake_op_ids = [uuid4() for _ in range(len(problem.operations))]
-        fake_candidates = [
-            _make_assignment(operation_id=oid) for oid in fake_op_ids
-        ]
+        fake_candidates = [_make_assignment(operation_id=oid) for oid in fake_op_ids]
 
         # Step 1: The filter rejects all candidates
         real_op_ids = {op.id for op in problem.operations}
@@ -408,8 +403,7 @@ class TestAllRejectedFallback:
 
         # Solver must still produce a feasible schedule via greedy fallback
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL), (
-            f"Expected FEASIBLE/OPTIMAL after warm-start rejection fallback, "
-            f"got {result.status}"
+            f"Expected FEASIBLE/OPTIMAL after warm-start rejection fallback, got {result.status}"
         )
 
         md = result.metadata
@@ -433,9 +427,7 @@ class TestAllRejectedFallback:
         times), the solver rejects the warm-start and falls back to greedy.
         Metadata records the rejection reason.
         """
-        problem = _make_small_feasible_problem(
-            n_orders=5, ops_per_order=3, n_machines=3, seed=42
-        )
+        problem = _make_small_feasible_problem(n_orders=5, ops_per_order=3, n_machines=3, seed=42)
 
         # Create assignments that cover all problem operations but are
         # infeasible (all assigned to the same machine with overlapping times).
@@ -467,8 +459,7 @@ class TestAllRejectedFallback:
 
         # Solver must still produce a feasible schedule via greedy fallback
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL), (
-            f"Expected FEASIBLE/OPTIMAL after infeasible warm-start fallback, "
-            f"got {result.status}"
+            f"Expected FEASIBLE/OPTIMAL after infeasible warm-start fallback, got {result.status}"
         )
 
         md = result.metadata

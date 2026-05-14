@@ -460,10 +460,7 @@ class TestBeamSearchDispatch:
 
         # With width=1, beam search degenerates to greedy
         assert (
-            abs(
-                result_beam.objective.makespan_minutes
-                - result_greedy.objective.makespan_minutes
-            )
+            abs(result_beam.objective.makespan_minutes - result_greedy.objective.makespan_minutes)
             < 0.1
         )
 

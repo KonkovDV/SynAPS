@@ -125,15 +125,10 @@ def collect_commit_candidates(
         changed = False
         for op_id in list(candidates.keys()):
             operation = ops_by_id.get(op_id)
-            predecessor_op_id = (
-                operation.predecessor_op_id if operation is not None else None
-            )
+            predecessor_op_id = operation.predecessor_op_id if operation is not None else None
             if predecessor_op_id is None:
                 continue
-            if (
-                predecessor_op_id not in frozen_ids
-                and predecessor_op_id not in candidates
-            ):
+            if predecessor_op_id not in frozen_ids and predecessor_op_id not in candidates:
                 del candidates[op_id]
                 changed = True
 
@@ -189,9 +184,7 @@ def reanchor_inner_assignments(
     if not assignments or not frozen_assignments:
         return list(assignments), 0
 
-    original_by_op = {
-        assignment.operation_id: assignment for assignment in assignments
-    }
+    original_by_op = {assignment.operation_id: assignment for assignment in assignments}
     scheduled_assignments = list(frozen_assignments)
     machine_index = machine_index_factory(dispatch_context)
     for assignment in scheduled_assignments:
@@ -265,8 +258,7 @@ def reanchor_inner_assignments(
         for assignment in reanchored_assignments
         if original_by_op[assignment.operation_id].start_time != assignment.start_time
         or original_by_op[assignment.operation_id].end_time != assignment.end_time
-        or original_by_op[assignment.operation_id].work_center_id
-        != assignment.work_center_id
+        or original_by_op[assignment.operation_id].work_center_id != assignment.work_center_id
     )
     return sorted(
         reanchored_assignments,
@@ -320,10 +312,7 @@ def select_backtracking_assignments(
     rewound_ids = {
         assignment.operation_id
         for assignment in committed_assignments
-        if (
-            (assignment.end_time - horizon_start).total_seconds() / 60.0
-            > rewind_boundary + 1e-9
-        )
+        if ((assignment.end_time - horizon_start).total_seconds() / 60.0 > rewind_boundary + 1e-9)
     }
     if not rewound_ids:
         return []
@@ -335,9 +324,7 @@ def select_backtracking_assignments(
             if op_id in rewound_ids:
                 continue
             operation = ops_by_id.get(op_id)
-            predecessor_op_id = (
-                operation.predecessor_op_id if operation is not None else None
-            )
+            predecessor_op_id = operation.predecessor_op_id if operation is not None else None
             if predecessor_op_id in rewound_ids:
                 rewound_ids.add(op_id)
                 changed = True
@@ -382,9 +369,7 @@ def detect_cross_window_stable_ops(
             continue
         if curr.work_center_id != prev.work_center_id:
             continue
-        delta_minutes = abs(
-            (curr.start_time - prev.start_time).total_seconds()
-        ) / 60.0
+        delta_minutes = abs((curr.start_time - prev.start_time).total_seconds()) / 60.0
         if delta_minutes <= tolerance_minutes + 1e-9:
             stable.add(op_id)
     return stable
@@ -437,7 +422,7 @@ def stabilize_temporal_consistency(
     }
     assigned_op_ids = set(assignment_by_op.keys())
 
-    indegree: dict[UUID, int] = {op_id: 0 for op_id in assigned_op_ids}
+    indegree: dict[UUID, int] = dict.fromkeys(assigned_op_ids, 0)
     successors: dict[UUID, list[UUID]] = defaultdict(list)
     for op_id in assigned_op_ids:
         operation = ops_by_id.get(op_id)
@@ -452,9 +437,7 @@ def stabilize_temporal_consistency(
     topo_queue = deque(
         sorted(
             [op_id for op_id, deg in indegree.items() if deg == 0],
-            key=lambda op_id: (
-                ops_by_id[op_id].seq_in_order if op_id in ops_by_id else 0
-            ),
+            key=lambda op_id: (ops_by_id[op_id].seq_in_order if op_id in ops_by_id else 0),
         )
     )
     topo_order: list[UUID] = []
@@ -474,9 +457,7 @@ def stabilize_temporal_consistency(
         topo_order.extend(
             sorted(
                 remaining_ids,
-                key=lambda op_id: (
-                    ops_by_id[op_id].seq_in_order if op_id in ops_by_id else 0
-                ),
+                key=lambda op_id: (ops_by_id[op_id].seq_in_order if op_id in ops_by_id else 0),
             )
         )
 

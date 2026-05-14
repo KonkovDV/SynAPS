@@ -288,9 +288,7 @@ class ScheduleProblem(BaseModel):
                     f"{missing_work_centers}"
                 )
             if operation.predecessor_op_id == operation.id:
-                issues.append(
-                    f"operation {operation.id} cannot reference itself as predecessor"
-                )
+                issues.append(f"operation {operation.id} cannot reference itself as predecessor")
             elif (
                 operation.predecessor_op_id is not None
                 and operation.predecessor_op_id not in operation_id_set
@@ -370,22 +368,17 @@ class ScheduleProblem(BaseModel):
                 )
             if entry.from_state_id not in state_id_set:
                 issues.append(
-                    "setup entry "
-                    f"{entry.id} references unknown from_state_id "
-                    f"{entry.from_state_id}"
+                    f"setup entry {entry.id} references unknown from_state_id {entry.from_state_id}"
                 )
             if entry.to_state_id not in state_id_set:
                 issues.append(
-                    "setup entry "
-                    f"{entry.id} references unknown to_state_id "
-                    f"{entry.to_state_id}"
+                    f"setup entry {entry.id} references unknown to_state_id {entry.to_state_id}"
                 )
 
         for requirement in self.aux_requirements:
             if requirement.operation_id not in operation_id_set:
                 issues.append(
-                    "aux requirement references unknown operation_id "
-                    f"{requirement.operation_id}"
+                    f"aux requirement references unknown operation_id {requirement.operation_id}"
                 )
             if requirement.aux_resource_id not in aux_resource_id_set:
                 issues.append(
@@ -434,12 +427,10 @@ class SolverErrorCategory(StrEnum):
                 "increase time_limit_s or accept current feasible solution"
             ),
             SolverErrorCategory.TIMEOUT_NO_SOLUTION: (
-                "increase time_limit_s, relax constraints, "
-                "or try a faster solver config"
+                "increase time_limit_s, relax constraints, or try a faster solver config"
             ),
             SolverErrorCategory.INFEASIBLE_OVERCONSTRAINED: (
-                "relax due dates, add work centers, "
-                "or reduce operation count"
+                "relax due dates, add work centers, or reduce operation count"
             ),
             SolverErrorCategory.INFEASIBLE_PRECEDENCE_CYCLE: (
                 "check operation predecessor_op_id references for cycles"
@@ -448,20 +439,15 @@ class SolverErrorCategory(StrEnum):
                 "verify eligible_wc_ids are populated for all operations"
             ),
             SolverErrorCategory.MASTER_INFEASIBLE: (
-                "LBBD master assignment has no feasible solution; "
-                "relax constraints"
+                "LBBD master assignment has no feasible solution; relax constraints"
             ),
             SolverErrorCategory.SUBPROBLEM_INFEASIBLE: (
-                "LBBD subproblem sequencing failed; "
-                "try larger clusters or more iterations"
+                "LBBD subproblem sequencing failed; try larger clusters or more iterations"
             ),
             SolverErrorCategory.CONSTRUCTIVE_FAILURE: (
-                "greedy dispatch found no feasible slot; "
-                "check planning horizon or eligibility"
+                "greedy dispatch found no feasible slot; check planning horizon or eligibility"
             ),
-            SolverErrorCategory.INTERNAL_ERROR: (
-                "unexpected solver error; check logs and report"
-            ),
+            SolverErrorCategory.INTERNAL_ERROR: ("unexpected solver error; check logs and report"),
         }
         return hints.get(self, "unknown error category")
 

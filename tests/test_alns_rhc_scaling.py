@@ -57,28 +57,46 @@ def _make_3state_problem(n_orders: int = 10, ops_per_order: int = 3) -> Schedule
     ]
     setup_matrix = [
         SetupEntry(
-            work_center_id=WC1, from_state_id=SA, to_state_id=SB,
-            setup_minutes=10, material_loss=1.0,
+            work_center_id=WC1,
+            from_state_id=SA,
+            to_state_id=SB,
+            setup_minutes=10,
+            material_loss=1.0,
         ),
         SetupEntry(
-            work_center_id=WC1, from_state_id=SB, to_state_id=SA,
-            setup_minutes=15, material_loss=2.0,
+            work_center_id=WC1,
+            from_state_id=SB,
+            to_state_id=SA,
+            setup_minutes=15,
+            material_loss=2.0,
         ),
         SetupEntry(
-            work_center_id=WC1, from_state_id=SA, to_state_id=SC,
-            setup_minutes=20, material_loss=0.5,
+            work_center_id=WC1,
+            from_state_id=SA,
+            to_state_id=SC,
+            setup_minutes=20,
+            material_loss=0.5,
         ),
         SetupEntry(
-            work_center_id=WC1, from_state_id=SC, to_state_id=SA,
-            setup_minutes=12, material_loss=0.8,
+            work_center_id=WC1,
+            from_state_id=SC,
+            to_state_id=SA,
+            setup_minutes=12,
+            material_loss=0.8,
         ),
         SetupEntry(
-            work_center_id=WC1, from_state_id=SB, to_state_id=SC,
-            setup_minutes=8, material_loss=1.5,
+            work_center_id=WC1,
+            from_state_id=SB,
+            to_state_id=SC,
+            setup_minutes=8,
+            material_loss=1.5,
         ),
         SetupEntry(
-            work_center_id=WC1, from_state_id=SC, to_state_id=SB,
-            setup_minutes=18, material_loss=3.0,
+            work_center_id=WC1,
+            from_state_id=SC,
+            to_state_id=SB,
+            setup_minutes=18,
+            material_loss=3.0,
         ),
         SetupEntry(work_center_id=WC2, from_state_id=SA, to_state_id=SB, setup_minutes=8),
         SetupEntry(work_center_id=WC2, from_state_id=SB, to_state_id=SA, setup_minutes=12),
@@ -535,8 +553,7 @@ class TestAlnsSolver:
         assert alns_result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
         # Allow 10% tolerance — ALNS may not beat greedy on tiny instances
         assert (
-            alns_result.objective.makespan_minutes
-            <= greedy_result.objective.makespan_minutes * 1.1
+            alns_result.objective.makespan_minutes <= greedy_result.objective.makespan_minutes * 1.1
         )
 
     def test_alns_metadata_correct(self) -> None:
@@ -1088,10 +1105,8 @@ class TestAlnsSolver:
             Assignment(
                 operation_id=op.id,
                 work_center_id=work_center_id,
-                start_time=problem.planning_horizon_start
-                + timedelta(minutes=index * 10),
-                end_time=problem.planning_horizon_start
-                + timedelta(minutes=(index + 1) * 10),
+                start_time=problem.planning_horizon_start + timedelta(minutes=index * 10),
+                end_time=problem.planning_horizon_start + timedelta(minutes=(index + 1) * 10),
                 setup_minutes=0,
                 aux_resource_ids=[],
             )
@@ -1302,12 +1317,15 @@ class TestRhcSolver:
 
         problem = _make_3state_problem(n_orders=10, ops_per_order=3)
         spec = RhcPolicySpec.from_preset(RhcPolicy.BALANCED)
-        kwargs = build_solve_kwargs_from_spec(spec, overrides={
-            "window_minutes": 240,
-            "overlap_minutes": 60,
-            "inner_solver": "greedy",
-            "max_ops_per_window": 100,
-        })
+        kwargs = build_solve_kwargs_from_spec(
+            spec,
+            overrides={
+                "window_minutes": 240,
+                "overlap_minutes": 60,
+                "inner_solver": "greedy",
+                "max_ops_per_window": 100,
+            },
+        )
         kwargs["time_limit_s"] = 30
         solver = RhcSolver(policy=RhcPolicy.BALANCED)
         result = solver.solve(problem, **kwargs)
@@ -1420,12 +1438,15 @@ class TestRhcSolver:
 
         problem = _make_due_pressure_chain_problem()
         spec = RhcPolicySpec.from_preset(RhcPolicy.BALANCED)
-        kwargs = build_solve_kwargs_from_spec(spec, overrides={
-            "window_minutes": 120,
-            "overlap_minutes": 30,
-            "inner_solver": "greedy",
-            "max_ops_per_window": 10,
-        })
+        kwargs = build_solve_kwargs_from_spec(
+            spec,
+            overrides={
+                "window_minutes": 120,
+                "overlap_minutes": 30,
+                "inner_solver": "greedy",
+                "max_ops_per_window": 10,
+            },
+        )
         kwargs["time_limit_s"] = 30
         solver = RhcSolver(policy=RhcPolicy.BALANCED)
         result = solver.solve(problem, **kwargs)
@@ -1713,9 +1734,10 @@ class TestRhcSolver:
 
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL, SolverStatus.ERROR)
         assert result.metadata["peak_raw_window_candidate_count"] == 20
-        assert result.metadata["peak_window_candidate_count"] == result.metadata[
-            "candidate_pool_limit"
-        ]
+        assert (
+            result.metadata["peak_window_candidate_count"]
+            == result.metadata["candidate_pool_limit"]
+        )
         assert result.metadata["peak_window_candidate_count"] > len(earliest_ids)
         assert result.metadata["admission_relaxation_windows"] == 1
         assert result.metadata["admission_relaxation_recovered_ops"] >= 8
@@ -1761,13 +1783,15 @@ class TestRhcSolver:
         assert result.metadata["admission_full_scan_triggered_windows"] == 1
         assert result.metadata["admission_full_scan_windows"] == 1
         assert result.metadata["admission_full_scan_added_ops"] == 2
-        assert result.metadata["admission_full_scan_final_pool_peak"] <= result.metadata[
-            "candidate_pool_limit"
-        ]
+        assert (
+            result.metadata["admission_full_scan_final_pool_peak"]
+            <= result.metadata["candidate_pool_limit"]
+        )
         assert result.metadata["admission_full_scan_recovered_ops"] == 2
-        assert result.metadata["peak_window_candidate_count"] == result.metadata[
-            "candidate_pool_limit"
-        ]
+        assert (
+            result.metadata["peak_window_candidate_count"]
+            == result.metadata["candidate_pool_limit"]
+        )
         assert result.metadata["peak_window_candidate_count"] > len(earliest_ids)
 
     def test_rhc_window_cap_selection_is_deterministic_under_ties(self) -> None:
@@ -1901,19 +1925,22 @@ class TestRhcSolver:
         monkeypatch.setattr(alns_module.AlnsSolver, "solve", fake_alns_solve)
 
         spec = RhcPolicySpec.from_preset(RhcPolicy.BALANCED)
-        kwargs = build_solve_kwargs_from_spec(spec, overrides={
-            "window_minutes": 60,
-            "overlap_minutes": 0,
-            "inner_solver": "alns",
-            "max_ops_per_window": 18,
-            "backtracking_enabled": True,
-            "backtracking_tail_minutes": 20,
-            "backtracking_max_ops": 4,
-            "inner_kwargs": {
-                "max_iterations": 5,
-                "use_cpsat_repair": False,
+        kwargs = build_solve_kwargs_from_spec(
+            spec,
+            overrides={
+                "window_minutes": 60,
+                "overlap_minutes": 0,
+                "inner_solver": "alns",
+                "max_ops_per_window": 18,
+                "backtracking_enabled": True,
+                "backtracking_tail_minutes": 20,
+                "backtracking_max_ops": 4,
+                "inner_kwargs": {
+                    "max_iterations": 5,
+                    "use_cpsat_repair": False,
+                },
             },
-        })
+        )
         kwargs["time_limit_s"] = 30
         solver = RhcSolver(policy=RhcPolicy.BALANCED)
         result = solver.solve(problem, max_windows=2, **kwargs)
@@ -2155,20 +2182,23 @@ class TestRhcInnerSolver:
 
         problem = _make_3state_problem(n_orders=12, ops_per_order=3)
         spec = RhcPolicySpec.from_preset(RhcPolicy.BALANCED)
-        kwargs = build_solve_kwargs_from_spec(spec, overrides={
-            "window_minutes": 360,
-            "overlap_minutes": 60,
-            "inner_solver": "alns",
-            "max_ops_per_window": 100,
-            "inner_kwargs": {
-                "max_iterations": 30,
-                "time_limit_s": 15,
-                "destroy_fraction": 0.2,
-                "min_destroy": 2,
-                "max_destroy": 8,
-                "repair_time_limit_s": 3,
+        kwargs = build_solve_kwargs_from_spec(
+            spec,
+            overrides={
+                "window_minutes": 360,
+                "overlap_minutes": 60,
+                "inner_solver": "alns",
+                "max_ops_per_window": 100,
+                "inner_kwargs": {
+                    "max_iterations": 30,
+                    "time_limit_s": 15,
+                    "destroy_fraction": 0.2,
+                    "min_destroy": 2,
+                    "max_destroy": 8,
+                    "repair_time_limit_s": 3,
+                },
             },
-        })
+        )
         kwargs["time_limit_s"] = 60
         solver = RhcSolver(policy=RhcPolicy.BALANCED)
         result = solver.solve(problem, **kwargs)
@@ -2429,12 +2459,9 @@ class TestRhcInnerSolver:
         assert captured_warm_starts[0] == []
 
         expected_tail_ids = {ops_by_seq[1].id, ops_by_seq[2].id}
-        actual_tail_ids = {
-            assignment.operation_id for assignment in captured_warm_starts[1]
-        }
+        actual_tail_ids = {assignment.operation_id for assignment in captured_warm_starts[1]}
         assert expected_tail_ids <= actual_tail_ids, (
-            f"Expected overlap tail to include {expected_tail_ids}, "
-            f"but got {actual_tail_ids}"
+            f"Expected overlap tail to include {expected_tail_ids}, but got {actual_tail_ids}"
         )
 
     def test_rhc_passes_external_warm_start_into_first_alns_window(
@@ -2502,9 +2529,10 @@ class TestRhcInnerSolver:
 
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
         assert captured_warm_starts
-        assert {
-            assignment.operation_id for assignment in captured_warm_starts[0]
-        } == {ops_by_seq[0].id, ops_by_seq[1].id}
+        assert {assignment.operation_id for assignment in captured_warm_starts[0]} == {
+            ops_by_seq[0].id,
+            ops_by_seq[1].id,
+        }
         assert result.metadata["external_warm_start_supplied_assignments"] == 2
         assert result.metadata["external_warm_start_used_windows"] == 1
 
@@ -2583,9 +2611,7 @@ class TestRhcInnerSolver:
         assert len(captured_warm_starts) >= 2
         assert captured_warm_starts[0] == []
         expected_boundary_ids = {ops_by_seq[1].id, ops_by_seq[2].id}
-        actual_boundary_ids = {
-            assignment.operation_id for assignment in captured_warm_starts[1]
-        }
+        actual_boundary_ids = {assignment.operation_id for assignment in captured_warm_starts[1]}
         assert expected_boundary_ids <= actual_boundary_ids, (
             f"Expected boundary tail to include {expected_boundary_ids}, "
             f"but got {actual_boundary_ids}"
@@ -2653,9 +2679,9 @@ class TestRhcInnerSolver:
         assert captured_time_limits
         assert captured_time_limits[0] == pytest.approx(180.0)
         assert result.metadata["inner_window_summaries"]
-        assert result.metadata["inner_window_summaries"][0][
-            "inner_time_limit_s"
-        ] == pytest.approx(180.0)
+        assert result.metadata["inner_window_summaries"][0]["inner_time_limit_s"] == pytest.approx(
+            180.0
+        )
 
     def test_rhc_uses_numpy_candidate_metrics_path(
         self,
@@ -2942,16 +2968,16 @@ class TestRhcInnerSolver:
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
         first_window = result.metadata["inner_window_summaries"][0]
         assert first_window["resolution_mode"] == "fallback_greedy"
-        assert (
-            first_window["fallback_reason"]
-            == "inner_time_limit_exhausted_before_search"
-        )
+        assert first_window["fallback_reason"] == "inner_time_limit_exhausted_before_search"
         assert first_window["inner_status"] == "feasible"
         assert first_window["time_limit_exhausted_before_search"] is True
         assert first_window["iterations_completed"] == 0
-        assert result.metadata["inner_fallback_reason_counts"][
-            "inner_time_limit_exhausted_before_search"
-        ] >= 1
+        assert (
+            result.metadata["inner_fallback_reason_counts"][
+                "inner_time_limit_exhausted_before_search"
+            ]
+            >= 1
+        )
 
         verification = verify_schedule_result(problem, result)
         assert verification.feasible, f"Violations: {verification.violations}"
@@ -2990,16 +3016,16 @@ class TestRhcInnerSolver:
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
         first_window = result.metadata["inner_window_summaries"][0]
         assert first_window["resolution_mode"] == "fallback_greedy"
-        assert (
-            first_window["fallback_reason"]
-            == "inner_time_limit_exhausted_before_search"
-        )
+        assert first_window["fallback_reason"] == "inner_time_limit_exhausted_before_search"
         assert first_window["budget_guard_skipped_initial_search"] is True
         assert result.metadata["alns_presearch_budget_guard_enabled"] is True
         assert result.metadata["alns_presearch_budget_guard_skipped_windows"] >= 1
-        assert result.metadata["inner_fallback_reason_counts"][
-            "inner_time_limit_exhausted_before_search"
-        ] >= 1
+        assert (
+            result.metadata["inner_fallback_reason_counts"][
+                "inner_time_limit_exhausted_before_search"
+            ]
+            >= 1
+        )
 
         verification = verify_schedule_result(problem, result)
         assert verification.feasible, f"Violations: {verification.violations}"
@@ -3259,14 +3285,8 @@ class TestRhcInnerSolver:
         assert result.metadata["inner_window_summaries"]
         first_window = result.metadata["inner_window_summaries"][0]
         assert first_window["resolution_mode"] == "fallback_greedy"
-        assert (
-            first_window["fallback_reason"]
-            == "inner_time_limit_exhausted_before_search"
-        )
-        assert (
-            first_window["fallback_reason_code"]
-            == "inner_time_limit_exhausted_before_search"
-        )
+        assert first_window["fallback_reason"] == "inner_time_limit_exhausted_before_search"
+        assert first_window["fallback_reason_code"] == "inner_time_limit_exhausted_before_search"
         assert first_window["inner_status"] == "error"
         assert result.metadata["inner_resolution_counts"]["fallback_greedy"] >= 1
         greedy_result = GreedyDispatch().solve(problem)
@@ -3440,9 +3460,7 @@ class TestRhcInnerSolver:
             for local_index, op in enumerate(
                 sorted(sub_problem.operations, key=lambda op: op.seq_in_order)
             ):
-                start_time = problem.planning_horizon_start + timedelta(
-                    minutes=local_index * 10
-                )
+                start_time = problem.planning_horizon_start + timedelta(minutes=local_index * 10)
                 assignments.append(
                     Assignment(
                         operation_id=op.id,
@@ -3513,9 +3531,7 @@ class TestRhcInnerSolver:
             for local_index, op in enumerate(
                 sorted(sub_problem.operations, key=lambda op: op.seq_in_order)
             ):
-                start_time = problem.planning_horizon_start + timedelta(
-                    minutes=local_index * 10
-                )
+                start_time = problem.planning_horizon_start + timedelta(minutes=local_index * 10)
                 assignments.append(
                     Assignment(
                         operation_id=op.id,
@@ -3560,9 +3576,9 @@ class TestRhcInnerSolver:
         second_call = captured_calls[1]
         frozen_assignments = second_call.get("frozen_assignments", [])
         if frozen_assignments:
-            assert {
-                assignment.operation_id for assignment in frozen_assignments
-            } <= {assignment.operation_id for assignment in result.assignments}
+            assert {assignment.operation_id for assignment in frozen_assignments} <= {
+                assignment.operation_id for assignment in result.assignments
+            }
 
 
 # ═══════════════════════════════════════════════════════════════════════════

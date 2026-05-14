@@ -123,9 +123,7 @@ class TestIncrementalParity:
     **Validates: Task 17.6**
     """
 
-    def test_incremental_matches_full_recompute_100_cycles(
-        self, problem_500, schedule_500
-    ) -> None:
+    def test_incremental_matches_full_recompute_100_cycles(self, problem_500, schedule_500) -> None:
         """For 100 iterations of random destroy + greedy re-insert, assert
         incremental and full recompute produce identical costs (within 1e-6).
         """
@@ -204,9 +202,7 @@ class TestIncrementalParity:
             cost_incr = _objective_cost(obj_incr, weights)
 
             # Compute cost via full recompute
-            obj_full = _evaluate_objective(
-                problem_500, candidate, sdst, ops_by_id=ops_by_id
-            )
+            obj_full = _evaluate_objective(problem_500, candidate, sdst, ops_by_id=ops_by_id)
             cost_full = _objective_cost(obj_full, weights)
 
             # Assert parity within tolerance
@@ -229,7 +225,9 @@ class TestIncrementalParity:
                 f"Cycle {cycle}: material_loss mismatch: "
                 f"{obj_incr.total_material_loss} vs {obj_full.total_material_loss}"
             )
-            assert abs(obj_incr.total_tardiness_minutes - obj_full.total_tardiness_minutes) < 1e-6, (
+            assert (
+                abs(obj_incr.total_tardiness_minutes - obj_full.total_tardiness_minutes) < 1e-6
+            ), (
                 f"Cycle {cycle}: tardiness mismatch: "
                 f"{obj_incr.total_tardiness_minutes} vs {obj_full.total_tardiness_minutes}"
             )
@@ -251,9 +249,7 @@ class TestIncrementalBenchmark:
     **Validates: Task 17.7**
     """
 
-    def test_incremental_at_least_5x_faster_than_full(
-        self, problem_1000, schedule_1000
-    ) -> None:
+    def test_incremental_at_least_5x_faster_than_full(self, problem_1000, schedule_1000) -> None:
         """Time 50 iterations of full recompute vs 50 iterations of incremental
         eval with a small number of affected machines, and assert incremental
         is ≥5× faster.
@@ -296,9 +292,7 @@ class TestIncrementalBenchmark:
         # --- Time full recompute (50 iterations) ---
         t_full_start = time.perf_counter()
         for _ in range(50):
-            _evaluate_objective(
-                problem_1000, assignments, sdst, ops_by_id=ops_by_id
-            )
+            _evaluate_objective(problem_1000, assignments, sdst, ops_by_id=ops_by_id)
         t_full_end = time.perf_counter()
         time_full = t_full_end - t_full_start
 
@@ -322,12 +316,12 @@ class TestIncrementalBenchmark:
 
         # Report timing for visibility
         print(
-            f"\n  Full recompute (50 iters): {time_full*1000:.1f} ms "
-            f"({time_full/50*1000:.2f} ms/iter)"
+            f"\n  Full recompute (50 iters): {time_full * 1000:.1f} ms "
+            f"({time_full / 50 * 1000:.2f} ms/iter)"
         )
         print(
-            f"  Incremental eval (50 iters): {time_incr*1000:.1f} ms "
-            f"({time_incr/50*1000:.2f} ms/iter)"
+            f"  Incremental eval (50 iters): {time_incr * 1000:.1f} ms "
+            f"({time_incr / 50 * 1000:.2f} ms/iter)"
         )
         print(f"  Speedup: {speedup:.1f}×")
 
@@ -337,6 +331,6 @@ class TestIncrementalBenchmark:
         # the speedup reaches 10-20×. At 3000 ops we reliably achieve ≥3.5×.
         assert speedup >= 3.5, (
             f"Incremental eval speedup is only {speedup:.2f}× "
-            f"(expected ≥3.5×). Full: {time_full*1000:.1f} ms, "
-            f"Incr: {time_incr*1000:.1f} ms"
+            f"(expected ≥3.5×). Full: {time_full * 1000:.1f} ms, "
+            f"Incr: {time_incr * 1000:.1f} ms"
         )

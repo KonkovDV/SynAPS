@@ -14,8 +14,6 @@ import random
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-import pytest
-
 from synaps.model import (
     Operation,
     Order,
@@ -25,9 +23,8 @@ from synaps.model import (
     State,
     WorkCenter,
 )
-from synaps.solvers.alns_solver import AlnsSolver, DESTROY_OPERATORS
+from synaps.solvers.alns_solver import DESTROY_OPERATORS, AlnsSolver
 from synaps.solvers.rhc._cross_window import WindowQualitySummary
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Fixtures
@@ -46,10 +43,7 @@ def _make_small_problem(
     """Build a small deterministic FJSP-SDST problem for bias testing."""
     rng = random.Random(seed)
 
-    states = [
-        State(id=uuid4(), code=f"S{i}", label=f"State {i}")
-        for i in range(3)
-    ]
+    states = [State(id=uuid4(), code=f"S{i}", label=f"State {i}") for i in range(3)]
     state_ids = [s.id for s in states]
 
     work_centers = [
@@ -126,8 +120,8 @@ def _make_high_setup_hints(n_hints: int = 3) -> list[WindowQualitySummary]:
     return [
         WindowQualitySummary(
             window_index=i,
-            per_machine_utilization={f"wc_0": 0.8, f"wc_1": 0.6},
-            setup_cost_by_machine={f"wc_0": 200.0, f"wc_1": 150.0},
+            per_machine_utilization={"wc_0": 0.8, "wc_1": 0.6},
+            setup_cost_by_machine={"wc_0": 200.0, "wc_1": 150.0},
             tardiness_contribution=10.0,
             operation_count=500,
         )
@@ -140,8 +134,8 @@ def _make_low_setup_hints(n_hints: int = 3) -> list[WindowQualitySummary]:
     return [
         WindowQualitySummary(
             window_index=i,
-            per_machine_utilization={f"wc_0": 0.3, f"wc_1": 0.2},
-            setup_cost_by_machine={f"wc_0": 1.0, f"wc_1": 0.5},
+            per_machine_utilization={"wc_0": 0.3, "wc_1": 0.2},
+            setup_cost_by_machine={"wc_0": 1.0, "wc_1": 0.5},
             tardiness_contribution=0.0,
             operation_count=100,
         )
@@ -248,9 +242,7 @@ class TestBiasAbsentWhenFlagOff:
         deltas = result.metadata["cross_window_bias_operator_deltas"]
         assert isinstance(deltas, dict)
         for name, delta in deltas.items():
-            assert delta == 0.0, (
-                f"Operator '{name}' has non-zero delta {delta} when flag is off"
-            )
+            assert delta == 0.0, f"Operator '{name}' has non-zero delta {delta} when flag is off"
 
     def test_bias_not_applied_when_no_hints(self) -> None:
         """With flag on but no hints, cross_window_bias_applied=False."""
@@ -273,9 +265,7 @@ class TestBiasAbsentWhenFlagOff:
 
         deltas = result.metadata["cross_window_bias_operator_deltas"]
         for name, delta in deltas.items():
-            assert delta == 0.0, (
-                f"Operator '{name}' has non-zero delta {delta} when no hints"
-            )
+            assert delta == 0.0, f"Operator '{name}' has non-zero delta {delta} when no hints"
 
     def test_bias_not_applied_when_hints_empty_list(self) -> None:
         """With flag on but empty hints list, cross_window_bias_applied=False."""
@@ -328,8 +318,9 @@ class TestBiasAbsentWhenFlagOff:
         )
 
         # Initial weights should be identical
-        assert result_off.metadata["alns_initial_operator_weights"] == (
-            result_default.metadata["alns_initial_operator_weights"]
+        assert (
+            result_off.metadata["alns_initial_operator_weights"]
+            == (result_default.metadata["alns_initial_operator_weights"])
         )
 
 
@@ -353,8 +344,8 @@ class TestBiasFloorEnforced:
         extreme_hints = [
             WindowQualitySummary(
                 window_index=i,
-                per_machine_utilization={f"wc_0": 1.0},
-                setup_cost_by_machine={f"wc_0": 10000.0},  # Very high
+                per_machine_utilization={"wc_0": 1.0},
+                setup_cost_by_machine={"wc_0": 10000.0},  # Very high
                 tardiness_contribution=100.0,
                 operation_count=1000,
             )
@@ -390,10 +381,7 @@ class TestBiasFloorEnforced:
 
         # Check initial weights after bias (use deltas + initial to reconstruct)
         initial_weights = result.metadata["alns_initial_operator_weights"]
-        biased_weights = {
-            name: initial_weights[name] + deltas[name]
-            for name in initial_weights
-        }
+        biased_weights = {name: initial_weights[name] + deltas[name] for name in initial_weights}
 
         for name, weight in biased_weights.items():
             assert weight >= weight_floor - 1e-10, (
@@ -406,9 +394,9 @@ class TestBiasFloorEnforced:
         solver = AlnsSolver()
 
         # Start with heavily skewed weights (machine_segment dominates)
-        n_operators = len(DESTROY_OPERATORS)
+        len(DESTROY_OPERATORS)
         operator_names = [name for name, _ in DESTROY_OPERATORS]
-        skewed_weights = {name: 0.01 for name in operator_names}
+        skewed_weights = dict.fromkeys(operator_names, 0.01)
         skewed_weights["machine_segment"] = 10.0  # Dominates
 
         result = solver.solve(
@@ -429,9 +417,7 @@ class TestBiasFloorEnforced:
         # All final weights should be positive (no zeroed-out operators)
         final_weights = result.metadata["alns_final_operator_weights"]
         for name, weight in final_weights.items():
-            assert weight > 0.0, (
-                f"Operator '{name}' has zero weight — floor should prevent this"
-            )
+            assert weight > 0.0, f"Operator '{name}' has zero weight — floor should prevent this"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

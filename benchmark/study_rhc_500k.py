@@ -21,13 +21,13 @@ from pathlib import Path
 from typing import Any, Literal
 
 from benchmark.study_rhc_50k import _apply_lane_profile, _summarize_inner_windows
+from synaps.benchmarks.run_scaling_benchmark import run_benchmark as run_scaling_case
 from synaps.model import (
     MAX_SCHEDULE_OPERATIONS,
     MAX_SCHEDULE_ORDERS,
     MAX_SCHEDULE_SETUP_ENTRIES,
     MAX_SCHEDULE_WORK_CENTERS,
 )
-from synaps.benchmarks.run_scaling_benchmark import run_benchmark as run_scaling_case
 
 LaneMode = Literal["throughput", "strict", "both"]
 ExecutionMode = Literal["plan", "gated", "full"]
@@ -145,14 +145,14 @@ def _topology_for_scale(
     """Compute machine/state topology for a given operation scale."""
 
     target = max(1, ops_per_machine_target)
-    machine_estimate = int(round(n_ops / target))
+    machine_estimate = round(n_ops / target)
     n_machines = min(max_machines, max(min_machines, machine_estimate))
 
     if state_growth_power <= 0.0:
         n_states = max(2, base_states)
     else:
         growth = (n_ops / 50_000.0) ** state_growth_power
-        n_states = max(2, int(round(base_states * growth)))
+        n_states = max(2, round(base_states * growth))
 
     return {
         "n_ops": n_ops,
@@ -180,9 +180,9 @@ def _estimate_instance_footprint(
     The estimates are intentionally conservative and used only for a safety gate.
     """
 
-    eligible_per_operation = max(1, int(round(n_machines * machine_flexibility)))
-    expected_setup_entries = int(
-        round(n_machines * n_states * max(n_states - 1, 0) * setup_density)
+    eligible_per_operation = max(1, round(n_machines * machine_flexibility))
+    expected_setup_entries = round(
+        n_machines * n_states * max(n_states - 1, 0) * setup_density
     )
     n_orders = max(1, math.ceil(n_ops / max(1, ops_per_order)))
 
@@ -284,14 +284,14 @@ def _scale_solver_kwargs(
     ratio = max(1.0, n_ops / max(1, base_ops))
 
     base_time_limit = float(base_kwargs.get("time_limit_s", 600))
-    scaled_time_limit = int(round(base_time_limit * (ratio ** time_limit_growth_power)))
+    scaled_time_limit = round(base_time_limit * (ratio**time_limit_growth_power))
     scaled["time_limit_s"] = max(60, scaled_time_limit)
     if time_limit_cap_s is not None:
         scaled["time_limit_s"] = max(60, min(int(time_limit_cap_s), scaled["time_limit_s"]))
 
     if "max_ops_per_window" in base_kwargs:
         base_window_cap = int(base_kwargs["max_ops_per_window"])
-        scaled_window_cap = int(round(base_window_cap * (ratio ** max_window_growth_power)))
+        scaled_window_cap = round(base_window_cap * (ratio**max_window_growth_power))
         scaled["max_ops_per_window"] = max(1000, min(max_window_cap, scaled_window_cap))
 
     if solver_name in {"RHC-ALNS", "RHC-ALNS-100K"}:
@@ -347,8 +347,7 @@ def _summarize_runs(runs: list[dict[str, Any]], *, cvar_alpha: float) -> dict[st
     assigned_ops = [int(run["results"]["assigned_ops"]) for run in completed]
     total_ops = [int(run["results"]["n_ops"]) for run in completed]
     scheduled_ratios = [
-        assigned / max(1, n_ops)
-        for assigned, n_ops in zip(assigned_ops, total_ops, strict=True)
+        assigned / max(1, n_ops) for assigned, n_ops in zip(assigned_ops, total_ops, strict=True)
     ]
     throughput_ops_s = [
         assigned / max(1e-9, solve_s)
@@ -403,9 +402,7 @@ def _summarize_runs(runs: list[dict[str, Any]], *, cvar_alpha: float) -> dict[st
             4,
         )
 
-    summary["inner_window_summary"] = _summarize_inner_windows(
-        flattened_inner_window_summaries
-    )
+    summary["inner_window_summary"] = _summarize_inner_windows(flattened_inner_window_summaries)
 
     return summary
 
@@ -452,8 +449,7 @@ def _evaluate_quality_gate(
             "summary_ok": summary.get("status") == "ok",
             "feasibility": float(summary.get("feasibility_rate", 0.0)) >= 1.0,
             "scheduled_ratio": (
-                float(summary.get("mean_scheduled_ratio", 0.0))
-                >= min_scheduled_ratio
+                float(summary.get("mean_scheduled_ratio", 0.0)) >= min_scheduled_ratio
             ),
             "fallback_ratio": (
                 True
@@ -581,9 +577,7 @@ def study_rhc_500k(
             "runs": [],
         }
 
-        should_execute = execution_mode == "full" or (
-            execution_mode == "gated" and gate["allowed"]
-        )
+        should_execute = execution_mode == "full" or (execution_mode == "gated" and gate["allowed"])
 
         if execution_mode == "plan" or not should_execute:
             scale_record["execution"] = "skipped"
@@ -668,8 +662,7 @@ def study_rhc_500k(
         scale_records.append(scale_record)
 
     summary_by_config = {
-        key: _summarize_runs(runs, cvar_alpha=cvar_alpha)
-        for key, runs in grouped_runs.items()
+        key: _summarize_runs(runs, cvar_alpha=cvar_alpha) for key, runs in grouped_runs.items()
     }
 
     quality_gate = _evaluate_quality_gate(

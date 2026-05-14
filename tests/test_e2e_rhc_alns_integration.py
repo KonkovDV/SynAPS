@@ -63,22 +63,24 @@ def _solve_rhc(problem, *, cross_window_learning_enabled: bool = False, **extra_
     Uses the typed RhcPolicy + RhcPolicySpec overrides pattern to avoid
     deprecation warnings from raw kwargs.  See Task 15 migration notes.
     """
+    from synaps.solvers.rhc import RhcPolicy
     from synaps.solvers.rhc._policy import RhcPolicySpec, build_solve_kwargs_from_spec
 
-    from synaps.solvers.rhc import RhcPolicy
-
     spec = RhcPolicySpec.from_preset(RhcPolicy.BALANCED)
-    kwargs = build_solve_kwargs_from_spec(spec, overrides={
-        "inner_solver": "alns",
-        "window_minutes": 120,
-        "overlap_minutes": 30,
-        "inner_kwargs": {
-            "max_iterations": 30,
-            "max_no_improve_iters": 15,
-            "record_iteration_metrics": True,
-            "max_iteration_records": 100,
+    kwargs = build_solve_kwargs_from_spec(
+        spec,
+        overrides={
+            "inner_solver": "alns",
+            "window_minutes": 120,
+            "overlap_minutes": 30,
+            "inner_kwargs": {
+                "max_iterations": 30,
+                "max_no_improve_iters": 15,
+                "record_iteration_metrics": True,
+                "max_iteration_records": 100,
+            },
         },
-    })
+    )
     kwargs["time_limit_s"] = 120
     kwargs["random_seed"] = 42
     kwargs["cross_window_learning_enabled"] = cross_window_learning_enabled
@@ -95,9 +97,7 @@ _result_cache: dict[str, object] = {}
 def rhc_result_disabled(problem_500):
     """Solve with cross_window_learning_enabled=False (shared across tests)."""
     if "disabled" not in _result_cache:
-        _result_cache["disabled"] = _solve_rhc(
-            problem_500, cross_window_learning_enabled=False
-        )
+        _result_cache["disabled"] = _solve_rhc(problem_500, cross_window_learning_enabled=False)
     return _result_cache["disabled"]
 
 
@@ -105,9 +105,7 @@ def rhc_result_disabled(problem_500):
 def rhc_result_enabled(problem_500):
     """Solve with cross_window_learning_enabled=True (shared across tests)."""
     if "enabled" not in _result_cache:
-        _result_cache["enabled"] = _solve_rhc(
-            problem_500, cross_window_learning_enabled=True
-        )
+        _result_cache["enabled"] = _solve_rhc(problem_500, cross_window_learning_enabled=True)
     return _result_cache["enabled"]
 
 
@@ -126,9 +124,7 @@ class TestE2EFeasibility:
             SolverStatus.OPTIMAL,
         }, f"Unexpected status: {rhc_result_disabled.status}"
 
-    def test_zero_feasibility_violations(
-        self, problem_500, rhc_result_disabled
-    ) -> None:
+    def test_zero_feasibility_violations(self, problem_500, rhc_result_disabled) -> None:
         """FeasibilityChecker must report zero violations."""
         verification = verify_schedule_result(problem_500, rhc_result_disabled)
         assert verification.feasible, (
@@ -178,8 +174,7 @@ class TestE2EMetadata:
                 assert "due_pressure" in top_names
             else:
                 pytest.fail(
-                    "alns_operator_names not found in inner_window_summaries "
-                    "or top-level metadata"
+                    "alns_operator_names not found in inner_window_summaries or top-level metadata"
                 )
 
     def test_alns_final_operator_weights_is_dict(self, rhc_result_disabled) -> None:
@@ -190,19 +185,15 @@ class TestE2EMetadata:
         for summary in summaries:
             if "alns_final_operator_weights" in summary:
                 weights = summary["alns_final_operator_weights"]
-                assert isinstance(weights, dict), (
-                    f"Expected dict, got {type(weights)}"
-                )
+                assert isinstance(weights, dict), f"Expected dict, got {type(weights)}"
                 assert len(weights) > 0
-                assert all(isinstance(k, str) for k in weights.keys())
-                assert all(isinstance(v, (int, float)) for v in weights.values())
+                assert all(isinstance(k, str) for k in weights)
+                assert all(isinstance(v, int | float) for v in weights.values())
                 found = True
                 break
 
         if not found:
-            top_weights = rhc_result_disabled.metadata.get(
-                "alns_final_operator_weights"
-            )
+            top_weights = rhc_result_disabled.metadata.get("alns_final_operator_weights")
             if top_weights is not None:
                 assert isinstance(top_weights, dict)
                 assert len(top_weights) > 0
@@ -220,7 +211,7 @@ class TestE2EMetadata:
         for summary in summaries:
             if "alns_gap_ratio" in summary:
                 gap = summary["alns_gap_ratio"]
-                assert isinstance(gap, (int, float))
+                assert isinstance(gap, int | float)
                 assert gap >= 0, f"Gap ratio should be >= 0, got {gap}"
                 found = True
                 break
@@ -228,12 +219,11 @@ class TestE2EMetadata:
         if not found:
             top_gap = rhc_result_disabled.metadata.get("alns_gap_ratio")
             if top_gap is not None:
-                assert isinstance(top_gap, (int, float))
+                assert isinstance(top_gap, int | float)
                 assert top_gap >= 0
             else:
                 pytest.fail(
-                    "alns_gap_ratio not found in inner_window_summaries "
-                    "or top-level metadata"
+                    "alns_gap_ratio not found in inner_window_summaries or top-level metadata"
                 )
 
     def test_stagnation_detected_present(self, rhc_result_disabled) -> None:
@@ -258,8 +248,7 @@ class TestE2EMetadata:
                 assert isinstance(top_stag, bool)
             else:
                 pytest.fail(
-                    "stagnation_detected not found in inner_window_summaries "
-                    "or top-level metadata"
+                    "stagnation_detected not found in inner_window_summaries or top-level metadata"
                 )
 
     def test_warm_start_used_present(self, rhc_result_disabled) -> None:
@@ -268,20 +257,14 @@ class TestE2EMetadata:
         assert len(summaries) > 0, "No inner_window_summaries"
 
         warm_start_found = any("warm_start_used" in s for s in summaries)
-        assert warm_start_found, (
-            "warm_start_used not found in any inner_window_summary"
-        )
+        assert warm_start_found, "warm_start_used not found in any inner_window_summary"
 
-    def test_warm_start_completed_assignments_present(
-        self, rhc_result_disabled
-    ) -> None:
+    def test_warm_start_completed_assignments_present(self, rhc_result_disabled) -> None:
         """warm_start_completed_assignments must appear in per-window metadata."""
         summaries = rhc_result_disabled.metadata.get("inner_window_summaries", [])
         assert len(summaries) > 0, "No inner_window_summaries"
 
-        ws_completed_found = any(
-            "warm_start_completed_assignments" in s for s in summaries
-        )
+        ws_completed_found = any("warm_start_completed_assignments" in s for s in summaries)
         assert ws_completed_found, (
             "warm_start_completed_assignments not found in any inner_window_summary"
         )
@@ -312,9 +295,7 @@ class TestE2ECrossWindowTelemetryToggle:
         summaries = rhc_result_disabled.metadata.get("inner_window_summaries", [])
         for summary in summaries:
             bias_applied = summary.get("cross_window_bias_applied", False)
-            assert not bias_applied or summary.get(
-                "cross_window_bias_operator_deltas"
-            ) == {}, (
+            assert not bias_applied or summary.get("cross_window_bias_operator_deltas") == {}, (
                 f"Window {summary.get('window')}: cross_window_bias_applied="
                 f"{bias_applied} but learning was disabled"
             )
@@ -328,9 +309,7 @@ class TestE2ECrossWindowTelemetryToggle:
         }
 
         # Verify the solver completed without error
-        assert rhc_result_enabled.assignments, (
-            "No assignments produced with learning enabled"
-        )
+        assert rhc_result_enabled.assignments, "No assignments produced with learning enabled"
 
         # Evidence: the solver ran multiple windows and the feature was active.
         summaries = rhc_result_enabled.metadata.get("inner_window_summaries", [])
@@ -340,9 +319,7 @@ class TestE2ECrossWindowTelemetryToggle:
         # opportunity to receive hints (buffer non-empty after first window).
         if len(summaries) > 1:
             later_windows = summaries[1:]
-            has_bias_field = any(
-                "cross_window_bias_applied" in s for s in later_windows
-            )
+            has_bias_field = any("cross_window_bias_applied" in s for s in later_windows)
             # The field should be present (True or False) when hints are passed
             assert has_bias_field, (
                 "cross_window_bias_applied field not found in any window "

@@ -137,9 +137,7 @@ def run_rhc_alns_doe(
         per_run: list[dict[str, Any]] = []
         for seed in study_seeds:
             solver_kwargs = _default_solver_kwargs()
-            solver_kwargs["hybrid_due_pressure_threshold"] = params[
-                "hybrid_due_pressure_threshold"
-            ]
+            solver_kwargs["hybrid_due_pressure_threshold"] = params["hybrid_due_pressure_threshold"]
             solver_kwargs["hybrid_candidate_pressure_threshold"] = params[
                 "hybrid_candidate_pressure_threshold"
             ]
@@ -220,9 +218,7 @@ def run_rhc_alns_doe(
         ),
         None,
     )
-    baseline_makespan = (
-        float(baseline["summary"]["mean_makespan_minutes"]) if baseline else None
-    )
+    baseline_makespan = float(baseline["summary"]["mean_makespan_minutes"]) if baseline else None
 
     for config in configs:
         summary = config["summary"]
@@ -235,7 +231,8 @@ def run_rhc_alns_doe(
 
         checks = {
             "feasibility": float(summary["feasibility_rate"]) >= 1.0,
-            "fallback_ratio": float(summary["mean_inner_fallback_ratio"]) <= max_inner_fallback_ratio,
+            "fallback_ratio": float(summary["mean_inner_fallback_ratio"])
+            <= max_inner_fallback_ratio,
             "objective_degradation": objective_ok,
         }
         config["quality_gate"] = {
@@ -279,9 +276,7 @@ def run_rhc_alns_doe(
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Run DOE sweep for RHC-ALNS policy parameters"
-    )
+    parser = argparse.ArgumentParser(description="Run DOE sweep for RHC-ALNS policy parameters")
     parser.add_argument("--seeds", nargs="+", type=int, default=[1, 2, 3])
     parser.add_argument("--lane", choices=["throughput", "strict"], default="throughput")
     parser.add_argument("--n-ops", type=int, default=10_000)

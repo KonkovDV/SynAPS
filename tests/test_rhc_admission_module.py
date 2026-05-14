@@ -4,6 +4,7 @@ Locks in algorithmic invariants of the four admission helpers extracted
 from `synaps/solvers/rhc/_solver.py` so the rest of the Wave 4 R7
 decomposition can proceed without breaking the candidate-frontier contract.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ from synaps.solvers.rhc._admission import (
 @dataclass
 class _OpStub:
     """Minimal Operation-like stub for kernel testing."""
+
     id: UUID
     order_id: UUID
     predecessor_op_id: UUID | None = None

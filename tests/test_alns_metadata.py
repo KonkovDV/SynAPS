@@ -13,7 +13,9 @@ import random
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+import hypothesis.strategies as st
 import pytest
+from hypothesis import given, settings
 
 from synaps.model import (
     Operation,
@@ -25,7 +27,6 @@ from synaps.model import (
     WorkCenter,
 )
 from synaps.solvers.alns_solver import AlnsSolver
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Fixtures
@@ -48,10 +49,7 @@ def _make_small_feasible_problem(
     """
     rng = random.Random(seed)
 
-    states = [
-        State(id=uuid4(), code=f"S{i}", label=f"State {i}")
-        for i in range(3)
-    ]
+    states = [State(id=uuid4(), code=f"S{i}", label=f"State {i}") for i in range(3)]
     state_ids = [s.id for s in states]
 
     work_centers = [
@@ -138,9 +136,7 @@ class TestAlnsLowerBoundMetadata:
         `alns_lower_bound`, `alns_gap_ratio`, and `lower_bound_components`
         with correct types and non-negative values.
         """
-        problem = _make_small_feasible_problem(
-            n_orders=5, ops_per_order=3, n_machines=3, seed=42
-        )
+        problem = _make_small_feasible_problem(n_orders=5, ops_per_order=3, n_machines=3, seed=42)
         solver = AlnsSolver()
         result = solver.solve(
             problem,
@@ -158,23 +154,15 @@ class TestAlnsLowerBoundMetadata:
         )
 
         # 2. alns_lower_bound exists and is a non-negative float
-        assert "alns_lower_bound" in result.metadata, (
-            "Missing 'alns_lower_bound' in metadata"
-        )
+        assert "alns_lower_bound" in result.metadata, "Missing 'alns_lower_bound' in metadata"
         alns_lb = result.metadata["alns_lower_bound"]
-        assert isinstance(alns_lb, float), (
-            f"alns_lower_bound should be float, got {type(alns_lb)}"
-        )
-        assert alns_lb >= 0.0, (
-            f"alns_lower_bound should be non-negative, got {alns_lb}"
-        )
+        assert isinstance(alns_lb, float), f"alns_lower_bound should be float, got {type(alns_lb)}"
+        assert alns_lb >= 0.0, f"alns_lower_bound should be non-negative, got {alns_lb}"
 
         # 3. alns_gap_ratio exists and is >= 0
-        assert "alns_gap_ratio" in result.metadata, (
-            "Missing 'alns_gap_ratio' in metadata"
-        )
+        assert "alns_gap_ratio" in result.metadata, "Missing 'alns_gap_ratio' in metadata"
         gap_ratio = result.metadata["alns_gap_ratio"]
-        assert isinstance(gap_ratio, (int, float)), (
+        assert isinstance(gap_ratio, int | float), (
             f"alns_gap_ratio should be numeric, got {type(gap_ratio)}"
         )
         assert gap_ratio >= 0.0, (
@@ -206,15 +194,11 @@ class TestAlnsLowerBoundMetadata:
             assert isinstance(val, float), (
                 f"lower_bound_components['{key}'] should be float, got {type(val)}"
             )
-            assert val >= 0.0, (
-                f"lower_bound_components['{key}'] should be non-negative, got {val}"
-            )
+            assert val >= 0.0, f"lower_bound_components['{key}'] should be non-negative, got {val}"
 
         # 5. Consistency: alns_gap_ratio ≈ (makespan - LB) / max(LB, 1e-6)
         makespan = result.objective.makespan_minutes
-        expected_gap = (
-            max(makespan - alns_lb, 0.0) / max(alns_lb, 1e-6)
-        )
+        expected_gap = max(makespan - alns_lb, 0.0) / max(alns_lb, 1e-6)
         assert gap_ratio == pytest.approx(round(expected_gap, 6), abs=1e-5), (
             f"alns_gap_ratio ({gap_ratio}) does not match expected "
             f"(makespan - LB) / max(LB, 1e-6) = {expected_gap:.6f}\n"
@@ -239,9 +223,7 @@ class TestAlnsAggregateMetadataAlwaysPresent:
         fields must still be present with correct types, and the iteration trace
         must NOT appear in metadata.
         """
-        problem = _make_small_feasible_problem(
-            n_orders=5, ops_per_order=3, n_machines=3, seed=42
-        )
+        problem = _make_small_feasible_problem(n_orders=5, ops_per_order=3, n_machines=3, seed=42)
         solver = AlnsSolver()
         result = solver.solve(
             problem,
@@ -277,8 +259,12 @@ class TestAlnsAggregateMetadataAlwaysPresent:
         oac = md["operator_attempt_counts"]
         assert isinstance(oac, dict)
         for key, val in oac.items():
-            assert isinstance(key, str), f"operator_attempt_counts key should be str, got {type(key)}"
-            assert isinstance(val, int), f"operator_attempt_counts['{key}'] should be int, got {type(val)}"
+            assert isinstance(key, str), (
+                f"operator_attempt_counts key should be str, got {type(key)}"
+            )
+            assert isinstance(val, int), (
+                f"operator_attempt_counts['{key}'] should be int, got {type(val)}"
+            )
             assert val >= 0, f"operator_attempt_counts['{key}'] should be >= 0, got {val}"
 
         # 5. operator_improvement_counts: dict[str, int], all values >= 0
@@ -286,8 +272,12 @@ class TestAlnsAggregateMetadataAlwaysPresent:
         oic = md["operator_improvement_counts"]
         assert isinstance(oic, dict)
         for key, val in oic.items():
-            assert isinstance(key, str), f"operator_improvement_counts key should be str, got {type(key)}"
-            assert isinstance(val, int), f"operator_improvement_counts['{key}'] should be int, got {type(val)}"
+            assert isinstance(key, str), (
+                f"operator_improvement_counts key should be str, got {type(key)}"
+            )
+            assert isinstance(val, int), (
+                f"operator_improvement_counts['{key}'] should be int, got {type(val)}"
+            )
             assert val >= 0, f"operator_improvement_counts['{key}'] should be >= 0, got {val}"
 
         # 6. alns_final_operator_weights: dict[str, float], values sum to ~1.0
@@ -295,8 +285,12 @@ class TestAlnsAggregateMetadataAlwaysPresent:
         weights = md["alns_final_operator_weights"]
         assert isinstance(weights, dict)
         for key, val in weights.items():
-            assert isinstance(key, str), f"alns_final_operator_weights key should be str, got {type(key)}"
-            assert isinstance(val, float), f"alns_final_operator_weights['{key}'] should be float, got {type(val)}"
+            assert isinstance(key, str), (
+                f"alns_final_operator_weights key should be str, got {type(key)}"
+            )
+            assert isinstance(val, float), (
+                f"alns_final_operator_weights['{key}'] should be float, got {type(val)}"
+            )
         weight_sum = sum(weights.values())
         assert weight_sum == pytest.approx(1.0, abs=1e-6), (
             f"alns_final_operator_weights should sum to ~1.0, got {weight_sum}"
@@ -335,9 +329,7 @@ class TestAlnsIterationTraceBounded:
         running 50 iterations must produce a trace with at most 10 records,
         each containing the expected 9 fields.
         """
-        problem = _make_small_feasible_problem(
-            n_orders=5, ops_per_order=3, n_machines=3, seed=42
-        )
+        problem = _make_small_feasible_problem(n_orders=5, ops_per_order=3, n_machines=3, seed=42)
         solver = AlnsSolver()
         result = solver.solve(
             problem,
@@ -362,9 +354,7 @@ class TestAlnsIterationTraceBounded:
         assert isinstance(trace, list)
 
         # 2. Trace length must not exceed max_iteration_records
-        assert len(trace) <= 10, (
-            f"Trace length {len(trace)} exceeds max_iteration_records=10"
-        )
+        assert len(trace) <= 10, f"Trace length {len(trace)} exceeds max_iteration_records=10"
 
         # 3. Each record must be a dict with the expected 9 keys
         expected_keys = {
@@ -393,9 +383,6 @@ class TestAlnsIterationTraceBounded:
 # Task 7.8: Stagnation detection property test
 # ─────────────────────────────────────────────────────────────────────────────
 
-import hypothesis.strategies as st
-from hypothesis import given, settings
-
 
 class TestAlnsStagnationDetectionProperty:
     """Property test: stagnation detection fires correctly when no improvement
@@ -409,9 +396,7 @@ class TestAlnsStagnationDetectionProperty:
         seed=st.integers(min_value=1, max_value=10000),
     )
     @settings(max_examples=15, deadline=120_000)
-    def test_stagnation_invariant_across_parameters(
-        self, max_no_improve: int, seed: int
-    ) -> None:
+    def test_stagnation_invariant_across_parameters(self, max_no_improve: int, seed: int) -> None:
         """For any max_no_improve_iters in [3, 20] and random seed:
         - If stagnation_detected is True:
           - stagnation_iteration is not None and is an int
@@ -421,9 +406,7 @@ class TestAlnsStagnationDetectionProperty:
           - iterations_completed reached max_iterations (no early stop)
         """
         max_iterations = 1000
-        problem = _make_small_feasible_problem(
-            n_orders=5, ops_per_order=3, n_machines=3, seed=seed
-        )
+        problem = _make_small_feasible_problem(n_orders=5, ops_per_order=3, n_machines=3, seed=seed)
         solver = AlnsSolver()
         result = solver.solve(
             problem,

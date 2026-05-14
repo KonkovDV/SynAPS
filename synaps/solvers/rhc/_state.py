@@ -3,10 +3,13 @@
 This module is the foundation for R6 (typed RhcPolicy) and R7 (subpackage split).
 All RHC window transitions must go through RhcWindowState — never bare dicts.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Literal
+
+__all__ = ["RhcWindowState"]
 
 
 @dataclass
@@ -18,10 +21,10 @@ class RhcWindowState:
     - overlap_tail contains only committed assignments from the previous window
     - status transitions: pending → (alns_running | greedy_fallback) → done | failed
     """
+
     window_id: int
     status: Literal[
         "pending",
-        "seed_building",
         "alns_running",
         "greedy_fallback",
         "inner_time_limit_exhausted",

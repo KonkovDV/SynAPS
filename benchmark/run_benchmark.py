@@ -70,7 +70,9 @@ _T_CRITICAL_95: dict[int, float] = {
 }
 
 
-def _mean_confidence_interval(samples: list[float], confidence_level: float = 0.95) -> dict[str, float] | None:
+def _mean_confidence_interval(
+    samples: list[float], confidence_level: float = 0.95
+) -> dict[str, float] | None:
     """Return a mean confidence interval for repeated benchmark samples."""
     if len(samples) < 2:
         return None
@@ -107,11 +109,13 @@ def _two_sided_sign_test_pvalue(differences: list[float]) -> float | None:
     if trials == 0:
         return None
     tail = min(wins, losses)
-    cumulative = sum(math.comb(trials, k) for k in range(tail + 1)) / (2 ** trials)
+    cumulative = sum(math.comb(trials, k) for k in range(tail + 1)) / (2**trials)
     return round(min(1.0, 2.0 * cumulative), 6)
 
 
-def _build_paired_metric_summary(candidate: list[float], baseline: list[float]) -> dict[str, Any] | None:
+def _build_paired_metric_summary(
+    candidate: list[float], baseline: list[float]
+) -> dict[str, Any] | None:
     """Summarize paired repeated-run differences between two solver metrics."""
     pair_count = min(len(candidate), len(baseline))
     if pair_count == 0:
@@ -119,14 +123,16 @@ def _build_paired_metric_summary(candidate: list[float], baseline: list[float]) 
 
     candidate_values = candidate[:pair_count]
     baseline_values = baseline[:pair_count]
-    differences = [cand - base for cand, base in zip(candidate_values, baseline_values)]
+    differences = [
+        cand - base for cand, base in zip(candidate_values, baseline_values, strict=False)
+    ]
     wins = sum(1 for diff in differences if diff < 0)
     losses = sum(1 for diff in differences if diff > 0)
     ties = pair_count - wins - losses
     mean_difference = statistics.mean(differences)
     ratio_samples = [
         cand / max(abs(base), 1e-9)
-        for cand, base in zip(candidate_values, baseline_values)
+        for cand, base in zip(candidate_values, baseline_values, strict=False)
     ]
     summary: dict[str, Any] = {
         "pairs": pair_count,
@@ -154,8 +160,7 @@ def _build_performance_profile(
         return {}
 
     sample_lists = [
-        comparison.get("statistics", {}).get(metric_key, [])
-        for comparison in comparisons
+        comparison.get("statistics", {}).get(metric_key, []) for comparison in comparisons
     ]
     run_count = min((len(samples) for samples in sample_lists), default=0)
     if run_count == 0:
@@ -236,7 +241,7 @@ def _run_single(
 ) -> dict[str, Any]:
     """Execute *solver_name* on *problem* for *runs* repetitions."""
     try:
-        import resource as _resource  # noqa: PLC0415
+        import resource as _resource
     except ImportError:
         _resource = None  # type: ignore[assignment]
 
@@ -297,7 +302,7 @@ def _run_single(
     peak_rss_mb: float | None = None
     try:
         if os.name == "nt":
-            import psutil  # type: ignore[import-untyped]  # noqa: PLC0415
+            import psutil  # type: ignore[import-untyped]
 
             peak_rss_mb = round(psutil.Process().memory_info().peak_wset / 1024 / 1024, 1)
         elif peak_rss_kb > 0:

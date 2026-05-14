@@ -10,9 +10,9 @@ Validates: Requirements 12.1, 12.2, 12.3
 
 from __future__ import annotations
 
-import math
-
+import hypothesis.strategies as st
 import pytest
+from hypothesis import given, settings
 
 from synaps.solvers.alns_solver import (
     DESTROY_OPERATORS,
@@ -43,7 +43,7 @@ class TestNormalizeInitialOperatorWeightsUnit:
 
     def test_dict_full_coverage(self) -> None:
         """raw={name: 2.0 for all names} → all weights equal 1/n, sum=1.0."""
-        raw = {name: 2.0 for name in NAMES}
+        raw = dict.fromkeys(NAMES, 2.0)
         result = _normalize_initial_operator_weights(raw, NAMES)
         assert len(result) == N
         expected = 1.0 / N
@@ -59,7 +59,7 @@ class TestNormalizeInitialOperatorWeightsUnit:
         assert sum(result) == pytest.approx(1.0, abs=1e-10)
         # "random" and "worst" should have higher weight than filled entries
         idx_random = NAMES.index("random")
-        idx_worst = NAMES.index("worst")
+        NAMES.index("worst")
         # Filled entries get mean of recognized = 5.0, so all are equal here
         # Actually: recognized values are 5.0 each, mean_recognized = 5.0,
         # so all entries get 5.0 → uniform. Let's use asymmetric values instead.
@@ -79,7 +79,7 @@ class TestNormalizeInitialOperatorWeightsUnit:
         assert sum(result) == pytest.approx(1.0, abs=1e-10)
         # "random" is recognized; others filled with mean of recognized (1.0)
         # So all should be equal (1.0 each before normalization)
-        idx_random = NAMES.index("random")
+        NAMES.index("random")
         # All weights should be equal since mean_recognized = 1.0 = the only recognized value
         expected = 1.0 / N
         for w in result:
@@ -141,17 +141,25 @@ class TestNormalizeInitialOperatorWeightsUnit:
 # Validates: Requirements 12.3
 # ─────────────────────────────────────────────────────────────────────────────
 
-import hypothesis.strategies as st
-from hypothesis import given, settings
-
 
 # Strategy: generate random raw inputs (dicts with random subsets of operator
 # names and random positive floats, or lists of random length/values, or None).
 @st.composite
 def raw_weight_inputs(draw: st.DrawFn):
     """Generate random raw inputs for _normalize_initial_operator_weights."""
-    choice = draw(st.sampled_from(["none", "dict_valid", "dict_partial", "dict_empty",
-                                    "list_correct", "list_wrong_len", "list_with_neg"]))
+    choice = draw(
+        st.sampled_from(
+            [
+                "none",
+                "dict_valid",
+                "dict_partial",
+                "dict_empty",
+                "list_correct",
+                "list_wrong_len",
+                "list_with_neg",
+            ]
+        )
+    )
     if choice == "none":
         return None
     elif choice == "dict_valid":
@@ -195,9 +203,7 @@ class TestNormalizeWeightsProperty:
         """
         result = _normalize_initial_operator_weights(raw, NAMES)
         assert len(result) == N, f"Expected length {N}, got {len(result)}"
-        assert abs(sum(result) - 1.0) < 1e-10, (
-            f"Weights sum to {sum(result)}, expected ~1.0"
-        )
+        assert abs(sum(result) - 1.0) < 1e-10, f"Weights sum to {sum(result)}, expected ~1.0"
         for i, w in enumerate(result):
             assert w >= 0.0, f"Weight at index {i} is negative: {w}"
 

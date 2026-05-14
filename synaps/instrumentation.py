@@ -117,9 +117,7 @@ class MetricsStore:
             key = f"{regime}:{solver_config}"
             self._routing_counts[key] += 1
 
-    def record_feasibility(
-        self, feasible: bool, violation_kinds: list[str] | None = None
-    ) -> None:
+    def record_feasibility(self, feasible: bool, violation_kinds: list[str] | None = None) -> None:
         with self._lock:
             if feasible:
                 self._feasibility_counts["pass"] += 1
@@ -184,8 +182,11 @@ def record_solve_event(
     with _collectors_lock:
         for collector in _collectors:
             collector.on_solve_event(
-                solver_config, status=status, duration_ms=duration_ms,
-                op_count=op_count, **extra,
+                solver_config,
+                status=status,
+                duration_ms=duration_ms,
+                op_count=op_count,
+                **extra,
             )
 
 
@@ -201,7 +202,10 @@ def record_routing_event(
     with _collectors_lock:
         for collector in _collectors:
             collector.on_routing_event(
-                solver_config, regime=regime, reason=reason, **extra,
+                solver_config,
+                regime=regime,
+                reason=reason,
+                **extra,
             )
 
 
@@ -217,8 +221,10 @@ def record_feasibility_event(
     with _collectors_lock:
         for collector in _collectors:
             collector.on_feasibility_event(
-                feasible=feasible, violation_count=violation_count,
-                violation_kinds=violation_kinds, **extra,
+                feasible=feasible,
+                violation_count=violation_count,
+                violation_kinds=violation_kinds,
+                **extra,
             )
 
 
