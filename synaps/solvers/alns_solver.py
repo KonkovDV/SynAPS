@@ -2404,13 +2404,18 @@ class AlnsSolver(BaseSolver):
         def _initial_seed_budget_s() -> float:
             remaining_budget_s = _remaining_initial_seed_budget_s()
             repair_budget_s = max(1.0, float(repair_time_limit_s))
-            # Phase-1 seed construction must leave room for either actual ALNS search
-            # or the outer RHC fallback, rather than monopolizing the whole window.
+            # Guarantee a minimum search budget so that ALNS always gets
+            # at least search_budget_reservation_s seconds after the seed.
+            search_budget_reservation_s: float = float(
+                kwargs.get("search_budget_reservation_s", 10.0)
+            )
             if time_limit_s <= 90.0:
-                phase_cap_s = max(1.0, min(3.0, repair_budget_s * 2.0))
+                cap = max(1.0, min(3.0, repair_budget_s * 2.0))
             else:
-                phase_cap_s = max(5.0, min(10.0, repair_budget_s * 5.0))
-            return min(remaining_budget_s, phase_cap_s)
+                cap = max(5.0, min(10.0, repair_budget_s * 5.0))
+            # Reserve search budget: seed phase cannot eat into the reservation.
+            reserved = remaining_budget_s - search_budget_reservation_s
+            return max(1.0, min(cap, reserved))
 
         def _initial_seed_timed_out(result: ScheduleResult) -> bool:
             metadata = result.metadata or {}

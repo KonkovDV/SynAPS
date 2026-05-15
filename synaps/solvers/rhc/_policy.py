@@ -57,6 +57,7 @@ class BudgetSpec:
     alns_dynamic_repair_time_limit_min_s: float = 1.0
     alns_dynamic_repair_time_limit_max_s: float = 5.0
     alns_presearch_max_window_ops: int = 5000
+    search_budget_reservation_s: float = 10.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -298,6 +299,7 @@ def build_solve_kwargs_from_spec(
         "alns_dynamic_repair_time_limit_min_s": spec.budget.alns_dynamic_repair_time_limit_min_s,
         "alns_dynamic_repair_time_limit_max_s": spec.budget.alns_dynamic_repair_time_limit_max_s,
         "alns_presearch_max_window_ops": spec.budget.alns_presearch_max_window_ops,
+        "search_budget_reservation_s": spec.budget.search_budget_reservation_s,
         # guards
         "fallback_repair_enabled": spec.guards.fallback_repair_enabled,
         "backtracking_enabled": spec.guards.backtracking_enabled,
