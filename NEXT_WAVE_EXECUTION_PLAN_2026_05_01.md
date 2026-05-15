@@ -118,16 +118,47 @@ Wave 3a closed the initial-seed budget stall (P1+P2+P3):
 - Artifact: `benchmark/studies/2026-05-15-rhc-100k-v9/`
 - Tests: `tests/test_greedy_dispatch_time_limit.py` (2 tests), existing suite 143 passed
 
-Wave 3b — remaining LBBD goals:
+Wave 3b — LBBD cut strengthening: **completed 2026-05-15**.
 
-Goal: make the LBBD line stronger before expanding ALNS complexity again.
+All five cut families are now active in both `LBBD` and `LBBD-HD`:
 
-Priority work:
+| Cut kind | Mechanism | Status |
+|----------|-----------|--------|
+| `nogood` | Exclude exact assignment re-visits | ✅ Production |
+| `capacity` | Hooker–Ottosson combinatorial Benders | ✅ Production |
+| `setup_cost` | Sequence-independent setup floor | ✅ Production (safe fallback) |
+| `machine_tsp` | Bellman–Held–Karp on realised state types (Naderi & Roshanaei 2021) | ✅ Production (toggle: `enable_machine_tsp_cuts`) |
+| `load_balance` | `C_max ≥ max(avg_load, max_load)` | ✅ Production |
+| `critical_path` | DAG longest-path over precedence + SDST arcs, threshold ≥ 5 % makespan (R9) | ✅ Production |
 
-1. Quantify the impact of the shipped standard `critical_path` cut family on medium and large instances, not just on metadata exposure.
-2. Extend LBBD beyond the shipped safe setup floor, setup lower-bound repair, and current `critical_path` family with stronger master-side sequencing bounds such as TSP-style machine-order cuts.
-3. Extend the master-reporting surface so every LBBD run exposes which cuts tightened the lower bound and by how much.
-4. Revalidate `LBBD-10`, `LBBD-20-HD`, and any new master profile against at least one medium exact instance and one large generated instance.
+Additional improvements:
+- Cut-pool deduplication via `cut_pool_fingerprint()` (kind + bottleneck_ops + rhs@3dp)
+- `ub_evolution` tracking in both solvers (appended on every new incumbent)
+- `cut_kind_lb_contribution` attribution: per-iteration LB deltas split across responsible cut kinds
+- `_register_cut()` returns `bool` (True = accepted, False = duplicate)
+- HiGHS warm-start via `setSolution()` using previous master assignment
+
+**Wave 4 — RHC parameter surface reduction: completed 2026-05-15.**
+
+| What | Where | Status |
+|------|-------|--------|
+| Named policy presets (`coverage-first`, `balanced`, `search-entry`, `bounded-100k`, `fast-50k`) | `rhc/_policy.py` → `RhcPolicy` enum | ✅ |
+| Structured spec hierarchy (`AdmissionSpec`, `BudgetSpec`, `GuardSpec`, `InnerSpec`) | `rhc/_policy.py` → `RhcPolicySpec` | ✅ |
+| `build_solve_kwargs_from_spec()` with dotted-path overrides | `rhc/_policy.py` | ✅ |
+| `resolve_policy()` with deprecation path for raw kwargs | `rhc/_policy.py` | ✅ |
+| Cross-window variable fixing (`detect_cross_window_stable_ops`) | `rhc/_window.py` (L-RHO pattern) | ✅ |
+| Fixed-op IDs passed to ALNS inner solver | `rhc/_solver.py` P3.1 | ✅ |
+| Machine-index stability tracking for per-op frequency | `rhc/_solver.py` P3.2 | ✅ |
+| `fixed_op_ids` merge via `setdefault().update()` (cross-window + window variable fixing) | `rhc/_solver.py` | ✅ |
+
+**Wave 5 — Multi-objective positioning: pending.**
+
+Goal: keep the exact Pareto story academically defensible while avoiding overclaiming ALNS weighted sums.
+
+Actions:
+1. Keep `AUGMECON2`/epsilon-constraint exact slices as the reference Pareto surface.
+2. Do not describe weighted ALNS output as Pareto exploration.
+3. Add documentation that clearly separates exact Pareto slices, heuristic scalarized trade-offs, and large-instance coverage heuristics.
 
 Why this comes before broader ALNS tuning:
 

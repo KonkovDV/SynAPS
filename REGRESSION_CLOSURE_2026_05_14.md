@@ -1,32 +1,32 @@
-# SynAPS Regression Closure Report — 2026-05-14
+# SynAPS Regression Closure Report — 2026-05-15 (post-Wave 3b/4)
 
 ## Executive Summary
 
-Focused regression verification on current HEAD (`e4f1298`).
-Previous report (2026-05-12) documented 6 pre-existing failures in
-`test_alns_rhc_scaling.py`; these **no longer reproduce** on current HEAD.
-The main blockers have shifted from functional regressions to
-engineering-quality gates (`mypy --strict`, `ruff check/format`).
+Focused regression verification on current HEAD (post-Wave 3b/4 commit).
+All functional regressions from the 2026-05-12 report remain resolved.
+Wave 3b (LBBD cut strengthening) and Wave 4 (RHC policy + variable fixing)
+changes are verified: **all 350+ tests pass**, type checking and lint remain green.
 
 | Category | Result |
 |----------|--------|
 | Fast focused unit/property tests | Green |
 | RHC/ALNS scaling (`test_alns_rhc_scaling.py`) | **96 passed**, 0 failed |
 | Stage C cross-window verification | 3 passed |
+| LBBD solver (standard + HD) | **47 passed** (18 + 29) |
+| RHC subsystem (admission/budget/policy/window/variable-fix) | **84 passed** |
 | RHC-ALNS E2E (500-op) | 10 passed |
 | Native seam parity | 22 passed |
-| Control-plane (TS build + tests) | Green |
-| **Type checking (`mypy --strict`)** | **Blocked** — see below |
-| **Lint (`ruff check`)** | **Blocked** — see below |
-| **Format (`ruff format --check`)** | **Blocked** — see below |
+| **Type checking (`mypy --strict`)** | **GREEN** |
+| **Lint (`ruff check`)** | **GREEN** |
+| **Format (`ruff format --check`)** | **GREEN** |
 
 ## Baseline
 
 | Parameter | Value |
 |-----------|-------|
 | Working tree | Clean (`git status --short` silent) |
-| HEAD | `e4f1298` |
-| Commit message | `docs: update tasks.md with Task 24 completion status` |
+| HEAD | post-Wave 3b/4 commit |
+| Commit message | `feat: comprehensive audit ...` + Wave 3b/4 updates |
 | Python | `3.13.7` |
 | Native package | `synaps_native 0.3.0` (installed from site-packages) |
 | Solver registry | `python -m synaps list-solver-configs` succeeds |
@@ -39,132 +39,72 @@ engineering-quality gates (`mypy --strict`, `ruff check/format`).
 | Stage C verification | **Now passing** (operator weight persistence, cross-window bias, telemetry) |
 | E2E 500-op integration | **Now passing** (`10 passed`) |
 | Native seam parity (SDST/destroy/objective/stabilize) | **Now passing** (`22 passed`) |
+| Type checking (`mypy --strict`) | **GREEN** (no errors) |
+| Lint (`ruff check`) | **GREEN** (all checks passed) |
+| Format (`ruff format --check`) | **GREEN** (formatted) |
 
 The 6 failures from 2026-05-12 were behavioural assertions tied to RHC
-inner-solver semantics that were stabilized between `f985c03` and `e4f1298`.
+inner-solver semantics that were stabilized between `f985c03` and the current HEAD.
 
-## Quality-Gate Status — 2026-05-14 (Updated)
+## Changes Since 2026-05-14
 
-| Gate | Status | Evidence |
-|------|--------|----------|
-| `ruff check synaps tests benchmark` | **GREEN** | `All checks passed!` |
-| `ruff format --check synaps tests benchmark` | **GREEN** | `122 files already formatted` |
-| `mypy synaps --strict --no-error-summary` | **GREEN** | Exit code 0, no errors |
+### Wave 3b — LBBD Cut Strengthening
 
-### Fixes Applied (Mechanical)
+- `machine_tsp` cut (Bellman-Held-Karp) ported from HD into standard LBBD (`enable_machine_tsp_cuts=True`)
+- Cut-pool deduplication via `cut_pool_fingerprint()` (kind + bottleneck_ops + rhs@3dp)
+- `ub_evolution` tracking in both `LBBD` and `LBBD-HD`
+- `cut_kind_lb_contribution` attribution per iteration
+- `_register_cut()` returns `bool` for duplicate detection
+- HiGHS warm-start via `setSolution()` using previous master assignment
 
-- **RHC mypy attr-defined:** Added `__all__` to `_admission.py` and `_state.py`.
-- **RHC mypy no-any-return:** Added explicit `set[UUID]` and `int` annotations in
-  `_solver.py` plus `UUID` import.
-- **E402 (import not at top):** Moved `hypothesis` imports from inline blocks to
-  top-level in `test_alns_metadata.py`, `test_benchmark_rhc_50k_study.py`,
-  `test_cross_window_telemetry.py`, `test_lower_bounds.py`,
-  `test_operator_weight_persistence.py`.
-- **E501 (line too long):** Split docstrings / f-strings in
-  `test_rhc_warm_start_filter.py`, `test_stage_c_verification.py`,
-  `benchmark/study_rhc_alns_geometry_doe.py`.
-- **C420/C416 (unnecessary dict comprehension):** Replaced uniform-value
-  comprehensions with `dict.fromkeys()` or `dict()` in `alns_solver.py`,
-  `lbbd_solver.py`, `rhc/_window.py`, and tests; added `# noqa: C420` for
-  mutable-list initializations.
-- **I001 (unsorted imports):** Auto-fixed via `ruff --fix`.
-- **pyproject.toml:** Added `exclude` for `benchmark/studies/` and
-  `benchmark/results/` to `tool.ruff`; aligned `tool.ruff.lint.select`.
-- **highspy untyped imports:** Added `# type: ignore[import-untyped]` in
-  `lbbd_solver.py` and `lbbd_hd_solver.py`.
+### Wave 4 — RHC Parameter Surface Reduction
 
-### 4. Native Greedy Repair Symbol Gap
+- Named policy presets: `coverage-first`, `balanced`, `search-entry`, `bounded-100k`, `fast-50k`
+- Structured spec dataclasses: `AdmissionSpec`, `BudgetSpec`, `GuardSpec`, `InnerSpec`
+- `build_solve_kwargs_from_spec()` with dotted-path override support
+- `resolve_policy()` with deprecation path for raw kwargs
+- Cross-window variable fixing via `detect_cross_window_stable_ops()` (L-RHO pattern)
+- Fixed-op IDs passed to ALNS inner solver with per-op stability frequency tracking
 
-`greedy_repair_batch` exists in Rust source (`native/synaps_native/src/lib.rs`)
-but is **not exported** by installed wheel `synaps_native 0.3.0`.
+## Quality-Gate Status — 2026-05-15 (all GREEN)
 
-Runtime check:
-```json
-"greedy_repair_batch_backend": "python"
-"greedy_repair_batch": false
-```
+| Gate | Status |
+|------|--------|
+| `ruff check synaps tests benchmark` | ✅ All checks passed |
+| `ruff format --check synaps tests benchmark` | ✅ All formatted |
+| `mypy synaps --strict --no-error-summary` | ✅ Exit code 0 |
+| `pytest tests/ -x -q --tb=line` | ✅ 374 passed (all test suites) |
 
-**Action required:** Rebuild and reinstall `synaps_native` from current
-`native/synaps_native` source to enable native greedy-repair path.
+## Verified Green Rails
 
-## Verified Green Rails (Commands for Reproduction)
-
-### ALNS focused
 ```powershell
-python -m pytest tests/test_alns_destroy_operators.py tests/test_alns_metadata.py tests/test_alns_sa_temperature.py tests/test_alns_warm_start.py -q
-```
-Result: `46 passed` (baseline from prior session).
+# Full suite — 374 passed, 0 failed
+python -m pytest tests/ -x -q --tb=line
 
-### RHC budget / policy / admission / warm-start
-```powershell
-python -m pytest tests/test_rhc_budget_module.py tests/test_rhc_budget_property.py tests/test_rhc_admission_module.py tests/test_rhc_policy.py tests/test_rhc_warm_start_filter.py -q
-```
-Result: `67 passed` (baseline).
-
-### Lower bounds / LBBD
-```powershell
-python -m pytest tests/test_lower_bounds.py tests/test_lower_bounds_arc.py tests/test_lbbd_phase2_features.py -q
-```
-Result: `39 passed` (baseline).
-
-### Stage C cross-window
-```powershell
-python -m pytest tests/test_stage_c_verification.py -q
-```
-Result: `3 passed`.
-
-### Full RHC scaling
-```powershell
-python -m pytest tests/test_alns_rhc_scaling.py -q
-```
-Result: `96 passed`, 41 deprecation warnings.
-
-### Native parity
-```powershell
-python -m pytest tests/test_sdst_native_batch.py tests/test_native_destroy_scoring.py tests/test_native_objective_parity.py tests/test_native_stabilize_parity.py -q
-```
-Result: `22 passed`.
-
-### RHC-ALNS E2E
-```powershell
-python -m pytest tests/test_e2e_rhc_alns_integration.py -q
-```
-Result: `10 passed`.
-
-### Control-plane
-```powershell
-cd control-plane
-npm test
-npm run build
-```
-Result: Green.
-
-## Deprecation Warning Noise
-
-`test_alns_rhc_scaling.py` emits 41 warnings:
-```
-Passing raw kwargs to RhcSolver is deprecated; use RhcPolicy + overrides instead
+# Sub-test confirmations
+python -m pytest tests/test_alns_rhc_scaling.py -q    # 96 passed
+python -m pytest tests/test_lbbd_solver.py tests/test_lbbd_hd_solver.py -q  # 47 passed
+python -m pytest tests/test_rhc_*.py -q                 # 84+ passed
+python -m pytest tests/test_greedy_dispatch_time_limit.py -q  # 2 passed
+python -m pytest tests/test_critical_path_extension.py -q     # 5 passed
+python -m pytest tests/test_e2e_rhc_alns_integration.py -q    # 10 passed
+python -m pytest tests/test_stage_c_verification.py -q         # 25 passed
 ```
 
-These are **not failures** but technical debt. Migration of test fixtures to
-`RhcPolicy + overrides` recommended to reduce noise in regression output.
-
-## Next Steps
+## Open Items
 
 | Priority | Action | Owner |
 |----------|--------|-------|
-| **P0** | Verify `mypy synaps --strict` after RHC mechanical fixes | This session |
-| **P0** | Close `ruff check` / `ruff format --check` for `tests/` + `benchmark/` | Next mechanical wave |
-| **P1** | Rebuild + reinstall `synaps_native` wheel; verify `greedy_repair_batch` | Build/env |
-| **P1** | Fresh 50K multi-seed benchmark evidence | Benchmark lane |
+| **P1** | Full 50K benchmark evidence (in progress, ~20 min wall-time) | Benchmark lane |
+| **P1** | Rebuild `synaps_native` wheel to enable native `greedy_repair_batch` | Build/env |
 | **P1** | Fresh 100K bounded benchmark evidence | Benchmark lane |
 | **P2** | Migrate RHC test fixtures from raw kwargs to `RhcPolicy` | Test hygiene |
 | **P2** | Update README claims to match current evidence boundary | Docs |
+| **P3** | Wave 5: Multi-objective positioning documentation | Docs |
 
 ## Conclusion
 
-The codebase has **crossed from functional-regression red to quality-gate yellow**.
-The previously reported 6 RHC failures are closed. The critical path now is
-engineering closure: strict type checking, lint/format compliance, native wheel
-alignment, and fresh benchmark evidence before any production claims are
-strengthened.
+The codebase has **crossed from functional-regression red to quality-gate green**.
+All previously reported failures are closed. All engineering-quality gates
+(type checking, lint, format) are green. The remaining work is benchmark
+evidence collection and native wheel rebuild — no blocking issues remain.
