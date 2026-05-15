@@ -2182,6 +2182,7 @@ class AlnsSolver(BaseSolver):
 
         # Parameters
         max_iterations: int = int(kwargs.get("max_iterations", 500))
+        min_iterations: int = int(kwargs.get("min_iterations", 5))
         time_limit_s: float = float(kwargs.get("time_limit_s", 300))
         destroy_fraction: float = float(kwargs.get("destroy_fraction", 0.05))
         min_destroy: int = int(kwargs.get("min_destroy", 20))
@@ -2409,12 +2410,16 @@ class AlnsSolver(BaseSolver):
             search_budget_reservation_s: float = float(
                 kwargs.get("search_budget_reservation_s", 10.0)
             )
+            reserved = remaining_budget_s - search_budget_reservation_s
+            # Scale seed budget proportionally to problem size so larger
+            # windows don't exhaust their budget on seed construction alone.
+            # Target ~15% of remaining budget for the seed phase, floored
+            # at 3 s and capped to leave the search reservation intact.
+            proportional = max(3.0, remaining_budget_s * 0.15)
             if time_limit_s <= 90.0:
                 cap = max(1.0, min(3.0, repair_budget_s * 2.0))
             else:
-                cap = max(5.0, min(10.0, repair_budget_s * 5.0))
-            # Reserve search budget: seed phase cannot eat into the reservation.
-            reserved = remaining_budget_s - search_budget_reservation_s
+                cap = max(5.0, min(proportional, reserved))
             return max(1.0, min(cap, reserved))
 
         def _initial_seed_timed_out(result: ScheduleResult) -> bool:
@@ -2795,11 +2800,22 @@ class AlnsSolver(BaseSolver):
                 )
 
             if _initial_seed_timed_out(initial_result):
-                return _initial_generation_error_result(
-                    "initial_seed_greedy_timed_out",
-                    reason_key="initial_seed_greedy_timed_out",
-                    time_limit_exhausted_before_search=True,
-                )
+                # Seed timed out but may still have produced enough assignments
+                # to serve as a starting point. Proceed to ALNS search rather than
+                # bailing out — the loop will repair missing ops if coverage is
+                # sufficient, otherwise it will terminate naturally.
+                seed_coverage = len(initial_result.assignments) / max(n_ops, 1)
+                if seed_coverage >= 0.5:
+                    logger.info(
+                        "ALNS seed timed out at %.1f%% coverage, proceeding to search",
+                        seed_coverage * 100,
+                    )
+                else:
+                    return _initial_generation_error_result(
+                        "initial_seed_greedy_timed_out",
+                        reason_key="initial_seed_greedy_timed_out",
+                        time_limit_exhausted_before_search=True,
+                    )
 
             if not _is_valid_complete_schedule(list(initial_result.assignments)):
                 # Fall back to greedy if beam failed to cover the full instance.
@@ -2809,13 +2825,29 @@ class AlnsSolver(BaseSolver):
                     time_limit_s=_initial_seed_budget_s(),
                 )
                 if _initial_seed_timed_out(initial_result):
-                    return _initial_generation_error_result(
-                        "initial_seed_greedy_timed_out",
-                        reason_key="initial_seed_greedy_timed_out",
-                        time_limit_exhausted_before_search=True,
-                    )
+                    seed_coverage = len(initial_result.assignments) / max(n_ops, 1)
+                    if seed_coverage >= 0.5:
+                        logger.info(
+                            "ALNS fallback seed timed out at %.1f%% coverage, proceeding",
+                            seed_coverage * 100,
+                        )
+                    else:
+                        return _initial_generation_error_result(
+                            "initial_seed_greedy_timed_out",
+                            reason_key="initial_seed_greedy_timed_out",
+                            time_limit_exhausted_before_search=True,
+                        )
                 if not _is_valid_complete_schedule(list(initial_result.assignments)):
-                    return _initial_generation_error_result("initial solution generation failed")
+                    if len(initial_result.assignments) >= n_ops * 0.5:
+                        logger.info(
+                            "ALNS seed incomplete (%d/%d ops), proceeding to search for repair",
+                            len(initial_result.assignments),
+                            n_ops,
+                        )
+                    else:
+                        return _initial_generation_error_result(
+                            "initial solution generation failed"
+                        )
 
         if initial_result is not None and frozen_assignments:
             reanchored_initial_assignments, _ = _reanchor_against_frozen(
@@ -2831,6 +2863,37 @@ class AlnsSolver(BaseSolver):
                 )
             else:
                 return _initial_generation_error_result("initial solution generation failed")
+
+        # Completion phase: if seed did not cover all operations, repair the
+        # missing ones via greedy dispatch so ALNS starts from a full schedule.
+        if initial_result is not None and len(initial_result.assignments) < n_ops:
+            covered_ids = {a.operation_id for a in initial_result.assignments}
+            missing_ids = problem_op_ids - covered_ids
+            if missing_ids:
+                repair_outcome = _repair_greedy_outcome(
+                    problem,
+                    list(initial_result.assignments),
+                    missing_ids,
+                )
+                if repair_outcome.status == RepairStatus.FEASIBLE:
+                    completed = list(initial_result.assignments) + list(
+                        repair_outcome.assignments
+                    )
+                    completed.sort(
+                        key=lambda a: (
+                            a.start_time,
+                            op_positions.get(a.operation_id, 0),
+                        )
+                    )
+                    initial_result = initial_result.model_copy(
+                        update={"assignments": completed}
+                    )
+                    logger.info(
+                        "ALNS completion phase repaired %d missing ops (now %d/%d)",
+                        len(missing_ids),
+                        len(completed),
+                        n_ops,
+                    )
 
         initial_solution_ms = int((time.monotonic() - initial_solution_t0) * 1000)
         time_limit_exhausted_before_search = (time.monotonic() - t0) > time_limit_s
@@ -3136,7 +3199,7 @@ class AlnsSolver(BaseSolver):
         else:
             for iteration in range(1, max_iterations + 1):
                 elapsed = time.monotonic() - t0
-                if elapsed > time_limit_s:
+                if elapsed > time_limit_s and iteration > min_iterations:
                     logger.info("ALNS time limit reached at iteration %d", iteration)
                     break
 
