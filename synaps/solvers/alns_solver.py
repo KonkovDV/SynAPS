@@ -2802,13 +2802,16 @@ class AlnsSolver(BaseSolver):
             if _initial_seed_timed_out(initial_result):
                 # Seed timed out but may still have produced enough assignments
                 # to serve as a starting point. Proceed to ALNS search rather than
-                # bailing out — the loop will repair missing ops if coverage is
-                # sufficient, otherwise it will terminate naturally.
+                # bailing out — the completion phase below will repair any gaps,
+                # and the ALNS loop will then improve the resulting schedule.
                 seed_coverage = len(initial_result.assignments) / max(n_ops, 1)
-                if seed_coverage >= 0.5:
+                if seed_coverage > 0:
                     logger.info(
-                        "ALNS seed timed out at %.1f%% coverage, proceeding to search",
+                        "ALNS seed timed out at %.1f%% coverage (%d/%d), "
+                        "proceeding to completion + search",
                         seed_coverage * 100,
+                        len(initial_result.assignments),
+                        n_ops,
                     )
                 else:
                     return _initial_generation_error_result(
@@ -2826,10 +2829,13 @@ class AlnsSolver(BaseSolver):
                 )
                 if _initial_seed_timed_out(initial_result):
                     seed_coverage = len(initial_result.assignments) / max(n_ops, 1)
-                    if seed_coverage >= 0.5:
+                    if seed_coverage > 0:
                         logger.info(
-                            "ALNS fallback seed timed out at %.1f%% coverage, proceeding",
+                            "ALNS fallback seed timed out at %.1f%% coverage (%d/%d), "
+                            "proceeding to completion + search",
                             seed_coverage * 100,
+                            len(initial_result.assignments),
+                            n_ops,
                         )
                     else:
                         return _initial_generation_error_result(
@@ -2838,9 +2844,12 @@ class AlnsSolver(BaseSolver):
                             time_limit_exhausted_before_search=True,
                         )
                 if not _is_valid_complete_schedule(list(initial_result.assignments)):
-                    if len(initial_result.assignments) >= n_ops * 0.5:
+                    # Proceed with whatever coverage we have — completion phase
+                    # and ALNS will repair missing ops. Only bail if zero coverage.
+                    if len(initial_result.assignments) > 0:
                         logger.info(
-                            "ALNS seed incomplete (%d/%d ops), proceeding to search for repair",
+                            "ALNS seed incomplete (%d/%d ops), proceeding to "
+                            "completion + search for repair",
                             len(initial_result.assignments),
                             n_ops,
                         )
