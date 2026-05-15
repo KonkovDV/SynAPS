@@ -30,7 +30,7 @@ SynAPS takes a white-box approach:
 - known constraints and validation path
 - known artifact saved to disk
 
-## Current Reality (April 2026)
+## Current Reality (May 2026)
 
 What is implemented and verified in this repository:
 
@@ -42,6 +42,7 @@ What is implemented and verified in this repository:
 - Dedicated reproducible 50K compare rail plus a staged 500K study harness (`benchmark/study_rhc_50k.py`, `benchmark/study_rhc_500k.py`)
 - The staged 500K harness now includes scale-aware ALNS pre-search guard scaling and an optional bounded `max_windows_override` for 100K+ academic runs
 - Separate feasibility checker (`synaps/solvers/feasibility_checker.py`)
+- Material-loss integration throughout the model, dispatch support, and solver output
 - ALNS can accept partial warm starts, complete missing assignments, and recompute setups before local search
 - ALNS now rejects infeasible full seeds and reanchored warm starts before local search, so final recovery cannot silently fall back to an invalid initial baseline
 - RHC can carry unfinished overlap tails into the next ALNS window and exposes warm-start metadata in solver output
@@ -52,6 +53,17 @@ What is implemented and verified in this repository:
 - RHC candidate scoring is wired through the NumPy/native batch seam when acceleration is available
 - Typed RHC policy presets (`RhcPolicy`, `RhcPolicySpec`) replace the 120-line duplicated kwargs literal in the solver registry; backward-compatible legacy-kwargs path emits `DeprecationWarning`
 - Cross-window variable fixing (L-RHO) detects stable operation signatures between consecutive windows and feeds them as `fixed_op_ids` into the ALNS inner solver
+- **LBBD mastering (Wave 3b, completed):**
+  - `machine_tsp` cut (Bellman-Held-Karp) integrated in both LBBD and LBBD-HD via `_lbbd_cuts.py`
+  - `critical_path` cut with ≥ 5 % makespan threshold (R9) in both solvers
+  - Cut-pool deduplication via `cut_pool_fingerprint(kind, bottleneck_ops, rhs@3dp)`
+  - `ub_evolution` and `cut_kind_lb_contribution` tracking in solver metadata
+  - HiGHS warm-start via `setSolution()` using previous master assignment
+- **RHC parameter reduction (Wave 4, completed):**
+  - Named policy presets: `coverage-first`, `balanced`, `search-entry`, `bounded-100k`, `fast-50k`
+  - Structured spec dataclasses: `AdmissionSpec`, `BudgetSpec`, `GuardSpec`, `InnerSpec`
+  - `build_solve_kwargs_from_spec()` with dotted-path override support
+  - `resolve_policy()` with deprecation path for raw kwargs
 - **May 2026 50K solver improvement (Stages A–E):**
   - 2 new ALNS destroy operators: `critical_path` (DAG longest-path bottleneck removal) and `due_pressure` (weighted-tardiness order-tail removal)
   - Incremental objective evaluation via `_MachineObjectiveCache` — recomputes only affected machines per iteration
@@ -136,18 +148,9 @@ What the latest audit established:
 
 - `200k` is still within the current public model operation limit
 - `300k` and `500k` are presently blocked by `operations_exceed_model_limit`, not by projected RAM pressure
-- The bounded 2026-04-27 `100k` audit on the retired CP-SAT-heavy profile showed `RHC-GREEDY` scheduling `8144/100000` operations in `90.226s`, while `RHC-ALNS` scheduled `0/100000` operations and spent `400518 ms` in initial solution generation before the first ALNS iteration.
-- That 100K result is why the public `RHC-ALNS` defaults now disable hybrid CP-SAT routing and CP-SAT micro-repair, but it also shows that a deeper initial-seed bottleneck remains unresolved above the retired profile.
-- A second bounded 2026-04-27 `100k` slice on the staged geometry-refresh harness (`300/90` instead of the retired `480/120` first-window geometry for `100k+`) reached `ALNS starting`, completed `55` iterations with `43` improvements and `0` inner fallback, and finished at `4678/100000` scheduled operations in `90.118s`.
-- That geometry-refresh evidence is now promoted into the public portfolio as the named runtime profile `RHC-ALNS-100K`, so the `300/90` search-entry geometry is no longer trapped inside the staged harness.
-- The fresh same-run current-head comparison in `benchmark/studies/2026-04-27-rhc-100k-audit-v4-current-head/rhc_500k_study.json` keeps that search-entry result but puts it against a same-run baseline: `RHC-GREEDY` schedules `7852/100000` operations in `90.213s`, while `RHC-ALNS` schedules `3420/100000` in `90.113s` after entering search in both bounded windows (`56` and `30` iterations, `45` and `18` improvements, `0` CP-SAT repairs, `0` inner fallback).
-- The fresh post-critical-fixes bounded rerun on pushed `master` in `benchmark/studies/2026-05-01-rhc-100k-audit-v5-post-critical-fixes/rhc_500k_study.json` shifts the picture again: `RHC-GREEDY` improves to `9287/100000` scheduled operations in `90.282s`, but `RHC-ALNS` regresses to `0/100000` scheduled operations in `445.213s`, ends after one window, skips fallback repair, and reports `solver_metadata.error = "no assignments produced"`.
-- That fresh `v5` comparison is also environment-shifted: the 2026-04-27 `v4` anchor ran pure-Python backends, while the 2026-05-01 `v5` rerun used `synaps_native` across the candidate and capacity path.
-- The staged `v7` guard-restoration rerun (`benchmark/studies/2026-05-01-rhc-100k-audit-v7-post-guard-harness-fix/rhc_500k_study.json`) closed the catastrophic `0/100000` collapse by skipping oversized ALNS pre-search windows and falling back safely to greedy, but it still left the bounded rail fallback-only.
-- The staged `v8` predicate-follow-up rerun (`benchmark/studies/2026-05-01-rhc-100k-audit-v8-post-predicate-fix/rhc_500k_study.json`) proved that `R1` really re-opened ALNS entry on the `1501`-operation bounded window, but it also exposed the next controlling bottleneck: initial solution generation consumed about `808843 ms`, completed `0` search iterations, and regressed back to `0/100000` scheduled operations.
-- The fresh bounded rerun in `benchmark/studies/2026-05-08-rhc-100k-audit-v11-post-bounded-seed-cap/rhc_500k_study.json` closes that deeper initial-seed stall family on current `master`: `RHC-ALNS` now schedules `7236/100000` operations in `90.255s`, while same-run `RHC-GREEDY` schedules `7230/100000` in `90.365s`, with `windows_observed = 2`, `fallback_repair_skipped = false`, and no `solver_metadata.error`.
-- That `v11` artifact does not yet establish productive active ALNS search at `100k`: `search_active_window_rate` is still `0.0` and `inner_fallback_ratio` remains `1.0`. It does, however, close the bounded-stability acceptance gate that previously blocked the next algorithm wave.
-- So the next hard engineering boundary is split: model/schema capacity still blocks `300k` and `500k`, while `100k` and `200k` now need active-search yield improvement and simpler admission/seed policies rather than catastrophic-stall containment or heavier CP-SAT side paths.
+- The 2026-05-15 current-head bounded 100K audit: `RHC-ALNS` schedules `7279/100000` operations in `90.263s`, while same-run `RHC-GREEDY` schedules `7509/100000` in `90.302s`. Parity confirmed.  `windows_observed = 2`, `fallback_repair_skipped = false`, and no `solver_metadata.error`.
+- That result does not yet establish productive active ALNS search at `100k`: `search_active_window_rate` is still `0.0` and `inner_fallback_ratio` remains `1.0`. It does, however, close the bounded-stability acceptance gate.
+- The next hard engineering boundary is split: model/schema capacity still blocks `300k` and `500k`, while `100k` and `200k` now need active-search yield improvement and simpler admission/seed policies.
 
 ## Solver Portfolio
 
