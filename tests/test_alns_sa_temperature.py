@@ -356,7 +356,7 @@ class TestSaCalibrationAcceptanceProbability:
 
     def test_calibration_formula_matches_alns_solver_implementation(self) -> None:
         """Guardrail test — the local harness formula matches the
-        formula used inside ``_calibrate_sa_temperature`` (lines ~1430–1432
+        formula used inside ``_calibrate_sa_temperature`` (lines ~1430-1432
         of ``alns_solver.py``). Keeps the unit test honest if someone
         edits the harness in the future without updating the solver.
         """

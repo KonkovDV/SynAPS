@@ -221,8 +221,7 @@ class CpSatSolver(BaseSolver):
                 )
             ):
                 start_offset = round(
-                    (frozen_assignment.start_time - planning_horizon_start).total_seconds()
-                    / 60.0
+                    (frozen_assignment.start_time - planning_horizon_start).total_seconds() / 60.0
                 )
                 end_offset = round(
                     (frozen_assignment.end_time - planning_horizon_start).total_seconds() / 60.0
@@ -396,10 +395,7 @@ class CpSatSolver(BaseSolver):
     ) -> tuple[Any, Any, Any, int, dict[str, int], int]:
         max_setup = max((entry.setup_minutes for entry in problem.setup_matrix), default=0)
         max_material_scaled = max(
-            (
-                round(entry.material_loss * material_loss_scale)
-                for entry in problem.setup_matrix
-            ),
+            (round(entry.material_loss * material_loss_scale) for entry in problem.setup_matrix),
             default=0,
         )
 
@@ -689,9 +685,7 @@ class CpSatSolver(BaseSolver):
             presence_vars: list[Any] = []
             for work_center_id in eligible_by_op[operation.id]:
                 work_center = wc_by_id[work_center_id]
-                duration = max(
-                    1, round(operation.base_duration_min / work_center.speed_factor)
-                )
+                duration = max(1, round(operation.base_duration_min / work_center.speed_factor))
 
                 suffix = f"_{operation.id}_{work_center_id}"
                 start_var = model.new_int_var(0, horizon, f"start{suffix}")

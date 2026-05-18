@@ -79,9 +79,7 @@ class LbbdSolver(BaseSolver):
         # Held-Karp Benders cut. Defaults to True (production behaviour);
         # benchmarks set this to False to measure the LB tightening that the
         # cut delivers on top of the legacy setup_cost floor.
-        enable_machine_tsp_cuts: bool = bool(
-            kwargs.get("enable_machine_tsp_cuts", True)
-        )
+        enable_machine_tsp_cuts: bool = bool(kwargs.get("enable_machine_tsp_cuts", True))
 
         # Precompute lookups
         wc_by_id = {wc.id: wc for wc in problem.work_centers}
@@ -127,6 +125,7 @@ class LbbdSolver(BaseSolver):
             seen_cut_fingerprints.add(fp)
             benders_cuts.append(cut)
             return True
+
         # Master-LB telemetry: each entry of `lb_evolution` is the master
         # lower bound observed in that iteration. `prev_iteration_cut_kinds`
         # carries the kinds of cuts added in iteration N-1, which are the
@@ -415,9 +414,7 @@ class LbbdSolver(BaseSolver):
                         )
                     )
 
-            prev_iteration_cut_kinds = [
-                cut.kind for cut in benders_cuts[cuts_before_iteration:]
-            ]
+            prev_iteration_cut_kinds = [cut.kind for cut in benders_cuts[cuts_before_iteration:]]
 
         status = SolverStatus.FEASIBLE if best_assignments else SolverStatus.TIMEOUT
         elapsed_ms = int((time.monotonic() - t0) * 1000)
@@ -450,9 +447,7 @@ class LbbdSolver(BaseSolver):
                 continue
             share = delta / float(len(kinds))
             for kind in kinds:
-                cut_kind_lb_contribution[kind] = (
-                    cut_kind_lb_contribution.get(kind, 0.0) + share
-                )
+                cut_kind_lb_contribution[kind] = cut_kind_lb_contribution.get(kind, 0.0) + share
 
         return ScheduleResult(
             solver_name=self.name,
@@ -466,9 +461,7 @@ class LbbdSolver(BaseSolver):
                 "lower_bound": reported_lb,
                 "upper_bound": best_ub,
                 "gap": (
-                    (best_ub - reported_lb) / max(best_ub, 1e-9)
-                    if best_ub < float("inf")
-                    else None
+                    (best_ub - reported_lb) / max(best_ub, 1e-9) if best_ub < float("inf") else None
                 ),
                 "lower_bound_method": "master_relaxation_benders",
                 "lower_bound_components": {
@@ -500,7 +493,7 @@ class LbbdSolver(BaseSolver):
 class _BendersCut:
     """Represents a Benders cut to add to the master problem."""
 
-    __slots__ = ("assignment_map", "kind", "rhs", "bottleneck_ops")
+    __slots__ = ("assignment_map", "bottleneck_ops", "kind", "rhs")
 
     def __init__(
         self,
@@ -519,6 +512,7 @@ class _BendersCut:
 # `synaps.solvers._lbbd_cuts` so that LBBD and LBBD-HD share a single source
 # of truth. The aliases below preserve the historical private names that
 # callers and tests already import from this module.
+
 
 def _deprecated_alias(name: str, fn):  # type: ignore[no-untyped-def]
     """Emit DeprecationWarning on first access to deprecated alias."""
@@ -660,11 +654,11 @@ def _solve_master(
         elif cut.kind == "capacity":
             # Combinatorial Benders capacity cut (Hooker & Ottosson 2003).
             #
-            # Original:  C_max ≥ rhs − Σ_{i∈B} p_i · (1 − y[i, k_i])
-            # Expand:     C_max ≥ rhs − Σ p_i + Σ p_i · y[i, k_i]
-            # Rearrange:  C_max − Σ p_i · y[i, k_i] ≥ rhs − Σ p_i
+            # Original:  C_max >= rhs - sum_{i in B} p_i * (1 - y[i, k_i])
+            # Expand:     C_max >= rhs - sum p_i + sum p_i * y[i, k_i]
+            # Rearrange:  C_max - sum p_i * y[i, k_i] >= rhs - sum p_i
             #
-            # The row added to HiGHS is:  C_max − Σ p·y  ≥  rhs − total_p
+            # The row added to HiGHS is:  C_max - sum p*y  >=  rhs - total_p
             capacity_cut_indices = [cmax_idx]
             capacity_cut_coeffs = [1.0]
             total_processing = 0.0
@@ -682,7 +676,7 @@ def _solve_master(
                 p = max(1.0, cut_op.base_duration_min / cut_wc.speed_factor)
                 total_processing += p
                 capacity_cut_indices.append(var_index[key])
-                # Negative coefficient: C_max − p·y
+                # Negative coefficient: C_max - p*y
                 capacity_cut_coeffs.append(-p)
 
             if len(capacity_cut_indices) > 1:
@@ -773,7 +767,7 @@ def _solve_master(
                 )
         elif cut.kind == "machine_tsp":
             # Sequence-aware setup cut (Naderi & Roshanaei 2021):
-            # C_max + Σ_{i ∈ S_m} p_{i,m} · (1 − y[i, m]) ≥ Σ_{i ∈ S_m} p_{i,m} + L_TSP(S_m)
+            # C_max + sum_{i in S_m} p_{i,m} * (1 - y[i, m]) >= sum_{i in S_m} p_{i,m} + L_TSP(S_m)
             # where L_TSP is the Bellman-Held-Karp lower bound on the realised
             # state-type Hamiltonian path. Same shape as `setup_cost`, but
             # with a strictly tighter rhs.
@@ -887,7 +881,7 @@ def _cluster_machines(
     """
     # Map each machine to itself initially
     parent: dict[UUID, UUID] = {}
-    op_to_machine = {op_id: wc_id for op_id, wc_id in assignment_map.items()}
+    op_to_machine = dict(assignment_map.items())
 
     def find(x: UUID) -> UUID:
         while parent.get(x, x) != x:
@@ -1240,16 +1234,20 @@ def _solve_single_cluster_worker(
     ops_by_id = {op.id: op for op in problem.operations}
     orders_by_id = {o.id: o for o in problem.orders}
 
-    cluster_op_ids = {
-        op_id for op_id, wc_id in assignment_map.items() if wc_id in cluster_wcs
-    }
+    cluster_op_ids = {op_id for op_id, wc_id in assignment_map.items() if wc_id in cluster_wcs}
     cluster_ops = [ops_by_id[oid] for oid in cluster_op_ids if oid in ops_by_id]
     if not cluster_ops:
         return {"assignments": [], "makespan": 0.0}
 
     sub_problem = _build_subproblem(
-        problem, cluster_ops, cluster_wcs, cluster_op_ids,
-        assignment_map, wc_by_id, ops_by_id, orders_by_id,
+        problem,
+        cluster_ops,
+        cluster_wcs,
+        cluster_op_ids,
+        assignment_map,
+        wc_by_id,
+        ops_by_id,
+        orders_by_id,
     )
 
     cpsat = CpSatSolver()
@@ -1397,10 +1395,7 @@ def _post_assemble_assignments(
 
     horizon_start = problem.planning_horizon_start
     makespan = (
-        max(
-            (a.end_time - horizon_start).total_seconds() / 60.0
-            for a in assignments
-        )
+        max((a.end_time - horizon_start).total_seconds() / 60.0 for a in assignments)
         if assignments
         else 0.0
     )

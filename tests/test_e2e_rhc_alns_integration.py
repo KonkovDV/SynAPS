@@ -1,4 +1,4 @@
-"""E2E integration test for the full RHC-ALNS stack with all Stage A–E features.
+"""E2E integration test for the full RHC-ALNS stack with all Stage A-E features.
 
 Validates: Task 13a — all new features work together on a synthetic 500-op instance.
 

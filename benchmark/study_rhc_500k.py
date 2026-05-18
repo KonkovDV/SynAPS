@@ -181,9 +181,7 @@ def _estimate_instance_footprint(
     """
 
     eligible_per_operation = max(1, round(n_machines * machine_flexibility))
-    expected_setup_entries = round(
-        n_machines * n_states * max(n_states - 1, 0) * setup_density
-    )
+    expected_setup_entries = round(n_machines * n_states * max(n_states - 1, 0) * setup_density)
     n_orders = max(1, math.ceil(n_ops / max(1, ops_per_order)))
 
     sdst_dense_bytes = int(n_machines * n_states * n_states * 12)

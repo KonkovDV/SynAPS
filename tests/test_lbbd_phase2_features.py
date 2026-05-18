@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -190,7 +191,7 @@ def test_lbbd_metadata_exposes_lb_evolution_and_cut_kind_contribution() -> None:
     assert all(isinstance(value, int | float) for value in lb_evolution)
     # LB cannot strictly decrease across iterations: each new master is
     # solved with at least as many cuts as the previous one.
-    for previous_lb, next_lb in zip(lb_evolution, lb_evolution[1:], strict=False):
+    for previous_lb, next_lb in itertools.pairwise(lb_evolution):
         assert next_lb + 1e-6 >= previous_lb
 
     contribution = metadata["cut_kind_lb_contribution"]
@@ -250,7 +251,7 @@ def test_lbbd_hd_metadata_exposes_master_lb_telemetry() -> None:
     lb_evolution = metadata["lb_evolution"]
     assert isinstance(lb_evolution, list)
     assert len(lb_evolution) == metadata["iterations"]
-    for previous_lb, next_lb in zip(lb_evolution, lb_evolution[1:], strict=False):
+    for previous_lb, next_lb in itertools.pairwise(lb_evolution):
         assert next_lb + 1e-6 >= previous_lb
 
     contribution = metadata["cut_kind_lb_contribution"]

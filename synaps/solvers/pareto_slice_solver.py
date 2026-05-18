@@ -173,9 +173,7 @@ class ParetoSliceCpSatSolver(BaseSolver):
 
         for index, epsilon_ratio in enumerate(epsilon_grid):
             allocated_time_s = per_slice_stage2_time_s + (1 if index < stage2_remainder_s else 0)
-            max_makespan_minutes = int(
-                math.ceil(baseline.objective.makespan_minutes * epsilon_ratio)
-            )
+            max_makespan_minutes = math.ceil(baseline.objective.makespan_minutes * epsilon_ratio)
             epsilon_constraints = {"max_makespan_minutes": max_makespan_minutes}
 
             slice_result = baseline_solver.solve(

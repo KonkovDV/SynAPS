@@ -1,9 +1,9 @@
 """Tests for SDST matrix backend selection, metadata, and interface consistency.
 
-Covers tasks 11.5–11.7 from the synaps-50k-solver-improvement spec:
-- 11.5: Property test — backend-to-backend lookup equivalence for all valid triples
-- 11.6: Memory-accounting test — sdst_memory_bytes within target for large matrices
-- 11.7: Unit test — unknown triples return 0.0 (not KeyError, not NaN)
+Covers tasks 11.5-11.7 from the synaps-50k-solver-improvement spec:
+- 11.5: Property test - backend-to-backend lookup equivalence for all valid triples
+- 11.6: Memory-accounting test - sdst_memory_bytes within target for large matrices
+- 11.7: Unit test - unknown triples return 0.0 (not KeyError, not NaN)
 """
 
 from __future__ import annotations
@@ -246,12 +246,12 @@ class TestBackendLookupEquivalence:
 class TestMemoryAccounting:
     """**Validates: Requirements 11.3, 11.4**
 
-    Verify sdst_memory_bytes for a 100×20 matrix is within the 20 MB target.
-    Dense array: 100 wc × 20 states × 20 states × (4 + 4 + 4) bytes = 480,000 bytes.
+    Verify sdst_memory_bytes for a 100x20 matrix is within the 20 MB target.
+    Dense array: 100 wc x 20 states x 20 states x (4 + 4 + 4) bytes = 480,000 bytes.
     """
 
     def test_memory_within_target_100x20(self) -> None:
-        """A 100 work-center × 20 state dense matrix stays under 20 MB."""
+        """A 100 work-center x 20 state dense matrix stays under 20 MB."""
         problem = _make_dense_problem(n_wc=100, n_states=20)
         sdst = SdstMatrix.from_problem(problem)
 

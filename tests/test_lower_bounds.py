@@ -84,7 +84,7 @@ def _make_problem(
             ops.append(op)
             prev_id = op.id
     else:
-        # Each op in its own order в†’ no model_validator auto-chaining
+        # Each op in its own order → no model_validator auto-chaining
         for k in range(n_ops):
             order = Order(id=uuid4(), external_ref=f"ORD-{k:04d}", due_date=_HORIZON_END)
             orders.append(order)
@@ -138,21 +138,21 @@ class TestComputeRelaxedMakespanLowerBound:
         assert result.max_operation_lb == pytest.approx(45.0)
 
     def test_parallel_ops_single_machine_uses_average_capacity_lb(self) -> None:
-        # 4 ops Г— 30 min each on 1 machine в†’ average_capacity_lb = 120 min
+        # 4 ops x 30 min each on 1 machine -> average_capacity_lb = 120 min
         problem = _make_problem(n_ops=4, n_machines=1, base_duration_min=30)
         result = compute_relaxed_makespan_lower_bound(problem)
         assert result.average_capacity_lb == pytest.approx(120.0)
         assert result.value == pytest.approx(120.0)
 
     def test_parallel_ops_multiple_machines_divides_load(self) -> None:
-        # 4 ops Г— 30 min on 4 machines в†’ average_capacity_lb = 30 min
+        # 4 ops x 30 min on 4 machines -> average_capacity_lb = 30 min
         problem = _make_problem(n_ops=4, n_machines=4, base_duration_min=30)
         result = compute_relaxed_makespan_lower_bound(problem)
         assert result.average_capacity_lb == pytest.approx(30.0)
         assert result.value == pytest.approx(30.0)
 
     def test_precedence_chain_dominates_average_capacity(self) -> None:
-        # 4 ops in a chain Г— 30 min each в†’ critical-path = 120 min even with 4 machines
+        # 4 ops in a chain x 30 min each -> critical-path = 120 min even with 4 machines
         problem = _make_problem(
             n_ops=4, n_machines=4, base_duration_min=30, add_predecessor_chain=True
         )
@@ -161,25 +161,25 @@ class TestComputeRelaxedMakespanLowerBound:
         assert result.value == pytest.approx(120.0)
 
     def test_max_parallel_machines_reduces_average_capacity_lb(self) -> None:
-        # 1 machine, max_parallel=2 в†’ total capacity = 2 в†’ lb = (4Г—30)/2 = 60
+        # 1 machine, max_parallel=2 -> total capacity = 2 -> lb = (4x30)/2 = 60
         problem = _make_problem(n_ops=4, n_machines=1, base_duration_min=30, max_parallel=2)
         result = compute_relaxed_makespan_lower_bound(problem)
         assert result.average_capacity_lb == pytest.approx(60.0)
 
     def test_speed_factor_reduces_durations(self) -> None:
-        # speed_factor=2.0 в†’ effective duration = 30/2 = 15 min per op
-        # 4 ops, 1 machine, 1 parallel в†’ lb = 4 Г— 15 = 60
+        # speed_factor=2.0 -> effective duration = 30/2 = 15 min per op
+        # 4 ops, 1 machine, 1 parallel -> lb = 4 x 15 = 60
         problem = _make_problem(n_ops=4, n_machines=1, base_duration_min=30, speed_factor=2.0)
         result = compute_relaxed_makespan_lower_bound(problem)
         assert result.average_capacity_lb == pytest.approx(60.0)
 
     def test_exclusive_machine_load_when_all_ops_pinned(self) -> None:
-        # All ops pinned to the only machine в†’ exclusive_machine_lb = sum of durations
+        # All ops pinned to the only machine -> exclusive_machine_lb = sum of durations
         problem = _make_problem(
             n_ops=3, n_machines=1, base_duration_min=20, pin_to_single_machine=True
         )
         result = compute_relaxed_makespan_lower_bound(problem)
-        # exclusive_machine_lb = 3Г—20 / max_parallel=1 = 60
+        # exclusive_machine_lb = 3x20 / max_parallel=1 = 60
         assert result.exclusive_machine_lb == pytest.approx(60.0)
         assert result.value == pytest.approx(60.0)
 
@@ -621,7 +621,7 @@ def _random_schedule_problems(
                 priority=draw(st.integers(min_value=100, max_value=1000)),
             )
         )
-        # Chain length: 1–5 ops per order, capped by remaining budget
+        # Chain length: 1-5 ops per order, capped by remaining budget
         chain_len = draw(
             st.integers(min_value=1, max_value=min(5, max(1, target_ops - n_ops_built)))
         )

@@ -58,6 +58,9 @@ docs/_extra/
 benchmark/results/
 benchmark/studies/
 benchmark/instances/
+
+# Native wheel build directory (CI artifact)
+native-dist/
 .benchmarks/
 /test_results.txt
 
@@ -65,6 +68,8 @@ benchmark/instances/
 *.log
 *.tmp
 *.bak
+*.orig
+.env.local
 /_*.txt
 /_*.cmd
 /_*.bat

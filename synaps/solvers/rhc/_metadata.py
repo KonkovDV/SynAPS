@@ -159,7 +159,7 @@ def build_inner_window_summary(
     summary["inner_status"] = computed_inner_status
     summary["inner_duration_ms"] = inner_result.duration_ms
     if inner_time_limit_s is not None:
-        budget_ms = int(round(inner_time_limit_s * 1000.0))
+        budget_ms = round(inner_time_limit_s * 1000.0)
         if inner_result.duration_ms > budget_ms:
             summary["inner_time_budget_overrun_ms"] = inner_result.duration_ms - budget_ms
     if hasattr(inner_result.error_category, "value"):

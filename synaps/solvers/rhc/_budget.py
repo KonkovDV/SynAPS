@@ -268,7 +268,7 @@ def scale_alns_inner_budget(
     )
     requested_destroy_size = max(
         min_destroy,
-        int(math.ceil(window_op_count * destroy_fraction)),
+        math.ceil(window_op_count * destroy_fraction),
     )
 
     effective_max_destroy = max(

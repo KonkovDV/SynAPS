@@ -1,8 +1,8 @@
 """Tests for native SDST batch lookup parity and deterministic fallback.
 
-Covers tasks 11b.5–11b.6 from the synaps-50k-solver-improvement spec:
-- 11b.5: Parity test — native batch lookup equals Python lookup for all valid triples
-- 11b.6: Deterministic fallback test — absence of native module does not change behavior
+Covers tasks 11b.5-11b.6 from the synaps-50k-solver-improvement spec:
+- 11b.5: Parity test - native batch lookup equals Python lookup for all valid triples
+- 11b.6: Deterministic fallback test - absence of native module does not change behavior
 """
 
 from __future__ import annotations

@@ -2411,15 +2411,21 @@ class AlnsSolver(BaseSolver):
                 kwargs.get("search_budget_reservation_s", 10.0)
             )
             reserved = remaining_budget_s - search_budget_reservation_s
-            # Scale seed budget proportionally to problem size so larger
-            # windows don't exhaust their budget on seed construction alone.
-            # Target ~15% of remaining budget for the seed phase, floored
-            # at 3 s and capped to leave the search reservation intact.
+            if reserved < 1.0:
+                return max(1.0, remaining_budget_s * 0.1)
+            # Scale seed budget proportionally to problem size and remaining
+            # budget so larger windows don't exhaust their budget on seed
+            # construction alone.
+            #   - n_ops factor: ~0.5 ms per op (empirically observed for
+            #     Python GreedyDispatch), capped at 30 s.
+            #   - proportional factor: 15 % of remaining budget.
+            #   - Floor at 3 s; cap to leave the search reservation intact.
+            n_ops_budget = min(n_ops * 0.0005, 30.0)
             proportional = max(3.0, remaining_budget_s * 0.15)
             if time_limit_s <= 90.0:
                 cap = max(1.0, min(3.0, repair_budget_s * 2.0))
             else:
-                cap = max(5.0, min(proportional, reserved))
+                cap = max(5.0, min(max(n_ops_budget, proportional), reserved))
             return max(1.0, min(cap, reserved))
 
         def _initial_seed_timed_out(result: ScheduleResult) -> bool:
@@ -2668,9 +2674,6 @@ class AlnsSolver(BaseSolver):
                     warm_start_rejected_reason = "warm_start_reanchored_infeasible"
             elif warm_start_rejected_reason is None:
                 warm_start_rejected_reason = "warm_start_infeasible"
-            elif warm_start_rejected_reason is None:
-                warm_start_rejected_reason = "warm_start_incomplete"
-
         if initial_result is None and frozen_assignments:
             # For RHC inner windows, prefer a frozen-compatible constructive seed
             # instead of a standalone greedy seed that may become infeasible after
@@ -2885,18 +2888,14 @@ class AlnsSolver(BaseSolver):
                     missing_ids,
                 )
                 if repair_outcome.status == RepairStatus.FEASIBLE:
-                    completed = list(initial_result.assignments) + list(
-                        repair_outcome.assignments
-                    )
+                    completed = list(initial_result.assignments) + list(repair_outcome.assignments)
                     completed.sort(
                         key=lambda a: (
                             a.start_time,
                             op_positions.get(a.operation_id, 0),
                         )
                     )
-                    initial_result = initial_result.model_copy(
-                        update={"assignments": completed}
-                    )
+                    initial_result = initial_result.model_copy(update={"assignments": completed})
                     logger.info(
                         "ALNS completion phase repaired %d missing ops (now %d/%d)",
                         len(missing_ids),

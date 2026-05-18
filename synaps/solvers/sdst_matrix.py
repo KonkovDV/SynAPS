@@ -60,16 +60,16 @@ class SdstMatrix:
     """
 
     __slots__ = (
-        "setup_minutes",
-        "material_loss",
         "energy_kwh",
-        "wc_id_to_idx",
-        "state_id_to_idx",
-        "idx_to_wc_id",
         "idx_to_state_id",
-        "n_wc",
+        "idx_to_wc_id",
+        "material_loss",
         "n_states",
+        "n_wc",
         "sdst_backend",
+        "setup_minutes",
+        "state_id_to_idx",
+        "wc_id_to_idx",
     )
 
     def __init__(

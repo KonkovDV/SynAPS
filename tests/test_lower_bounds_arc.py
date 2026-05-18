@@ -1,8 +1,8 @@
 """Tests for R8 — ARC-aware lower bound (auxiliary-resource pool bound).
 
 R17 acceptance:
-- 3 ops × 60 min, shared ARC pool_size=1 → auxiliary_resource_lb ≥ 180.
-- Same with pool_size=3 → auxiliary_resource_lb does NOT dominate other LB components.
+- 3 ops x 60 min, shared ARC pool_size=1 -> auxiliary_resource_lb >= 180.
+- Same with pool_size=3 -> auxiliary_resource_lb does NOT dominate other LB components.
 """
 
 from __future__ import annotations
@@ -89,7 +89,7 @@ def _make_arc_problem(
 
 class TestArcLowerBound:
     def test_pool_size_one_dominates(self) -> None:
-        """3 ops × 60 min with pool_size=1 → ARC LB = 180, must dominate."""
+        """3 ops x 60 min with pool_size=1 -> ARC LB = 180, must dominate."""
         problem = _make_arc_problem(n_ops=3, base_duration_min=60.0, pool_size=1)
         lb = compute_relaxed_makespan_lower_bound(problem)
         assert lb.auxiliary_resource_lb >= 180.0

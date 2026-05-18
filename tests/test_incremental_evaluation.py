@@ -3,7 +3,7 @@
 Task 17.6: Parity test — incremental cost == full recompute cost for 100 random
            destroy/repair cycles on a 500-op problem.
 Task 17.7: Benchmark — measure per-iteration time with/without incremental eval
-           on a 1000-op window; assert ≥5× speedup.
+           on a 1000-op window; assert >=5x speedup.
 
 Validates: Requirements 1 (design §17), Property 5 (incremental == full recompute).
 """
@@ -80,7 +80,7 @@ def problem_1000():
 
     Uses 3000 ops across 50 machines (60 ops/machine) to provide enough
     computational work for meaningful timing. The incremental speedup scales
-    with problem size — at 50K (production target) the speedup is 10-20×.
+    with problem size — at 50K (production target) the speedup is 10-20x.
     """
     return generate_large_instance(
         n_operations=3000,
@@ -145,7 +145,7 @@ class TestIncrementalParity:
         )
 
         for cycle in range(100):
-            # Randomly destroy 10–30 operations
+            # Randomly destroy 10-30 operations
             destroy_size = rng.randint(10, 30)
             destroyed_ids = _destroy_random(
                 assignments, problem_500, sdst, destroy_size, rng, ops_by_id=ops_by_id
@@ -238,13 +238,13 @@ class TestIncrementalParity:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Task 17.7: Benchmark — incremental eval ≥5× faster than full recompute
+# Task 17.7: Benchmark - incremental eval >=5x faster than full recompute
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestIncrementalBenchmark:
     """Measure per-iteration time with/without incremental eval on a 1000-op
-    window and assert ≥5× speedup.
+    window and assert >=5x speedup.
 
     **Validates: Task 17.7**
     """
@@ -252,7 +252,7 @@ class TestIncrementalBenchmark:
     def test_incremental_at_least_5x_faster_than_full(self, problem_1000, schedule_1000) -> None:
         """Time 50 iterations of full recompute vs 50 iterations of incremental
         eval with a small number of affected machines, and assert incremental
-        is ≥5× faster.
+        is >=5x faster.
 
         The speedup comes from the incremental path only recomputing objective
         contributions for affected machines (a small subset), while the full
@@ -323,14 +323,14 @@ class TestIncrementalBenchmark:
             f"  Incremental eval (50 iters): {time_incr * 1000:.1f} ms "
             f"({time_incr / 50 * 1000:.2f} ms/iter)"
         )
-        print(f"  Speedup: {speedup:.1f}×")
+        print(f"  Speedup: {speedup:.1f}x")
 
         # The incremental function has an O(N) scan to find affected assignments,
         # which limits speedup at test-friendly sizes (3000 ops). At production
         # scale (50K ops), the per-machine sort + setup computation dominates and
-        # the speedup reaches 10-20×. At 3000 ops we reliably achieve ≥3.5×.
+        # the speedup reaches 10-20x. At 3000 ops we reliably achieve >=3.5x.
         assert speedup >= 3.5, (
-            f"Incremental eval speedup is only {speedup:.2f}× "
-            f"(expected ≥3.5×). Full: {time_full * 1000:.1f} ms, "
+            f"Incremental eval speedup is only {speedup:.2f}x "
+            f"(expected >=3.5x). Full: {time_full * 1000:.1f} ms, "
             f"Incr: {time_incr * 1000:.1f} ms"
         )

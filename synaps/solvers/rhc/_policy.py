@@ -133,20 +133,20 @@ _PRESET_HYBRID_INNER_KWARGS: dict[str, Any] = {
 }
 
 PRESETS: dict[RhcPolicy, RhcPolicySpec] = {
-RhcPolicy.COVERAGE_FIRST: RhcPolicySpec(
-         admission=AdmissionSpec(
-             window_minutes=600,
-             overlap_minutes=180,
-             max_ops_per_window=8000,
-             candidate_pool_factor=2.5,
-         ),
-         budget=BudgetSpec(),
-         guards=GuardSpec(),
-         inner=InnerSpec(
-             inner_kwargs=_PRESET_ALNS_INNER_KWARGS,
-             hybrid_inner_kwargs=_PRESET_HYBRID_INNER_KWARGS,
-         ),
-     ),
+    RhcPolicy.COVERAGE_FIRST: RhcPolicySpec(
+        admission=AdmissionSpec(
+            window_minutes=600,
+            overlap_minutes=180,
+            max_ops_per_window=8000,
+            candidate_pool_factor=2.5,
+        ),
+        budget=BudgetSpec(),
+        guards=GuardSpec(),
+        inner=InnerSpec(
+            inner_kwargs=_PRESET_ALNS_INNER_KWARGS,
+            hybrid_inner_kwargs=_PRESET_HYBRID_INNER_KWARGS,
+        ),
+    ),
     RhcPolicy.BALANCED: RhcPolicySpec(
         admission=AdmissionSpec(
             window_minutes=480,
@@ -360,13 +360,13 @@ def resolve_policy(
 
 
 __all__ = [
-    "RhcPolicy",
-    "RhcPolicySpec",
+    "PRESETS",
     "AdmissionSpec",
     "BudgetSpec",
     "GuardSpec",
     "InnerSpec",
-    "PRESETS",
+    "RhcPolicy",
+    "RhcPolicySpec",
     "build_solve_kwargs_from_spec",
     "resolve_policy",
 ]

@@ -314,7 +314,7 @@ class TestHintPropagationLogic:
 
 @st.composite
 def window_summary_sequence(draw: st.DrawFn):
-    """Generate a random sequence of window completions (length 1–100).
+    """Generate a random sequence of window completions (length 1-100).
 
     Each completion produces a WindowQualitySummary with random metrics.
     """

@@ -977,7 +977,7 @@ class TestAlnsSolver:
         monkeypatch.setattr(
             alns_module,
             "DESTROY_OPERATORS",
-            [("deterministic", fake_destroy)] + list(alns_module.DESTROY_OPERATORS[1:]),
+            [("deterministic", fake_destroy), *list(alns_module.DESTROY_OPERATORS[1:])],
         )
         monkeypatch.setattr(alns_module, "_repair_greedy_outcome", fake_repair)
         monkeypatch.setattr(alns_module, "_objective_cost", lambda obj, weights: 120.0)
@@ -1001,7 +1001,7 @@ class TestAlnsSolver:
         monkeypatch.setattr(
             alns_module,
             "DESTROY_OPERATORS",
-            [original_operator] + list(alns_module.DESTROY_OPERATORS[1:]),
+            [original_operator, *list(alns_module.DESTROY_OPERATORS[1:])],
         )
 
         assert sample_count == 3
@@ -2118,7 +2118,7 @@ class TestInstanceGenerator:
         sdst = SdstMatrix.from_problem(problem)
         assert sdst.n_wc == 20
         assert sdst.n_states == 10
-        # Memory should be modest: 20 × 10 × 10 × 3 arrays × 4 bytes ≈ 24 KB
+        # Memory should be modest: 20 x 10 x 10 x 3 arrays x 4 bytes ~ 24 KB
         assert sdst.memory_bytes() < 100_000
 
 

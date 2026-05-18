@@ -16,9 +16,9 @@ from synaps.solvers.rhc._policy import (
 
 class TestPresets:
     def test_coverage_first_has_600_180(self) -> None:
-         spec = RhcPolicySpec.from_preset(RhcPolicy.COVERAGE_FIRST)
-         assert spec.admission.window_minutes == 600
-         assert spec.admission.overlap_minutes == 180
+        spec = RhcPolicySpec.from_preset(RhcPolicy.COVERAGE_FIRST)
+        assert spec.admission.window_minutes == 600
+        assert spec.admission.overlap_minutes == 180
 
     def test_search_entry_has_300_90(self) -> None:
         spec = RhcPolicySpec.from_preset(RhcPolicy.SEARCH_ENTRY)

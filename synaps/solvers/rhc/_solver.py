@@ -50,17 +50,17 @@ from synaps.solvers.rhc._admission import (
     compute_precedence_closed_set,
     count_admitted_candidates,
 )
-from synaps.solvers.rhc._cross_window import (
-    QUALITY_BUFFER_MAXLEN,
-    WindowQualitySummary,
-    compute_window_quality_summary,
-)
 from synaps.solvers.rhc._budget import (
     AlnsBudgetPolicy,
     EmpiricalRepairCostEstimator,
     InnerWindowTimeCapPolicy,
     resolve_inner_window_time_cap as _resolve_inner_window_time_cap,
     scale_alns_inner_budget as _scale_alns_inner_budget,
+)
+from synaps.solvers.rhc._cross_window import (
+    QUALITY_BUFFER_MAXLEN,
+    WindowQualitySummary,
+    compute_window_quality_summary,
 )
 from synaps.solvers.rhc._metadata import build_inner_window_summary
 from synaps.solvers.rhc._policy import RhcPolicy, resolve_policy
@@ -150,9 +150,7 @@ class RhcSolver(BaseSolver):
         )
         inner_window_time_cap_raw = kwargs.get("inner_window_time_cap_s")
         inner_window_time_cap_s: float | None = (
-            float(inner_window_time_cap_raw)
-            if inner_window_time_cap_raw is not None
-            else None
+            float(inner_window_time_cap_raw) if inner_window_time_cap_raw is not None else None
         )
         alns_inner_window_time_cap_raw = kwargs.get("alns_inner_window_time_cap_s")
         alns_inner_window_time_cap_s: float | None = (
@@ -207,9 +205,7 @@ class RhcSolver(BaseSolver):
         # after every ALNS window from the new ALNS metadata key
         # `observed_repair_s_per_destroyed_op`; consumed by subsequent calls
         # to `scale_alns_inner_budget` via the override parameter.
-        alns_repair_cost_alpha: float = float(
-            kwargs.get("alns_repair_cost_ema_alpha", 0.3)
-        )
+        alns_repair_cost_alpha: float = float(kwargs.get("alns_repair_cost_ema_alpha", 0.3))
         alns_repair_cost_estimator = EmpiricalRepairCostEstimator(
             alpha=max(0.0, min(1.0, alns_repair_cost_alpha)),
         )
@@ -217,9 +213,7 @@ class RhcSolver(BaseSolver):
         alns_presearch_budget_guard_enabled: bool = bool(
             kwargs.get("alns_presearch_budget_guard_enabled", True)
         )
-        alns_presearch_max_window_ops: int = int(
-            kwargs.get("alns_presearch_max_window_ops", 1000)
-        )
+        alns_presearch_max_window_ops: int = int(kwargs.get("alns_presearch_max_window_ops", 1000))
         alns_presearch_min_time_limit_s: float = float(
             kwargs.get("alns_presearch_min_time_limit_s", 240.0)
         )
@@ -227,13 +221,9 @@ class RhcSolver(BaseSolver):
         window_load_factor: float = float(kwargs.get("window_load_factor", 1.25))
         max_windows_raw = kwargs.get("max_windows")
         max_windows: int | None = int(max_windows_raw) if max_windows_raw is not None else None
-        dynamic_no_improve_enabled: bool = bool(
-            kwargs.get("dynamic_no_improve_enabled", True)
-        )
+        dynamic_no_improve_enabled: bool = bool(kwargs.get("dynamic_no_improve_enabled", True))
         no_improve_due_alpha: float = float(kwargs.get("no_improve_due_alpha", 0.6))
-        no_improve_candidate_beta: float = float(
-            kwargs.get("no_improve_candidate_beta", 0.4)
-        )
+        no_improve_candidate_beta: float = float(kwargs.get("no_improve_candidate_beta", 0.4))
         no_improve_min_iters_raw = kwargs.get("no_improve_min_iters")
         no_improve_min_iters: int | None = (
             int(no_improve_min_iters_raw) if no_improve_min_iters_raw is not None else None
@@ -243,17 +233,11 @@ class RhcSolver(BaseSolver):
             int(no_improve_max_iters_raw) if no_improve_max_iters_raw is not None else None
         )
         due_pressure_k1: float = float(kwargs.get("due_pressure_k1", 1.0))
-        machine_coverage_boost: float = float(
-            kwargs.get("machine_coverage_boost", 1.15)
-        )
-        due_pressure_overdue_boost: float = float(
-            kwargs.get("due_pressure_overdue_boost", 1.25)
-        )
+        machine_coverage_boost: float = float(kwargs.get("machine_coverage_boost", 1.15))
+        due_pressure_overdue_boost: float = float(kwargs.get("due_pressure_overdue_boost", 1.25))
         random_seed_raw = kwargs.get("random_seed")
         random_seed_base = int(random_seed_raw) if random_seed_raw is not None else 0
-        candidate_admission_enabled: bool = bool(
-            kwargs.get("candidate_admission_enabled", True)
-        )
+        candidate_admission_enabled: bool = bool(kwargs.get("candidate_admission_enabled", True))
         candidate_pool_factor: float = max(
             1.0,
             float(kwargs.get("candidate_pool_factor", 3.0)),
@@ -266,9 +250,7 @@ class RhcSolver(BaseSolver):
             0.0,
             float(kwargs.get("admission_tail_weight", 0.5)),
         )
-        adaptive_window_enabled: bool = bool(
-            kwargs.get("adaptive_window_enabled", True)
-        )
+        adaptive_window_enabled: bool = bool(kwargs.get("adaptive_window_enabled", True))
         adaptive_window_min_fill_ratio: float = min(
             1.0,
             max(0.0, float(kwargs.get("adaptive_window_min_fill_ratio", 0.5))),
@@ -287,19 +269,13 @@ class RhcSolver(BaseSolver):
             1.0,
             max(0.0, float(kwargs.get("admission_relaxation_min_fill_ratio", 0.3))),
         )
-        admission_full_scan_enabled: bool = bool(
-            kwargs.get("admission_full_scan_enabled", True)
-        )
+        admission_full_scan_enabled: bool = bool(kwargs.get("admission_full_scan_enabled", True))
         admission_full_scan_min_fill_ratio: float = min(
             1.0,
             max(0.0, float(kwargs.get("admission_full_scan_min_fill_ratio", 0.3))),
         )
-        hybrid_inner_routing_enabled: bool = bool(
-            kwargs.get("hybrid_inner_routing_enabled", False)
-        )
-        hybrid_inner_solver_name: str = str(
-            kwargs.get("hybrid_inner_solver", "cpsat")
-        )
+        hybrid_inner_routing_enabled: bool = bool(kwargs.get("hybrid_inner_routing_enabled", False))
+        hybrid_inner_solver_name: str = str(kwargs.get("hybrid_inner_solver", "cpsat"))
         hybrid_due_pressure_threshold: float = float(
             kwargs.get("hybrid_due_pressure_threshold", 0.35)
         )
@@ -308,13 +284,9 @@ class RhcSolver(BaseSolver):
         )
         hybrid_max_ops: int = int(kwargs.get("hybrid_max_ops", 1500))
         hybrid_inner_kwargs: dict[str, Any] = dict(kwargs.get("hybrid_inner_kwargs", {}))
-        inner_fallback_kpi_threshold: float = float(
-            kwargs.get("inner_fallback_kpi_threshold", 0.1)
-        )
+        inner_fallback_kpi_threshold: float = float(kwargs.get("inner_fallback_kpi_threshold", 0.1))
         max_candidate_pool_raw = kwargs.get("max_candidate_pool")
-        external_warm_start_assignments = list(
-            kwargs.get("warm_start_assignments", []) or []
-        )
+        external_warm_start_assignments = list(kwargs.get("warm_start_assignments", []) or [])
 
         ops_by_id = {op.id: op for op in problem.operations}
         orders_by_id = {o.id: o for o in problem.orders}
@@ -327,9 +299,7 @@ class RhcSolver(BaseSolver):
         dispatch_context = build_dispatch_context(problem)
 
         # P3.1: Variable fixing — detect stable ops across windows
-        variable_fixing_enabled: bool = bool(
-            kwargs.get("variable_fixing_enabled", True)
-        )
+        variable_fixing_enabled: bool = bool(kwargs.get("variable_fixing_enabled", True))
         variable_fixing_min_frequency: int = max(
             2, int(kwargs.get("variable_fixing_min_frequency", 2))
         )
@@ -384,11 +354,7 @@ class RhcSolver(BaseSolver):
             for work_center in problem.work_centers
         }
         op_eligible_wc_ids: dict[UUID, set[UUID]] = {
-            op.id: (
-                set(op.eligible_wc_ids)
-                if op.eligible_wc_ids
-                else set(all_work_center_ids)
-            )
+            op.id: (set(op.eligible_wc_ids) if op.eligible_wc_ids else set(all_work_center_ids))
             for op in problem.operations
         }
 
@@ -397,8 +363,7 @@ class RhcSolver(BaseSolver):
         for op in problem.operations:
             eligible_ids = op_eligible_wc_ids[op.id]
             effective_durations = [
-                op.base_duration_min / wc_speed_by_id.get(wc_id, 1.0)
-                for wc_id in eligible_ids
+                op.base_duration_min / wc_speed_by_id.get(wc_id, 1.0) for wc_id in eligible_ids
             ]
             if not effective_durations:
                 effective_durations = [max(op.base_duration_min, 1.0)]
@@ -428,11 +393,7 @@ class RhcSolver(BaseSolver):
             for setup_entry in problem.setup_matrix
             if setup_entry.setup_minutes > 0
         ]
-        expected_setup = (
-            sum(positive_setups) / len(positive_setups)
-            if positive_setups
-            else 0.0
-        )
+        expected_setup = sum(positive_setups) / len(positive_setups) if positive_setups else 0.0
 
         _ops_by_order: dict[UUID, list[Operation]] = {}
         for op in problem.operations:
@@ -457,9 +418,7 @@ class RhcSolver(BaseSolver):
             due_offset = order_due_offsets.get(op.order_id, horizon_minutes)
             rpt_tail = op_tail_rpt_by_id.get(op.id, op_mean_duration_by_id.get(op.id, 1.0))
             due_release_offset = (
-                due_offset
-                - admission_horizon_minutes
-                + admission_tail_weight * rpt_tail
+                due_offset - admission_horizon_minutes + admission_tail_weight * rpt_tail
             )
             op_admission_offset_by_id[op.id] = max(
                 op_earliest.get(op.id, 0.0),
@@ -512,17 +471,15 @@ class RhcSolver(BaseSolver):
             (
                 int(max_candidate_pool_raw)
                 if max_candidate_pool_raw is not None
-                else int(math.ceil(effective_window_op_cap * candidate_pool_factor))
+                else math.ceil(effective_window_op_cap * candidate_pool_factor)
             ),
         )
         candidate_admission_active = (
-            candidate_admission_enabled
-            and len(problem.operations) > effective_window_op_cap
+            candidate_admission_enabled and len(problem.operations) > effective_window_op_cap
         )
         if not candidate_admission_active:
             op_admission_offset_by_id = {
-                op.id: op_earliest.get(op.id, 0.0)
-                for op in problem.operations
+                op.id: op_earliest.get(op.id, 0.0) for op in problem.operations
             }
             ops_sorted_by_admission = sorted(
                 problem.operations,
@@ -611,9 +568,7 @@ class RhcSolver(BaseSolver):
         cross_window_learning_enabled: bool = bool(
             kwargs.get("cross_window_learning_enabled", False)
         )
-        quality_summary_buffer: deque[WindowQualitySummary] = deque(
-            maxlen=QUALITY_BUFFER_MAXLEN
-        )
+        quality_summary_buffer: deque[WindowQualitySummary] = deque(maxlen=QUALITY_BUFFER_MAXLEN)
 
         def append_inner_window_summary(
             *,
@@ -714,9 +669,7 @@ class RhcSolver(BaseSolver):
 
             precedence_ready_candidate_ops_total += len(candidate_ids)
             filtered_ids = {
-                op_id
-                for op_id in candidate_ids
-                if op_earliest.get(op_id, 0.0) < window_boundary
+                op_id for op_id in candidate_ids if op_earliest.get(op_id, 0.0) < window_boundary
             }
             if not filtered_ids:
                 precedence_ready_filtered_ops += len(candidate_ids)
@@ -762,11 +715,7 @@ class RhcSolver(BaseSolver):
             # The closure still owns the mutable `horizon_clipped_assignments`
             # counter; the kernel returns the per-call clipped count.
             nonlocal horizon_clipped_assignments
-            frozen_ids = (
-                committed_op_ids
-                if frozen_committed_ids is None
-                else frozen_committed_ids
-            )
+            frozen_ids = committed_op_ids if frozen_committed_ids is None else frozen_committed_ids
             candidates, clipped_count = _collect_commit_candidates(
                 assignments,
                 commit_boundary=commit_boundary,
@@ -871,11 +820,7 @@ class RhcSolver(BaseSolver):
             ):
                 target_candidate_count = max(
                     1,
-                    int(
-                        math.ceil(
-                            effective_window_op_cap * adaptive_window_min_fill_ratio
-                        )
-                    ),
+                    math.ceil(effective_window_op_cap * adaptive_window_min_fill_ratio),
                 )
                 current_effective_count = effective_candidate_count(
                     raw_window_candidate_ids,
@@ -891,15 +836,13 @@ class RhcSolver(BaseSolver):
                     )
                     expanded_window_end_offset = min(
                         horizon_minutes,
-                        window_start_offset
-                        + (base_window_span_minutes * requested_multiplier),
+                        window_start_offset + (base_window_span_minutes * requested_multiplier),
                     )
                     if expanded_window_end_offset > window_end_offset + 1e-9:
                         window_end_offset = expanded_window_end_offset
                         adaptive_window_expansions += 1
                         adaptive_window_expansion_factors.append(
-                            (window_end_offset - window_start_offset)
-                            / base_window_span_minutes
+                            (window_end_offset - window_start_offset) / base_window_span_minutes
                         )
                         extend_candidate_frontiers(window_end_offset)
                         raw_window_candidate_ids = filter_precedence_ready_candidate_ids(
@@ -993,11 +936,7 @@ class RhcSolver(BaseSolver):
                 if progressive_admission_relaxation_enabled:
                     relaxation_target_count = max(
                         1,
-                        int(
-                            math.ceil(
-                                effective_window_op_cap * admission_relaxation_min_fill_ratio
-                            )
-                        ),
+                        math.ceil(effective_window_op_cap * admission_relaxation_min_fill_ratio),
                     )
                     if (
                         len(raw_window_candidate_ids) > admitted_candidate_count
@@ -1024,11 +963,7 @@ class RhcSolver(BaseSolver):
                 if admission_full_scan_enabled:
                     full_scan_target_count = max(
                         1,
-                        int(
-                            math.ceil(
-                                effective_window_op_cap * admission_full_scan_min_fill_ratio
-                            )
-                        ),
+                        math.ceil(effective_window_op_cap * admission_full_scan_min_fill_ratio),
                     )
                     if len(window_candidate_ids) <= full_scan_target_count:
                         window_full_scan_triggered = True
@@ -1064,9 +999,7 @@ class RhcSolver(BaseSolver):
                         if full_scan_recovered_ops > 0:
                             window_candidate_ids = full_scan_candidate_ids
                             window_admission_relaxed = True
-                            window_admission_relaxation_recovered_ops += (
-                                full_scan_recovered_ops
-                            )
+                            window_admission_relaxation_recovered_ops += full_scan_recovered_ops
                             admission_full_scan_windows += 1
                             admission_full_scan_recovered_ops += full_scan_recovered_ops
                             filtered_by_admission = 0
@@ -1102,9 +1035,7 @@ class RhcSolver(BaseSolver):
                 )
 
             window_candidate_ids = {
-                op_id
-                for op_id in window_candidate_ids
-                if op_id not in committed_op_ids
+                op_id for op_id in window_candidate_ids if op_id not in committed_op_ids
             }
             peak_window_candidate_count = max(
                 peak_window_candidate_count,
@@ -1134,8 +1065,7 @@ class RhcSolver(BaseSolver):
             ]
 
             machine_available_offsets = {
-                work_center.id: 0.0
-                for work_center in problem.work_centers
+                work_center.id: 0.0 for work_center in problem.work_centers
             }
             for assignment in committed_assignments:
                 end_offset = (assignment.end_time - horizon_start).total_seconds() / 60.0
@@ -1146,8 +1076,7 @@ class RhcSolver(BaseSolver):
 
             ordered_machine_ids = [work_center.id for work_center in problem.work_centers]
             machine_available_offsets_vector = [
-                machine_available_offsets[machine_id]
-                for machine_id in ordered_machine_ids
+                machine_available_offsets[machine_id] for machine_id in ordered_machine_ids
             ]
             machine_index_by_id = {
                 machine_id: machine_index
@@ -1228,9 +1157,7 @@ class RhcSolver(BaseSolver):
 
             # Cap the window by configured budget and estimated machine throughput.
             uncovered_machines = {
-                wc_id
-                for op in ordered_window_candidate_ops
-                for wc_id in op_eligible_wc_ids[op.id]
+                wc_id for op in ordered_window_candidate_ops for wc_id in op_eligible_wc_ids[op.id]
             }
             window_heap: list[tuple[float, float, int, int, UUID, bool]] = []
             for op in ordered_window_candidate_ops:
@@ -1330,24 +1257,19 @@ class RhcSolver(BaseSolver):
             candidate_pressure_values.append(window_candidate_pressure)
 
             due_only_selected_ids = {
-                op.id
-                for op in window_ops
-                if candidate_slack_by_id.get(op.id, 0.0) <= 0.0
+                op.id for op in window_ops if candidate_slack_by_id.get(op.id, 0.0) <= 0.0
             }
             due_pressure_selected_ids.update(due_only_selected_ids)
             window_due_pressure = len(due_only_selected_ids) / max(1, len(window_ops))
             due_pressure_values.append(window_due_pressure)
 
-            window_due_drift_minutes = (
-                sum(
-                    max(
-                        0.0,
-                        window_end_offset - order_due_offsets.get(op.order_id, horizon_minutes),
-                    )
-                    for op in window_ops
+            window_due_drift_minutes = sum(
+                max(
+                    0.0,
+                    window_end_offset - order_due_offsets.get(op.order_id, horizon_minutes),
                 )
-                / max(1, len(window_ops))
-            )
+                for op in window_ops
+            ) / max(1, len(window_ops))
             due_drift_minutes_values.append(window_due_drift_minutes)
 
             window_spillover = max(0, len(window_candidate_ids) - len(window_ops))
@@ -1382,8 +1304,11 @@ class RhcSolver(BaseSolver):
                     clean_window_ops.append(op)
 
             logger.info(
-                "RHC window %d: offset=%.0f–%.0f min, %d ops",
-                window_count, window_start_offset, window_end_offset, len(clean_window_ops),
+                "RHC window %d: offset=%.0f-%.0f min, %d ops",
+                window_count,
+                window_start_offset,
+                window_end_offset,
+                len(clean_window_ops),
             )
 
             # ------ Attempt inner solver on the window sub-problem ------
@@ -1409,9 +1334,7 @@ class RhcSolver(BaseSolver):
             ):
                 hybrid_route_attempts += 1
                 due_trigger = window_due_pressure >= hybrid_due_pressure_threshold
-                candidate_trigger = (
-                    window_candidate_pressure >= hybrid_candidate_pressure_threshold
-                )
+                candidate_trigger = window_candidate_pressure >= hybrid_candidate_pressure_threshold
                 size_trigger = len(clean_window_ops) <= hybrid_max_ops
                 if size_trigger and (due_trigger or candidate_trigger):
                     selected_inner_solver_name = hybrid_inner_solver_name
@@ -1468,8 +1391,7 @@ class RhcSolver(BaseSolver):
                         setup_matrix=problem.setup_matrix,
                         auxiliary_resources=problem.auxiliary_resources,
                         aux_requirements=[
-                            r for r in problem.aux_requirements
-                            if r.operation_id in window_op_ids
+                            r for r in problem.aux_requirements if r.operation_id in window_op_ids
                         ],
                         planning_horizon_start=problem.planning_horizon_start,
                         planning_horizon_end=problem.planning_horizon_end,
@@ -1482,9 +1404,7 @@ class RhcSolver(BaseSolver):
                         10.0,
                         min(
                             remaining_time * inner_window_time_fraction,
-                            resolve_inner_window_time_cap(
-                                window_op_count=len(clean_window_ops)
-                            ),
+                            resolve_inner_window_time_cap(window_op_count=len(clean_window_ops)),
                         ),
                     )
 
@@ -1530,34 +1450,29 @@ class RhcSolver(BaseSolver):
                                 frozen_committed_assignments
                             )
                             frozen_predecessor_end_offsets = {
-                                op.id: int(
-                                    round(
-                                        (
-                                            frozen_committed_assignment_by_op[
-                                                op.predecessor_op_id
-                                            ].end_time
-                                            - horizon_start
-                                        ).total_seconds()
-                                        / 60.0
-                                    )
+                                op.id: round(
+                                    (
+                                        frozen_committed_assignment_by_op[
+                                            op.predecessor_op_id
+                                        ].end_time
+                                        - horizon_start
+                                    ).total_seconds()
+                                    / 60.0
                                 )
                                 for op in clean_window_ops
                                 if op.predecessor_op_id is not None
                                 and op.predecessor_op_id not in window_op_ids
-                                and op.predecessor_op_id
-                                in frozen_committed_assignment_by_op
+                                and op.predecessor_op_id in frozen_committed_assignment_by_op
                             }
                             if frozen_predecessor_end_offsets:
-                                effective_inner_kwargs[
-                                    "frozen_predecessor_end_offsets"
-                                ] = frozen_predecessor_end_offsets
+                                effective_inner_kwargs["frozen_predecessor_end_offsets"] = (
+                                    frozen_predecessor_end_offsets
+                                )
                         if selected_inner_solver_name == "cpsat":
                             effective_inner_kwargs["auto_greedy_warm_start"] = False
                         if selected_inner_solver_name == "alns":
                             effective_inner_kwargs["due_pressure"] = window_due_pressure
-                            effective_inner_kwargs["candidate_pressure"] = (
-                                window_candidate_pressure
-                            )
+                            effective_inner_kwargs["candidate_pressure"] = window_candidate_pressure
                             effective_inner_kwargs.setdefault(
                                 "random_seed",
                                 random_seed_base + window_count,
@@ -1607,9 +1522,7 @@ class RhcSolver(BaseSolver):
                                 )
                                 if alns_dynamic_repair_budget_enabled:
                                     effective_inner_kwargs["repair_time_limit_s"] = float(
-                                        alns_budget_profile[
-                                            "effective_repair_time_limit_s"
-                                        ]
+                                        alns_budget_profile["effective_repair_time_limit_s"]
                                     )
                                 alns_effective_max_iterations_values.append(
                                     int(alns_budget_profile["effective_max_iterations"])
@@ -1618,11 +1531,7 @@ class RhcSolver(BaseSolver):
                                     int(alns_budget_profile["effective_max_destroy"])
                                 )
                                 alns_effective_repair_time_limit_values.append(
-                                    float(
-                                        alns_budget_profile[
-                                            "effective_repair_time_limit_s"
-                                        ]
-                                    )
+                                    float(alns_budget_profile["effective_repair_time_limit_s"])
                                 )
                                 if bool(alns_budget_profile["scaled"]):
                                     alns_budget_scaled_windows += 1
@@ -1630,9 +1539,7 @@ class RhcSolver(BaseSolver):
                             # P3.1: Variable fixing — pass stable ops to ALNS
                             if variable_fixing_enabled:
                                 window_fixed_op_ids: set[UUID] = set()
-                                max_fixed = int(
-                                    len(clean_window_ops) * variable_fixing_max_ratio
-                                )
+                                max_fixed = int(len(clean_window_ops) * variable_fixing_max_ratio)
                                 for op in clean_window_ops:
                                     if len(window_fixed_op_ids) >= max_fixed:
                                         break
@@ -1643,12 +1550,8 @@ class RhcSolver(BaseSolver):
                                     ):
                                         window_fixed_op_ids.add(op.id)
                                 if window_fixed_op_ids:
-                                    effective_inner_kwargs["fixed_op_ids"] = (
-                                        window_fixed_op_ids
-                                    )
-                                    total_fixed_ops_across_windows += len(
-                                        window_fixed_op_ids
-                                    )
+                                    effective_inner_kwargs["fixed_op_ids"] = window_fixed_op_ids
+                                    total_fixed_ops_across_windows += len(window_fixed_op_ids)
                                     logger.debug(
                                         "RHC window %d: variable fixing %d ops (%.1f%%)",
                                         window_count,
@@ -1699,8 +1602,7 @@ class RhcSolver(BaseSolver):
                                     per_window_limit,
                                 )
                             elif (
-                                alns_budget_auto_scaling_enabled
-                                and alns_budget_profile is not None
+                                alns_budget_auto_scaling_enabled and alns_budget_profile is not None
                             ):
                                 logger.info(
                                     "RHC window %d skipped ALNS pre-search: estimated run %.2fs "
@@ -1749,14 +1651,9 @@ class RhcSolver(BaseSolver):
                     # `scale_alns_inner_budget` call can override its
                     # static fallback. update() ignores None / non-positive
                     # observations.
-                    if (
-                        selected_inner_solver_name == "alns"
-                        and inner_result is not None
-                    ):
+                    if selected_inner_solver_name == "alns" and inner_result is not None:
                         alns_repair_cost_estimator.update(
-                            (inner_result.metadata or {}).get(
-                                "observed_repair_s_per_destroyed_op"
-                            )
+                            (inner_result.metadata or {}).get("observed_repair_s_per_destroyed_op")
                         )
                         # C2 (Task 12.4): Persist final operator weights for
                         # the next window's ALNS initialization.
@@ -1769,13 +1666,15 @@ class RhcSolver(BaseSolver):
                     alns_budget_exhausted_before_search = bool(
                         selected_inner_solver_name == "alns"
                         and inner_result is not None
-                        and bool((inner_result.metadata or {}).get(
-                            "time_limit_exhausted_before_search"
-                        ))
-                        and int((inner_result.metadata or {}).get(
-                            "iterations_completed",
-                            0,
-                        ))
+                        and bool(
+                            (inner_result.metadata or {}).get("time_limit_exhausted_before_search")
+                        )
+                        and int(
+                            (inner_result.metadata or {}).get(
+                                "iterations_completed",
+                                0,
+                            )
+                        )
                         == 0
                     )
 
@@ -1794,9 +1693,7 @@ class RhcSolver(BaseSolver):
                         if frozen_committed_assignments:
                             boundary_reanchor_windows += 1
                             boundary_reanchor_ops_total += len(boundary_aware_assignments)
-                            boundary_reanchor_changed_ops_total += (
-                                boundary_reanchor_changed_ops
-                            )
+                            boundary_reanchor_changed_ops_total += boundary_reanchor_changed_ops
                         # Map inner solver assignments into committed set
                         commit_candidates = collect_commit_candidates(
                             boundary_aware_assignments,
@@ -1876,53 +1773,49 @@ class RhcSolver(BaseSolver):
                             spillover_ops=window_spillover,
                         )
                         if warm_selection is not None and warm_selection.rejected_reason_counts:
-                            inner_window_summaries[-1]["warm_start_rejected_reason_counts"] = (
-                                dict(warm_selection.rejected_reason_counts)
+                            inner_window_summaries[-1]["warm_start_rejected_reason_counts"] = dict(
+                                warm_selection.rejected_reason_counts
                             )
                         if window_admission_relaxed:
                             inner_window_summaries[-1]["admission_relaxed"] = True
-                            inner_window_summaries[-1][
-                                "admission_relaxation_recovered_ops"
-                            ] = window_admission_relaxation_recovered_ops
+                            inner_window_summaries[-1]["admission_relaxation_recovered_ops"] = (
+                                window_admission_relaxation_recovered_ops
+                            )
                         if window_full_scan_triggered:
                             inner_window_summaries[-1]["full_scan_triggered"] = True
-                            inner_window_summaries[-1][
-                                "full_scan_added_ops"
-                            ] = window_full_scan_added_ops
-                            inner_window_summaries[-1][
-                                "full_scan_final_pool"
-                            ] = window_full_scan_final_pool
+                            inner_window_summaries[-1]["full_scan_added_ops"] = (
+                                window_full_scan_added_ops
+                            )
+                            inner_window_summaries[-1]["full_scan_final_pool"] = (
+                                window_full_scan_final_pool
+                            )
                         inner_window_summaries[-1]["boundary_reanchor_ops"] = len(
                             boundary_aware_assignments
                         )
-                        inner_window_summaries[-1][
-                            "boundary_reanchor_changed_ops"
-                        ] = boundary_reanchor_changed_ops
+                        inner_window_summaries[-1]["boundary_reanchor_changed_ops"] = (
+                            boundary_reanchor_changed_ops
+                        )
                         if alns_budget_profile is not None:
                             inner_window_summaries[-1]["alns_budget_auto_scaled"] = bool(
                                 alns_budget_profile["scaled"]
                             )
-                            inner_window_summaries[-1][
-                                "alns_effective_max_iterations"
-                            ] = int(alns_budget_profile["effective_max_iterations"])
-                            inner_window_summaries[-1][
-                                "alns_effective_max_destroy"
-                            ] = int(alns_budget_profile["effective_max_destroy"])
+                            inner_window_summaries[-1]["alns_effective_max_iterations"] = int(
+                                alns_budget_profile["effective_max_iterations"]
+                            )
+                            inner_window_summaries[-1]["alns_effective_max_destroy"] = int(
+                                alns_budget_profile["effective_max_destroy"]
+                            )
                             inner_window_summaries[-1][
                                 "alns_estimated_repair_s_per_destroyed_op"
                             ] = round(
-                                float(
-                                    alns_budget_profile[
-                                        "estimated_repair_s_per_destroyed_op"
-                                    ]
-                                ),
+                                float(alns_budget_profile["estimated_repair_s_per_destroyed_op"]),
                                 4,
                             )
-                            inner_window_summaries[-1][
-                                "alns_effective_repair_time_limit_s"
-                            ] = round(
-                                float(alns_budget_profile["effective_repair_time_limit_s"]),
-                                4,
+                            inner_window_summaries[-1]["alns_effective_repair_time_limit_s"] = (
+                                round(
+                                    float(alns_budget_profile["effective_repair_time_limit_s"]),
+                                    4,
+                                )
                             )
                         if rewound_assignments:
                             inner_window_summaries[-1]["backtracking_rewind_ops"] = len(
@@ -1936,8 +1829,7 @@ class RhcSolver(BaseSolver):
                                 hybrid_routing_reason
                             )
                         logger.info(
-                            "RHC window %d solved by %s inner solver "
-                            "(%d ops committed)",
+                            "RHC window %d solved by %s inner solver (%d ops committed)",
                             window_count,
                             selected_inner_solver_name,
                             committed_now,
@@ -1966,7 +1858,8 @@ class RhcSolver(BaseSolver):
                     if inner_exception_logs_emitted < max_inner_exception_logs:
                         logger.warning(
                             "RHC window %d: inner solver '%s' failed, falling back to greedy",
-                            window_count, selected_inner_solver_name,
+                            window_count,
+                            selected_inner_solver_name,
                             exc_info=True,
                         )
                         inner_exception_logs_emitted += 1
@@ -2121,9 +2014,7 @@ class RhcSolver(BaseSolver):
                     if inner_result is None:
                         inner_status_counts["not_run"] += 1
                     else:
-                        inner_status = (inner_result.metadata or {}).get(
-                            "inner_status_override"
-                        )
+                        inner_status = (inner_result.metadata or {}).get("inner_status_override")
                         if not isinstance(inner_status, str) or not inner_status:
                             inner_status = (
                                 inner_result.status.value
@@ -2147,45 +2038,39 @@ class RhcSolver(BaseSolver):
                         exception_message=inner_exception_message,
                     )
                     if warm_selection is not None and warm_selection.rejected_reason_counts:
-                        inner_window_summaries[-1]["warm_start_rejected_reason_counts"] = (
-                            dict(warm_selection.rejected_reason_counts)
+                        inner_window_summaries[-1]["warm_start_rejected_reason_counts"] = dict(
+                            warm_selection.rejected_reason_counts
                         )
                     if window_admission_relaxed:
                         inner_window_summaries[-1]["admission_relaxed"] = True
-                        inner_window_summaries[-1][
-                            "admission_relaxation_recovered_ops"
-                        ] = window_admission_relaxation_recovered_ops
+                        inner_window_summaries[-1]["admission_relaxation_recovered_ops"] = (
+                            window_admission_relaxation_recovered_ops
+                        )
                     if window_full_scan_triggered:
                         inner_window_summaries[-1]["full_scan_triggered"] = True
-                        inner_window_summaries[-1][
-                            "full_scan_added_ops"
-                        ] = window_full_scan_added_ops
-                        inner_window_summaries[-1][
-                            "full_scan_final_pool"
-                        ] = window_full_scan_final_pool
+                        inner_window_summaries[-1]["full_scan_added_ops"] = (
+                            window_full_scan_added_ops
+                        )
+                        inner_window_summaries[-1]["full_scan_final_pool"] = (
+                            window_full_scan_final_pool
+                        )
                     if alns_budget_profile is not None:
                         inner_window_summaries[-1]["alns_budget_auto_scaled"] = bool(
                             alns_budget_profile["scaled"]
                         )
-                        inner_window_summaries[-1][
-                            "alns_effective_max_iterations"
-                        ] = int(alns_budget_profile["effective_max_iterations"])
-                        inner_window_summaries[-1][
-                            "alns_effective_max_destroy"
-                        ] = int(alns_budget_profile["effective_max_destroy"])
-                        inner_window_summaries[-1][
-                            "alns_estimated_repair_s_per_destroyed_op"
-                        ] = round(
-                            float(
-                                alns_budget_profile[
-                                    "estimated_repair_s_per_destroyed_op"
-                                ]
-                            ),
-                            4,
+                        inner_window_summaries[-1]["alns_effective_max_iterations"] = int(
+                            alns_budget_profile["effective_max_iterations"]
                         )
-                        inner_window_summaries[-1][
-                            "alns_effective_repair_time_limit_s"
-                        ] = round(
+                        inner_window_summaries[-1]["alns_effective_max_destroy"] = int(
+                            alns_budget_profile["effective_max_destroy"]
+                        )
+                        inner_window_summaries[-1]["alns_estimated_repair_s_per_destroyed_op"] = (
+                            round(
+                                float(alns_budget_profile["estimated_repair_s_per_destroyed_op"]),
+                                4,
+                            )
+                        )
+                        inner_window_summaries[-1]["alns_effective_repair_time_limit_s"] = round(
                             float(alns_budget_profile["effective_repair_time_limit_s"]),
                             4,
                         )
@@ -2193,13 +2078,9 @@ class RhcSolver(BaseSolver):
                         inner_window_summaries[-1]["backtracking_rewind_ops"] = len(
                             rewound_assignments
                         )
-                    inner_window_summaries[-1]["inner_solver_selected"] = (
-                        selected_inner_solver_name
-                    )
+                    inner_window_summaries[-1]["inner_solver_selected"] = selected_inner_solver_name
                     if hybrid_routing_reason is not None:
-                        inner_window_summaries[-1]["hybrid_routing_reason"] = (
-                            hybrid_routing_reason
-                        )
+                        inner_window_summaries[-1]["hybrid_routing_reason"] = hybrid_routing_reason
 
                 window_start_offset += window_minutes
                 if time_limit_reached:
@@ -2364,8 +2245,11 @@ class RhcSolver(BaseSolver):
 
         logger.info(
             "RHC finished: %d windows, %d/%d ops scheduled, makespan=%.1f min, %d ms",
-            window_count, scheduled_count, total_ops,
-            final_obj.makespan_minutes, elapsed_ms,
+            window_count,
+            scheduled_count,
+            total_ops,
+            final_obj.makespan_minutes,
+            elapsed_ms,
         )
 
         inner_solver_windows = sum(
@@ -2437,8 +2321,7 @@ class RhcSolver(BaseSolver):
                 "adaptive_window_max_multiplier": adaptive_window_max_multiplier,
                 "adaptive_window_expansions": adaptive_window_expansions,
                 "adaptive_window_mean_multiplier_applied": round(
-                    sum(adaptive_window_expansion_factors)
-                    / len(adaptive_window_expansion_factors),
+                    sum(adaptive_window_expansion_factors) / len(adaptive_window_expansion_factors),
                     4,
                 )
                 if adaptive_window_expansion_factors
@@ -2449,9 +2332,7 @@ class RhcSolver(BaseSolver):
                 )
                 if adaptive_window_expansion_factors
                 else 1.0,
-                "external_warm_start_supplied_assignments": len(
-                    external_warm_start_by_op
-                ),
+                "external_warm_start_supplied_assignments": len(external_warm_start_by_op),
                 "external_warm_start_used_windows": external_warm_start_used_windows,
                 "candidate_pool_clamped_windows": candidate_pool_clamped_windows,
                 "candidate_pool_filtered_ops": candidate_pool_filtered_ops,
@@ -2545,15 +2426,9 @@ class RhcSolver(BaseSolver):
                     else None
                 ),
                 "alns_dynamic_repair_budget_enabled": alns_dynamic_repair_budget_enabled,
-                "alns_dynamic_repair_s_per_destroyed_op": (
-                    alns_dynamic_repair_s_per_destroyed_op
-                ),
-                "alns_dynamic_repair_time_limit_min_s": (
-                    alns_dynamic_repair_time_limit_min_s
-                ),
-                "alns_dynamic_repair_time_limit_max_s": (
-                    alns_dynamic_repair_time_limit_max_s
-                ),
+                "alns_dynamic_repair_s_per_destroyed_op": (alns_dynamic_repair_s_per_destroyed_op),
+                "alns_dynamic_repair_time_limit_min_s": (alns_dynamic_repair_time_limit_min_s),
+                "alns_dynamic_repair_time_limit_max_s": (alns_dynamic_repair_time_limit_max_s),
                 # R2 (EMA calibration) telemetry: final state of the
                 # solver-scoped repair-cost estimator.
                 "alns_repair_cost_ema_alpha": alns_repair_cost_alpha,
@@ -2566,9 +2441,7 @@ class RhcSolver(BaseSolver):
                     alns_repair_cost_estimator.observation_count
                 ),
                 "alns_budget_scaled_windows": alns_budget_scaled_windows,
-                "alns_presearch_budget_guard_enabled": (
-                    alns_presearch_budget_guard_enabled
-                ),
+                "alns_presearch_budget_guard_enabled": (alns_presearch_budget_guard_enabled),
                 "alns_presearch_max_window_ops": alns_presearch_max_window_ops,
                 "alns_presearch_min_time_limit_s": alns_presearch_min_time_limit_s,
                 "alns_presearch_budget_guard_skipped_windows": (
@@ -2582,8 +2455,7 @@ class RhcSolver(BaseSolver):
                 if alns_effective_max_iterations_values
                 else 0.0,
                 "alns_budget_mean_effective_max_destroy": round(
-                    sum(alns_effective_max_destroy_values)
-                    / len(alns_effective_max_destroy_values),
+                    sum(alns_effective_max_destroy_values) / len(alns_effective_max_destroy_values),
                     2,
                 )
                 if alns_effective_max_destroy_values
@@ -2622,8 +2494,7 @@ class RhcSolver(BaseSolver):
                 "cross_window_variable_fixing_enabled": cross_window_variable_fixing_enabled,
                 "cross_window_stable_ops_total": len(cross_window_stable_ops),
                 "cross_window_stable_ops_count_per_window": [
-                    s.get("cross_window_stable_ops_count", 0)
-                    for s in inner_window_summaries
+                    s.get("cross_window_stable_ops_count", 0) for s in inner_window_summaries
                 ],
                 "inner_window_summaries": inner_window_summaries,
             },
@@ -2634,18 +2505,23 @@ class RhcSolver(BaseSolver):
         """Instantiate the inner solver by name."""
         if name == "alns":
             from synaps.solvers.alns_solver import AlnsSolver
+
             return AlnsSolver()
         elif name == "cpsat":
             from synaps.solvers.cpsat_solver import CpSatSolver
+
             return CpSatSolver()
         elif name == "greedy":
             from synaps.solvers.greedy_dispatch import GreedyDispatch
+
             return GreedyDispatch()
         elif name == "beam":
             from synaps.solvers.greedy_dispatch import BeamSearchDispatch
+
             return BeamSearchDispatch(beam_width=3)
         else:
             from synaps.solvers.greedy_dispatch import GreedyDispatch
+
             return GreedyDispatch()
 
     @staticmethod
@@ -2824,9 +2700,7 @@ class RhcSolver(BaseSolver):
         horizon_start = problem.planning_horizon_start
         ops_by_id = {op.id: op for op in problem.operations}
 
-        makespan = max(
-            (a.end_time - horizon_start).total_seconds() / 60.0 for a in assignments
-        )
+        makespan = max((a.end_time - horizon_start).total_seconds() / 60.0 for a in assignments)
 
         total_setup = 0.0
         total_material_loss = 0.0

@@ -189,7 +189,7 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
         solve_kwargs={"max_iterations": 10, "time_limit_s": 60},
         description="LBBD decomposition with 10 Benders iterations and 60-second budget",
     ),
-    # ---- Hierarchical Decomposition variants (10k–50k+ operations) ----
+    # ---- Hierarchical Decomposition variants (10k-50k+ operations) ----
     "LBBD-5-HD": SolverRegistration(
         factory=_build_lbbd_hd,
         solve_kwargs={
@@ -216,7 +216,7 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
         description=(
             "Hierarchical LBBD with balanced partitioning (≤200 ops/cluster), "
             "greedy warm-start, parallel subproblems. 10 iterations, 300s budget. "
-            "Industrial scale: 10 000–50 000 operations."
+            "Industrial scale: 10 000-50 000 operations."
         ),
     ),
     "LBBD-20-HD": SolverRegistration(
@@ -236,7 +236,7 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
             "— use RHC-ALNS as the validated path for 50K+ instances."
         ),
     ),
-    # ---- ALNS variants (5k–50k+ operations) ----
+    # ---- ALNS variants (5k-50k+ operations) ----
     "ALNS-300": SolverRegistration(
         factory=_build_alns,
         solve_kwargs={
@@ -251,7 +251,7 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
         },
         description=(
             "ALNS with micro-CP-SAT repair. 300 iterations, 2-minute budget. "
-            "For medium instances (1000–10000 ops)."
+            "For medium instances (1000-10000 ops)."
         ),
     ),
     "ALNS-500": SolverRegistration(
@@ -268,7 +268,7 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
         },
         description=(
             "ALNS with micro-CP-SAT repair. 500 iterations, 5-minute budget. "
-            "For large instances (10000–50000 ops)."
+            "For large instances (10000-50000 ops)."
         ),
     ),
     "ALNS-1000": SolverRegistration(
@@ -290,7 +290,7 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
             "1000 iterations, 10-minute budget, wider destroy neighborhood."
         ),
     ),
-    # ---- RHC variants (10k–100k+ operations) ----
+    # ---- RHC variants (10k-100k+ operations) ----
     "RHC-ALNS": SolverRegistration(
         factory=_build_rhc,
         solve_kwargs=build_solve_kwargs_from_spec(RhcPolicySpec.from_preset(RhcPolicy.BALANCED)),
@@ -298,7 +298,7 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
             "Receding Horizon Control with ALNS inner solver. "
             "8-hour windows, 2-hour overlap, max 5000 ops/window, "
             "boundary-aware tail carry-over and greedy-only repair. "
-            "For ultra-large instances (50 000–100 000+ ops)."
+            "For ultra-large instances (50 000-100 000+ ops)."
         ),
     ),
     "RHC-ALNS-100K": SolverRegistration(

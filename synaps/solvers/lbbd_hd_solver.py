@@ -20,6 +20,7 @@ Academic basis:
 
 from __future__ import annotations
 
+import itertools
 import os
 import time
 import warnings
@@ -61,7 +62,7 @@ if TYPE_CHECKING:
 
 
 class LbbdHdSolver(BaseSolver):
-    """Hierarchical Decomposition LBBD for 10 000–50 000+ operation instances.
+    """Hierarchical Decomposition LBBD for 10 000-50 000+ operation instances.
 
     Iterates between a precedence-aware HiGHS master (assignment + relaxed
     timing) and size-controlled CP-SAT subproblems (exact sequencing with
@@ -92,16 +93,12 @@ class LbbdHdSolver(BaseSolver):
         random_seed: int = int(kwargs.get("random_seed", 42))
         gap_threshold: float = float(kwargs.get("gap_threshold", 0.01))
         max_ops_per_cluster: int = int(kwargs.get("max_ops_per_cluster", 200))
-        num_workers: int = int(
-            kwargs.get("num_workers", min(8, os.cpu_count() or 4))
-        )
+        num_workers: int = int(kwargs.get("num_workers", min(8, os.cpu_count() or 4)))
         sub_num_workers: int = int(kwargs.get("sub_num_workers", 4))
         use_warm_start: bool = bool(kwargs.get("use_warm_start", True))
         setup_relaxation: bool = bool(kwargs.get("setup_relaxation", True))
         setup_cut_top_k: int = max(1, int(kwargs.get("setup_cut_top_k", 3)))
-        local_branching_enabled: bool = bool(
-            kwargs.get("local_branching_enabled", False)
-        )
+        local_branching_enabled: bool = bool(kwargs.get("local_branching_enabled", False))
         local_branching_delta_ratio: float = min(
             0.95,
             max(0.01, float(kwargs.get("local_branching_delta_ratio", 0.10))),
@@ -111,9 +108,7 @@ class LbbdHdSolver(BaseSolver):
             int(kwargs.get("local_branching_max_ops", 128)),
         )
 
-        sub_time_limit_s: int = max(
-            2, time_limit_s // max(max_iterations, 1)
-        )
+        sub_time_limit_s: int = max(2, time_limit_s // max(max_iterations, 1))
 
         # ---- Precompute lookups ----
         wc_by_id = {wc.id: wc for wc in problem.work_centers}
@@ -125,9 +120,7 @@ class LbbdHdSolver(BaseSolver):
         }
         eligible_by_op: dict[UUID, list[UUID]] = {
             op.id: (
-                op.eligible_wc_ids
-                if op.eligible_wc_ids
-                else [wc.id for wc in problem.work_centers]
+                op.eligible_wc_ids if op.eligible_wc_ids else [wc.id for wc in problem.work_centers]
             )
             for op in problem.operations
         }
@@ -164,13 +157,16 @@ class LbbdHdSolver(BaseSolver):
 
                 greedy = GreedyDispatch(k1=2.0, k3=0.5)
                 warm_result = greedy.solve(problem)
-                if warm_result.status in (
-                    SolverStatus.OPTIMAL,
-                    SolverStatus.FEASIBLE,
-                ) and warm_result.assignments:
+                if (
+                    warm_result.status
+                    in (
+                        SolverStatus.OPTIMAL,
+                        SolverStatus.FEASIBLE,
+                    )
+                    and warm_result.assignments
+                ):
                     prev_assignment_map = {
-                        a.operation_id: a.work_center_id
-                        for a in warm_result.assignments
+                        a.operation_id: a.work_center_id for a in warm_result.assignments
                     }
                     best_assignments = list(warm_result.assignments)
                     best_objective = warm_result.objective or ObjectiveValues()
@@ -303,17 +299,18 @@ class LbbdHdSolver(BaseSolver):
             sub_assignments, sub_makespan = sub_result
 
             # ---- Measure 5: Accelerated post-assembly ----
-            assembled = _topological_post_assembly(
-                problem, sub_assignments, ops_by_id
-            )
+            assembled = _topological_post_assembly(problem, sub_assignments, ops_by_id)
             if assembled is not None:
                 sub_assignments = assembled
                 # Recompute makespan after assembly
                 horizon_start = problem.planning_horizon_start
-                sub_makespan = max(
-                    (a.end_time - horizon_start).total_seconds() / 60.0
-                    for a in sub_assignments
-                ) if sub_assignments else 0.0
+                sub_makespan = (
+                    max(
+                        (a.end_time - horizon_start).total_seconds() / 60.0 for a in sub_assignments
+                    )
+                    if sub_assignments
+                    else 0.0
+                )
 
             ub = sub_makespan
 
@@ -323,8 +320,12 @@ class LbbdHdSolver(BaseSolver):
                 ub_evolution.append(best_ub)
                 best_assignments = sub_assignments
                 best_objective = _compute_objective(
-                    problem, sub_assignments, sub_makespan,
-                    wc_by_id, ops_by_id, orders_by_id,
+                    problem,
+                    sub_assignments,
+                    sub_makespan,
+                    wc_by_id,
+                    ops_by_id,
+                    orders_by_id,
                 )
 
             iteration_log.append(
@@ -339,10 +340,7 @@ class LbbdHdSolver(BaseSolver):
                     "cluster_count": len(clusters),
                     "max_cluster_ops": max(
                         (
-                            sum(
-                                1 for op_id, wc_id in assignment_map.items()
-                                if wc_id in c
-                            )
+                            sum(1 for op_id, wc_id in assignment_map.items() if wc_id in c)
                             for c in clusters
                         ),
                         default=0,
@@ -359,8 +357,13 @@ class LbbdHdSolver(BaseSolver):
             # ---- Generate Benders cuts ----
             cuts_before_gen = len(benders_cuts)
             _generate_all_cuts(
-                problem, sub_assignments, assignment_map,
-                benders_cuts, sub_makespan, wc_by_id, ops_by_id,
+                problem,
+                sub_assignments,
+                assignment_map,
+                benders_cuts,
+                sub_makespan,
+                wc_by_id,
+                ops_by_id,
                 setup_cut_top_k=setup_cut_top_k,
                 local_branching_enabled=local_branching_enabled,
                 local_branching_delta_ratio=local_branching_delta_ratio,
@@ -373,9 +376,7 @@ class LbbdHdSolver(BaseSolver):
             for fresh_cut in freshly_generated:
                 _register_cut(fresh_cut)
 
-            prev_iteration_cut_kinds = [
-                cut.kind for cut in benders_cuts[cuts_before_iteration:]
-            ]
+            prev_iteration_cut_kinds = [cut.kind for cut in benders_cuts[cuts_before_iteration:]]
 
         # ---- Build final result ----
         status = SolverStatus.FEASIBLE if best_assignments else SolverStatus.TIMEOUT
@@ -403,9 +404,7 @@ class LbbdHdSolver(BaseSolver):
                 continue
             share = delta / float(len(kinds))
             for kind in kinds:
-                cut_kind_lb_contribution[kind] = (
-                    cut_kind_lb_contribution.get(kind, 0.0) + share
-                )
+                cut_kind_lb_contribution[kind] = cut_kind_lb_contribution.get(kind, 0.0) + share
 
         return ScheduleResult(
             solver_name=self.name,
@@ -456,7 +455,7 @@ class LbbdHdSolver(BaseSolver):
 class _BendersCut:
     """Represents a Benders cut to add to the master problem."""
 
-    __slots__ = ("assignment_map", "kind", "rhs", "bottleneck_ops")
+    __slots__ = ("assignment_map", "bottleneck_ops", "kind", "rhs")
 
     def __init__(
         self,
@@ -475,6 +474,7 @@ class _BendersCut:
 # `synaps.solvers._lbbd_cuts` so that LBBD and LBBD-HD share a single source
 # of truth. The aliases below preserve the historical private names that
 # callers and tests already import from this module.
+
 
 def _deprecated_alias(name: str, fn):  # type: ignore[no-untyped-def]
     """Emit DeprecationWarning on first access to deprecated alias."""
@@ -537,8 +537,8 @@ def _solve_precedence_aware_master(
 
     Objective: min C_max
 
-    Scaling: For 10 000 ops × 100 machines → ~1M binary + 20K continuous +
-    ~8K precedence constraints. HiGHS solves this in 1–5 s typically.
+    Scaling: For 10 000 ops x 100 machines → ~1M binary + 20K continuous +
+    ~8K precedence constraints. HiGHS solves this in 1-5 s typically.
     """
     h = highspy.Highs()
     h.silent()
@@ -586,7 +586,8 @@ def _solve_precedence_aware_master(
         indices = [var_index[(op.id, wc_id)] for wc_id in eligible_by_op[op.id]]
         coeffs = [1.0] * len(indices)
         h.addRow(
-            1.0, 1.0,
+            1.0,
+            1.0,
             len(indices),
             np.array(indices, dtype=np.int32),
             np.array(coeffs),
@@ -611,7 +612,8 @@ def _solve_precedence_aware_master(
             coeffs.append(-duration)
 
         h.addRow(
-            0.0, 0.0,
+            0.0,
+            0.0,
             len(indices),
             np.array(indices, dtype=np.int32),
             np.array(coeffs),
@@ -625,7 +627,8 @@ def _solve_precedence_aware_master(
         e_pred = end_base + op_to_idx[pred_id]
         s_succ = start_base + op_to_idx[succ_id]
         h.addRow(
-            0.0, highspy.kHighsInf,
+            0.0,
+            highspy.kHighsInf,
             2,
             np.array([s_succ, e_pred], dtype=np.int32),
             np.array([1.0, -1.0]),
@@ -653,7 +656,8 @@ def _solve_precedence_aware_master(
         cap_indices.append(cmax_idx)
         cap_coeffs.append(-1.0)
         h.addRow(
-            -highspy.kHighsInf, cap_upper_bound,
+            -highspy.kHighsInf,
+            cap_upper_bound,
             len(cap_indices),
             np.array(cap_indices, dtype=np.int32),
             np.array(cap_coeffs),
@@ -664,7 +668,8 @@ def _solve_precedence_aware_master(
         e_idx = end_base + op_to_idx[op.id]
         # C_max - end[i] ≥ 0
         h.addRow(
-            0.0, highspy.kHighsInf,
+            0.0,
+            highspy.kHighsInf,
             2,
             np.array([cmax_idx, e_idx], dtype=np.int32),
             np.array([1.0, -1.0]),
@@ -710,14 +715,17 @@ def _solve_precedence_aware_master(
                 cut_coeffs.append(-p)
             if len(cut_indices) > 1:
                 h.addRow(
-                    cut.rhs - total_p, highspy.kHighsInf,
+                    cut.rhs - total_p,
+                    highspy.kHighsInf,
                     len(cut_indices),
                     np.array(cut_indices, dtype=np.int32),
                     np.array(cut_coeffs),
                 )
         elif cut.kind == "load_balance":
             h.addRow(
-                cut.rhs, highspy.kHighsInf, 1,
+                cut.rhs,
+                highspy.kHighsInf,
+                1,
                 np.array([cmax_idx], dtype=np.int32),
                 np.array([1.0]),
             )
@@ -748,7 +756,8 @@ def _solve_precedence_aware_master(
                 sc_coeffs.append(-p)
             if len(sc_indices) > 1:
                 h.addRow(
-                    cut.rhs - total_p, highspy.kHighsInf,
+                    cut.rhs - total_p,
+                    highspy.kHighsInf,
                     len(sc_indices),
                     np.array(sc_indices, dtype=np.int32),
                     np.array(sc_coeffs),
@@ -776,7 +785,8 @@ def _solve_precedence_aware_master(
                 cp_coeffs.append(-p)
             if len(cp_indices) > 1:
                 h.addRow(
-                    cut.rhs - total_cp, highspy.kHighsInf,
+                    cut.rhs - total_cp,
+                    highspy.kHighsInf,
                     len(cp_indices),
                     np.array(cp_indices, dtype=np.int32),
                     np.array(cp_coeffs),
@@ -877,18 +887,21 @@ def _solve_single_cluster(
     wc_by_id = {wc.id: wc for wc in problem.work_centers}
 
     # Collect operations for this cluster
-    cluster_op_ids = {
-        op_id for op_id, wc_id in assignment.items()
-        if wc_id in cluster_wc_set
-    }
+    cluster_op_ids = {op_id for op_id, wc_id in assignment.items() if wc_id in cluster_wc_set}
     if not cluster_op_ids:
         return {"assignments": [], "makespan": 0.0}
 
     cluster_ops = [ops_by_id[oid] for oid in cluster_op_ids if oid in ops_by_id]
 
     sub_problem = _build_subproblem(
-        problem, cluster_ops, cluster_wc_set, cluster_op_ids,
-        assignment, wc_by_id, ops_by_id, orders_by_id,
+        problem,
+        cluster_ops,
+        cluster_wc_set,
+        cluster_op_ids,
+        assignment,
+        wc_by_id,
+        ops_by_id,
+        orders_by_id,
     )
 
     cpsat = CpSatSolver()
@@ -907,10 +920,7 @@ def _solve_single_cluster(
     # Only keep cluster-owned assignments
     kept = [a for a in result.assignments if a.operation_id in cluster_op_ids]
     horizon_start = problem.planning_horizon_start
-    mk = (
-        max((a.end_time - horizon_start).total_seconds() / 60.0 for a in kept)
-        if kept else 0.0
-    )
+    mk = max((a.end_time - horizon_start).total_seconds() / 60.0 for a in kept) if kept else 0.0
 
     return {
         "assignments": [a.model_dump(mode="json") for a in kept],
@@ -946,9 +956,15 @@ def _solve_subproblems_parallel(
     # Sequential path for small counts
     if len(clusters) <= 3:
         return _solve_subproblems_sequential(
-            problem, assignment_map, clusters,
-            wc_by_id, ops_by_id, orders_by_id,
-            sub_time_limit_s, random_seed, sub_num_workers,
+            problem,
+            assignment_map,
+            clusters,
+            wc_by_id,
+            ops_by_id,
+            orders_by_id,
+            sub_time_limit_s,
+            random_seed,
+            sub_num_workers,
         )
 
     all_assignments: list[Assignment] = []
@@ -1006,20 +1022,21 @@ def _solve_subproblems_sequential(
     horizon_start = problem.planning_horizon_start
 
     for cluster_wcs in clusters:
-        cluster_op_ids = {
-            op_id for op_id, wc_id in assignment_map.items()
-            if wc_id in cluster_wcs
-        }
+        cluster_op_ids = {op_id for op_id, wc_id in assignment_map.items() if wc_id in cluster_wcs}
         if not cluster_op_ids:
             continue
 
-        cluster_ops = [
-            ops_by_id[oid] for oid in cluster_op_ids if oid in ops_by_id
-        ]
+        cluster_ops = [ops_by_id[oid] for oid in cluster_op_ids if oid in ops_by_id]
 
         sub_problem = _build_subproblem(
-            problem, cluster_ops, cluster_wcs, cluster_op_ids,
-            assignment_map, wc_by_id, ops_by_id, orders_by_id,
+            problem,
+            cluster_ops,
+            cluster_wcs,
+            cluster_op_ids,
+            assignment_map,
+            wc_by_id,
+            ops_by_id,
+            orders_by_id,
         )
 
         cpsat = CpSatSolver()
@@ -1038,10 +1055,7 @@ def _solve_subproblems_sequential(
         kept = [a for a in result.assignments if a.operation_id in cluster_op_ids]
         all_assignments.extend(kept)
         if kept:
-            mk = max(
-                (a.end_time - horizon_start).total_seconds() / 60.0
-                for a in kept
-            )
+            mk = max((a.end_time - horizon_start).total_seconds() / 60.0 for a in kept)
             overall_makespan = max(overall_makespan, mk)
 
     assigned_ops = {a.operation_id for a in all_assignments}
@@ -1139,16 +1153,12 @@ def _topological_post_assembly(
         return assignments
 
     setup_lookup: dict[tuple[UUID, UUID, UUID], timedelta] = {
-        (e.work_center_id, e.from_state_id, e.to_state_id): timedelta(
-            minutes=e.setup_minutes
-        )
+        (e.work_center_id, e.from_state_id, e.to_state_id): timedelta(minutes=e.setup_minutes)
         for e in problem.setup_matrix
     }
 
     # Build assignment lookup
-    assignment_by_op: dict[UUID, Assignment] = {
-        a.operation_id: a for a in assignments
-    }
+    assignment_by_op: dict[UUID, Assignment] = {a.operation_id: a for a in assignments}
 
     # Build DAG: successor list
     successors: dict[UUID, list[UUID]] = defaultdict(list)
@@ -1161,9 +1171,7 @@ def _topological_post_assembly(
 
     # Topological sort via Kahn's algorithm
     topo_order: list[UUID] = []
-    queue: list[UUID] = [
-        op_id for op_id, deg in in_degree.items() if deg == 0
-    ]
+    queue: list[UUID] = [op_id for op_id, deg in in_degree.items() if deg == 0]
     while queue:
         current = queue.pop()
         topo_order.append(current)
@@ -1255,11 +1263,7 @@ def _build_subproblem(
     Includes the full predecessor chain for precedence correctness.
     """
     all_op_ids = set(cluster_op_ids)
-    pending = [
-        op.predecessor_op_id
-        for op in cluster_ops
-        if op.predecessor_op_id is not None
-    ]
+    pending = [op.predecessor_op_id for op in cluster_ops if op.predecessor_op_id is not None]
     while pending:
         pred_id = pending.pop()
         if pred_id in all_op_ids:
@@ -1277,9 +1281,7 @@ def _build_subproblem(
         if op_id in cluster_op_ids:
             assigned_wc = assignment_map.get(op_id)
             eligible = (
-                [assigned_wc]
-                if assigned_wc and assigned_wc in cluster_wcs
-                else list(cluster_wcs)
+                [assigned_wc] if assigned_wc and assigned_wc in cluster_wcs else list(cluster_wcs)
             )
         else:
             assigned_wc = assignment_map.get(op_id)
@@ -1296,9 +1298,7 @@ def _build_subproblem(
                 base_duration_min=op.base_duration_min,
                 eligible_wc_ids=eligible,
                 predecessor_op_id=(
-                    op.predecessor_op_id
-                    if op.predecessor_op_id in all_op_ids
-                    else None
+                    op.predecessor_op_id if op.predecessor_op_id in all_op_ids else None
                 ),
                 domain_attributes=op.domain_attributes,
             )
@@ -1315,16 +1315,15 @@ def _build_subproblem(
     sub_orders = [o for o in problem.orders if o.id in needed_order_ids]
     sub_wcs = [wc for wc in problem.work_centers if wc.id in needed_wc_ids]
     sub_setup = [
-        e for e in problem.setup_matrix
+        e
+        for e in problem.setup_matrix
         if e.work_center_id in needed_wc_ids
         and e.from_state_id in needed_state_ids
         and e.to_state_id in needed_state_ids
     ]
 
     sub_op_ids = {op.id for op in sub_operations}
-    sub_aux_reqs = [
-        r for r in problem.aux_requirements if r.operation_id in sub_op_ids
-    ]
+    sub_aux_reqs = [r for r in problem.aux_requirements if r.operation_id in sub_op_ids]
     needed_aux_ids = {r.aux_resource_id for r in sub_aux_reqs}
     sub_aux = [r for r in problem.auxiliary_resources if r.id in needed_aux_ids]
 
@@ -1390,8 +1389,7 @@ def _generate_all_cuts(
     if machine_loads:
         bottleneck_wc = max(machine_loads, key=machine_loads.get)  # type: ignore[arg-type]
         bottleneck_ops = {
-            op_id for op_id, wc_id in assignment_map.items()
-            if wc_id == bottleneck_wc
+            op_id for op_id, wc_id in assignment_map.items() if wc_id == bottleneck_wc
         }
         benders_cuts.append(
             _BendersCut(
@@ -1419,9 +1417,7 @@ def _generate_all_cuts(
         if len(m_assignments) < 2:
             continue
         machine_state_seq = [
-            ops_by_id[a.operation_id].state_id
-            for a in m_assignments
-            if a.operation_id in ops_by_id
+            ops_by_id[a.operation_id].state_id for a in m_assignments if a.operation_id in ops_by_id
         ]
         tsp_lower_bound = compute_machine_tsp_lower_bound(
             machine_state_seq,
@@ -1444,8 +1440,7 @@ def _generate_all_cuts(
         processing_total = sum(
             max(
                 1.0,
-                ops_by_id[a.operation_id].base_duration_min
-                / wc_by_id[wc_id].speed_factor,
+                ops_by_id[a.operation_id].base_duration_min / wc_by_id[wc_id].speed_factor,
             )
             for a in m_assignments
             if a.operation_id in ops_by_id
@@ -1522,6 +1517,7 @@ def _generate_all_cuts(
             scoped_ops = list(assignment_map.keys())
 
         if len(scoped_ops) > local_branching_max_ops:
+
             def _local_branching_duration(op_id: UUID) -> float:
                 operation = ops_by_id.get(op_id)
                 return float(operation.base_duration_min) if operation is not None else 0.0
@@ -1533,7 +1529,7 @@ def _generate_all_cuts(
             )[:local_branching_max_ops]
 
         if scoped_ops:
-            delta = max(1, int(round(len(scoped_ops) * local_branching_delta_ratio)))
+            delta = max(1, round(len(scoped_ops) * local_branching_delta_ratio))
             rhs = max(0, len(scoped_ops) - delta)
             benders_cuts.append(
                 _BendersCut(
@@ -1579,11 +1575,7 @@ def _find_critical_path(
             sequence_assignments,
             key=lambda assignment: assignment.start_time,
         )
-        for previous_assignment, current_assignment in zip(
-            sorted_assignments,
-            sorted_assignments[1:],
-            strict=False,
-        ):
+        for previous_assignment, current_assignment in itertools.pairwise(sorted_assignments):
             previous_operation = ops_by_id.get(previous_assignment.operation_id)
             current_operation = ops_by_id.get(current_assignment.operation_id)
             if previous_operation is None or current_operation is None:

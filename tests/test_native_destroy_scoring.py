@@ -1,8 +1,8 @@
 """Tests for native ALNS destroy worst scoring parity and performance.
 
-Covers tasks 4.5–4.6 from the synaps-50k-solver-improvement spec:
-- 4.5: Parity test — native and Python score vectors match within 1e-10 tolerance
-- 4.6: Benchmark test — < 10 ms for 50K operations across 100 machines
+Covers tasks 4.5-4.6 from the synaps-50k-solver-improvement spec:
+- 4.5: Parity test - native and Python score vectors match within 1e-10 tolerance
+- 4.6: Benchmark test - < 10 ms for 50K operations across 100 machines
 """
 
 from __future__ import annotations

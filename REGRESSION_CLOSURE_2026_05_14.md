@@ -1,4 +1,4 @@
-# SynAPS Regression Closure Report — 2026-05-15 (post-Wave 3b/4)
+# SynAPS Regression Closure Report — 2026-05-17 (post-Wave 3b/4, quality gate refinement)
 
 ## Executive Summary
 
@@ -66,14 +66,32 @@ inner-solver semantics that were stabilized between `f985c03` and the current HE
 - Cross-window variable fixing via `detect_cross_window_stable_ops()` (L-RHO pattern)
 - Fixed-op IDs passed to ALNS inner solver with per-op stability frequency tracking
 
-## Quality-Gate Status — 2026-05-15 (all GREEN)
+## Quality-Gate Status — 2026-05-17 (all GREEN)
 
 | Gate | Status |
 |------|--------|
-| `ruff check synaps tests benchmark` | ✅ All checks passed |
-| `ruff format --check synaps tests benchmark` | ✅ All formatted |
-| `mypy synaps --strict --no-error-summary` | ✅ Exit code 0 |
+| `ruff check synaps tests benchmark` | ✅ 0 errors (64 mechanical fixes applied) |
+| `ruff format --check synaps tests benchmark` | ✅ 123 files formatted |
+| `mypy synaps --strict --no-error-summary` | ✅ 0 errors (`warn_unreachable`, `warn_redundant_casts`, `warn_unused_ignores` enabled) |
 | `pytest tests/ -x -q --tb=line` | ✅ 374 passed (all test suites) |
+
+### Mechanical Fixes Applied (2026-05-17)
+
+- **RUF046** (4): Removed redundant `int()` around `math.ceil()` / `round()` in `_solver.py`.
+- **RUF007** (2): Replaced `zip(seq, seq[1:])` with `itertools.pairwise(seq)` in `test_lbbd_phase2_features.py`.
+- **RUF005** (2): Replaced list concatenation `+` with iterable unpacking `*` in `test_alns_rhc_scaling.py`.
+- **RUF100/RUF023** (5): Auto-fixed unused `noqa` and unsorted `__slots__` via `ruff check --fix`.
+- **RUF001/002/003** (51): Replaced ambiguous Unicode (`×`, `–`, `—`, `→`, `≥`) with ASCII equivalents across 14 test files and 1 solver file.
+- **PEP 561**: Added `synaps/py.typed` marker for typed package discoverability.
+- **highspy**: Verified current installed package no longer requires inline `import-untyped` ignores under strict mypy.
+
+### Developer DX + Native Wheel Closure (2026-05-18)
+
+- **Makefile**: Added developer targets for lint, format, typecheck, tests, native build/test, pre-commit, and cleanup.
+- **pre-commit**: Bumped `ruff-pre-commit` from `v0.11.0` to `v0.11.7`.
+- **CI typecheck**: Replaced `liskin/gh-mypy-cache@v1` with direct `mypy synaps --strict --no-error-summary`.
+- **Native wheel**: Rebuilt and installed `synaps_native-0.3.0-cp313-cp313-win_amd64.whl`; `greedy_repair_batch` export verified.
+- **Native tests**: `tests/test_native_destroy_scoring.py`, `tests/test_native_objective_parity.py`, `tests/test_native_stabilize_parity.py`, and `tests/test_accelerators.py` passed (`32 passed`).
 
 ## Verified Green Rails
 
@@ -96,7 +114,7 @@ python -m pytest tests/test_stage_c_verification.py -q         # 25 passed
 | Priority | Action | Owner |
 |----------|--------|-------|
 | **P1** | Full 50K benchmark evidence (in progress, ~20 min wall-time) | Benchmark lane |
-| **P1** | Rebuild `synaps_native` wheel to enable native `greedy_repair_batch` | Build/env |
+| **P1** | Rebuild `synaps_native` wheel to enable native `greedy_repair_batch` | ✅ Closed 2026-05-18 |
 | **P1** | Fresh 100K bounded benchmark evidence | Benchmark lane |
 | **P2** | Migrate RHC test fixtures from raw kwargs to `RhcPolicy` | Test hygiene |
 | **P2** | Update README claims to match current evidence boundary | Docs |

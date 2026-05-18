@@ -105,7 +105,7 @@ class TestBenchmarkRegression:
     """Pinned quality bounds for deterministic solver runs."""
 
     def test_cpsat_stress_5x3_makespan_bound(self) -> None:
-        """CP-SAT on 5 orders × 3 ops × 3 machines must achieve makespan ≤ 130 min."""
+        """CP-SAT on 5 orders x 3 ops x 3 machines must achieve makespan <= 130 min."""
         problem = _make_stress_problem()
         solver = CpSatSolver()
         result = solver.solve(problem, time_limit_s=10, random_seed=42, num_workers=4)
@@ -232,7 +232,7 @@ class TestBenchmarkRegression:
         result = solver.solve(problem, time_limit_s=10, random_seed=42)
 
         assert result.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
-        # Optimal grouping: 1 setup = 15 min. Sub-optimal would be 3 × 15 = 45.
+        # Optimal grouping: 1 setup = 15 min. Sub-optimal would be 3 x 15 = 45.
         assert result.objective.total_setup_minutes <= 15, (
             f"Expected ≤ 1 setup (15 min), got {result.objective.total_setup_minutes} min"
         )

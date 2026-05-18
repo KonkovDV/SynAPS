@@ -711,7 +711,7 @@ def _compute_critical_path_length(
     assigned_op_ids = set(start_offset)
 
     # Adjacency: node -> list of (successor, edge_gap)
-    successors: dict[Any, list[tuple[Any, float]]] = {op_id: [] for op_id in assigned_op_ids}  # noqa: C420
+    successors: dict[Any, list[tuple[Any, float]]] = {op_id: [] for op_id in assigned_op_ids}
     in_degree: dict[Any, int] = dict.fromkeys(assigned_op_ids, 0)
 
     # Precedence edges
@@ -2239,10 +2239,10 @@ class TestDuePressureMedianTardinessProperty:
         )
 
         # Sanity: exhaustion regime is rare with destroy_size=3 and reasonable
-        # problem sizes (≥2 ops/order × ≥2 top-half orders usually ≥ 3).
+        # problem sizes (>=2 ops/order x >=2 top-half orders usually >= 3).
         assert n_edge_case_top_half_exhausted <= n_tested // 3, (
             f"Top-half-exhausted edge case fired {n_edge_case_top_half_exhausted} "
-            f"times out of {n_tested} — property is mostly trivially satisfied. "
+            f"times out of {n_tested} - property is mostly trivially satisfied. "
             f"Tighten the generator so top-half orders have more ops."
         )
 
@@ -2311,8 +2311,8 @@ def _compute_critical_ops_from_dag(
     assigned_op_ids = set(duration)
 
     # Build forward + backward adjacency
-    successors: dict[UUID, list[UUID]] = {op_id: [] for op_id in assigned_op_ids}  # noqa: C420
-    predecessors: dict[UUID, list[UUID]] = {op_id: [] for op_id in assigned_op_ids}  # noqa: C420
+    successors: dict[UUID, list[UUID]] = {op_id: [] for op_id in assigned_op_ids}
+    predecessors: dict[UUID, list[UUID]] = {op_id: [] for op_id in assigned_op_ids}
     in_degree: dict[UUID, int] = dict.fromkeys(assigned_op_ids, 0)
 
     # Precedence edges
@@ -2407,7 +2407,7 @@ def _count_critical_path_length(assignments: list[Assignment], problem: Schedule
 
     assigned_op_ids = set(duration)
 
-    successors: dict[UUID, list[UUID]] = {op_id: [] for op_id in assigned_op_ids}  # noqa: C420
+    successors: dict[UUID, list[UUID]] = {op_id: [] for op_id in assigned_op_ids}
     in_degree: dict[UUID, int] = dict.fromkeys(assigned_op_ids, 0)
     for op_id in assigned_op_ids:
         op = ops_by_id.get(op_id)
@@ -2468,7 +2468,7 @@ def _count_critical_path_length(assignments: list[Assignment], problem: Schedule
 # source. That is acceptable here because operation identity is
 # structural (a UUID), not a shrinkable primitive — shrinking focuses on
 # sizes, durations, and setup densities. Size bounds follow the task
-# brief: 10–50 operations, 2–5 machines, 2–4 states (enough coverage
+# brief: 10-50 operations, 2-5 machines, 2-4 states (enough coverage
 # without slowing the suite).
 
 
@@ -2486,7 +2486,7 @@ def _small_feasible_problems(
 
     The generator fixes the planning horizon to a safely long window (30
     days) so that greedy's horizon bound never trips during shrinking,
-    and keeps processing times bounded (5–60 minutes) for the same
+    and keeps processing times bounded (5-60 minutes) for the same
     reason. Every operation is eligible on at least one machine; the
     setup matrix is sparsely populated (60% fill) to give the combined
     DAG non-trivial machine edges without slowing construction.
@@ -2508,7 +2508,7 @@ def _small_feasible_problems(
         for i in range(n_machines)
     ]
 
-    # Sparse random setup matrix (60% fill, 1–20 minute setup).
+    # Sparse random setup matrix (60% fill, 1-20 minute setup).
     setup_entries: list[SetupEntry] = []
     for wc in work_centers:
         for i, s_from in enumerate(states):
@@ -2714,7 +2714,7 @@ class TestCriticalPathProperty:
 #   valid invariant instead.
 #
 # Method:
-#   1. Draw small feasible problems (5–50 operations, 2–8 machines) via
+#   1. Draw small feasible problems (5-50 operations, 2-8 machines) via
 #      Hypothesis using the existing ``_small_feasible_problems`` strategy
 #      parameterised for this task's scope.
 #   2. Greedy-dispatch the problem to obtain a feasible schedule.
@@ -2764,7 +2764,7 @@ class TestCriticalPathDurationInvariant:
         ``max(end_time) - min(start_time)`` across all assignments.
         """
         n_ops = len(problem.operations)
-        # Guardrail on the generator: enforce the task's 5–50 scope even
+        # Guardrail on the generator: enforce the task's 5-50 scope even
         # under aggressive Hypothesis shrinking.
         assert 5 <= n_ops <= 50, f"generator out of bounds: n_ops={n_ops}"
         assert 2 <= len(problem.work_centers) <= 8, (

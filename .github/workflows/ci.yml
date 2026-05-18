@@ -87,9 +87,7 @@ jobs:
           python -m pip install -e ".[dev]"
 
       - name: Type check
-        uses: liskin/gh-mypy-cache@v1
-        with:
-          mypy-args: synaps --strict --no-error-summary
+        run: mypy synaps --strict --no-error-summary
 
   test-fast:
     runs-on: ubuntu-latest
