@@ -86,6 +86,8 @@ function detectCycle(operations: Record<string, unknown>[]): string[] | null {
   return null;
 }
 
+const MAX_ACL_INTERPOLATED_SETUP_ENTRIES = 250_000;
+
 function interpolateSetupMatrix(problem: Record<string, unknown>): Record<string, unknown> {
   const workCenters = asArray(problem.work_centers).map(asObject);
   const states = asArray(problem.states).map(asObject);
@@ -98,6 +100,25 @@ function interpolateSetupMatrix(problem: Record<string, unknown>): Record<string
 
   if (stateIds.length === 0 || workCenterIds.length === 0) {
     return problem;
+  }
+
+  const missingBudget =
+    workCenterIds.length * stateIds.length * stateIds.length - setupMatrix.length;
+  if (missingBudget > MAX_ACL_INTERPOLATED_SETUP_ENTRIES) {
+    throw new AclValidationError("Setup matrix interpolation exceeds safety budget", [
+      {
+        code: "SETUP_INTERPOLATION_BUDGET",
+        message:
+          `Interpolating missing SDST cells would create ~${missingBudget} entries ` +
+          `(limit ${MAX_ACL_INTERPOLATED_SETUP_ENTRIES})`,
+        details: {
+          work_centers: workCenterIds.length,
+          states: stateIds.length,
+          existing_setup_entries: setupMatrix.length,
+          limit: MAX_ACL_INTERPOLATED_SETUP_ENTRIES,
+        },
+      },
+    ]);
   }
 
   const byWorkCenter = new Map<string, number[]>();

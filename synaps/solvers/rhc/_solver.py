@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import time
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
@@ -137,6 +138,57 @@ class RhcSolver(BaseSolver):
         inner_kwargs.pop("time_limit_s", None)
         time_limit_s: float = float(kwargs.get("time_limit_s", 600))
         fallback_repair_enabled: bool = bool(kwargs.get("fallback_repair_enabled", True))
+        fallback_repair_on_timeout: bool = bool(kwargs.get("fallback_repair_on_timeout", True))
+        fallback_repair_soft_budget_s: float = max(
+            0.0, float(kwargs.get("fallback_repair_soft_budget_s", 30.0))
+        )
+        coverage_time_reserve_fraction: float = max(
+            0.0, min(0.9, float(kwargs.get("coverage_time_reserve_fraction", 0.0)))
+        )
+        coverage_time_reserve_min_s: float = max(
+            0.0, float(kwargs.get("coverage_time_reserve_min_s", 0.0))
+        )
+        coverage_time_reserve_max_s: float = max(
+            coverage_time_reserve_min_s,
+            float(kwargs.get("coverage_time_reserve_max_s", 300.0)),
+        )
+        coverage_horizon_extension_factor: float = max(
+            1.0, float(kwargs.get("coverage_horizon_extension_factor", 1.0))
+        )
+        window_bound_inner_horizon: bool = bool(kwargs.get("window_bound_inner_horizon", True))
+        window_horizon_slack_minutes: float = max(
+            0.0,
+            float(
+                kwargs.get(
+                    "window_horizon_slack_minutes",
+                    max(float(overlap_minutes), float(window_minutes) * 0.25),
+                )
+            ),
+        )
+        if coverage_time_reserve_fraction > 0.0:
+            raw_reserve = time_limit_s * coverage_time_reserve_fraction
+            if coverage_time_reserve_min_s > 0.0:
+                raw_reserve = max(raw_reserve, coverage_time_reserve_min_s)
+            raw_reserve = min(raw_reserve, coverage_time_reserve_max_s)
+            # Never starve the window loop: keep at least half the wall budget
+            # for rolling windows when the caller passes a short time_limit.
+            coverage_reserve_s = min(raw_reserve, time_limit_s * 0.5)
+        else:
+            coverage_reserve_s = 0.0
+        window_time_limit_s = max(0.0, time_limit_s - coverage_reserve_s)
+        coverage_deadline_s = time_limit_s + (
+            fallback_repair_soft_budget_s if fallback_repair_on_timeout else 0.0
+        )
+        # Under resource guards, soft overrun must not exceed the advertised
+        # SYNAPS_SOLVE_TIMEOUT_S / time_limit_s contract (DoS amplifier).
+        if os.environ.get("SYNAPS_ENABLE_RESOURCE_GUARDS", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
+            coverage_deadline_s = time_limit_s
+            fallback_repair_soft_budget_s = 0.0
         inner_solver_min_budget_s: float = float(kwargs.get("inner_solver_min_budget_s", 0.0))
         backtracking_enabled: bool = bool(kwargs.get("backtracking_enabled", False))
         backtracking_tail_minutes: float = max(
@@ -312,8 +364,13 @@ class RhcSolver(BaseSolver):
         total_fixed_ops_across_windows = 0
 
         horizon_start = problem.planning_horizon_start
-        horizon_end = problem.planning_horizon_end
-        horizon_minutes = (horizon_end - horizon_start).total_seconds() / 60.0
+        original_horizon_end = problem.planning_horizon_end
+        original_horizon_minutes = (
+            original_horizon_end - horizon_start
+        ).total_seconds() / 60.0
+        horizon_minutes = original_horizon_minutes * coverage_horizon_extension_factor
+        horizon_end = horizon_start + timedelta(minutes=horizon_minutes)
+        planning_horizon_extended = coverage_horizon_extension_factor > 1.0 + 1e-12
 
         # Build inner solver
         inner_solver = self._make_inner_solver(inner_solver_name)
@@ -615,6 +672,14 @@ class RhcSolver(BaseSolver):
         def global_time_exceeded() -> bool:
             return (time.monotonic() - time_budget_t0) > time_limit_s
 
+        def window_budget_exceeded() -> bool:
+            """True when windows must stop to preserve coverage reserve."""
+            return (time.monotonic() - time_budget_t0) > window_time_limit_s
+
+        def coverage_deadline_exceeded() -> bool:
+            """True when residual coverage greedy must also stop."""
+            return (time.monotonic() - time_budget_t0) > coverage_deadline_s
+
         def extend_candidate_frontiers(window_boundary: float) -> None:
             # Thin wrapper around the pure kernels in _admission.py:
             # the closure still owns mutation of the cursors, advance counters,
@@ -782,9 +847,14 @@ class RhcSolver(BaseSolver):
             if max_windows is not None and window_count >= max_windows:
                 logger.info("RHC max_windows reached (%d)", max_windows)
                 break
-            if global_time_exceeded():
+            if window_budget_exceeded():
                 time_limit_reached = True
-                logger.warning("RHC time limit reached at window %d", window_count)
+                logger.warning(
+                    "RHC window budget reached at window %d "
+                    "(reserve=%.1fs for coverage fallback)",
+                    window_count,
+                    coverage_reserve_s,
+                )
                 break
 
             window_end_offset = min(
@@ -1383,6 +1453,22 @@ class RhcSolver(BaseSolver):
                 try:
                     # Build a sub-problem for just this window's operations
                     window_order_ids = {op.order_id for op in clean_window_ops}
+                    # Bound inner subproblem horizon to the commit band so ALNS/CPSAT
+                    # placements land inside the freeze window instead of spilling past
+                    # commit_boundary on the full planning horizon (coverage yield).
+                    if (
+                        window_bound_inner_horizon
+                        and window_end_offset + 1e-9 < horizon_minutes
+                    ):
+                        sub_horizon_end = min(
+                            horizon_end,
+                            horizon_start
+                            + timedelta(
+                                minutes=window_end_offset + window_horizon_slack_minutes
+                            ),
+                        )
+                    else:
+                        sub_horizon_end = horizon_end
                     sub_problem = ScheduleProblem(
                         states=problem.states,
                         orders=[o for o in problem.orders if o.id in window_order_ids],
@@ -1394,14 +1480,16 @@ class RhcSolver(BaseSolver):
                             r for r in problem.aux_requirements if r.operation_id in window_op_ids
                         ],
                         planning_horizon_start=problem.planning_horizon_start,
-                        planning_horizon_end=problem.planning_horizon_end,
+                        planning_horizon_end=sub_horizon_end,
                     )
                     window_lower_bound = compute_relaxed_makespan_lower_bound(sub_problem)
 
-                    # Compute remaining time budget for this window
-                    remaining_time = max(10.0, time_limit_s - (time.monotonic() - t0))
+                    # Respect coverage reserve: do not let inner solvers eat residual fill time.
+                    remaining_time = max(
+                        1.0, window_time_limit_s - (time.monotonic() - time_budget_t0)
+                    )
                     per_window_limit = max(
-                        10.0,
+                        1.0,
                         min(
                             remaining_time * inner_window_time_fraction,
                             resolve_inner_window_time_cap(window_op_count=len(clean_window_ops)),
@@ -1894,20 +1982,20 @@ class RhcSolver(BaseSolver):
                 max_inner_iters = len(ready_pool) * 3
                 inner_iter = 0
                 while ready_pool and inner_iter < max_inner_iters:
-                    if global_time_exceeded():
+                    if window_budget_exceeded():
                         time_limit_reached = True
                         logger.warning(
-                            "RHC time limit reached during window %d greedy scheduling",
+                            "RHC window budget reached during window %d greedy scheduling",
                             window_count,
                         )
                         break
                     inner_iter += 1
                     placed_any = False
                     for op in list(ready_pool):
-                        if global_time_exceeded():
+                        if window_budget_exceeded():
                             time_limit_reached = True
                             logger.warning(
-                                "RHC time limit reached during window %d greedy scheduling",
+                                "RHC window budget reached during window %d greedy scheduling",
                                 window_count,
                             )
                             break
@@ -2089,26 +2177,37 @@ class RhcSolver(BaseSolver):
         # ------- Handle any remaining unscheduled operations -------
         unscheduled_ids = {op.id for op in problem.operations} - committed_op_ids
         if unscheduled_ids:
-            if time_limit_reached or global_time_exceeded():
-                fallback_repair_skipped = True
-                logger.warning(
-                    "RHC: %d operations unscheduled after all windows; "
-                    "skipping fallback greedy repair because the global time limit is exhausted",
-                    len(unscheduled_ids),
-                )
-            elif not fallback_repair_enabled:
+            can_run_coverage_fallback = fallback_repair_enabled and (
+                not coverage_deadline_exceeded()
+                if fallback_repair_on_timeout
+                else not (time_limit_reached or global_time_exceeded())
+            )
+            if not fallback_repair_enabled:
                 fallback_repair_skipped = True
                 logger.info(
                     "RHC: %d operations unscheduled after all windows; "
                     "skipping fallback greedy repair because fallback_repair_enabled=false",
                     len(unscheduled_ids),
                 )
+            elif not can_run_coverage_fallback:
+                fallback_repair_skipped = True
+                logger.warning(
+                    "RHC: %d operations unscheduled after all windows; "
+                    "skipping fallback greedy repair because the coverage deadline is exhausted "
+                    "(time_limit=%.1fs soft_budget=%.1fs on_timeout=%s)",
+                    len(unscheduled_ids),
+                    time_limit_s,
+                    fallback_repair_soft_budget_s,
+                    fallback_repair_on_timeout,
+                )
             else:
                 fallback_repair_attempted = True
                 logger.warning(
                     "RHC: %d operations unscheduled after all windows; "
-                    "running fallback greedy repair",
+                    "running fallback greedy repair (reserve=%.1fs soft_budget=%.1fs)",
                     len(unscheduled_ids),
+                    coverage_reserve_s,
+                    fallback_repair_soft_budget_s if fallback_repair_on_timeout else 0.0,
                 )
                 remaining_ops = [op for op in problem.operations if op.id in unscheduled_ids]
                 remaining_ops.sort(key=lambda op: op.seq_in_order)
@@ -2118,23 +2217,23 @@ class RhcSolver(BaseSolver):
                 fallback_iters = len(remaining_ops) * 3
                 fi = 0
                 while remaining_ops and fi < fallback_iters:
-                    if global_time_exceeded():
+                    if coverage_deadline_exceeded():
                         time_limit_reached = True
                         fallback_repair_time_limited = True
                         logger.warning(
-                            "RHC fallback greedy repair stopped because the global time "
-                            "limit is exhausted"
+                            "RHC fallback greedy repair stopped because the coverage "
+                            "deadline is exhausted"
                         )
                         break
                     fi += 1
                     placed = False
                     for op in list(remaining_ops):
-                        if global_time_exceeded():
+                        if coverage_deadline_exceeded():
                             time_limit_reached = True
                             fallback_repair_time_limited = True
                             logger.warning(
-                                "RHC fallback greedy repair stopped because the global time "
-                                "limit is exhausted"
+                                "RHC fallback greedy repair stopped because the coverage "
+                                "deadline is exhausted"
                             )
                             break
                         if op.predecessor_op_id and op.predecessor_op_id not in committed_op_ids:
@@ -2487,6 +2586,21 @@ class RhcSolver(BaseSolver):
                 "horizon_clipped_assignments": horizon_clipped_assignments,
                 "temporal_stabilization": temporal_stabilization,
                 "time_limit_reached": time_limit_reached,
+                "time_limit_s": time_limit_s,
+                "window_time_limit_s": window_time_limit_s,
+                "coverage_reserve_s": coverage_reserve_s,
+                "coverage_deadline_s": coverage_deadline_s,
+                "coverage_time_reserve_fraction": coverage_time_reserve_fraction,
+                "fallback_repair_on_timeout": fallback_repair_on_timeout,
+                "fallback_repair_soft_budget_s": fallback_repair_soft_budget_s,
+                "coverage_horizon_extension_factor": coverage_horizon_extension_factor,
+                "window_bound_inner_horizon": window_bound_inner_horizon,
+                "window_horizon_slack_minutes": window_horizon_slack_minutes,
+                "planning_horizon_extended": planning_horizon_extended,
+                "original_planning_horizon_end": original_horizon_end.isoformat(),
+                "effective_planning_horizon_end": horizon_end.isoformat(),
+                "original_horizon_minutes": original_horizon_minutes,
+                "effective_horizon_minutes": horizon_minutes,
                 "fallback_repair_attempted": fallback_repair_attempted,
                 "fallback_repair_skipped": fallback_repair_skipped,
                 "fallback_repair_time_limited": fallback_repair_time_limited,

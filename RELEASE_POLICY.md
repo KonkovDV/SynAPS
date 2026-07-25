@@ -19,7 +19,9 @@ Before creating a release tag:
 2. strict mypy checks pass;
 3. distribution build and metadata checks pass (`python -m build`, `twine check dist/*`);
 4. README and governance docs reflect shipped behavior;
-5. no unresolved critical security findings.
+5. no unresolved critical security findings;
+6. lock files (`requirements-lock.txt`, `requirements-dev-lock.txt`) are current;
+7. SBOM (`sbom.json`) is generated and committed with the release tag.
 
 ## Evidence Requirements
 
@@ -27,6 +29,7 @@ Release notes should include:
 
 - commit range;
 - validation commands executed;
+- artifact SHA-256 hashes (wheel, sdist, SBOM);
 - known limitations and non-claims;
 - contract or schema changes, if any.
 

@@ -232,18 +232,20 @@ def route_solver_config(
                 )
             if op_count >= 100_000 and latency > 600:
                 return SolverRoutingDecision(
-                    solver_config="RHC-ALNS-100K",
+                    solver_config="RHC-GREEDY-COVER",
                     reason=(
-                        "feasibility-first runtime policy uses the named 100K RHC-ALNS "
-                        f"profile for {op_count} ops when the latency budget exceeds {latency}s"
+                        "feasibility-first runtime policy uses coverage-complete RHC for "
+                        f"{op_count} ops when the latency budget exceeds {latency}s "
+                        "(ALNS refine is deferred until after full coverage)"
                     ),
                 )
             if op_count > 50_000 and latency > 600:
                 return SolverRoutingDecision(
-                    solver_config="RHC-ALNS",
+                    solver_config="RHC-GREEDY-COVER",
                     reason=(
-                        "feasibility-first runtime policy prefers RHC-ALNS over LBBD-HD for "
-                        f"ultra-large nominal instances ({op_count} ops) under a 10+ minute budget"
+                        "feasibility-first runtime policy prefers coverage-complete "
+                        f"RHC-GREEDY-COVER for ultra-large nominal instances ({op_count} ops) "
+                        f"under a {latency}s+ latency budget"
                     ),
                 )
 

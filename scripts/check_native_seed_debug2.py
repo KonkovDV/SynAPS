@@ -1,9 +1,11 @@
 """Debug: call greedy_repair_batch_native directly to see the error."""
-import numpy as np
+
 from collections import deque
 
-from synaps.benchmarks.instance_generator import generate_large_instance
+import numpy as np
+
 from synaps.accelerators import greedy_repair_batch_native
+from synaps.benchmarks.instance_generator import generate_large_instance
 
 problem = generate_large_instance(n_operations=10, n_machines=3, n_states=3, seed=42)
 
@@ -53,7 +55,7 @@ for i, op_id in enumerate(topo_order):
         pred_local = local_idx.get(op.predecessor_op_id)
         if pred_local is not None:
             predecessor_indices[i] = pred_local
-    for wc_id in (op.eligible_wc_ids or [wc.id for wc in problem.work_centers]):
+    for wc_id in op.eligible_wc_ids or [wc.id for wc in problem.work_centers]:
         wc_idx = wc_id_to_idx.get(wc_id)
         if wc_idx is not None:
             eligible_flat.append(wc_idx)
@@ -71,7 +73,10 @@ for entry in problem.setup_matrix:
 speed_factors = np.array([wc.speed_factor for wc in problem.work_centers], dtype=np.float64)
 
 print(f"Arrays built: n={n}, n_wc={n_wc}, n_states={n_states}")
-print(f"eligible_offsets shape: {eligible_offsets.shape}, eligible_indices shape: {eligible_indices.shape}")
+print(
+    f"eligible_offsets shape: {eligible_offsets.shape}, "
+    f"eligible_indices shape: {eligible_indices.shape}"
+)
 
 result = greedy_repair_batch_native(
     base_durations=base_durations,

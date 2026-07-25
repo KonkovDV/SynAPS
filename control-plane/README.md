@@ -44,19 +44,26 @@ Key env vars:
 
 - `SYNAPS_OTEL_ENABLED=1`
 - `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://.../v1/traces`
-- `SYNAPS_ENABLE_LIMIT_GUARDS=1`
+- `SYNAPS_ENABLE_LIMIT_GUARDS=1` (opt-in; off by default)
 - `SYNAPS_LIMIT_GUARD_CHAIN=CPSAT-30,LBBD-10,RHC-ALNS,GREED`
-- `SYNAPS_CONTROL_PLANE_API_KEY=...`
+- `SYNAPS_CONTROL_PLANE_API_KEY=...` (required when binding beyond loopback)
+- `SYNAPS_CONTROL_PLANE_REQUIRE_AUTH=1` / `SYNAPS_CONTROL_PLANE_ALLOW_ANONYMOUS=1`
 - `SYNAPS_CONTROL_PLANE_MAX_BODY_BYTES=10000000`
-- `SYNAPS_CONTROL_PLANE_RATE_LIMIT_MAX=60`
+- `SYNAPS_CONTROL_PLANE_RATE_LIMIT_MAX=60` (default 60/min when unset; disable with `SYNAPS_CONTROL_PLANE_RATE_LIMIT_DISABLED=1`)
 - `SYNAPS_CONTROL_PLANE_RATE_LIMIT_WINDOW_MS=60000`
-- `SYNAPS_PYTHON_EXEC_TIMEOUT_MS=...`
-- `SYNAPS_PYTHON_MAX_OUTPUT_BYTES=...`
+- `SYNAPS_PYTHON_EXEC_TIMEOUT_MS=300000` (default 300s; `0` disables)
+- `SYNAPS_PYTHON_MAX_OUTPUT_BYTES=5000000`
+- `SYNAPS_INSTANCE_DIR=...` (default `<repo>/benchmark/instances`)
+- `SYNAPS_ALLOW_PYTHONPATH=1` (opt-in; PYTHONPATH is stripped by default)
+- `SYNAPS_ENABLE_RESOURCE_GUARDS=1` / `SYNAPS_SOLVE_TIMEOUT_S` / `SYNAPS_SOLVE_MEMORY_LIMIT_MB`
+
+The Python bridge defaults `SYNAPS_ENABLE_RESOURCE_GUARDS=1` and derives
+`SYNAPS_SOLVE_TIMEOUT_S` from `SYNAPS_PYTHON_EXEC_TIMEOUT_MS` unless overridden.
 
 When `SYNAPS_CONTROL_PLANE_API_KEY` is set, the control plane requires either
-`x-api-key: <value>` or `Authorization: Bearer <value>` on every route.
-Optional fixed-window throttling is enabled by setting both
-`SYNAPS_CONTROL_PLANE_RATE_LIMIT_MAX` and `SYNAPS_CONTROL_PLANE_RATE_LIMIT_WINDOW_MS`.
+`x-api-key: <value>` or `Authorization: Bearer <value>` on non-healthz routes.
+Rate limiting defaults to 60 requests / 60s keyed by API key identity or client IP
+(not spoofable `x-tenant-id`).
 
 Ready-to-import monitoring artifacts (Grafana dashboard + Prometheus alert rules):
 

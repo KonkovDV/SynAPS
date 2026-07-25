@@ -117,6 +117,35 @@ def test_execute_repair_request_returns_contract_response() -> None:
     assert response.result.metadata["portfolio"]["solver_config"] == "INCREMENTAL_REPAIR"
 
 
+def test_assert_no_precedence_cycle_detects_loops() -> None:
+    from synaps.contracts import PrecedenceCycleError, _assert_no_precedence_cycle
+    from synaps.model import ScheduleProblem
+
+    problem = make_simple_problem()
+    ops = [operation.model_copy(deep=True) for operation in problem.operations]
+    assert len(ops) >= 3
+    # Bypass ScheduleProblem linear-chain validator to exercise defense-in-depth.
+    ops[1].predecessor_op_id = ops[2].id
+    ops[2].predecessor_op_id = ops[1].id
+    cyclic = ScheduleProblem.model_construct(
+        states=problem.states,
+        orders=problem.orders,
+        operations=ops,
+        work_centers=problem.work_centers,
+        setup_matrix=problem.setup_matrix,
+        auxiliary_resources=problem.auxiliary_resources,
+        aux_requirements=problem.aux_requirements,
+        planning_horizon_start=problem.planning_horizon_start,
+        planning_horizon_end=problem.planning_horizon_end,
+    )
+
+    try:
+        _assert_no_precedence_cycle(cyclic)
+        raise AssertionError("expected PrecedenceCycleError")
+    except PrecedenceCycleError:
+        pass
+
+
 def test_execute_solve_request_feasibility_first_policy_is_reflected_in_runtime_metadata() -> None:
     problem = make_simple_problem(n_orders=40, ops_per_order=4)
     request = SolveRequest(

@@ -40,7 +40,49 @@ class FeasibilityChecker:
            + processing windows.
         6. Horizon bounds: no assignment starts before planning_horizon_start or ends
            after planning_horizon_end.
+        7. Cross-state SDST entries must exist in setup_matrix (same-state may default
+           to 0 minutes when the cell is absent).
     """
+
+    @staticmethod
+    def _lookup_required_setup(
+        setup_lookup: dict[tuple[Any, Any, Any], int],
+        *,
+        work_center_id: Any,
+        from_state_id: Any,
+        to_state_id: Any,
+        operation_id: Any,
+        violations: list[FeasibilityViolation],
+        exhaustive: bool,
+        strict_setup_matrix: bool,
+    ) -> int | None:
+        """Return required setup minutes, or None when a blocking violation was recorded.
+
+        Contract: absent setup cells default to 0 minutes (sparse SDST). When
+        ``strict_setup_matrix`` is enabled, a missing *cross-state* cell is a
+        hard ``MISSING_SETUP_ENTRY`` violation instead of a silent zero.
+        """
+
+        key = (work_center_id, from_state_id, to_state_id)
+        if key in setup_lookup:
+            return setup_lookup[key]
+        if from_state_id == to_state_id or not strict_setup_matrix:
+            return 0
+
+        violations.append(
+            FeasibilityViolation(
+                "MISSING_SETUP_ENTRY",
+                (
+                    f"Machine {work_center_id} has no setup_matrix entry from state "
+                    f"{from_state_id} to {to_state_id} for operation {operation_id}."
+                ),
+                operation_id=operation_id,
+                work_center_id=work_center_id,
+            )
+        )
+        if not exhaustive:
+            return None
+        return 10**9
 
     def check(
         self,
@@ -48,6 +90,7 @@ class FeasibilityChecker:
         assignments: list[Assignment],
         *,
         exhaustive: bool = False,
+        strict_setup_matrix: bool = False,
     ) -> list[FeasibilityViolation]:
         violations: list[FeasibilityViolation] = []
         ops_by_id = {op.id: op for op in problem.operations}
@@ -190,10 +233,18 @@ class FeasibilityChecker:
                             previous_op = ops_by_id.get(lane_previous_assignment.operation_id)
                             if previous_op is None:
                                 continue
-                            required_setup = setup_lookup.get(
-                                (wc_id, previous_op.state_id, current_op.state_id),
-                                0,
+                            required_setup = self._lookup_required_setup(
+                                setup_lookup,
+                                work_center_id=wc_id,
+                                from_state_id=previous_op.state_id,
+                                to_state_id=current_op.state_id,
+                                operation_id=assignment.operation_id,
+                                violations=violations,
+                                exhaustive=exhaustive,
+                                strict_setup_matrix=strict_setup_matrix,
                             )
+                            if required_setup is None:
+                                return violations
                             available_at = lane_previous_assignment.end_time + timedelta(
                                 minutes=required_setup
                             )
@@ -253,10 +304,19 @@ class FeasibilityChecker:
                         current_op = ops_by_id.get(assignment.operation_id)
                         required_setup = 0
                         if previous_op is not None and current_op is not None:
-                            required_setup = setup_lookup.get(
-                                (wc_id, previous_op.state_id, current_op.state_id),
-                                0,
+                            looked_up = self._lookup_required_setup(
+                                setup_lookup,
+                                work_center_id=wc_id,
+                                from_state_id=previous_op.state_id,
+                                to_state_id=current_op.state_id,
+                                operation_id=assignment.operation_id,
+                                violations=violations,
+                                exhaustive=exhaustive,
+                                strict_setup_matrix=strict_setup_matrix,
                             )
+                            if looked_up is None:
+                                return violations
+                            required_setup = looked_up
 
                         actual_gap_minutes = (
                             assignment.start_time - previous_assignment.end_time
@@ -307,10 +367,19 @@ class FeasibilityChecker:
                 current_op = ops_by_id.get(assignment.operation_id)
                 required_setup = 0
                 if previous_op is not None and current_op is not None:
-                    required_setup = setup_lookup.get(
-                        (wc_id, previous_op.state_id, current_op.state_id),
-                        0,
+                    looked_up = self._lookup_required_setup(
+                        setup_lookup,
+                        work_center_id=wc_id,
+                        from_state_id=previous_op.state_id,
+                        to_state_id=current_op.state_id,
+                        operation_id=assignment.operation_id,
+                        violations=violations,
+                        exhaustive=exhaustive,
+                        strict_setup_matrix=strict_setup_matrix,
                     )
+                    if looked_up is None:
+                        return violations
+                    required_setup = looked_up
                 actual_gap_minutes = (
                     assignment.start_time - serial_previous_assignment.end_time
                 ).total_seconds() / 60.0

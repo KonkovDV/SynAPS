@@ -1,5 +1,7 @@
 """Diagnostic: why does native initial seed fail on RHC sub-problems?"""
+
 import time
+
 from synaps.benchmarks.instance_generator import generate_large_instance
 from synaps.solvers.alns_solver import AlnsSolver
 

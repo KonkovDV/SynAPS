@@ -419,8 +419,16 @@ def generate_problem(spec: GenerationSpec) -> ScheduleProblem:
             )
         )
 
+    # SDST-aware horizon: P/m×3 alone underestimates changeover load on dense
+    # industrial presets (sdst_density≈0.9), clipping late ops before coverage.
+    mean_setup = sum(entry.setup_minutes for entry in setup_matrix) / max(1, len(setup_matrix))
+    ops_per_machine = len(operations) / max(1, spec.n_machines)
+    setup_lb = ops_per_machine * mean_setup * spec.sdst_density * (
+        1.0 - 1.0 / max(1, spec.state_count)
+    )
     planning_horizon_minutes = max(
-        int(total_processing_minutes / max(1, spec.n_machines) * 3.0),
+        int(total_processing_minutes / max(1, spec.n_machines) * 3.0 + 2.0 * setup_lb),
+        int(total_processing_minutes / max(1, spec.n_machines) * 4.5),
         8 * 60,
     )
     planning_horizon_end = horizon_start + timedelta(minutes=planning_horizon_minutes)

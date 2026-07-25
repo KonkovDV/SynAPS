@@ -50,7 +50,7 @@ test("python executor supports file-backed solve requests with pre-validation sl
   const response = await executor.executeSolveRequest({
     contract_version: "2026-04-03",
     request_id: "executor-test-instance-ref",
-    problem_instance_ref: "benchmark/instances/tiny_3x3.json",
+    problem_instance_ref: "tiny_3x3.json",
     problem_slice: {
       max_operations: 2,
     },
@@ -93,12 +93,56 @@ test("python bridge environment allowlist keeps SynAPS and runtime variables onl
   });
 
   assert.equal(env.PATH, "bin");
-  assert.equal(env.PYTHONPATH, "repo");
+  assert.equal(env.PYTHONPATH, undefined);
+  assert.equal(env.PYTHONNOUSERSITE, "1");
   assert.equal(env.SYNAPS_PYTHON_EXEC_TIMEOUT_MS, "1000");
   assert.equal(env.SYNAPS_DISABLE_NATIVE_ACCELERATION, "1");
+  assert.equal(env.SYNAPS_ENABLE_RESOURCE_GUARDS, "1");
+  assert.ok(Number(env.SYNAPS_SOLVE_TIMEOUT_S) > 0);
   assert.equal(env.SYNAPS_CONTROL_PLANE_API_KEY, undefined);
   assert.equal(env.SYNAPS_CONTROL_PLANE_RATE_LIMIT_MAX, undefined);
   assert.equal(env.OTEL_SERVICE_NAME, "synaps-control-plane");
   assert.equal(env.AWS_SECRET_ACCESS_KEY, undefined);
   assert.equal(env.DATABASE_URL, undefined);
+});
+
+test("python bridge can opt into PYTHONPATH inheritance", () => {
+  const env = _testInternals.buildPythonBridgeEnv({
+    PATH: "bin",
+    PYTHONPATH: "repo",
+    SYNAPS_ALLOW_PYTHONPATH: "1",
+  });
+  assert.equal(env.PYTHONPATH, "repo");
+});
+
+test("python bridge defaults to a positive execution timeout", () => {
+  const previous = process.env.SYNAPS_PYTHON_EXEC_TIMEOUT_MS;
+  delete process.env.SYNAPS_PYTHON_EXEC_TIMEOUT_MS;
+  try {
+    const limits = _testInternals.resolveExecutionLimits();
+    assert.ok(limits.timeoutMs > 0);
+    assert.equal(limits.timeoutMs, 300_000);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.SYNAPS_PYTHON_EXEC_TIMEOUT_MS;
+    } else {
+      process.env.SYNAPS_PYTHON_EXEC_TIMEOUT_MS = previous;
+    }
+  }
+});
+
+test("python bridge instance dir defaults under benchmark/instances", () => {
+  const previous = process.env.SYNAPS_INSTANCE_DIR;
+  delete process.env.SYNAPS_INSTANCE_DIR;
+  try {
+    const repoRoot = resolveSynapsRepoRoot(process.cwd());
+    const instanceDir = _testInternals.resolveInstanceDir(repoRoot);
+    assert.equal(instanceDir, path.join(repoRoot, "benchmark", "instances"));
+  } finally {
+    if (previous === undefined) {
+      delete process.env.SYNAPS_INSTANCE_DIR;
+    } else {
+      process.env.SYNAPS_INSTANCE_DIR = previous;
+    }
+  }
 });

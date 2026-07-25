@@ -455,6 +455,19 @@ def _build_industrial_50k_solver_specs(
         "inner_solver": "greedy",
         "time_limit_s": 600,
         "max_ops_per_window": 10_000,
+        # Coverage-complete knobs (2026-07): reserve residual fill; do not abandon
+        # leftover ops solely because rolling windows burned the clock.
+        "due_admission_horizon_factor": 6.0,
+        "admission_full_scan_enabled": True,
+        "progressive_admission_relaxation_enabled": True,
+        "precedence_ready_candidate_filter_enabled": False,
+        "coverage_time_reserve_fraction": 0.20,
+        "coverage_time_reserve_min_s": 60.0,
+        "coverage_time_reserve_max_s": 180.0,
+        "fallback_repair_on_timeout": True,
+        "fallback_repair_soft_budget_s": 120.0,
+        "coverage_horizon_extension_factor": 1.0,
+        "backtracking_enabled": False,
     }
     rhc_alns_kwargs = {
         "window_minutes": 480,

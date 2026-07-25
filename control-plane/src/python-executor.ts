@@ -17,21 +17,45 @@ export interface SynapsPythonExecutionLimits {
   maxOutputBytes: number;
 }
 
+const DEFAULT_PYTHON_EXEC_TIMEOUT_MS = 300_000;
+const DEFAULT_PYTHON_MAX_OUTPUT_BYTES = 5_000_000;
+
 function resolveExecutionLimits(): SynapsPythonExecutionLimits {
-  const timeoutMs = Number(process.env.SYNAPS_PYTHON_EXEC_TIMEOUT_MS ?? 0);
-  const maxOutputBytes = Number(process.env.SYNAPS_PYTHON_MAX_OUTPUT_BYTES ?? 5_000_000);
+  const timeoutMs = Number(
+    process.env.SYNAPS_PYTHON_EXEC_TIMEOUT_MS ?? DEFAULT_PYTHON_EXEC_TIMEOUT_MS,
+  );
+  const maxOutputBytes = Number(
+    process.env.SYNAPS_PYTHON_MAX_OUTPUT_BYTES ?? DEFAULT_PYTHON_MAX_OUTPUT_BYTES,
+  );
 
   return {
-    timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.floor(timeoutMs) : 0,
+    // 0 explicitly disables the wall-clock guard for local debugging only.
+    timeoutMs: Number.isFinite(timeoutMs) && timeoutMs >= 0 ? Math.floor(timeoutMs) : DEFAULT_PYTHON_EXEC_TIMEOUT_MS,
     maxOutputBytes:
       Number.isFinite(maxOutputBytes) && maxOutputBytes > 0
         ? Math.floor(maxOutputBytes)
-        : 5_000_000,
+        : DEFAULT_PYTHON_MAX_OUTPUT_BYTES,
   };
+}
+
+function resolveInstanceDir(repoRoot: string): string {
+  const configured = process.env.SYNAPS_INSTANCE_DIR?.trim();
+  if (configured) {
+    return path.resolve(configured);
+  }
+  // Default sandbox: only benchmark instances, never the whole repository.
+  return path.join(repoRoot, "benchmark", "instances");
 }
 
 const ALLOWED_SYNAPS_BRIDGE_ENV_KEYS = new Set([
   "SYNAPS_DISABLE_NATIVE_ACCELERATION",
+  "SYNAPS_REQUEST_ID",
+  "SYNAPS_ALLOW_PYTHONPATH",
+  "SYNAPS_ENABLE_RESOURCE_GUARDS",
+  "SYNAPS_SOLVE_TIMEOUT_S",
+  "SYNAPS_SOLVE_MEMORY_LIMIT_MB",
+  "SYNAPS_RESOURCE_GUARDS_FAIL_OPEN",
+  "SYNAPS_INSTANCE_DIR",
 ]);
 
 function isAllowedSynapsBridgeEnvKey(key: string): boolean {
@@ -42,7 +66,10 @@ function isAllowedSynapsBridgeEnvKey(key: string): boolean {
   );
 }
 
-function buildPythonBridgeEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+function buildPythonBridgeEnv(
+  source: NodeJS.ProcessEnv = process.env,
+  limits: SynapsPythonExecutionLimits = resolveExecutionLimits(),
+): NodeJS.ProcessEnv {
   const allowedKeys = new Set([
     "PATH",
     "PATHEXT",
@@ -50,11 +77,18 @@ function buildPythonBridgeEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.P
     "COMSPEC",
     "TEMP",
     "TMP",
-    "PYTHONPATH",
     "PYTHONUTF8",
     "PYTHONDONTWRITEBYTECODE",
+    "PYTHONNOUSERSITE",
   ]);
-  const env: NodeJS.ProcessEnv = {};
+  // PYTHONPATH is opt-in: inheriting it lets a compromised process env shadow synaps.
+  const allowPythonPath = source.SYNAPS_ALLOW_PYTHONPATH === "1";
+  if (allowPythonPath) {
+    allowedKeys.add("PYTHONPATH");
+  }
+  const env: NodeJS.ProcessEnv = {
+    PYTHONNOUSERSITE: "1",
+  };
   for (const [key, value] of Object.entries(source)) {
     if (value === undefined) {
       continue;
@@ -67,6 +101,18 @@ function buildPythonBridgeEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.P
       env[key] = value;
     }
   }
+
+  // BFF default: activate portfolio resource guards and align wall-clock with bridge timeout.
+  if (env.SYNAPS_ENABLE_RESOURCE_GUARDS === undefined) {
+    env.SYNAPS_ENABLE_RESOURCE_GUARDS = "1";
+  }
+  if (
+    limits.timeoutMs > 0 &&
+    (env.SYNAPS_SOLVE_TIMEOUT_S === undefined || env.SYNAPS_SOLVE_TIMEOUT_S === "")
+  ) {
+    env.SYNAPS_SOLVE_TIMEOUT_S = String(Math.max(1, Math.ceil(limits.timeoutMs / 1000)));
+  }
+
   return env;
 }
 
@@ -106,7 +152,7 @@ async function executePythonContract(
   const responsePath = path.join(tempDir, `${subcommand}.response.json`);
   const commandArgs = ["-m", "synaps", subcommand, "-", "--output-file", responsePath];
   if (subcommand === "solve-request") {
-    commandArgs.push("--instance-dir", paths.repoRoot);
+    commandArgs.push("--instance-dir", resolveInstanceDir(paths.repoRoot));
   }
 
   try {
@@ -122,7 +168,7 @@ async function executePythonContract(
         commandArgs,
         {
           cwd: paths.repoRoot,
-          env: buildPythonBridgeEnv(),
+          env: buildPythonBridgeEnv(process.env, limits),
           stdio: ["pipe", "pipe", "pipe"],
         },
       );
@@ -135,7 +181,22 @@ async function executePythonContract(
         limits.timeoutMs > 0
           ? setTimeout(() => {
               timedOut = true;
-              child.kill();
+              try {
+                child.kill();
+              } catch {
+                // ignore
+              }
+              // Escalate if the solver ignores the soft signal (OR-Tools / native).
+              const escalate = setTimeout(() => {
+                try {
+                  child.kill("SIGKILL");
+                } catch {
+                  // ignore
+                }
+              }, 2_000);
+              if (typeof escalate.unref === "function") {
+                escalate.unref();
+              }
             }, limits.timeoutMs)
           : null;
 
@@ -208,6 +269,15 @@ async function executePythonContract(
       );
     }
 
+    const responseStat = await fs.stat(responsePath);
+    if (responseStat.size > limits.maxOutputBytes) {
+      throw new SynapsPythonBridgeError(
+        `Python bridge response file exceeded output limit for ${subcommand} (${limits.maxOutputBytes} bytes)`,
+        stderr || stdout,
+        "output_limit",
+      );
+    }
+
     const responseText = await fs.readFile(responsePath, "utf-8");
 
     try {
@@ -215,7 +285,7 @@ async function executePythonContract(
     } catch (parseError) {
       throw new SynapsPythonBridgeError(
         `Python bridge returned non-JSON payload for ${subcommand}: ${String(parseError)}`,
-        stderr || responseText,
+        stderr || responseText.slice(0, 2_000),
         "bridge",
       );
     }
@@ -254,4 +324,6 @@ export function createPythonContractExecutor(
 
 export const _testInternals = {
   buildPythonBridgeEnv,
+  resolveExecutionLimits,
+  resolveInstanceDir,
 };

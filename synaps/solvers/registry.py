@@ -348,6 +348,17 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
             "Receding Horizon Control with greedy dispatch. Fast baseline for 100 000+ ops."
         ),
     ),
+    "RHC-GREEDY-COVER": SolverRegistration(
+        factory=_build_rhc,
+        solve_kwargs={
+            **build_solve_kwargs_from_spec(RhcPolicySpec.from_preset(RhcPolicy.GREEDY_COVER)),
+            "time_limit_s": 1800,
+        },
+        description=(
+            "Coverage-first RHC with greedy inner solver: reserves wall-time for residual "
+            "fill, soft-overrun on timeout, and extended placement horizon for 50K+ completeness."
+        ),
+    ),
 }
 
 

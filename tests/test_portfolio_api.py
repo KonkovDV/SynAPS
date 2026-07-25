@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections import Counter
 from datetime import timedelta
 
+import pytest
+
 from synaps import recommend_repair_radius, repair_schedule, solve_schedule
 from synaps.model import Assignment, ScheduleProblem, SolverStatus
 from synaps.solvers.feasibility_checker import FeasibilityChecker
@@ -206,3 +208,37 @@ def test_verify_schedule_result_uses_exhaustive_checker_for_parallel_capacity(
     assert verification.violation_kind_counts == dict(
         sorted(Counter(v.kind for v in exhaustive_violations).items())
     )
+
+
+def test_resolve_portfolio_resource_limits_inactive_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SYNAPS_ENABLE_RESOURCE_GUARDS", raising=False)
+    monkeypatch.delenv("SYNAPS_SOLVE_TIMEOUT_S", raising=False)
+    monkeypatch.delenv("SYNAPS_SOLVE_MEMORY_LIMIT_MB", raising=False)
+    from synaps.portfolio import resolve_portfolio_resource_limits
+
+    assert resolve_portfolio_resource_limits(solve_kwargs={"time_limit_s": 30}) is None
+
+
+def test_resolve_portfolio_resource_limits_from_env_and_latency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SYNAPS_SOLVE_TIMEOUT_S", "120")
+    monkeypatch.setenv("SYNAPS_SOLVE_MEMORY_LIMIT_MB", "2048")
+    from synaps.portfolio import resolve_portfolio_resource_limits
+
+    limits = resolve_portfolio_resource_limits(preferred_max_latency_s=30)
+    assert limits is not None
+    assert limits.timeout_s == 30
+    assert limits.memory_limit_mb == 2048
+
+
+def test_solve_schedule_records_resource_guard_metadata(
+    simple_problem: ScheduleProblem,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SYNAPS_ENABLE_RESOURCE_GUARDS", "1")
+    result = solve_schedule(simple_problem, solver_config="GREED", solve_kwargs={"time_limit_s": 30})
+    assert result.metadata["portfolio"]["resource_guards_active"] is True
+    assert result.metadata["portfolio"]["resource_limits"]["timeout_s"] == 30

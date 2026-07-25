@@ -23,6 +23,7 @@ import {
 } from "./python-executor";
 import {
   InMemorySolveJobStore,
+  SolveJobCapacityError,
   type SolveJobError,
   type SynapsSolveJobStore,
 } from "./solve-jobs";
@@ -180,8 +181,23 @@ function asString(value: unknown): string | null {
 }
 
 function normalizeSolvePayload(payload: Record<string, unknown>): Record<string, unknown> {
+  const rawOptions =
+    typeof payload.solve_options === "object" && payload.solve_options !== null
+      ? { ...(payload.solve_options as Record<string, unknown>) }
+      : {};
+
+  if (typeof rawOptions.num_workers === "number" && Number.isFinite(rawOptions.num_workers)) {
+    rawOptions.num_workers = Math.max(1, Math.min(Math.floor(rawOptions.num_workers), 8));
+  }
+  if (typeof rawOptions.time_limit_s === "number" && Number.isFinite(rawOptions.time_limit_s)) {
+    rawOptions.time_limit_s = Math.max(1, Math.min(Math.floor(rawOptions.time_limit_s), 600));
+  }
+
   return {
     ...payload,
+    // Control-plane never accepts unverified schedules from external callers.
+    verify_feasibility: true,
+    solve_options: rawOptions,
     solver_config:
       typeof payload.solver_config === "string" && payload.solver_config.trim().length > 0
         ? payload.solver_config
@@ -192,6 +208,7 @@ function normalizeSolvePayload(payload: Record<string, unknown>): Record<string,
 function normalizeRepairPayload(payload: Record<string, unknown>): Record<string, unknown> {
   return {
     ...payload,
+    verify_feasibility: true,
   };
 }
 
@@ -286,15 +303,42 @@ function resolveRateLimit(
   if (optionValue !== undefined) {
     return optionValue;
   }
-  const maxRequests = parsePositiveInteger(process.env.SYNAPS_CONTROL_PLANE_RATE_LIMIT_MAX);
-  if (maxRequests === null) {
+  if (process.env.SYNAPS_CONTROL_PLANE_RATE_LIMIT_DISABLED === "1") {
     return null;
   }
+  const maxRequests =
+    parsePositiveInteger(process.env.SYNAPS_CONTROL_PLANE_RATE_LIMIT_MAX) ?? 60;
   return {
     maxRequests,
     windowMs:
       parsePositiveInteger(process.env.SYNAPS_CONTROL_PLANE_RATE_LIMIT_WINDOW_MS) ?? 60_000,
   };
+}
+
+function resolveRequireAuth(): boolean {
+  if (process.env.SYNAPS_CONTROL_PLANE_REQUIRE_AUTH === "1") {
+    return true;
+  }
+  if (process.env.SYNAPS_CONTROL_PLANE_ALLOW_ANONYMOUS === "1") {
+    return false;
+  }
+  // Fail-closed when binding beyond loopback without an explicit anonymous opt-in.
+  const host = (process.env.HOST ?? "127.0.0.1").trim().toLowerCase();
+  const isLoopback =
+    host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "";
+  return !isLoopback;
+}
+
+function rateLimitBucketKey(request: {
+  ip: string;
+  headers: Record<string, string | string[] | undefined>;
+}): string {
+  const presented = extractPresentedApiKey(request);
+  if (presented !== null) {
+    // Prefer API-key identity over spoofable tenant headers.
+    return `key:${presented.slice(0, 8)}:${presented.length}`;
+  }
+  return `ip:${request.ip}`;
 }
 
 function matchesControlPlaneApiKey(
@@ -325,6 +369,16 @@ function extractPresentedApiKey(request: {
   }
   const bearerMatch = authorizationHeader.match(/^\s*Bearer\s+(.+?)\s*$/i);
   return bearerMatch?.[1] ?? null;
+}
+
+function extractTenantId(request: {
+  headers: Record<string, string | string[] | undefined>;
+}): string | null {
+  const tenantHeader = request.headers["x-tenant-id"];
+  if (typeof tenantHeader === "string" && tenantHeader.trim().length > 0) {
+    return tenantHeader.trim();
+  }
+  return null;
 }
 
 function annotateResponseWithFallback(
@@ -406,6 +460,7 @@ export function buildControlPlaneApp(
   const solveJobs = options.solveJobs ?? new InMemorySolveJobStore();
   const openApiDocument = buildOpenApiDocument(schemas);
   const apiKey = resolveControlPlaneApiKey(options.apiKey);
+  const requireAuth = resolveRequireAuth();
   const rateLimit = resolveRateLimit(options.rateLimit);
   const rateLimitBuckets = new Map<string, { resetAt: number; count: number }>();
   const routeList = [
@@ -430,8 +485,9 @@ export function buildControlPlaneApp(
     },
   };
 
-  const fallbackChain = parseLimitGuardChain();
-  const limitGuardsEnabled = process.env.SYNAPS_ENABLE_LIMIT_GUARDS !== "0";
+  // Limit-guard fallback chain is opt-in (DoS amplifier when always-on).
+  const limitGuardsEnabled = process.env.SYNAPS_ENABLE_LIMIT_GUARDS === "1";
+  const fallbackChain = limitGuardsEnabled ? parseLimitGuardChain() : [];
 
   const app = Fastify({
     logger: options.logger ?? false,
@@ -439,7 +495,19 @@ export function buildControlPlaneApp(
   });
 
   app.addHook("onRequest", async (request, reply) => {
-    if (apiKey !== null) {
+    const isHealthz = request.url === "/healthz" || request.url.startsWith("/healthz?");
+
+    if (requireAuth && apiKey === null && !isHealthz) {
+      reply.code(503).send({
+        statusCode: 503,
+        error: "Service Unavailable",
+        message:
+          "SynAPS control-plane requires SYNAPS_CONTROL_PLANE_API_KEY when auth is mandatory",
+      });
+      return;
+    }
+
+    if (apiKey !== null && !isHealthz) {
       const presentedApiKey = extractPresentedApiKey(request);
       if (!matchesControlPlaneApiKey(presentedApiKey, apiKey)) {
         reply.code(401).send({
@@ -452,8 +520,16 @@ export function buildControlPlaneApp(
     }
 
     if (rateLimit !== null) {
-      const key = request.ip;
+      const key = rateLimitBucketKey(request);
       const now = Date.now();
+      // Opportunistic cleanup to avoid unbounded bucket growth.
+      if (rateLimitBuckets.size > 10_000) {
+        for (const [bucketKey, bucket] of rateLimitBuckets) {
+          if (bucket.resetAt <= now) {
+            rateLimitBuckets.delete(bucketKey);
+          }
+        }
+      }
       const bucket = rateLimitBuckets.get(key);
       if (bucket === undefined || bucket.resetAt <= now) {
         rateLimitBuckets.set(key, { resetAt: now + rateLimit.windowMs, count: 1 });
@@ -782,6 +858,7 @@ export function buildControlPlaneApp(
           202: solveJobAcceptedSchema,
           400: errorEnvelopeSchema,
           422: errorEnvelopeSchema,
+          429: errorEnvelopeSchema,
         },
       },
     },
@@ -794,30 +871,50 @@ export function buildControlPlaneApp(
         problem: maybeApplyAclGuardrails(rawPayload.problem),
       };
       const requestId = asString(guardedPayload.request_id) ?? request.id;
+      const tenantId = extractTenantId(request);
 
-      const job = solveJobs.enqueueSolveJob({
-        requestId,
-        statusUrlBase: "/api/v1/solve/jobs",
-        run: async () => {
-          const response = await executor.executeSolveRequest(guardedPayload);
-          if (!validators.solveResponse(response)) {
-            throw {
-              statusCode: 502,
-              error: "Bad Gateway",
-              message: "Python solve response failed contract validation",
-              errors: collectValidationFailure(
-                validators.solveResponse,
-                "invalid solve response",
-              ).errors,
-            };
+      const job = (() => {
+        try {
+          return solveJobs.enqueueSolveJob({
+            requestId,
+            tenantId,
+            statusUrlBase: "/api/v1/solve/jobs",
+            run: async () => {
+              const response = await executor.executeSolveRequest(guardedPayload);
+              if (!validators.solveResponse(response)) {
+                throw {
+                  statusCode: 502,
+                  error: "Bad Gateway",
+                  message: "Python solve response failed contract validation",
+                  errors: collectValidationFailure(
+                    validators.solveResponse,
+                    "invalid solve response",
+                  ).errors,
+                };
+              }
+
+              const result = asObject(asObject(response).result);
+              metrics.recordScheduleResult(result);
+              return response as Record<string, unknown>;
+            },
+            serializeError: serializeSolveJobError,
+          });
+        } catch (error) {
+          if (error instanceof SolveJobCapacityError) {
+            reply.code(429).send({
+              statusCode: 429,
+              error: "Too Many Requests",
+              message: error.message,
+            });
+            return null;
           }
+          throw error;
+        }
+      })();
 
-          const result = asObject(asObject(response).result);
-          metrics.recordScheduleResult(result);
-          return response as Record<string, unknown>;
-        },
-        serializeError: serializeSolveJobError,
-      });
+      if (job === null) {
+        return;
+      }
 
       return reply.code(202).send(job);
     },
@@ -829,6 +926,7 @@ export function buildControlPlaneApp(
       schema: {
         response: {
           200: solveJobStatusSchema,
+          403: errorEnvelopeSchema,
           404: errorEnvelopeSchema,
         },
       },
@@ -840,6 +938,17 @@ export function buildControlPlaneApp(
           statusCode: 404,
           error: "Not Found",
           message: "Solve job not found",
+        });
+      }
+      const callerTenantId = extractTenantId(request);
+      // Strict tenant match: null job tenant is only readable by callers that
+      // also omit x-tenant-id (anonymous). Cross-tenant and tenant→anonymous
+      // reads are denied to close UUID-fishing disclosure.
+      if (job.tenant_id !== callerTenantId) {
+        return reply.code(403).send({
+          statusCode: 403,
+          error: "Forbidden",
+          message: "Solve job belongs to a different tenant",
         });
       }
       return reply.code(200).send(job);

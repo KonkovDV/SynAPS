@@ -18,6 +18,8 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+  attestations: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -50,6 +52,16 @@ jobs:
       - name: Validate distribution metadata
         run: twine check dist/*
 
+      - name: Generate SBOM from lock file
+        run: |
+          python -m pip install cyclonedx-bom
+          python -m cyclonedx_py requirements requirements-lock.txt -o sbom.json
+
+      - name: Attest SBOM provenance
+        uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45 # v2
+        with:
+          subject-path: sbom.json
+
       - name: Upload built distributions
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
@@ -57,6 +69,19 @@ jobs:
           path: dist/
           if-no-files-found: error
           retention-days: 30
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: sbom
+          path: sbom.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Attest distribution provenance
+        uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45 # v2
+        with:
+          subject-path: dist/*
 
   build-native-wheels:
     if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || github.event_name == 'workflow_dispatch'
@@ -78,7 +103,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
       - name: Install maturin
         run: |
@@ -101,6 +126,11 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Attest native wheel provenance
+        uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45 # v2
+        with:
+          subject-path: dist-native/*.whl
+
   publish-testpypi:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.publish_target == 'testpypi'
     needs: build
@@ -119,7 +149,7 @@ jobs:
           path: dist/
 
       - name: Publish to TestPyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@7f25271a4aa483500f742f9492b2ab5648d61011 # v1.12.4
         with:
           repository-url: https://test.pypi.org/legacy/
           print-hash: true
@@ -142,6 +172,6 @@ jobs:
           path: dist/
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@7f25271a4aa483500f742f9492b2ab5648d61011 # v1.12.4
         with:
           print-hash: true

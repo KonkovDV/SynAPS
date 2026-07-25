@@ -1141,7 +1141,7 @@ class TestRhcSolver:
     #     result = solver.solve(problem, window_minutes=240, inner_solver="greedy", ...)
     #
     # New pattern — use RhcPolicy enum + overrides:
-    #     from synaps.solvers.rhc import RhcSolver, RhcPolicy
+    #     from synaps.solvers.rhc import RhcPolicy, RhcSolver
     #     from synaps.solvers.rhc._policy import build_solve_kwargs_from_spec, RhcPolicySpec
     #
     #     spec = RhcPolicySpec.from_preset(RhcPolicy.BALANCED)
@@ -1337,10 +1337,10 @@ class TestRhcSolver:
 
     def test_rhc_with_cpsat_inner(self) -> None:
         """RHC with CP-SAT inner solver should produce exact solutions per window."""
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_3state_problem(n_orders=6, ops_per_order=2)
-        solver = RhcSolver()
+        solver = RhcSolver(policy=RhcPolicy.BALANCED)
         result = solver.solve(
             problem,
             window_minutes=360,
@@ -1355,10 +1355,10 @@ class TestRhcSolver:
 
     def test_rhc_metadata_includes_window_count(self) -> None:
         """RHC result should report how many windows were solved."""
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_3state_problem(n_orders=5, ops_per_order=2)
-        solver = RhcSolver()
+        solver = RhcSolver(policy=RhcPolicy.BALANCED)
         result = solver.solve(
             problem,
             window_minutes=240,
@@ -1371,10 +1371,10 @@ class TestRhcSolver:
 
     def test_rhc_respects_max_windows_cap(self) -> None:
         """RHC should stop after max_windows when the cap is configured."""
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_due_pressure_chain_problem()
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=60,
             overlap_minutes=0,
@@ -1394,7 +1394,7 @@ class TestRhcSolver:
     ) -> None:
         """RHC should seed earliest-ready work when due/admission frontiers are empty."""
         from synaps.solvers.greedy_dispatch import GreedyDispatch
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_long_chain_problem(20)
         captured_window_sizes: list[int] = []
@@ -1408,7 +1408,7 @@ class TestRhcSolver:
             fake_alns_solve,
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=60,
             overlap_minutes=0,
@@ -1483,7 +1483,7 @@ class TestRhcSolver:
     ) -> None:
         """Inner-solver window summaries should carry deterministic lower bounds."""
         from synaps.solvers.greedy_dispatch import GreedyDispatch
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_long_chain_problem(12)
 
@@ -1495,7 +1495,7 @@ class TestRhcSolver:
             fake_alns_solve,
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=120,
             overlap_minutes=0,
@@ -1515,10 +1515,10 @@ class TestRhcSolver:
 
     def test_rhc_candidate_pool_clamp_prevents_frontier_explosion(self) -> None:
         """RHC should cap tie-heavy candidate frontiers to a bounded admission pool."""
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_tied_window_problem(n_orders=400)
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=240,
             overlap_minutes=0,
@@ -1542,10 +1542,10 @@ class TestRhcSolver:
 
     def test_rhc_bootstrap_admission_respects_candidate_pool_limit(self) -> None:
         """Empty-frontier bootstrap should seed only a bounded earliest-ready candidate pool."""
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_bootstrap_frontier_problem(n_orders=200)
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=60,
             overlap_minutes=0,
@@ -1567,10 +1567,10 @@ class TestRhcSolver:
 
     def test_rhc_adaptive_window_expands_starved_frontier_before_bootstrap(self) -> None:
         """Adaptive look-ahead should widen a starved first window before bootstrap fallback."""
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_adaptive_admission_chain_problem(n_ops=12)
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=60,
             overlap_minutes=0,
@@ -1598,12 +1598,12 @@ class TestRhcSolver:
         self,
     ) -> None:
         """Precedence-ready filter should drop chain ops beyond window."""
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_adaptive_admission_chain_problem(n_ops=12)
         problem.orders[0].due_date = HORIZON_START + timedelta(minutes=30)
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=60,
             overlap_minutes=0,
@@ -1625,7 +1625,7 @@ class TestRhcSolver:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Reject successors whose predecessor is not window-reachable."""
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         order_id = uuid4()
         op_a = Operation(
@@ -1680,7 +1680,7 @@ class TestRhcSolver:
             staticmethod(fake_compute_earliest_starts),
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=60,
             overlap_minutes=0,
@@ -1703,7 +1703,7 @@ class TestRhcSolver:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Low-fill pools should fall back to raw due/admission frontier."""
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_due_dense_starved_frontier_problem(n_ops=20)
         earliest_ids = {op.id for op in problem.operations[:2]}
@@ -1718,7 +1718,7 @@ class TestRhcSolver:
             staticmethod(fake_compute_earliest_starts),
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=60,
             overlap_minutes=0,
@@ -1747,7 +1747,7 @@ class TestRhcSolver:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """RHC should escalate to a capped full scan when relaxed frontier is still too small."""
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_adaptive_admission_chain_problem(n_ops=12)
         earliest_ids = {op.id for op in problem.operations[:2]}
@@ -1762,7 +1762,7 @@ class TestRhcSolver:
             staticmethod(fake_compute_earliest_starts),
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=60,
             overlap_minutes=0,
@@ -1796,12 +1796,12 @@ class TestRhcSolver:
 
     def test_rhc_window_cap_selection_is_deterministic_under_ties(self) -> None:
         """RHC should produce identical schedules under tie-heavy window ranking."""
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_tied_window_problem(n_orders=40)
 
         def solve_once():
-            return RhcSolver().solve(
+            return RhcSolver(policy=RhcPolicy.BALANCED).solve(
                 problem,
                 window_minutes=240,
                 overlap_minutes=0,
@@ -1837,7 +1837,7 @@ class TestRhcSolver:
     ) -> None:
         """RHC should stop cleanly once the global time budget is exhausted."""
         import synaps.solvers.rhc._solver as rhc_module
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_due_pressure_chain_problem()
 
@@ -1857,13 +1857,16 @@ class TestRhcSolver:
         monkeypatch.setattr(rhc_module.time, "monotonic", fake_monotonic)
         monkeypatch.setattr(rhc_module, "find_earliest_feasible_slot", fail_if_slot_search_runs)
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=60,
             overlap_minutes=0,
             inner_solver="greedy",
             time_limit_s=0.5,
             max_ops_per_window=10,
+            fallback_repair_on_timeout=False,
+            fallback_repair_soft_budget_s=0.0,
+            coverage_time_reserve_fraction=0.0,
         )
 
         assert result.status == SolverStatus.ERROR
@@ -1882,11 +1885,11 @@ class TestRhcSolver:
         self,
     ) -> None:
         """Partial RHC outputs with committed assignments must not expose a comparable gap."""
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_long_chain_problem(18)
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=180,
             overlap_minutes=0,
@@ -1963,12 +1966,12 @@ class TestRhcSolver:
         Per-window summaries should only report *facts* (triggered, added_ops, final_pool),
         not configuration.
         """
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_3state_problem(n_orders=10, ops_per_order=5)
 
         # Solve with admission_full_scan_enabled=False (production default)
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=120,
             overlap_minutes=30,
@@ -2242,7 +2245,7 @@ class TestRhcInnerSolver:
     ) -> None:
         """RHC should pass pressure context used for dynamic ALNS no-improve scaling."""
         from synaps.solvers.greedy_dispatch import GreedyDispatch
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_3state_problem(n_orders=5, ops_per_order=2)
         captured_inner_kwargs: list[dict[str, object]] = []
@@ -2256,7 +2259,7 @@ class TestRhcInnerSolver:
             fake_alns_solve,
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=240,
             overlap_minutes=30,
@@ -2284,7 +2287,7 @@ class TestRhcInnerSolver:
     ) -> None:
         """RHC should shrink ALNS iteration and destroy budgets when the window budget is tight."""
         from synaps.solvers.greedy_dispatch import GreedyDispatch
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_3state_problem(n_orders=6, ops_per_order=2)
         captured_inner_kwargs: list[dict[str, object]] = []
@@ -2298,7 +2301,7 @@ class TestRhcInnerSolver:
             fake_alns_solve,
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=240,
             overlap_minutes=0,
@@ -2342,7 +2345,7 @@ class TestRhcInnerSolver:
     ) -> None:
         """Dynamic ALNS repair budget should scale with the effective destroy envelope."""
         from synaps.solvers.greedy_dispatch import GreedyDispatch
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_3state_problem(n_orders=6, ops_per_order=2)
         captured_inner_kwargs: list[dict[str, object]] = []
@@ -2356,7 +2359,7 @@ class TestRhcInnerSolver:
             fake_alns_solve,
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=240,
             overlap_minutes=0,
@@ -2399,7 +2402,7 @@ class TestRhcInnerSolver:
         from datetime import timedelta
 
         from synaps.model import Assignment, ScheduleResult
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_due_pressure_chain_problem()
         work_center_id = problem.work_centers[0].id
@@ -2441,7 +2444,7 @@ class TestRhcInnerSolver:
             fake_alns_solve,
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=30,
             overlap_minutes=120,
@@ -2476,7 +2479,7 @@ class TestRhcInnerSolver:
 
         from synaps.model import Assignment
         from synaps.solvers.greedy_dispatch import GreedyDispatch
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_due_pressure_chain_problem()
         work_center_id = problem.work_centers[0].id
@@ -2512,7 +2515,7 @@ class TestRhcInnerSolver:
             fake_alns_solve,
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=240,
             overlap_minutes=30,
@@ -2544,7 +2547,7 @@ class TestRhcInnerSolver:
         from datetime import timedelta
 
         from synaps.model import Assignment, ScheduleResult
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_due_pressure_chain_problem()
         work_center_id = problem.work_centers[0].id
@@ -2594,7 +2597,7 @@ class TestRhcInnerSolver:
             fake_alns_solve,
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=30,
             overlap_minutes=120,
@@ -2625,7 +2628,7 @@ class TestRhcInnerSolver:
         from datetime import timedelta
 
         from synaps.model import Assignment, ScheduleResult
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_due_pressure_chain_problem()
         work_center_id = problem.work_centers[0].id
@@ -2661,7 +2664,7 @@ class TestRhcInnerSolver:
             fake_alns_solve,
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=30,
             overlap_minutes=120,
@@ -2688,7 +2691,7 @@ class TestRhcInnerSolver:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """RHC should use the NumPy/native candidate-metrics seam for window scoring."""
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_3state_problem(n_orders=5, ops_per_order=2)
         np_path_calls = {"count": 0}
@@ -2703,7 +2706,7 @@ class TestRhcInnerSolver:
             fake_candidate_metrics_np,
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=240,
             overlap_minutes=30,
@@ -2717,11 +2720,11 @@ class TestRhcInnerSolver:
 
     def test_rhc_with_cpsat_inner_produces_feasible_result(self) -> None:
         """RHC-CPSAT must delegate to CP-SAT per window."""
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
         from synaps.validation import verify_schedule_result
 
         problem = _make_3state_problem(n_orders=4, ops_per_order=2)
-        solver = RhcSolver()
+        solver = RhcSolver(policy=RhcPolicy.BALANCED)
         result = solver.solve(
             problem,
             window_minutes=480,
@@ -2740,11 +2743,11 @@ class TestRhcInnerSolver:
 
     def test_rhc_greedy_fallback_still_works(self) -> None:
         """When inner_solver='greedy', RHC should still schedule via greedy dispatch."""
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
         from synaps.validation import verify_schedule_result
 
         problem = _make_3state_problem(n_orders=6, ops_per_order=2)
-        solver = RhcSolver()
+        solver = RhcSolver(policy=RhcPolicy.BALANCED)
         result = solver.solve(
             problem,
             window_minutes=360,
@@ -2766,7 +2769,7 @@ class TestRhcInnerSolver:
     def test_rhc_clips_assignments_beyond_horizon(self) -> None:
         """RHC should never return assignments that end after planning horizon."""
         from synaps.solvers.feasibility_checker import FeasibilityChecker
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         state_id = uuid4()
         work_center_id = uuid4()
@@ -2817,7 +2820,7 @@ class TestRhcInnerSolver:
             planning_horizon_end=HORIZON_START + timedelta(minutes=60),
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=60,
             overlap_minutes=0,
@@ -2836,7 +2839,7 @@ class TestRhcInnerSolver:
     ) -> None:
         """Fallback-greedy windows must still appear in inner_window_summaries."""
         from synaps.model import ScheduleResult
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
         from synaps.validation import verify_schedule_result
 
         problem = _make_3state_problem(n_orders=4, ops_per_order=2)
@@ -2855,7 +2858,7 @@ class TestRhcInnerSolver:
             fake_alns_solve,
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=480,
             overlap_minutes=60,
@@ -2889,7 +2892,7 @@ class TestRhcInnerSolver:
     ) -> None:
         """Inner window summaries must expose advisory budget semantics explicitly."""
         from synaps.model import ScheduleResult
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_3state_problem(n_orders=4, ops_per_order=2)
 
@@ -2907,7 +2910,7 @@ class TestRhcInnerSolver:
             fake_alns_solve,
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=480,
             overlap_minutes=60,
@@ -2932,7 +2935,7 @@ class TestRhcInnerSolver:
         """A zero-iteration ALNS result should not bypass fallback greedy in RHC."""
         from synaps.model import ScheduleResult
         from synaps.solvers.greedy_dispatch import GreedyDispatch
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
         from synaps.validation import verify_schedule_result
 
         problem = _make_3state_problem(n_orders=4, ops_per_order=2)
@@ -2956,7 +2959,7 @@ class TestRhcInnerSolver:
             fake_alns_solve,
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=480,
             overlap_minutes=60,
@@ -2987,7 +2990,7 @@ class TestRhcInnerSolver:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """RHC should bypass ALNS when window size exceeds configured pre-search guard."""
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
         from synaps.validation import verify_schedule_result
 
         problem = _make_3state_problem(n_orders=4, ops_per_order=2)
@@ -3000,7 +3003,7 @@ class TestRhcInnerSolver:
             fail_if_alns_called,
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=480,
             overlap_minutes=60,
@@ -3036,7 +3039,7 @@ class TestRhcInnerSolver:
     ) -> None:
         """RHC should execute ALNS when per-window budget is exactly at guard threshold."""
         from synaps.model import ScheduleResult
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_3state_problem(n_orders=4, ops_per_order=2)
         alns_call_count = 0
@@ -3065,7 +3068,7 @@ class TestRhcInnerSolver:
             fake_alns,
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=480,
             overlap_minutes=60,
@@ -3088,7 +3091,7 @@ class TestRhcInnerSolver:
     ) -> None:
         """A calibrated ALNS budget profile should override the legacy raw-count guard."""
         from synaps.model import ScheduleResult
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_3state_problem(n_orders=4, ops_per_order=2)
         alns_call_count = 0
@@ -3117,7 +3120,7 @@ class TestRhcInnerSolver:
             fake_alns,
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=480,
             overlap_minutes=60,
@@ -3236,7 +3239,7 @@ class TestRhcInnerSolver:
         """RHC must route ALNS initial-seed timeout into the outer greedy fallback."""
         from synaps.model import ScheduleResult
         from synaps.solvers.greedy_dispatch import GreedyDispatch
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_3state_problem(n_orders=4, ops_per_order=2)
         alns_call_count = 0
@@ -3263,7 +3266,7 @@ class TestRhcInnerSolver:
             fake_alns,
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=480,
             overlap_minutes=60,
@@ -3298,7 +3301,7 @@ class TestRhcInnerSolver:
     ) -> None:
         """RHC should route ALNS windows to CP-SAT when hybrid thresholds are triggered."""
         from synaps.solvers.greedy_dispatch import GreedyDispatch
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_3state_problem(n_orders=4, ops_per_order=2)
         captured_cpsat_kwargs: list[dict[str, object]] = []
@@ -3319,7 +3322,7 @@ class TestRhcInnerSolver:
             fake_cpsat,
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=480,
             overlap_minutes=60,
@@ -3347,7 +3350,7 @@ class TestRhcInnerSolver:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Inner exceptions should remain fallback-safe and visible in metadata."""
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_3state_problem(n_orders=4, ops_per_order=2)
 
@@ -3359,7 +3362,7 @@ class TestRhcInnerSolver:
             explode,
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=480,
             overlap_minutes=60,
@@ -3384,7 +3387,7 @@ class TestRhcInnerSolver:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """RHC should skip inner ALNS and use fallback greedy when budget is too low."""
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_3state_problem(n_orders=4, ops_per_order=2)
 
@@ -3396,7 +3399,7 @@ class TestRhcInnerSolver:
             fail_if_called,
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=480,
             overlap_minutes=60,
@@ -3422,10 +3425,10 @@ class TestRhcInnerSolver:
         Before the fix, RHC passed time_limit_s= explicitly AND via **inner_kwargs,
         resulting in 'got multiple values for keyword argument time_limit_s'.
         """
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_3state_problem(n_orders=4, ops_per_order=2)
-        solver = RhcSolver()
+        solver = RhcSolver(policy=RhcPolicy.BALANCED)
         # This must NOT raise TypeError
         result = solver.solve(
             problem,
@@ -3450,7 +3453,7 @@ class TestRhcInnerSolver:
         from datetime import timedelta
 
         from synaps.model import Assignment, ScheduleResult
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_long_chain_problem(12)
         work_center_id = problem.work_centers[0].id
@@ -3485,7 +3488,7 @@ class TestRhcInnerSolver:
             fake_alns_solve,
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=30,
             overlap_minutes=0,
@@ -3519,7 +3522,7 @@ class TestRhcInnerSolver:
         from datetime import timedelta
 
         from synaps.model import Assignment, ScheduleResult
-        from synaps.solvers.rhc import RhcSolver
+        from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
         problem = _make_long_chain_problem(12)
         work_center_id = problem.work_centers[0].id
@@ -3556,7 +3559,7 @@ class TestRhcInnerSolver:
             fake_alns_solve,
         )
 
-        result = RhcSolver().solve(
+        result = RhcSolver(policy=RhcPolicy.BALANCED).solve(
             problem,
             window_minutes=30,
             overlap_minutes=0,

@@ -58,7 +58,7 @@ class Operation(BaseModel):
     order_id: UUID
     seq_in_order: int
     state_id: UUID
-    base_duration_min: int
+    base_duration_min: int = Field(ge=0)
     eligible_wc_ids: list[UUID] = Field(default_factory=list)
     predecessor_op_id: UUID | None = None
     domain_attributes: dict[str, Any] = Field(default_factory=dict)
@@ -71,7 +71,7 @@ class SetupEntry(BaseModel):
     work_center_id: UUID
     from_state_id: UUID
     to_state_id: UUID
-    setup_minutes: int
+    setup_minutes: int = Field(ge=0)
     material_loss: float = 0.0
     energy_kwh: float = 0.0
     domain_attributes: dict[str, Any] = Field(default_factory=dict)

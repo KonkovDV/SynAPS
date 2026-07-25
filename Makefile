@@ -5,7 +5,7 @@
 PYTHON := py -3.13
 PYTHONPATH := C:/plans/SynAPS
 
-.PHONY: lint format typecheck test test-fast test-slow clean native-build native-test benchmark-fast help
+.PHONY: lint format format-fix typecheck test test-fast test-slow clean native-build native-test benchmark-fast precommit help
 
 help: ## Show this help message
 	@echo "SynAPS developer targets:"
@@ -51,7 +51,7 @@ native-build: ## Build native PyO3 accelerator wheel
 	$(PYTHON) -m maturin build \
 		--manifest-path native/synaps_native/Cargo.toml \
 		--release --out native-dist
-	native-test: ## Install built wheel and run native tests
+native-test: ## Install built wheel and run native tests
 	$(PYTHON) -m pip install --force-reinstall native-dist/*.whl
 	$(PYTHON) -m pytest tests/test_native_*.py tests/test_accelerators.py -q
 

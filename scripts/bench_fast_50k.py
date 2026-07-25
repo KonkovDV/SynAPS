@@ -1,5 +1,5 @@
 """Quick comparative benchmark: FAST_50K vs BALANCED on 50K instance."""
-import json
+
 import time
 
 from synaps.benchmarks.instance_generator import generate_large_instance

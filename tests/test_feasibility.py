@@ -538,3 +538,52 @@ class TestFeasibilityChecker:
         horizon_violations = [v for v in violations if v.kind == "HORIZON_BOUND_VIOLATION"]
         assert len(horizon_violations) >= 1
         assert horizon_violations[0].operation_id == op_d.id
+
+    def test_strict_setup_matrix_flags_missing_cross_state_entry(
+        self, simple_problem: ScheduleProblem
+    ) -> None:
+        checker = FeasibilityChecker()
+        op_a, op_b, *_rest = simple_problem.operations
+        wc_id = simple_problem.work_centers[0].id
+        # Force a consecutive cross-state pair on one machine with no SDST cell.
+        if op_a.state_id == op_b.state_id:
+            other_state = next(
+                state.id for state in simple_problem.states if state.id != op_a.state_id
+            )
+            op_b.state_id = other_state
+
+        simple_problem.setup_matrix = [
+            entry
+            for entry in simple_problem.setup_matrix
+            if not (
+                entry.work_center_id == wc_id
+                and entry.from_state_id == op_a.state_id
+                and entry.to_state_id == op_b.state_id
+            )
+        ]
+        assignments = [
+            Assignment(
+                operation_id=op_a.id,
+                work_center_id=wc_id,
+                start_time=HORIZON_START,
+                end_time=HORIZON_START + timedelta(minutes=10),
+            ),
+            Assignment(
+                operation_id=op_b.id,
+                work_center_id=wc_id,
+                start_time=HORIZON_START + timedelta(minutes=20),
+                end_time=HORIZON_START + timedelta(minutes=30),
+            ),
+        ]
+
+        loose = checker.check(simple_problem, assignments, exhaustive=True)
+        assert all(v.kind != "MISSING_SETUP_ENTRY" for v in loose)
+
+        strict = checker.check(
+            simple_problem,
+            assignments,
+            exhaustive=True,
+            strict_setup_matrix=True,
+        )
+        missing = [v for v in strict if v.kind == "MISSING_SETUP_ENTRY"]
+        assert len(missing) >= 1

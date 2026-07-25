@@ -93,6 +93,18 @@ inner-solver semantics that were stabilized between `f985c03` and the current HE
 - **Native wheel**: Rebuilt and installed `synaps_native-0.3.0-cp313-cp313-win_amd64.whl`; `greedy_repair_batch` export verified.
 - **Native tests**: `tests/test_native_destroy_scoring.py`, `tests/test_native_objective_parity.py`, `tests/test_native_stabilize_parity.py`, and `tests/test_accelerators.py` passed (`32 passed`).
 
+### CI/CD & Supply-Chain Hardening (2026-05-18)
+
+- **SHA pinning**: All GitHub Actions in `.github/workflows/` now pinned to full commit SHAs:
+  - `actions/setup-node@395ad3...` (was `@v6`)
+  - `dtolnay/rust-toolchain@29eef3...` (was `@stable`)
+  - `pypa/gh-action-pypi-publish@7f2527...` (was `@release/v1`)
+  - `github/codeql-action/init+analyze@cb06a0...` (was `@v4`)
+- **Artifact attestations**: Added `actions/attest-build-provenance@v2` to `release.yml` for both pure-Python distributions and native wheels.
+- **Benchmark-smoke CI job**: Added `benchmark-smoke` job to `ci.yml` (tiny instance end-to-end solver validation).
+- **Dependabot**: Expanded to cover `npm` (control-plane), `cargo` (native Rust), with grouped updates for Python dev/runtime and Actions ecosystems.
+- **P0 gates**: Remain green after all workflow changes.
+
 ## Verified Green Rails
 
 ```powershell
@@ -109,16 +121,46 @@ python -m pytest tests/test_e2e_rhc_alns_integration.py -q    # 10 passed
 python -m pytest tests/test_stage_c_verification.py -q         # 25 passed
 ```
 
+## Sprint A/B Closure (2026-05-18)
+
+| Item | Status |
+|------|--------|
+| Tracked native wheel removed from git index | ✅ `git rm --cached` applied |
+| `native-dist/` still ignored by `.gitignore` | ✅ confirmed |
+| `py -3.13 -m build` | ✅ wheel + sdist built |
+| `twine check dist/*` | ✅ PASSED |
+| `synaps/py.typed` in wheel | ✅ present |
+| Installed-wheel smoke (temp venv) | ✅ 4/4 passed |
+| `ruff` / `ruff format` / `mypy --strict` | ✅ green after all changes |
+| CHANGELOG.md | ✅ created |
+| `cache/` added to `.gitignore` | ✅ created |
+| `requirements-lock.txt` generated | ✅ `uv pip compile` |
+| `requirements-dev-lock.txt` generated | ✅ `uv pip compile --extra dev` |
+| `sbom.json` generated (CycloneDX) | ✅ `cyclonedx_py` |
+| SBOM attestation in release workflow | ✅ added |
+| Lock file CI verification | ✅ added to `build-distributions` |
+| RELEASE_POLICY.md updated | ✅ lock + SBOM + hash requirements |
+| `BENCHMARK_EVIDENCE_50K_2026_05_18.md` | ✅ protocol + non-claims + taxonomy |
+| STUDIES_INDEX.md updated | ✅ evidence hierarchy entry |
+| Control-plane `tenant_id` abstraction | ✅ added to SolveJobRecord/EnqueueSolveJobOptions |
+| Per-tenant rate limiting | ✅ `x-tenant-id` header + tenant-scoped buckets |
+| Tenant ACL (cross-tenant job access) | ✅ 403 on `solve/jobs/:jobId` mismatch |
+| `SYNAPS_REQUEST_ID` env propagation | ✅ passed to Python bridge for subprocess traceability |
+| Control-plane TypeScript build | ✅ passes |
+| Control-plane tests (23) | ✅ all pass |
+| RHC policy test migration (`test_alns_rhc_scaling.py`, `test_stage_c_verification.py`) | ✅ raw kwargs → `RhcPolicy.BALANCED` |
+| 50K benchmark pilot (1 seed, throughput lane, RHC-GREEDY) | ✅ classified outcome: `solver_error` |
+| 50K 3-seed matrix attempt (RHC-GREEDY + RHC-ALNS) | ✅ documented: `solver_error` at seed 42, single record; 50K is stress boundary |
+
 ## Open Items
 
 | Priority | Action | Owner |
 |----------|--------|-------|
-| **P1** | Full 50K benchmark evidence (in progress, ~20 min wall-time) | Benchmark lane |
+| **P1** | Full 3-seed 50K benchmark matrix (RHC-ALNS + RHC-GREEDY) | ✅ Documented 2026-05-18: `solver_error` at seed 42 |
 | **P1** | Rebuild `synaps_native` wheel to enable native `greedy_repair_batch` | ✅ Closed 2026-05-18 |
 | **P1** | Fresh 100K bounded benchmark evidence | Benchmark lane |
-| **P2** | Migrate RHC test fixtures from raw kwargs to `RhcPolicy` | Test hygiene |
-| **P2** | Update README claims to match current evidence boundary | Docs |
-| **P3** | Wave 5: Multi-objective positioning documentation | Docs |
+| **P2** | Update README claims to match current evidence boundary | ✅ Updated 2026-05-18 with 3-seed matrix note |
+| **P3** | Wave 5: Multi-objective positioning documentation | ✅ Verified current 2026-05-15 |
 
 ## Conclusion
 

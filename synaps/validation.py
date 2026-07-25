@@ -24,7 +24,12 @@ def verify_schedule_result(
     problem: ScheduleProblem,
     result: ScheduleResult,
 ) -> SolutionVerification:
-    """Verify a solver result against the canonical feasibility checker."""
+    """Verify a solver result against the caller's declared problem contract.
+
+    Always checks against the submitted ``planning_horizon_end``. Solver-side
+    placement-horizon extension (RHC coverage mode) must not rewrite the
+    customer contract for ``verified_feasible``.
+    """
 
     if result.status not in {SolverStatus.FEASIBLE, SolverStatus.OPTIMAL}:
         return SolutionVerification(

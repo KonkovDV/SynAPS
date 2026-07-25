@@ -41,6 +41,7 @@ def test_available_solver_configs_matches_public_portfolio() -> None:
         "RHC-ALNS-100K",
         "RHC-CPSAT",
         "RHC-GREEDY",
+        "RHC-GREEDY-COVER",
     ]
 
 
@@ -288,6 +289,22 @@ def test_route_feasibility_first_rhc_greedy_for_ultra_large_nominal() -> None:
 
     assert decision.solver_config == "RHC-GREEDY"
     assert "feasibility-first" in decision.reason
+
+
+def test_route_feasibility_first_cover_for_ultra_large_with_latency() -> None:
+    problem = make_simple_problem(n_orders=15000, ops_per_order=4)
+
+    decision = route_solver_config(
+        problem,
+        context=SolverRoutingContext(
+            regime=SolveRegime.NOMINAL,
+            portfolio_policy=PortfolioPolicy.FEASIBILITY_FIRST,
+            preferred_max_latency_s=900,
+        ),
+    )
+
+    assert decision.solver_config == "RHC-GREEDY-COVER"
+    assert "coverage-complete" in decision.reason
 
 
 def test_route_solver_rhc_alns_100k_profile_for_100k_ops_with_latency_budget() -> None:

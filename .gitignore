@@ -61,6 +61,7 @@ benchmark/instances/
 
 # Native wheel build directory (CI artifact)
 native-dist/
+cache/
 .benchmarks/
 /test_results.txt
 

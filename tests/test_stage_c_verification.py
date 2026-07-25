@@ -23,7 +23,7 @@ from synaps.solvers.alns_solver import AlnsSolver
 from synaps.solvers.rhc._cross_window import WindowQualitySummary
 
 try:
-    from synaps.solvers.rhc import RhcSolver
+    from synaps.solvers.rhc import RhcPolicy, RhcSolver
 except ImportError:
     RhcSolver = None  # type: ignore[assignment, misc]
 
@@ -86,7 +86,7 @@ class TestOperatorWeightPassThrough:
             return original_solve(self_inner, prob, **kwargs)
 
         with patch.object(AlnsSolver, "solve", _capturing_solve):
-            solver = RhcSolver()
+            solver = RhcSolver(policy=RhcPolicy.BALANCED)
             result = solver.solve(
                 problem,
                 inner_solver="alns",
@@ -274,7 +274,7 @@ class TestWarmStartMetadataInRhcOutput:
         """Run RHC with 2+ windows and verify warm-start metadata fields."""
         problem = _make_small_problem(n_ops=60, n_machines=3, seed=303)
 
-        solver = RhcSolver()
+        solver = RhcSolver(policy=RhcPolicy.BALANCED)
         result = solver.solve(
             problem,
             inner_solver="alns",

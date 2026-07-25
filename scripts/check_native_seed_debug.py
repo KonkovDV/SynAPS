@@ -1,11 +1,10 @@
 """Debug: why is native initial seed failing?"""
-import traceback
-import numpy as np
-from datetime import timedelta
 
+import traceback
+
+from synaps.accelerators import _native_greedy_repair_batch
 from synaps.benchmarks.instance_generator import generate_large_instance
 from synaps.solvers.alns_solver import _try_native_initial_seed
-from synaps.accelerators import _native_greedy_repair_batch, greedy_repair_batch_native
 
 print("_native_greedy_repair_batch available:", _native_greedy_repair_batch is not None)
 

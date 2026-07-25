@@ -5,6 +5,10 @@ on:
     paths:
       - "pyproject.toml"
       - "requirements*.txt"
+      - "control-plane/package.json"
+      - "control-plane/package-lock.json"
+      - "native/synaps_native/Cargo.toml"
+      - "native/synaps_native/Cargo.lock"
       - ".github/workflows/**"
       - ".github/dependency-review-config.yml"
 

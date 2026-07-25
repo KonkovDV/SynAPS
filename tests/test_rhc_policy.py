@@ -78,6 +78,8 @@ class TestEveryPresetInRegistry:
             RhcPolicy.BALANCED,
             RhcPolicy.SEARCH_ENTRY,
             RhcPolicy.BOUNDED_100K,
+            RhcPolicy.FAST_50K,
+            RhcPolicy.GREEDY_COVER,
         ],
     )
     def test_preset_yields_finite_kwargs(self, policy: RhcPolicy) -> None:
@@ -88,3 +90,12 @@ class TestEveryPresetInRegistry:
         assert isinstance(kwargs["overlap_minutes"], int)
         assert kwargs["overlap_minutes"] >= 0
         assert isinstance(kwargs["inner_solver"], str)
+
+    def test_greedy_cover_reserves_coverage_budget(self) -> None:
+        spec = RhcPolicySpec.from_preset(RhcPolicy.GREEDY_COVER)
+        kwargs = build_solve_kwargs_from_spec(spec)
+        assert kwargs["inner_solver"] == "greedy"
+        assert kwargs["coverage_time_reserve_fraction"] == 0.20
+        assert kwargs["fallback_repair_on_timeout"] is True
+        assert kwargs["coverage_horizon_extension_factor"] == 1.0
+        assert kwargs["backtracking_enabled"] is False

@@ -9,6 +9,7 @@ import {
   SynapsPythonBridgeError,
   type SynapsContractExecutor,
 } from "../src/python-executor";
+import { InMemorySolveJobStore } from "../src/solve-jobs";
 import { resolveSynapsRepoRoot } from "../src/paths";
 
 function loadTinyProblem(): unknown {
@@ -38,7 +39,7 @@ function createSolveRequest(): Record<string, unknown> {
 function createInstanceRefSolveRequest(): Record<string, unknown> {
   return {
     contract_version: "2026-04-03",
-    problem_instance_ref: "benchmark/instances/tiny_3x3.json",
+    problem_instance_ref: "tiny_3x3.json",
     problem_slice: {
       max_operations: 2,
     },
@@ -101,6 +102,7 @@ test("health endpoint returns ok", async () => {
 test("optional api key guard rejects unauthenticated requests", async () => {
   const app = buildControlPlaneApp({
     apiKey: "test-key",
+    rateLimit: null,
     executor: {
       async executeSolveRequest(): Promise<unknown> {
         throw new Error("unused");
@@ -111,19 +113,23 @@ test("optional api key guard rejects unauthenticated requests", async () => {
     },
   });
 
-  const unauthorized = await app.inject({ method: "GET", url: "/healthz" });
+  // Liveness stays reachable for probes; protected surfaces require the key.
+  const healthz = await app.inject({ method: "GET", url: "/healthz" });
+  assert.equal(healthz.statusCode, 200);
+
+  const unauthorized = await app.inject({ method: "GET", url: "/metrics" });
   assert.equal(unauthorized.statusCode, 401);
 
   const authorized = await app.inject({
     method: "GET",
-    url: "/healthz",
+    url: "/metrics",
     headers: { "x-api-key": "test-key" },
   });
   assert.equal(authorized.statusCode, 200);
 
   const bearerAuthorized = await app.inject({
     method: "GET",
-    url: "/healthz",
+    url: "/openapi.json",
     headers: { authorization: "bearer test-key" },
   });
   assert.equal(bearerAuthorized.statusCode, 200);
@@ -423,7 +429,7 @@ test("solve route accepts file-backed solve requests without inline problem", as
   });
 
   assert.equal(response.statusCode, 200);
-  assert.equal(seenProblemInstanceRef, "benchmark/instances/tiny_3x3.json");
+  assert.equal(seenProblemInstanceRef, "tiny_3x3.json");
   assert.deepEqual(seenProblemSlice, { max_operations: 2 });
 
   await app.close();
@@ -596,6 +602,119 @@ test("async solve job status returns 404 for unknown job", async () => {
   await app.close();
 });
 
+test("async solve job tenant ACL denies cross-tenant reads", async () => {
+  const executor: SynapsContractExecutor = {
+    async executeSolveRequest(payload: object): Promise<unknown> {
+      const request = payload as { request_id?: string };
+      return {
+        contract_version: "2026-04-03",
+        request_id: request.request_id,
+        result: {
+          solver_name: "greedy_dispatch",
+          status: "feasible",
+          assignments: [],
+          objective: {},
+          duration_ms: 1,
+          metadata: {},
+          random_seed: null,
+        },
+      };
+    },
+    async executeRepairRequest(): Promise<unknown> {
+      throw new Error("unused");
+    },
+  };
+
+  const app = buildControlPlaneApp({ executor, rateLimit: null });
+  const acceptedResponse = await app.inject({
+    method: "POST",
+    url: "/api/v1/solve/jobs",
+    headers: { "x-tenant-id": "tenant-a" },
+    payload: createSolveRequest(),
+  });
+  assert.equal(acceptedResponse.statusCode, 202);
+  const accepted = acceptedResponse.json() as { job_id: string; status_url: string };
+
+  const forbidden = await app.inject({
+    method: "GET",
+    url: accepted.status_url,
+    headers: { "x-tenant-id": "tenant-b" },
+  });
+  assert.equal(forbidden.statusCode, 403);
+
+  const anonymous = await app.inject({
+    method: "GET",
+    url: accepted.status_url,
+  });
+  assert.equal(anonymous.statusCode, 403);
+
+  for (let i = 0; i < 50; i += 1) {
+    await delayImmediate();
+    const done = await app.inject({
+      method: "GET",
+      url: accepted.status_url,
+      headers: { "x-tenant-id": "tenant-a" },
+    });
+    if (done.statusCode === 200 && done.json().status === "succeeded") {
+      break;
+    }
+  }
+
+  await app.close();
+});
+
+test("async solve job store rejects when inflight capacity is exhausted", async () => {
+  const store = new InMemorySolveJobStore({ maxJobs: 8, maxInflight: 1, ttlMs: 60_000 });
+  let releaseFirst: (() => void) | undefined;
+  const firstGate = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+
+  const app = buildControlPlaneApp({
+    solveJobs: store,
+    rateLimit: null,
+    executor: {
+      async executeSolveRequest(payload: object): Promise<unknown> {
+        await firstGate;
+        const request = payload as { request_id?: string };
+        return {
+          contract_version: "2026-04-03",
+          request_id: request.request_id,
+          result: {
+            solver_name: "greedy_dispatch",
+            status: "feasible",
+            assignments: [],
+            objective: {},
+            duration_ms: 1,
+            metadata: {},
+            random_seed: null,
+          },
+        };
+      },
+      async executeRepairRequest(): Promise<unknown> {
+        throw new Error("unused");
+      },
+    },
+  });
+
+  const first = await app.inject({
+    method: "POST",
+    url: "/api/v1/solve/jobs",
+    payload: createSolveRequest(),
+  });
+  assert.equal(first.statusCode, 202);
+
+  const second = await app.inject({
+    method: "POST",
+    url: "/api/v1/solve/jobs",
+    payload: createSolveRequest(),
+  });
+  assert.equal(second.statusCode, 429);
+
+  releaseFirst?.();
+  await app.close();
+});
+
 test("solve route rejects invalid upstream response", async () => {
   const app = buildControlPlaneApp({
     executor: {
@@ -622,6 +741,8 @@ test("solve route rejects invalid upstream response", async () => {
 });
 
 test("solve route applies limit-guard fallback after timeout", async () => {
+  const previous = process.env.SYNAPS_ENABLE_LIMIT_GUARDS;
+  process.env.SYNAPS_ENABLE_LIMIT_GUARDS = "1";
   let attempts = 0;
   const executor: SynapsContractExecutor = {
     async executeSolveRequest(payload: object): Promise<unknown> {
@@ -655,7 +776,8 @@ test("solve route applies limit-guard fallback after timeout", async () => {
     },
   };
 
-  const app = buildControlPlaneApp({ executor });
+  const app = buildControlPlaneApp({ executor, rateLimit: null });
+  try {
   const response = await app.inject({
     method: "POST",
     url: "/api/v1/solve",
@@ -689,9 +811,18 @@ test("solve route applies limit-guard fallback after timeout", async () => {
   );
 
   await app.close();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.SYNAPS_ENABLE_LIMIT_GUARDS;
+    } else {
+      process.env.SYNAPS_ENABLE_LIMIT_GUARDS = previous;
+    }
+  }
 });
 
 test("solve route records status-based fallback transition metrics", async () => {
+  const previous = process.env.SYNAPS_ENABLE_LIMIT_GUARDS;
+  process.env.SYNAPS_ENABLE_LIMIT_GUARDS = "1";
   let attempts = 0;
   const executor: SynapsContractExecutor = {
     async executeSolveRequest(payload: object): Promise<unknown> {
@@ -741,10 +872,11 @@ test("solve route records status-based fallback transition metrics", async () =>
     },
   };
 
-  const app = buildControlPlaneApp({ executor });
+  const app = buildControlPlaneApp({ executor, rateLimit: null });
   const request = createSolveRequest();
   request.solver_config = "CPSAT-30";
 
+  try {
   const response = await app.inject({
     method: "POST",
     url: "/api/v1/solve",
@@ -770,6 +902,51 @@ test("solve route records status-based fallback transition metrics", async () =>
   );
 
   await app.close();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.SYNAPS_ENABLE_LIMIT_GUARDS;
+    } else {
+      process.env.SYNAPS_ENABLE_LIMIT_GUARDS = previous;
+    }
+  }
+});
+
+test("solve route forces verify_feasibility true", async () => {
+  let seenVerify: unknown;
+  const executor: SynapsContractExecutor = {
+    async executeSolveRequest(payload: object): Promise<unknown> {
+      const request = payload as { request_id?: string; verify_feasibility?: boolean };
+      seenVerify = request.verify_feasibility;
+      return {
+        contract_version: "2026-04-03",
+        request_id: request.request_id,
+        result: {
+          solver_name: "greedy_dispatch",
+          status: "feasible",
+          assignments: [],
+          objective: {},
+          duration_ms: 1,
+          metadata: {},
+          random_seed: null,
+        },
+      };
+    },
+    async executeRepairRequest(): Promise<unknown> {
+      throw new Error("unused");
+    },
+  };
+
+  const app = buildControlPlaneApp({ executor, rateLimit: null });
+  const request = createSolveRequest();
+  request.verify_feasibility = false;
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/v1/solve",
+    payload: request,
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(seenVerify, true);
+  await app.close();
 });
 
 test("solve route rejects cyclic precedence via ACL guardrails", async () => {
@@ -782,6 +959,7 @@ test("solve route rejects cyclic precedence via ACL guardrails", async () => {
         throw new Error("unused");
       },
     },
+    rateLimit: null,
   });
 
   const cyclicRequest = createSolveRequest();

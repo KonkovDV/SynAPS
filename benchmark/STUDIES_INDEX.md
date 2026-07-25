@@ -59,3 +59,4 @@ be deleted without affecting canonical evidence.
 | **100K pure-Python anchor** | Bounded current-head comparison before the native-backed rerun | `2026-04-27-rhc-100k-audit-v4-current-head/` |
 | **100K regression snapshot** | Native-backed bounded 100K stall before the initial-seed fix | `2026-05-01-rhc-100k-audit-v5-post-critical-fixes/` |
 | **100K accepted rerun** | Bounded 100K same-run parity after the bounded seed-cap fix | `2026-05-08-rhc-100k-audit-v11-post-bounded-seed-cap/` |
+| **Release evidence (current)** | Consolidated 50K/100K protocol, non-claims, and failure taxonomy | `BENCHMARK_EVIDENCE_50K_2026_05_18.md` |

@@ -8,6 +8,18 @@ updates:
     labels:
       - dependencies
       - python
+    groups:
+      python-dev:
+        patterns:
+          - "pytest*"
+          - "ruff"
+          - "mypy"
+          - "pre-commit"
+          - "coverage"
+      python-runtime:
+        patterns:
+          - "numpy"
+          - "ortools"
 
   - package-ecosystem: github-actions
     directory: "/"
@@ -17,3 +29,28 @@ updates:
     labels:
       - dependencies
       - ci
+    groups:
+      actions:
+        patterns:
+          - "actions/*"
+          - "github/*"
+          - "pypa/*"
+          - "dtolnay/*"
+
+  - package-ecosystem: npm
+    directory: "/control-plane"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - control-plane
+
+  - package-ecosystem: cargo
+    directory: "/native/synaps_native"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - native

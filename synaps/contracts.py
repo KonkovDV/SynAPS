@@ -25,9 +25,15 @@ CONTRACT_VERSION: Final = "2026-04-03"
 # Supported contract versions for backward compatibility.
 SUPPORTED_CONTRACT_VERSIONS: Final[tuple[str, ...]] = ("2026-04-03",)
 
+MAX_PROBLEM_INSTANCE_FILE_BYTES: Final = 50_000_000
+
 
 class ContractVersionError(ValueError):
     """Raised when a request uses an unsupported contract version."""
+
+
+class PrecedenceCycleError(ValueError):
+    """Raised when the operation precedence graph contains a cycle."""
 
 
 def check_contract_version(version: str) -> None:
@@ -72,7 +78,14 @@ class SolveOptions(BaseModel):
     epsilon_constraints: dict[str, int] | None = None
 
     def to_runtime_kwargs(self) -> dict[str, object]:
-        return self.model_dump(exclude_none=True)
+        payload = self.model_dump(exclude_none=True)
+        raw_workers = payload.get("num_workers")
+        if isinstance(raw_workers, int):
+            payload["num_workers"] = max(1, min(raw_workers, 8))
+        raw_limit = payload.get("time_limit_s")
+        if isinstance(raw_limit, int):
+            payload["time_limit_s"] = max(1, min(raw_limit, 600))
+        return payload
 
 
 class ProblemInstanceSlice(BaseModel):
@@ -207,6 +220,42 @@ def _require_object_list(
     return value
 
 
+def _assert_no_precedence_cycle(problem: ScheduleProblem) -> None:
+    """Reject cyclic precedence graphs before solver entry (ACL parity for file-backed)."""
+
+    by_id = {operation.id: operation for operation in problem.operations}
+    color: dict[UUID, int] = {}
+    stack: list[UUID] = []
+
+    def visit(node_id: UUID) -> list[UUID] | None:
+        color[node_id] = 1
+        stack.append(node_id)
+        operation = by_id.get(node_id)
+        predecessor_id = operation.predecessor_op_id if operation is not None else None
+        if predecessor_id is not None and predecessor_id in by_id:
+            pred_color = color.get(predecessor_id, 0)
+            if pred_color == 1:
+                cycle_start = stack.index(predecessor_id)
+                return [*stack[cycle_start:], predecessor_id]
+            if pred_color == 0:
+                cycle = visit(predecessor_id)
+                if cycle is not None:
+                    return cycle
+        stack.pop()
+        color[node_id] = 2
+        return None
+
+    for operation_id in by_id:
+        if color.get(operation_id, 0) != 0:
+            continue
+        cycle = visit(operation_id)
+        if cycle is not None:
+            raise PrecedenceCycleError(
+                "Operation precedence graph contains a cycle: "
+                + " -> ".join(str(node) for node in cycle)
+            )
+
+
 def _resolve_problem_instance_path(
     problem_instance_ref: str,
     *,
@@ -227,6 +276,11 @@ def _resolve_problem_instance_path(
         raise ValueError("problem_instance_ref must target a JSON file")
     if not resolved_path.is_file():
         raise FileNotFoundError(f"Problem instance file not found: {resolved_path}")
+    if resolved_path.stat().st_size > MAX_PROBLEM_INSTANCE_FILE_BYTES:
+        raise ValueError(
+            "problem_instance_ref exceeds max file size "
+            f"({MAX_PROBLEM_INSTANCE_FILE_BYTES} bytes)"
+        )
     return resolved_path
 
 
@@ -413,6 +467,7 @@ def execute_solve_request(
         request,
         instance_dir=instance_dir,
     )
+    _assert_no_precedence_cycle(problem)
     result = solve_schedule(
         problem,
         context=request.context.to_runtime(),
@@ -427,6 +482,7 @@ def execute_repair_request(request: RepairRequest) -> RepairResponse:
     """Execute a stable repair contract against the SynAPS portfolio API."""
 
     check_contract_version(request.contract_version)
+    _assert_no_precedence_cycle(request.problem)
     result = repair_schedule(
         request.problem,
         base_assignments=request.base_assignments,

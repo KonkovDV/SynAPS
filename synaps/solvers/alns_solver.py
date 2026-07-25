@@ -2239,7 +2239,7 @@ class AlnsSolver(BaseSolver):
         )
         seed: int = int(kwargs.get("random_seed", 42))
         initial_beam_op_limit: int = int(kwargs.get("initial_beam_op_limit", 60))
-        frozen_initial_repair_max_ops: int = int(kwargs.get("frozen_initial_repair_max_ops", 512))
+        frozen_initial_repair_max_ops: int = int(kwargs.get("frozen_initial_repair_max_ops", 2000))
         frozen_initial_repair_min_remaining_time_s: float = float(
             kwargs.get("frozen_initial_repair_min_remaining_time_s", 30.0)
         )
@@ -2588,6 +2588,16 @@ class AlnsSolver(BaseSolver):
         from synaps.solvers.greedy_dispatch import BeamSearchDispatch, GreedyDispatch
 
         initial_solution_t0 = time.monotonic()
+        # Hard ceiling for Phase-1 seed+completion so RHC windows retain search
+        # (or fall back to inline greedy) instead of burning 180–320s on seed alone.
+        phase1_wall_fraction: float = max(
+            0.1, min(0.9, float(kwargs.get("phase1_wall_fraction", 0.5)))
+        )
+        phase1_deadline = t0 + (time_limit_s * phase1_wall_fraction)
+
+        def _phase1_budget_exhausted() -> bool:
+            return time.monotonic() >= phase1_deadline
+
         warm_start_assignments: list[Assignment] = []
         warm_start_supplied_assignments = 0
         warm_start_completed_assignments = 0
@@ -2633,19 +2643,22 @@ class AlnsSolver(BaseSolver):
                 assignment.operation_id for assignment in warm_candidate
             )
             if warm_missing_ids:
-                warm_outcome = _repair_greedy_outcome(
-                    problem,
-                    warm_candidate,
-                    warm_missing_ids,
-                )
-                if warm_outcome.status == RepairStatus.FEASIBLE:
-                    warm_candidate = sorted(
-                        warm_candidate + list(warm_outcome.assignments),
-                        key=lambda assignment: assignment.start_time,
-                    )
-                    warm_start_completed_assignments = len(warm_outcome.assignments)
+                if _phase1_budget_exhausted():
+                    warm_start_rejected_reason = "phase1_wall_budget_exhausted"
                 else:
-                    warm_start_rejected_reason = warm_outcome.reason
+                    warm_outcome = _repair_greedy_outcome(
+                        problem,
+                        warm_candidate,
+                        warm_missing_ids,
+                    )
+                    if warm_outcome.status == RepairStatus.FEASIBLE:
+                        warm_candidate = sorted(
+                            warm_candidate + list(warm_outcome.assignments),
+                            key=lambda assignment: assignment.start_time,
+                        )
+                        warm_start_completed_assignments = len(warm_outcome.assignments)
+                    else:
+                        warm_start_rejected_reason = warm_outcome.reason
 
             if _is_valid_complete_schedule(warm_candidate):
                 recompute_assignment_setups(warm_candidate, dispatch_context)
@@ -2679,7 +2692,10 @@ class AlnsSolver(BaseSolver):
             # instead of a standalone greedy seed that may become infeasible after
             # re-anchoring against committed assignments.
             remaining_budget_s = max(0.0, time_limit_s - (time.monotonic() - t0))
-            if (
+            if _phase1_budget_exhausted():
+                if warm_start_rejected_reason is None:
+                    warm_start_rejected_reason = "phase1_wall_budget_exhausted"
+            elif (
                 n_ops <= frozen_initial_repair_max_ops
                 and remaining_budget_s >= frozen_initial_repair_min_remaining_time_s
             ):
@@ -2878,7 +2894,14 @@ class AlnsSolver(BaseSolver):
 
         # Completion phase: if seed did not cover all operations, repair the
         # missing ones via greedy dispatch so ALNS starts from a full schedule.
+        # Hard-stop when Phase-1 wall fraction is exhausted so RHC can fall back
+        # instead of burning the full window on uncapped completion.
         if initial_result is not None and len(initial_result.assignments) < n_ops:
+            if _phase1_budget_exhausted():
+                return _initial_generation_error_result(
+                    "phase1_wall_budget_exhausted_before_completion",
+                    time_limit_exhausted_before_search=True,
+                )
             covered_ids = {a.operation_id for a in initial_result.assignments}
             missing_ids = problem_op_ids - covered_ids
             if missing_ids:
@@ -2902,6 +2925,20 @@ class AlnsSolver(BaseSolver):
                         len(completed),
                         n_ops,
                     )
+                elif _phase1_budget_exhausted() or (time.monotonic() - t0) > time_limit_s:
+                    return _initial_generation_error_result(
+                        "phase1_wall_budget_exhausted_during_completion",
+                        time_limit_exhausted_before_search=True,
+                    )
+
+        if initial_result is not None and _phase1_budget_exhausted():
+            # Seed finished but consumed the Phase-1 ceiling — surface as
+            # pre-search timeout so RHC prefers inline greedy coverage path.
+            if (time.monotonic() - t0) > time_limit_s * 0.85:
+                return _initial_generation_error_result(
+                    "phase1_wall_budget_exhausted_after_seed",
+                    time_limit_exhausted_before_search=True,
+                )
 
         initial_solution_ms = int((time.monotonic() - initial_solution_t0) * 1000)
         time_limit_exhausted_before_search = (time.monotonic() - t0) > time_limit_s
@@ -3663,6 +3700,7 @@ class AlnsSolver(BaseSolver):
                 ),
                 "initial_beam_op_limit": initial_beam_op_limit,
                 "frozen_initial_repair_max_ops": frozen_initial_repair_max_ops,
+                "phase1_wall_fraction": phase1_wall_fraction,
                 "frozen_initial_repair_min_remaining_time_s": (
                     frozen_initial_repair_min_remaining_time_s
                 ),

@@ -83,8 +83,11 @@ line-length = 100
 exclude = [
     "benchmark/studies",
     "benchmark/results",
+    "synaps/scripts",
+    "tests/fixtures",
     ".venv",
     ".mypy_cache",
+    ".ruff_cache",
 ]
 
 [tool.ruff.lint]
@@ -106,6 +109,11 @@ warn_unreachable = true
 warn_redundant_casts = true
 warn_unused_ignores = true
 ignore_missing_imports = true
+exclude = [
+    "benchmark/studies",
+    "synaps/scripts",
+    "tests/fixtures",
+]
 
 [[tool.mypy.overrides]]
 module = "highspy"

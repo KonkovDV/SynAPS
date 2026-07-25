@@ -1,4 +1,5 @@
 """Quick check: is native initial seed being used?"""
+
 from synaps.benchmarks.instance_generator import generate_large_instance
 from synaps.solvers.alns_solver import AlnsSolver
 

@@ -9,6 +9,7 @@ Language: **EN** | [RU](README_RU.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Code style: Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Type checked: mypy](https://img.shields.io/badge/type%20checked-mypy-%231D9BF0)](https://mypy-lang.org/)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/KonkovDV/SynAPS/badge)](https://scorecard.dev/viewer/?uri=github.com/KonkovDV/SynAPS)
 [![CITATION.cff](https://img.shields.io/badge/cite-CITATION.cff-orange.svg)](CITATION.cff)
 
 SynAPS is for teams that need not just a schedule, but an explainable and reproducible schedule.
@@ -82,11 +83,23 @@ What is implemented and verified in this repository:
 - Property-based budget predicate tests (`tests/test_rhc_budget_property.py`) validate monotonicity, non-negativity, and cap-reduction invariants of the ALNS inner-window budget scaler via Hypothesis
 - The TypeScript control-plane validates JSON contracts, executes the real Python kernel for solve/repair, and CI bootstraps the Python runtime before `control-plane` integration tests
 - Pinned GitHub Actions security workflows cover Python, TypeScript, and Rust surfaces via CodeQL, and publish OSSF Scorecards SARIF results
+- **Supply-chain hardening (2026-05-18)**: All third-party GitHub Actions are pinned to full commit SHAs; release artifacts carry signed provenance attestations via `actions/attest-build-provenance`; Dependabot monitors Python, GitHub Actions, npm (control-plane), and Cargo (native Rust) with grouped updates
+- **CI benchmark-smoke job**: Every PR validates end-to-end solver execution on a tiny deterministic instance (`benchmark/instances/tiny_3x3.json`)
+- **Installed-wheel smoke tests**: `tests/smoke/test_installed_wheel.py` verifies package import, portfolio entrypoints, and solver registry accessibility after a clean install
+- **Reproducible benchmark protocol**: `benchmark/BENCHMARK_EVIDENCE_50K_2026_05_18.md` defines canonical commands, hardware assumptions, policy profiles, failure taxonomy, and non-claims for 50K/100K evidence
+- **Supply-chain artifacts**: Runtime lock (`requirements-lock.txt`), dev lock (`requirements-dev-lock.txt`), and CycloneDX SBOM (`sbom.json`) are generated per release
 
 What is not claimed:
 
 - full industrial validation on a live factory
-- guaranteed full feasible 50K solve within the current study timeboxes
+- guaranteed full feasible 50K solve under the historical ALNS/GREEDY study timeboxes without the coverage-complete path
+
+Coverage-complete path (2026-07):
+
+- Use portfolio config `RHC-GREEDY-COVER` (or `RhcPolicy.GREEDY_COVER`) when the KPI is **full feasible coverage**, not ALNS search quality.
+- Mechanism: reserve ~20% wall-time for residual greedy fill, soft-overrun after window budget, SDST-aware planning horizon on new `industrial-*` instances, optional placement-horizon extension.
+- Probe evidence on regenerated `industrial-10k` (~11k ops): `scheduled_ratio=1.0`, `status=feasible` in ~194s wall (90s limit + soft overrun) via `scripts/probe_coverage_10k.py`.
+- Full `industrial-50k` (~54k ops) still needs the default ~1800s cover budget for a customer-facing completeness promise; ALNS remains a refine/quality lane on partial or seeded plans.
 
 May 2026 audit re-verification:
 
@@ -131,6 +144,7 @@ Key comparison points:
 - Fresh post-critical-fixes `RHC-ALNS|throughput` in `2026-05-01-rhc-50k-audit-v3-post-critical-fixes` reports `mean_scheduled_ratio = 0.1374`, `mean_makespan_minutes = 4295.25`, `mean_inner_fallback_ratio = 0.3333`, `search_active_window_rate = 0.6667`, and `native_acceleration_rate = 1.0`.
 - Fresh post-critical-fixes `RHC-GREEDY|throughput` in `2026-05-01-rhc-50k-audit-v3-post-critical-fixes` reports `mean_scheduled_ratio = 0.4184`, `mean_makespan_minutes = 13622.18`, and `native_acceleration_rate = 1.0`.
 - **May 2026 improvement session** (`benchmark/studies/2026-05-12-quick-evidence`): After Stages A–E implementation (7 new destroy operators, incremental evaluation, native scoring, cross-window learning, operator weight persistence), `RHC-GREEDY` schedules `0.3551` ratio in `600.9s`, `RHC-ALNS` schedules `0.3871` ratio in `1201.1s`. Both still hit time limits. Key finding: `inner_fallback_ratio = 1.0` on ALNS — initial seed generation in Python consumes the entire per-window budget, preventing ALNS iterations from running. Next priority: native greedy repair (Task 20).
+- **2026-05-18 3-seed matrix attempt**: `benchmark/BENCHMARK_EVIDENCE_50K_2026_05_18.md` documents a full matrix attempt (seeds 42/123/999, both solvers, throughput lane). Outcome: single record generated (seed 42, RHC-GREEDY) with `solver_error` before telemetry capture. No inter-seed CV computable. Confirms 50K remains a stress boundary, not a feasibility target, under the current `industrial-50k` profile.
 - The unresolved research problem is now split in two: the fresh 50K rerun improved coverage under a native-backed environment but did not reach feasibility, while `100k+` has now recovered stable bounded fallback parity but still lacks productive active-search yield.
 
 ## 100K+ Snapshot (staged harness)
@@ -150,6 +164,7 @@ What the latest audit established:
 - `300k` and `500k` are presently blocked by `operations_exceed_model_limit`, not by projected RAM pressure
 - The 2026-05-15 current-head bounded 100K audit: `RHC-ALNS` schedules `7279/100000` operations in `90.263s`, while same-run `RHC-GREEDY` schedules `7509/100000` in `90.302s`. Parity confirmed.  `windows_observed = 2`, `fallback_repair_skipped = false`, and no `solver_metadata.error`.
 - That result does not yet establish productive active ALNS search at `100k`: `search_active_window_rate` is still `0.0` and `inner_fallback_ratio` remains `1.0`. It does, however, close the bounded-stability acceptance gate.
+- **2026-05-18 bounded rerun**: `benchmark/BENCHMARK_EVIDENCE_50K_2026_05_18.md` documents a fresh 100K bounded run (`--max-windows-override 2`). Window 1 ALNS completed 100 iterations with 6 violations remaining; 98,067 ops unscheduled after 2 windows; fallback greedy repair triggered. Confirms active-search yield at 100K remains the dominant engineering boundary.
 - The next hard engineering boundary is split: model/schema capacity still blocks `300k` and `500k`, while `100k` and `200k` now need active-search yield improvement and simpler admission/seed policies.
 
 ## Solver Portfolio

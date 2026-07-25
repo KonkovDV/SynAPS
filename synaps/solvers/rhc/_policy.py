@@ -25,6 +25,7 @@ class RhcPolicy(Enum):
     SEARCH_ENTRY = "search-entry"  # 100K tight-geometry profile
     BOUNDED_100K = "bounded-100k"  # aggressive 5h/90m ALNS
     FAST_50K = "fast-50k"  # 50K wall-time optimized
+    GREEDY_COVER = "greedy-cover"  # coverage-complete constructive path
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +59,10 @@ class BudgetSpec:
     alns_dynamic_repair_time_limit_max_s: float = 5.0
     alns_presearch_max_window_ops: int = 5000
     search_budget_reservation_s: float = 10.0
+    # Hold wall-time for residual coverage greedy after windows stop.
+    coverage_time_reserve_fraction: float = 0.0
+    coverage_time_reserve_min_s: float = 0.0
+    coverage_time_reserve_max_s: float = 300.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,11 +70,16 @@ class GuardSpec:
     """Pre-search and fallback guard-rails."""
 
     fallback_repair_enabled: bool = True
+    # When True, residual greedy may overrun time_limit by soft_budget.
+    fallback_repair_on_timeout: bool = True
+    fallback_repair_soft_budget_s: float = 30.0
     backtracking_enabled: bool = True
     backtracking_tail_minutes: float = 60.0
     backtracking_max_ops: int = 24
     inner_fallback_kpi_threshold: float = 0.10
     inner_solver_min_budget_s: float = 0.0
+    # Multiply declared planning horizon for slot clipping (coverage ceiling).
+    coverage_horizon_extension_factor: float = 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -253,6 +263,41 @@ PRESETS: dict[RhcPolicy, RhcPolicySpec] = {
             hybrid_inner_kwargs={"num_workers": 4},
         ),
     ),
+    # GREEDY_COVER: constructive coverage-first path for 50K+ completeness.
+    # Reserves wall-time for residual greedy; soft-overrun allowed so leftover
+    # ops are not abandoned solely because windows burned the clock.
+    RhcPolicy.GREEDY_COVER: RhcPolicySpec(
+        admission=AdmissionSpec(
+            window_minutes=480,
+            overlap_minutes=120,
+            max_ops_per_window=10000,
+            candidate_pool_factor=2.0,
+            due_admission_horizon_factor=6.0,
+            admission_tail_weight=0.5,
+            progressive_admission_relaxation_enabled=True,
+            precedence_ready_candidate_filter_enabled=False,
+            admission_relaxation_min_fill_ratio=0.30,
+            admission_full_scan_enabled=True,
+        ),
+        budget=BudgetSpec(
+            coverage_time_reserve_fraction=0.20,
+            coverage_time_reserve_min_s=60.0,
+            coverage_time_reserve_max_s=300.0,
+        ),
+        guards=GuardSpec(
+            fallback_repair_enabled=True,
+            fallback_repair_on_timeout=True,
+            fallback_repair_soft_budget_s=120.0,
+            backtracking_enabled=False,
+            coverage_horizon_extension_factor=1.0,
+        ),
+        inner=InnerSpec(
+            selected_inner_solver_name="greedy",
+            inner_window_time_fraction=0.95,
+            inner_kwargs={},
+            hybrid_inner_routing_enabled=False,
+        ),
+    ),
 }
 
 
@@ -300,13 +345,20 @@ def build_solve_kwargs_from_spec(
         "alns_dynamic_repair_time_limit_max_s": spec.budget.alns_dynamic_repair_time_limit_max_s,
         "alns_presearch_max_window_ops": spec.budget.alns_presearch_max_window_ops,
         "search_budget_reservation_s": spec.budget.search_budget_reservation_s,
+        "coverage_time_reserve_fraction": spec.budget.coverage_time_reserve_fraction,
+        "coverage_time_reserve_min_s": spec.budget.coverage_time_reserve_min_s,
+        "coverage_time_reserve_max_s": spec.budget.coverage_time_reserve_max_s,
+        "window_bound_inner_horizon": True,
         # guards
         "fallback_repair_enabled": spec.guards.fallback_repair_enabled,
+        "fallback_repair_on_timeout": spec.guards.fallback_repair_on_timeout,
+        "fallback_repair_soft_budget_s": spec.guards.fallback_repair_soft_budget_s,
         "backtracking_enabled": spec.guards.backtracking_enabled,
         "backtracking_tail_minutes": spec.guards.backtracking_tail_minutes,
         "backtracking_max_ops": spec.guards.backtracking_max_ops,
         "inner_fallback_kpi_threshold": spec.guards.inner_fallback_kpi_threshold,
         "inner_solver_min_budget_s": spec.guards.inner_solver_min_budget_s,
+        "coverage_horizon_extension_factor": spec.guards.coverage_horizon_extension_factor,
         # inner
         "inner_solver": spec.inner.selected_inner_solver_name,
         "inner_window_time_fraction": spec.inner.inner_window_time_fraction,

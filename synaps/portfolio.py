@@ -8,14 +8,17 @@ explicit overrides are supported, and execution provenance is written back into
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Any
 
+from synaps.guards import ResourceLimits, SolverMemoryError, guarded_solve
 from synaps.instrumentation import (
     record_feasibility_event,
     record_routing_event,
     record_solve_event,
 )
 from synaps.logging import get_logger
+from synaps.model import ScheduleResult, SolverErrorCategory, SolverStatus
 from synaps.problem_profile import build_problem_profile
 from synaps.solvers.incremental_repair import IncrementalRepair
 from synaps.solvers.registry import create_solver
@@ -31,7 +34,8 @@ from synaps.validation import verify_schedule_result
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from synaps.model import Assignment, ScheduleProblem, ScheduleResult
+    from synaps.model import Assignment, ScheduleProblem
+    from synaps.solvers import BaseSolver
 
 _log = get_logger("synaps.portfolio")
 
@@ -49,6 +53,87 @@ def _merge_kwargs(
         merged.update(override_kwargs)
     return merged
 
+
+def _parse_positive_int_env(name: str) -> int | None:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        _log.warning("invalid_resource_guard_env", name=name, value=raw)
+        return None
+    return value if value > 0 else None
+
+
+def resolve_portfolio_resource_limits(
+    *,
+    preferred_max_latency_s: int | None = None,
+    solve_kwargs: Mapping[str, object] | None = None,
+) -> ResourceLimits | None:
+    """Build optional :class:`ResourceLimits` for portfolio solve/repair.
+
+    Guards activate when any of the following is set:
+
+    - ``SYNAPS_SOLVE_TIMEOUT_S``
+    - ``SYNAPS_SOLVE_MEMORY_LIMIT_MB``
+    - ``SYNAPS_ENABLE_RESOURCE_GUARDS=1`` (uses kwargs / preferred latency / 600s ceiling)
+    - ``preferred_max_latency_s`` on the routing context
+
+    When inactive, returns ``None`` so :func:`guarded_solve` is a pure passthrough.
+    """
+
+    env_timeout = _parse_positive_int_env("SYNAPS_SOLVE_TIMEOUT_S")
+    env_memory = _parse_positive_int_env("SYNAPS_SOLVE_MEMORY_LIMIT_MB")
+    guards_forced = os.getenv("SYNAPS_ENABLE_RESOURCE_GUARDS", "").strip() == "1"
+
+    kwargs_timeout: int | None = None
+    if solve_kwargs is not None:
+        raw_limit = solve_kwargs.get("time_limit_s")
+        if isinstance(raw_limit, int) and raw_limit > 0:
+            kwargs_timeout = raw_limit
+        elif isinstance(raw_limit, float) and raw_limit > 0:
+            kwargs_timeout = int(raw_limit)
+
+    candidates = [
+        value
+        for value in (
+            env_timeout,
+            preferred_max_latency_s,
+            kwargs_timeout if guards_forced else None,
+        )
+        if isinstance(value, int) and value > 0
+    ]
+    timeout_s = min(candidates) if candidates else (600 if guards_forced else None)
+
+    if timeout_s is None and env_memory is None and not guards_forced:
+        return None
+
+    fail_open = os.getenv("SYNAPS_RESOURCE_GUARDS_FAIL_OPEN", "1").strip() != "0"
+    return ResourceLimits(
+        timeout_s=timeout_s,
+        memory_limit_mb=env_memory,
+        fail_open=fail_open,
+    )
+
+
+def _run_guarded_solve(
+    solver: BaseSolver,
+    problem: ScheduleProblem,
+    *,
+    limits: ResourceLimits | None,
+    solve_kwargs: Mapping[str, object],
+) -> ScheduleResult:
+    try:
+        return guarded_solve(solver, problem, limits=limits, **dict(solve_kwargs))
+    except SolverMemoryError as exc:
+        _log.error("portfolio_memory_guard_triggered", error=str(exc), solver=solver.name)
+        return ScheduleResult(
+            solver_name=solver.name,
+            status=SolverStatus.ERROR,
+            error_category=SolverErrorCategory.INTERNAL_ERROR,
+            metadata={"guard_error": str(exc), "guard_kind": "memory"},
+        )
 
 def _attach_portfolio_metadata(
     result: ScheduleResult,
@@ -166,7 +251,17 @@ def solve_schedule(
         reason=routing_reason,
     )
 
-    result = solver.solve(problem, **_merge_kwargs(default_kwargs, solve_kwargs))
+    merged_kwargs = _merge_kwargs(default_kwargs, solve_kwargs)
+    limits = resolve_portfolio_resource_limits(
+        preferred_max_latency_s=ctx.preferred_max_latency_s,
+        solve_kwargs=merged_kwargs,
+    )
+    result = _run_guarded_solve(
+        solver,
+        problem,
+        limits=limits,
+        solve_kwargs=merged_kwargs,
+    )
 
     _log.info(
         "solve_completed",
@@ -174,6 +269,7 @@ def solve_schedule(
         status=result.status.value,
         duration_ms=result.duration_ms,
         assignment_count=len(result.assignments),
+        resource_guards_active=limits is not None,
     )
     record_solve_event(
         selected_solver_config,
@@ -182,7 +278,16 @@ def solve_schedule(
         op_count=profile.operation_count,
     )
 
-    verification_details: dict[str, object] = {"problem_profile": profile.as_dict()}
+    verification_details: dict[str, object] = {
+        "problem_profile": profile.as_dict(),
+        "resource_guards_active": limits is not None,
+    }
+    if limits is not None:
+        verification_details["resource_limits"] = {
+            "timeout_s": limits.timeout_s,
+            "memory_limit_mb": limits.memory_limit_mb,
+            "fail_open": limits.fail_open,
+        }
     if verify_feasibility:
         verification = verify_schedule_result(problem, result)
         verification_details.update(
@@ -249,21 +354,26 @@ def repair_schedule(
         op_count=profile.operation_count,
     )
 
-    result = solver.solve(
+    merged_kwargs = _merge_kwargs(
+        {
+            "base_assignments": list(base_assignments),
+            "disrupted_op_ids": list(disrupted_op_ids),
+            "radius": applied_radius,
+        },
+        solve_kwargs,
+    )
+    limits = resolve_portfolio_resource_limits(solve_kwargs=merged_kwargs)
+    result = _run_guarded_solve(
+        solver,
         problem,
-        **_merge_kwargs(
-            {
-                "base_assignments": list(base_assignments),
-                "disrupted_op_ids": list(disrupted_op_ids),
-                "radius": applied_radius,
-            },
-            solve_kwargs,
-        ),
+        limits=limits,
+        solve_kwargs=merged_kwargs,
     )
     verification_details: dict[str, object] = {
         "applied_radius": applied_radius,
         "disrupted_operation_count": len(set(disrupted_op_ids)),
         "problem_profile": profile.as_dict(),
+        "resource_guards_active": limits is not None,
     }
     if verify_feasibility:
         verification = verify_schedule_result(problem, result)
@@ -300,5 +410,6 @@ __all__ = [
     "PortfolioValidationError",
     "recommend_repair_radius",
     "repair_schedule",
+    "resolve_portfolio_resource_limits",
     "solve_schedule",
 ]

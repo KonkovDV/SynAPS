@@ -2,7 +2,7 @@
 
 Runs 3 windows and captures inner_window_summaries timing breakdown.
 """
-import json
+
 import time
 
 from synaps.benchmarks.instance_generator import generate_large_instance
@@ -42,7 +42,9 @@ for i, s in enumerate(summaries):
     print(f"  iterations_completed: {s.get('iterations_completed', '?')}")
     print(f"  improvements: {s.get('improvements', '?')}")
     print(f"  inner_time_limit_s: {s.get('inner_time_limit_s', '?')}")
-    print(f"  time_limit_exhausted_before_search: {s.get('time_limit_exhausted_before_search', '?')}")
+    print(
+        f"  time_limit_exhausted_before_search: {s.get('time_limit_exhausted_before_search', '?')}"
+    )
     print(f"  budget_guard_skipped: {s.get('budget_guard_skipped_initial_search', '?')}")
     print(f"  native_initial_seed_used: {s.get('native_initial_seed_used', '?')}")
     print(f"  native_initial_seed_ms: {s.get('native_initial_seed_ms', '?')}")
