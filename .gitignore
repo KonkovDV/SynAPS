@@ -46,24 +46,26 @@ venv/
 env/
 .python-version
 
-# Habr drafts (private)
-docs/
-docs/habr/
-habr-article-*.md
-
-# Local markdown dumps moved from repo root
-docs/_extra/
-
-# Benchmark outputs
-benchmark/results/
-benchmark/studies/
-benchmark/instances/
-
-# Native wheel build directory (CI artifact)
-native-dist/
+# Local report dumps / scratch outputs (never publish)
+var/
 cache/
 .benchmarks/
 /test_results.txt
+/regression_run.txt
+
+# Local study runs and generated instances (fixtures under instances/ stay tracked)
+benchmark/results/
+benchmark/studies/
+!benchmark/studies/.gitkeep
+
+# Native wheel build directory (CI artifact)
+native-dist/
+
+# Habr / partner drafts (not part of the public docs tree)
+docs/habr/
+docs/_extra/
+habr-article-*.md
+archive/
 
 # Temporary / agent scratch files
 *.log
@@ -76,10 +78,10 @@ cache/
 /_*.bat
 /_*.py
 /_run_*.py
+/__*.txt
 /.git-status-*.txt
-
-# Local-only markdown archive (not published)
-archive/
+/.tmp_*
+/_tmp_*
 
 # Scratch / agent temporary scripts (never commit)
 apply_*.py
@@ -91,3 +93,25 @@ inspect_rhc*.py
 
 # Upstream reference snapshots (local donor exploration, never committed)
 _synaps_upstream_ref/
+
+# Local session plans / audits (remain on disk; not published to GitHub)
+/ALNS_*.md
+/AUDIT_*.md
+/HYPERDEEP_*.md
+/NEXT_WAVE_*.md
+/REGRESSION_CLOSURE_*.md
+/SYNAPS_RHC_*.md
+/regression_run.txt
+docs/audit/
+docs/HYPERDEEP_*.md
+docs/PUBLIC_GITHUB_POST_PUSH_CHECKLIST.md
+docs/architecture/INTEGRATION_AND_UI_ARCHITECTURE_2026.md
+docs/architecture/OBSERVABILITY_PRODUCTION_STANDARDS_2026.md
+docs/architecture/monitoring/
+docs/research/GNN_ML4CO_ARCHITECTURE_2026.md
+docs/research/RHC_MATH_FORMALIZATION_2026.md
+docs/research/RUST_PYO3_ACCELERATION_2026.md
+docs/research/SYNAPS_SILICON_HPC_ROADMAP_2026.md
+research/50k_scale_academic_audit.md
+scripts/check_native_seed_debug*.py
+scripts/diag_native_seed.py

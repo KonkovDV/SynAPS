@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Public GitHub surface hygiene: removed session audits/plans, Habr drafts, study JSON dumps, and debug scripts from the tracked tree; README trimmed to install / quick start / portfolio / claim boundary.
+- `.gitignore` no longer blanket-ignores `docs/` or `benchmark/instances/`; local studies/audits stay on disk but unpublished.
+
 ### Added
 
 - `RHC-GREEDY-COVER` portfolio config and `RhcPolicy.GREEDY_COVER` preset for coverage-complete constructive solves (time reserve, soft overrun, horizon extension).

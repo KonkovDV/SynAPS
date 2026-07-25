@@ -1,16 +1,14 @@
-# SynAPS Documentation Map
+# SynAPS Documentation
 
 Language: **EN** | [RU](README_RU.md)
 
-This directory is the public router for SynAPS technical documentation.
+Public technical docs for the scheduling core.
 
-Start here if you want the larger system context around the current scheduling core.
+## Start here
 
-## Fast paths
-
-1. Start with [../README.md](../README.md) for the repository boundary and quick-start commands.
-2. Go to [../benchmark/README.md](../benchmark/README.md) if you want reproducible solver evidence.
-3. Go to [../control-plane/README.md](../control-plane/README.md) if you want the TypeScript runtime boundary.
+1. [../README.md](../README.md) — install, quick start, portfolio, claim boundary
+2. [../benchmark/README.md](../benchmark/README.md) — reproducible evidence
+3. [../control-plane/README.md](../control-plane/README.md) — TypeScript BFF
 
 ## Architecture
 
@@ -20,52 +18,24 @@ Start here if you want the larger system context around the current scheduling c
 - [04_DATA_MODEL.md](architecture/04_DATA_MODEL.md)
 - [05_DEPLOYMENT.md](architecture/05_DEPLOYMENT.md)
 - [06_LANGUAGE_AND_RUNTIME_STRATEGY.md](architecture/06_LANGUAGE_AND_RUNTIME_STRATEGY.md)
+- [06_BENCHMARK_REPRODUCIBILITY_AND_ROBUSTNESS.md](architecture/06_BENCHMARK_REPRODUCIBILITY_AND_ROBUSTNESS.md)
 - [07_RUNTIME_CONTRACT.md](architecture/07_RUNTIME_CONTRACT.md)
 - [08_HPC_SILICON_OPTIMIZATION_ROADMAP.md](architecture/08_HPC_SILICON_OPTIMIZATION_ROADMAP.md)
 - [LEVEL2_RUSTIFICATION.md](architecture/LEVEL2_RUSTIFICATION.md)
 
-## Domain Parametrization
+## Domains
 
 - [DOMAIN_CATALOG.md](domains/DOMAIN_CATALOG.md)
-- [aerospace.md](domains/aerospace.md)
-- [electronics.md](domains/electronics.md)
-- [energy.md](domains/energy.md)
-- [food_beverage.md](domains/food_beverage.md)
-- [logistics.md](domains/logistics.md)
-- [metallurgy.md](domains/metallurgy.md)
-- [pharmaceutical.md](domains/pharmaceutical.md)
-- [data_center.md](domains/data_center.md)
+- Vertical notes under [`domains/`](domains/)
 
-## Near-Term Evolution
+## Research
 
-- [V1_DIGITAL_TWIN_DES.md](evolution/V1_DIGITAL_TWIN_DES.md)
+- [SYNAPS_OSS_STACK_2026.md](research/SYNAPS_OSS_STACK_2026.md)
+- [RHC_500K_SCALING_PROTOCOL_2026.md](research/RHC_500K_SCALING_PROTOCOL_2026.md)
 
-## Research Notes
+## Governance
 
-- [SYNAPS_OSS_STACK_2026.md](../research/SYNAPS_OSS_STACK_2026.md)
-
-Speculative blueprint narratives are no longer part of the active public research route.
-
-## Audit Reports
-
-- [ACADEMIC_TECHNICAL_REPORT_2026_04.md](audit/ACADEMIC_TECHNICAL_REPORT_2026_04.md) — comprehensive academic-level audit: formal problem classification, solver portfolio analysis, competitive positioning, and actionable recommendations.
-- [SYNAPS_AUDIT_DELTA_EXECUTION_PLAN_2026_04_25.md](audit/SYNAPS_AUDIT_DELTA_EXECUTION_PLAN_2026_04_25.md) — audit delta that reconciles April 2026 report claims with the live repository and records the executed next-step plan.
-- [SYNAPS_UPDATE_AUDIT_2026_04_25.md](audit/SYNAPS_UPDATE_AUDIT_2026_04_25.md) — post-audit implementation note for RHC admission escalation and ALNS repair-budget autoscaling.
-- [SYNAPS_RECHECK_AUDIT_2026_04_27.md](audit/SYNAPS_RECHECK_AUDIT_2026_04_27.md) — current-head recheck after the public `RHC-ALNS` cleanup and staged `100k+` geometry retune, with external ALNS / CP-SAT fact-check and updated scale-boundary verdict.
-- [SYNAPS_UPDATED_STRATEGIC_RECOMMENDATIONS_2026_04.md](audit/SYNAPS_UPDATED_STRATEGIC_RECOMMENDATIONS_2026_04.md) — updated strategic recommendations aligned with April 2026 trends, with explicit implemented/target boundaries, KPI, and kill-switch policy.
-- [SYNAPS_ACADEMIC_AUDIT_COMPREHENSIVE_RU.md](audit/SYNAPS_ACADEMIC_AUDIT_COMPREHENSIVE_RU.md) — architecture audit: incremental repair, feasibility checker, ML advisory, target OSS/OSH stack (RU).
-- [SYNAPS_CRITICAL_GAPS_AND_OPTIMIZATIONS_RU.md](audit/SYNAPS_CRITICAL_GAPS_AND_OPTIMIZATIONS_RU.md) — 5 architectural gaps with academic refs and optimization roadmap (RU). Gap #1 (LBBD parallelism) already closed.
-- [SYNAPS_VS_INFIMUM_MOSKABEL_STRATEGY_RU.md](audit/SYNAPS_VS_INFIMUM_MOSKABEL_STRATEGY_RU.md) — SynAPS vs APS Infimum: algorithmic comparison for cable manufacturing (RU).
-
-## Validation and Evidence
-
-- [benchmark/README.md](../benchmark/README.md)
-- [benchmark/README_RU.md](../benchmark/README_RU.md)
-- [control-plane/README.md](../control-plane/README.md)
-- [control-plane/README_RU.md](../control-plane/README_RU.md)
-- [README.md](../README.md)
-- [PUBLIC_GITHUB_POST_PUSH_CHECKLIST.md](PUBLIC_GITHUB_POST_PUSH_CHECKLIST.md)
-- [CONTRIBUTING.md](../CONTRIBUTING.md)
-- [SECURITY.md](../SECURITY.md)
-
-The public router intentionally excludes local-only partner materials.
+- [../CONTRIBUTING.md](../CONTRIBUTING.md)
+- [../SECURITY.md](../SECURITY.md)
+- [../CHANGELOG.md](../CHANGELOG.md)
+- [../RELEASE_POLICY.md](../RELEASE_POLICY.md)
