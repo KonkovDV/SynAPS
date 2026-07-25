@@ -362,7 +362,9 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
         },
         description=(
             "Coverage-first RHC with greedy inner solver: reserves wall-time for residual "
-            "fill, soft-overrun on timeout, and extended placement horizon for 50K+ completeness."
+            "fill and optional soft-overrun on timeout. Default COVER preset keeps "
+            "coverage_horizon_extension_factor=1.0 (declared planning horizon); extension "
+            "is opt-in and does not rewrite verified_feasible."
         ),
     ),
 }

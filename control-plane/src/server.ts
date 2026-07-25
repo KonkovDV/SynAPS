@@ -11,12 +11,21 @@ async function main(): Promise<void> {
     normalizedHost === "localhost" ||
     normalizedHost === "::1";
   const hasApiKey = Boolean(process.env.SYNAPS_CONTROL_PLANE_API_KEY?.trim());
+  const hasApiKeyMap = Boolean(process.env.SYNAPS_CONTROL_PLANE_API_KEY_MAP?.trim());
   const allowAnonymous = process.env.SYNAPS_CONTROL_PLANE_ALLOW_ANONYMOUS === "1";
 
-  if (!isLoopback && !hasApiKey && !allowAnonymous) {
+  // Anonymous access is loopback-only. Public binds must authenticate.
+  if (!isLoopback && allowAnonymous) {
+    throw new Error(
+      "Refusing SYNAPS_CONTROL_PLANE_ALLOW_ANONYMOUS=1 when binding beyond loopback; " +
+        "set SYNAPS_CONTROL_PLANE_API_KEY or SYNAPS_CONTROL_PLANE_API_KEY_MAP instead",
+    );
+  }
+
+  if (!isLoopback && !hasApiKey && !hasApiKeyMap) {
     throw new Error(
       "Refusing to bind SynAPS control-plane beyond loopback without " +
-        "SYNAPS_CONTROL_PLANE_API_KEY (or SYNAPS_CONTROL_PLANE_ALLOW_ANONYMOUS=1)",
+        "SYNAPS_CONTROL_PLANE_API_KEY or SYNAPS_CONTROL_PLANE_API_KEY_MAP",
     );
   }
 

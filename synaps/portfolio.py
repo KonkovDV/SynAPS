@@ -109,7 +109,10 @@ def resolve_portfolio_resource_limits(
     if timeout_s is None and env_memory is None and not guards_forced:
         return None
 
-    fail_open = os.getenv("SYNAPS_RESOURCE_GUARDS_FAIL_OPEN", "1").strip() != "0"
+    # When resource guards are forced (BFF / SYNAPS_ENABLE_RESOURCE_GUARDS),
+    # default fail-closed so unavailable RSS cannot silently bypass the limit.
+    default_fail_open = "0" if guards_forced else "1"
+    fail_open = os.getenv("SYNAPS_RESOURCE_GUARDS_FAIL_OPEN", default_fail_open).strip() != "0"
     return ResourceLimits(
         timeout_s=timeout_s,
         memory_limit_mb=env_memory,

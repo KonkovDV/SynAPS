@@ -98,6 +98,7 @@ test("python bridge environment allowlist keeps SynAPS and runtime variables onl
   assert.equal(env.SYNAPS_PYTHON_EXEC_TIMEOUT_MS, "1000");
   assert.equal(env.SYNAPS_DISABLE_NATIVE_ACCELERATION, "1");
   assert.equal(env.SYNAPS_ENABLE_RESOURCE_GUARDS, "1");
+  assert.equal(env.SYNAPS_RESOURCE_GUARDS_FAIL_OPEN, "0");
   assert.ok(Number(env.SYNAPS_SOLVE_TIMEOUT_S) > 0);
   assert.equal(env.SYNAPS_CONTROL_PLANE_API_KEY, undefined);
   assert.equal(env.SYNAPS_CONTROL_PLANE_RATE_LIMIT_MAX, undefined);
@@ -127,6 +128,32 @@ test("python bridge defaults to a positive execution timeout", () => {
       delete process.env.SYNAPS_PYTHON_EXEC_TIMEOUT_MS;
     } else {
       process.env.SYNAPS_PYTHON_EXEC_TIMEOUT_MS = previous;
+    }
+  }
+});
+
+test("python bridge refuses TIMEOUT_MS=0 without explicit unlimited opt-in", () => {
+  const previousTimeout = process.env.SYNAPS_PYTHON_EXEC_TIMEOUT_MS;
+  const previousAllow = process.env.SYNAPS_PYTHON_EXEC_ALLOW_UNLIMITED_TIMEOUT;
+  process.env.SYNAPS_PYTHON_EXEC_TIMEOUT_MS = "0";
+  delete process.env.SYNAPS_PYTHON_EXEC_ALLOW_UNLIMITED_TIMEOUT;
+  try {
+    const limited = _testInternals.resolveExecutionLimits();
+    assert.equal(limited.timeoutMs, 300_000);
+
+    process.env.SYNAPS_PYTHON_EXEC_ALLOW_UNLIMITED_TIMEOUT = "1";
+    const unlimited = _testInternals.resolveExecutionLimits();
+    assert.equal(unlimited.timeoutMs, 0);
+  } finally {
+    if (previousTimeout === undefined) {
+      delete process.env.SYNAPS_PYTHON_EXEC_TIMEOUT_MS;
+    } else {
+      process.env.SYNAPS_PYTHON_EXEC_TIMEOUT_MS = previousTimeout;
+    }
+    if (previousAllow === undefined) {
+      delete process.env.SYNAPS_PYTHON_EXEC_ALLOW_UNLIMITED_TIMEOUT;
+    } else {
+      process.env.SYNAPS_PYTHON_EXEC_ALLOW_UNLIMITED_TIMEOUT = previousAllow;
     }
   }
 });

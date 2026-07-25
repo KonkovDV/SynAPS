@@ -34,6 +34,13 @@ export interface BuildControlPlaneAppOptions {
   metrics?: SynapsMetricsRegistry;
   solveJobs?: SynapsSolveJobStore;
   apiKey?: string | null;
+  /** Maps API key → tenant id. When set, tenant is derived from the presented key. */
+  apiKeyMap?: Record<string, string> | null;
+  /**
+   * When true, allow `x-tenant-id` for callers authenticated with the shared
+   * primary API key (no key→tenant map entry). Default false closes spoofing.
+   */
+  trustTenantHeader?: boolean;
   bodyLimitBytes?: number;
   rateLimit?: {
     maxRequests: number;
@@ -290,6 +297,58 @@ function resolveControlPlaneApiKey(optionValue: string | null | undefined): stri
   return value && value.trim().length > 0 ? value : null;
 }
 
+function resolveControlPlaneApiKeyMap(
+  optionValue: Record<string, string> | null | undefined,
+): Map<string, string> {
+  if (optionValue !== undefined) {
+    const map = new Map<string, string>();
+    if (optionValue === null) {
+      return map;
+    }
+    for (const [key, tenant] of Object.entries(optionValue)) {
+      const trimmedKey = key.trim();
+      const trimmedTenant = tenant.trim();
+      if (trimmedKey.length > 0 && trimmedTenant.length > 0) {
+        map.set(trimmedKey, trimmedTenant);
+      }
+    }
+    return map;
+  }
+
+  const raw = process.env.SYNAPS_CONTROL_PLANE_API_KEY_MAP?.trim();
+  if (!raw) {
+    return new Map();
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("API key map must be a JSON object of { apiKey: tenantId }");
+    }
+    const map = new Map<string, string>();
+    for (const [key, tenant] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof tenant !== "string") {
+        continue;
+      }
+      const trimmedKey = key.trim();
+      const trimmedTenant = tenant.trim();
+      if (trimmedKey.length > 0 && trimmedTenant.length > 0) {
+        map.set(trimmedKey, trimmedTenant);
+      }
+    }
+    return map;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid SYNAPS_CONTROL_PLANE_API_KEY_MAP: ${message}`);
+  }
+}
+
+function resolveTrustTenantHeader(optionValue: boolean | undefined): boolean {
+  if (optionValue !== undefined) {
+    return optionValue;
+  }
+  return process.env.SYNAPS_CONTROL_PLANE_TRUST_TENANT_HEADER === "1";
+}
+
 function resolveBodyLimitBytes(optionValue: number | undefined): number {
   if (optionValue !== undefined && Number.isFinite(optionValue) && optionValue > 0) {
     return Math.floor(optionValue);
@@ -315,18 +374,28 @@ function resolveRateLimit(
   };
 }
 
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  return (
+    normalized === "127.0.0.1" ||
+    normalized === "localhost" ||
+    normalized === "::1" ||
+    normalized === ""
+  );
+}
+
 function resolveRequireAuth(): boolean {
   if (process.env.SYNAPS_CONTROL_PLANE_REQUIRE_AUTH === "1") {
     return true;
   }
-  if (process.env.SYNAPS_CONTROL_PLANE_ALLOW_ANONYMOUS === "1") {
+  // ALLOW_ANONYMOUS is honored only on loopback; public binds always require auth.
+  if (
+    process.env.SYNAPS_CONTROL_PLANE_ALLOW_ANONYMOUS === "1" &&
+    isLoopbackHost(process.env.HOST ?? "127.0.0.1")
+  ) {
     return false;
   }
-  // Fail-closed when binding beyond loopback without an explicit anonymous opt-in.
-  const host = (process.env.HOST ?? "127.0.0.1").trim().toLowerCase();
-  const isLoopback =
-    host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "";
-  return !isLoopback;
+  return !isLoopbackHost(process.env.HOST ?? "127.0.0.1");
 }
 
 function rateLimitBucketKey(request: {
@@ -356,6 +425,40 @@ function matchesControlPlaneApiKey(
   );
 }
 
+function authenticatePresentedApiKey(
+  presentedApiKey: string | null,
+  primaryApiKey: string | null,
+  apiKeyMap: Map<string, string>,
+): boolean {
+  if (presentedApiKey === null) {
+    return false;
+  }
+  if (primaryApiKey !== null && matchesControlPlaneApiKey(presentedApiKey, primaryApiKey)) {
+    return true;
+  }
+  for (const mappedKey of apiKeyMap.keys()) {
+    if (matchesControlPlaneApiKey(presentedApiKey, mappedKey)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function resolveMappedTenant(
+  presentedApiKey: string | null,
+  apiKeyMap: Map<string, string>,
+): string | null {
+  if (presentedApiKey === null || apiKeyMap.size === 0) {
+    return null;
+  }
+  for (const [mappedKey, tenantId] of apiKeyMap) {
+    if (matchesControlPlaneApiKey(presentedApiKey, mappedKey)) {
+      return tenantId;
+    }
+  }
+  return null;
+}
+
 function extractPresentedApiKey(request: {
   headers: Record<string, string | string[] | undefined>;
 }): string | null {
@@ -371,7 +474,7 @@ function extractPresentedApiKey(request: {
   return bearerMatch?.[1] ?? null;
 }
 
-function extractTenantId(request: {
+function extractTenantHeader(request: {
   headers: Record<string, string | string[] | undefined>;
 }): string | null {
   const tenantHeader = request.headers["x-tenant-id"];
@@ -379,6 +482,78 @@ function extractTenantId(request: {
     return tenantHeader.trim();
   }
   return null;
+}
+
+/**
+ * Resolve the caller's tenant.
+ *
+ * Priority: API-key map (non-spoofable) → trusted header (opt-in / anonymous) → null.
+ */
+function resolveCallerTenantId(
+  request: {
+    headers: Record<string, string | string[] | undefined>;
+  },
+  options: {
+    primaryApiKey: string | null;
+    apiKeyMap: Map<string, string>;
+    trustTenantHeader: boolean;
+    authConfigured: boolean;
+  },
+): string | null {
+  const presented = extractPresentedApiKey(request);
+  const mappedTenant = resolveMappedTenant(presented, options.apiKeyMap);
+  if (mappedTenant !== null) {
+    return mappedTenant;
+  }
+
+  const headerTenant = extractTenantHeader(request);
+  if (headerTenant === null) {
+    return null;
+  }
+
+  // Anonymous / unauthenticated local mode: header is the only tenant signal.
+  if (!options.authConfigured) {
+    return headerTenant;
+  }
+
+  // Shared primary key without a map entry: header only when explicitly trusted.
+  if (
+    options.trustTenantHeader &&
+    options.primaryApiKey !== null &&
+    matchesControlPlaneApiKey(presented, options.primaryApiKey)
+  ) {
+    return headerTenant;
+  }
+
+  return null;
+}
+
+const SUCCESS_SOLVER_STATUSES = new Set(["feasible", "optimal"]);
+
+/**
+ * Gate assignments for non-success statuses so HTTP 200 cannot be mistaken for a
+ * plottable complete schedule. Annotate coverage_complete in metadata.
+ */
+function sanitizeSolveResponse(response: Record<string, unknown>): Record<string, unknown> {
+  const result = asObject(response.result);
+  const status = (asString(result.status) ?? "").toLowerCase();
+  const success = SUCCESS_SOLVER_STATUSES.has(status);
+  const metadata = asObject(result.metadata);
+  const assignments = Array.isArray(result.assignments) ? result.assignments : [];
+  const coverageComplete = success && metadata.coverage_complete !== false;
+
+  return {
+    ...response,
+    result: {
+      ...result,
+      assignments: success ? assignments : [],
+      metadata: {
+        ...metadata,
+        coverage_complete: coverageComplete,
+        assignments_stripped: !success,
+      },
+    },
+  };
 }
 
 function annotateResponseWithFallback(
@@ -460,9 +635,21 @@ export function buildControlPlaneApp(
   const solveJobs = options.solveJobs ?? new InMemorySolveJobStore();
   const openApiDocument = buildOpenApiDocument(schemas);
   const apiKey = resolveControlPlaneApiKey(options.apiKey);
+  const apiKeyMap = resolveControlPlaneApiKeyMap(options.apiKeyMap);
+  const trustTenantHeader = resolveTrustTenantHeader(options.trustTenantHeader);
+  const authConfigured = apiKey !== null || apiKeyMap.size > 0;
   const requireAuth = resolveRequireAuth();
   const rateLimit = resolveRateLimit(options.rateLimit);
   const rateLimitBuckets = new Map<string, { resetAt: number; count: number }>();
+  const resolveTenant = (request: {
+    headers: Record<string, string | string[] | undefined>;
+  }): string | null =>
+    resolveCallerTenantId(request, {
+      primaryApiKey: apiKey,
+      apiKeyMap,
+      trustTenantHeader,
+      authConfigured,
+    });
   const routeList = [
     "/healthz",
     "/metrics",
@@ -497,19 +684,20 @@ export function buildControlPlaneApp(
   app.addHook("onRequest", async (request, reply) => {
     const isHealthz = request.url === "/healthz" || request.url.startsWith("/healthz?");
 
-    if (requireAuth && apiKey === null && !isHealthz) {
+    if (requireAuth && !authConfigured && !isHealthz) {
       reply.code(503).send({
         statusCode: 503,
         error: "Service Unavailable",
         message:
-          "SynAPS control-plane requires SYNAPS_CONTROL_PLANE_API_KEY when auth is mandatory",
+          "SynAPS control-plane requires SYNAPS_CONTROL_PLANE_API_KEY or " +
+          "SYNAPS_CONTROL_PLANE_API_KEY_MAP when auth is mandatory",
       });
       return;
     }
 
-    if (apiKey !== null && !isHealthz) {
+    if (authConfigured && !isHealthz) {
       const presentedApiKey = extractPresentedApiKey(request);
-      if (!matchesControlPlaneApiKey(presentedApiKey, apiKey)) {
+      if (!authenticatePresentedApiKey(presentedApiKey, apiKey, apiKeyMap)) {
         reply.code(401).send({
           statusCode: 401,
           error: "Unauthorized",
@@ -755,7 +943,9 @@ export function buildControlPlaneApp(
           });
 
           return reply.code(200).send(
-            annotateResponseWithFallback(normalizedResponse, attempts),
+            sanitizeSolveResponse(
+              annotateResponseWithFallback(normalizedResponse, attempts),
+            ),
           );
         } catch (error) {
           if (error instanceof SynapsPythonBridgeError) {
@@ -871,7 +1061,7 @@ export function buildControlPlaneApp(
         problem: maybeApplyAclGuardrails(rawPayload.problem),
       };
       const requestId = asString(guardedPayload.request_id) ?? request.id;
-      const tenantId = extractTenantId(request);
+      const tenantId = resolveTenant(request);
 
       const job = (() => {
         try {
@@ -893,9 +1083,10 @@ export function buildControlPlaneApp(
                 };
               }
 
-              const result = asObject(asObject(response).result);
+              const sanitized = sanitizeSolveResponse(response as Record<string, unknown>);
+              const result = asObject(sanitized.result);
               metrics.recordScheduleResult(result);
-              return response as Record<string, unknown>;
+              return sanitized;
             },
             serializeError: serializeSolveJobError,
           });
@@ -940,10 +1131,10 @@ export function buildControlPlaneApp(
           message: "Solve job not found",
         });
       }
-      const callerTenantId = extractTenantId(request);
+      const callerTenantId = resolveTenant(request);
       // Strict tenant match: null job tenant is only readable by callers that
-      // also omit x-tenant-id (anonymous). Cross-tenant and tenant→anonymous
-      // reads are denied to close UUID-fishing disclosure.
+      // also resolve to null. Cross-tenant and tenant→anonymous reads are denied
+      // to close UUID-fishing disclosure.
       if (job.tenant_id !== callerTenantId) {
         return reply.code(403).send({
           statusCode: 403,
@@ -1022,7 +1213,7 @@ export function buildControlPlaneApp(
       });
       closeObservedSpan(rootSpan, "ok");
 
-      return reply.code(200).send(response);
+      return reply.code(200).send(sanitizeSolveResponse(response as Record<string, unknown>));
     },
   );
 

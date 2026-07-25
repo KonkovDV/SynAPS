@@ -47,23 +47,32 @@ Key env vars:
 - `SYNAPS_ENABLE_LIMIT_GUARDS=1` (opt-in; off by default)
 - `SYNAPS_LIMIT_GUARD_CHAIN=CPSAT-30,LBBD-10,RHC-ALNS,GREED`
 - `SYNAPS_CONTROL_PLANE_API_KEY=...` (required when binding beyond loopback)
-- `SYNAPS_CONTROL_PLANE_REQUIRE_AUTH=1` / `SYNAPS_CONTROL_PLANE_ALLOW_ANONYMOUS=1`
+- `SYNAPS_CONTROL_PLANE_API_KEY_MAP={"key-a":"tenant-a","key-b":"tenant-b"}` (preferred multi-tenant identity)
+- `SYNAPS_CONTROL_PLANE_TRUST_TENANT_HEADER=1` (opt-in; allow `x-tenant-id` with shared primary key only)
+- `SYNAPS_CONTROL_PLANE_REQUIRE_AUTH=1` / `SYNAPS_CONTROL_PLANE_ALLOW_ANONYMOUS=1` (anonymous loopback-only; refused on public bind)
 - `SYNAPS_CONTROL_PLANE_MAX_BODY_BYTES=10000000`
 - `SYNAPS_CONTROL_PLANE_RATE_LIMIT_MAX=60` (default 60/min when unset; disable with `SYNAPS_CONTROL_PLANE_RATE_LIMIT_DISABLED=1`)
 - `SYNAPS_CONTROL_PLANE_RATE_LIMIT_WINDOW_MS=60000`
-- `SYNAPS_PYTHON_EXEC_TIMEOUT_MS=300000` (default 300s; `0` disables)
+- `SYNAPS_PYTHON_EXEC_TIMEOUT_MS=300000` (default 300s; `0` requires `SYNAPS_PYTHON_EXEC_ALLOW_UNLIMITED_TIMEOUT=1`)
 - `SYNAPS_PYTHON_MAX_OUTPUT_BYTES=5000000`
 - `SYNAPS_INSTANCE_DIR=...` (default `<repo>/benchmark/instances`)
 - `SYNAPS_ALLOW_PYTHONPATH=1` (opt-in; PYTHONPATH is stripped by default)
 - `SYNAPS_ENABLE_RESOURCE_GUARDS=1` / `SYNAPS_SOLVE_TIMEOUT_S` / `SYNAPS_SOLVE_MEMORY_LIMIT_MB`
+- `SYNAPS_RESOURCE_GUARDS_FAIL_OPEN=0` (BFF default; fail-closed when RSS unavailable)
 
-The Python bridge defaults `SYNAPS_ENABLE_RESOURCE_GUARDS=1` and derives
+The Python bridge defaults `SYNAPS_ENABLE_RESOURCE_GUARDS=1`,
+`SYNAPS_RESOURCE_GUARDS_FAIL_OPEN=0`, and derives
 `SYNAPS_SOLVE_TIMEOUT_S` from `SYNAPS_PYTHON_EXEC_TIMEOUT_MS` unless overridden.
 
-When `SYNAPS_CONTROL_PLANE_API_KEY` is set, the control plane requires either
+When `SYNAPS_CONTROL_PLANE_API_KEY` or `API_KEY_MAP` is set, the control plane requires either
 `x-api-key: <value>` or `Authorization: Bearer <value>` on non-healthz routes.
-Rate limiting defaults to 60 requests / 60s keyed by API key identity or client IP
-(not spoofable `x-tenant-id`).
+Tenant for async jobs is derived from `API_KEY_MAP` when present; otherwise a shared key
+ignores spoofable `x-tenant-id` unless `TRUST_TENANT_HEADER=1`.
+Rate limiting defaults to 60 requests / 60s keyed by API key identity or client IP.
+Non-success solver statuses return empty `assignments` with `metadata.coverage_complete=false`.
+
+For locked production Python installs prefer:
+`python -m pip install --require-hashes -r requirements-lock.txt`.
 
 Ready-to-import monitoring artifacts (Grafana dashboard + Prometheus alert rules):
 

@@ -45,16 +45,21 @@ Control-plane теперь поддерживает:
 - `SYNAPS_ENABLE_LIMIT_GUARDS=1`
 - `SYNAPS_LIMIT_GUARD_CHAIN=CPSAT-30,LBBD-10,RHC-ALNS,GREED`
 - `SYNAPS_CONTROL_PLANE_API_KEY=...`
+- `SYNAPS_CONTROL_PLANE_API_KEY_MAP={"key-a":"tenant-a"}` (tenant из ключа)
+- `SYNAPS_CONTROL_PLANE_TRUST_TENANT_HEADER=1` (opt-in для shared key)
+- `SYNAPS_CONTROL_PLANE_ALLOW_ANONYMOUS=1` (только loopback)
 - `SYNAPS_CONTROL_PLANE_MAX_BODY_BYTES=10000000`
 - `SYNAPS_CONTROL_PLANE_RATE_LIMIT_MAX=60`
 - `SYNAPS_CONTROL_PLANE_RATE_LIMIT_WINDOW_MS=60000`
-- `SYNAPS_PYTHON_EXEC_TIMEOUT_MS=...`
+- `SYNAPS_PYTHON_EXEC_TIMEOUT_MS=...` (`0` только с `SYNAPS_PYTHON_EXEC_ALLOW_UNLIMITED_TIMEOUT=1`)
 - `SYNAPS_PYTHON_MAX_OUTPUT_BYTES=...`
+- `SYNAPS_RESOURCE_GUARDS_FAIL_OPEN=0` (BFF default)
 
-Если задан `SYNAPS_CONTROL_PLANE_API_KEY`, control-plane требует на каждом маршруте
+Если задан `SYNAPS_CONTROL_PLANE_API_KEY` или `API_KEY_MAP`, control-plane требует на каждом маршруте
 либо `x-api-key: <value>`, либо `Authorization: Bearer <value>`.
 Опциональный fixed-window rate limit включается через пару
 `SYNAPS_CONTROL_PLANE_RATE_LIMIT_MAX` и `SYNAPS_CONTROL_PLANE_RATE_LIMIT_WINDOW_MS`.
+Для prod-установки Python: `pip install --require-hashes -r requirements-lock.txt`.
 
 Готовые monitoring-артефакты (Grafana dashboard + Prometheus alert rules):
 

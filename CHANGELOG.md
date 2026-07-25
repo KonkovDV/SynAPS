@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `RHC-GREEDY-COVER` portfolio config and `RhcPolicy.GREEDY_COVER` preset for coverage-complete constructive solves (time reserve, soft overrun, horizon extension).
+- `RHC-GREEDY-COVER` portfolio config and `RhcPolicy.GREEDY_COVER` preset for coverage-complete constructive solves (time reserve, soft overrun; horizon extension is opt-in, default factor 1.0).
 - RHC coverage knobs: `coverage_time_reserve_*`, `fallback_repair_on_timeout`, `fallback_repair_soft_budget_s`, `coverage_horizon_extension_factor`.
 - `scripts/probe_coverage_10k.py` for quick industrial-10k coverage probes.
 - Python lock files (`requirements-lock.txt`, `requirements-dev-lock.txt`) generated via `uv pip compile`.
@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `BENCHMARK_EVIDENCE_50K_2026_05_18.md` with reproducible protocol, non-claims, and failure taxonomy.
 - 50K 3-seed matrix attempt documented (RHC-GREEDY `solver_error`; confirms 50K as stress boundary).
 - Tenant ID abstraction in control-plane (`x-tenant-id` header, per-tenant rate limits, cross-tenant job ACL).
+- `SYNAPS_CONTROL_PLANE_API_KEY_MAP` (JSON `{apiKey: tenantId}`) so multi-tenant identity is derived from credentials, not spoofable headers.
+- Control-plane strips `assignments` on non-`feasible`/`optimal` solve responses and annotates `metadata.coverage_complete`.
 - `SYNAPS_REQUEST_ID` env var propagation to Python bridge for subprocess traceability.
 - CI `benchmark-smoke` job for end-to-end solver validation on tiny instances.
 - `installed-wheel-smoke` CI job that builds the wheel, installs it into a fresh venv, and runs `tests/smoke`.
@@ -35,7 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `industrial-*` instance generator planning horizon is now SDST-aware (`P/m×3 + 2×setup_LB`, floor `P/m×4.5`) so dense changeovers do not clip late ops.
 - `benchmark/study_rhc_50k.py` GREEDY lane enables coverage-complete residual-fill knobs.
-- Feasibility verification honors `effective_planning_horizon_end` when RHC extends placement horizon.
+- Non-loopback control-plane binds refuse `ALLOW_ANONYMOUS`; require `API_KEY` or `API_KEY_MAP`.
+- Shared API key ignores spoofable `x-tenant-id` unless `SYNAPS_CONTROL_PLANE_TRUST_TENANT_HEADER=1` or the key is mapped via `API_KEY_MAP`.
+- `SYNAPS_PYTHON_EXEC_TIMEOUT_MS=0` is ignored unless `SYNAPS_PYTHON_EXEC_ALLOW_UNLIMITED_TIMEOUT=1` (defaults back to 300s).
+- BFF defaults `SYNAPS_RESOURCE_GUARDS_FAIL_OPEN=0`; portfolio fail-closed when `SYNAPS_ENABLE_RESOURCE_GUARDS=1`.
 - All GitHub Actions in `.github/workflows/` pinned to full commit SHAs for supply-chain security.
 - README updated with OpenSSF Scorecard badge and supply-chain hardening notes.
 - `pyproject.toml` excludes `synaps/scripts` and `tests/fixtures` from ruff/mypy to avoid diagnostic noise on debug scripts.
@@ -48,7 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ALNS Phase-1 seed/completion is hard-capped via `phase1_wall_fraction` (default 0.5); `frozen_initial_repair_max_ops` default raised to 2000 for RHC window sizes.
 - Soft overrun is disabled when `SYNAPS_ENABLE_RESOURCE_GUARDS` is active so wall time cannot exceed the advertised solve timeout.
 - `verified_feasible` always checks the caller's declared `planning_horizon_end` (solver placement-horizon extension no longer rewrites the contract).
-- Async solve job GET requires exact tenant match (`null` only readable without `x-tenant-id`).
+- Async solve job GET requires exact tenant match (`null` only readable without a resolved tenant).
 - `Makefile` `native-test` target indentation (was nested inside `native-build` recipe).
 - `tests/smoke/__init__.py` invalid syntax.
 - Removed accidentally tracked native wheel (`native-dist/synaps_native-0.3.0-cp313-cp313-win_amd64.whl`) from git index.

@@ -226,12 +226,27 @@ def test_resolve_portfolio_resource_limits_from_env_and_latency(
 ) -> None:
     monkeypatch.setenv("SYNAPS_SOLVE_TIMEOUT_S", "120")
     monkeypatch.setenv("SYNAPS_SOLVE_MEMORY_LIMIT_MB", "2048")
+    monkeypatch.delenv("SYNAPS_RESOURCE_GUARDS_FAIL_OPEN", raising=False)
     from synaps.portfolio import resolve_portfolio_resource_limits
 
     limits = resolve_portfolio_resource_limits(preferred_max_latency_s=30)
     assert limits is not None
     assert limits.timeout_s == 30
     assert limits.memory_limit_mb == 2048
+    # Env timeout alone does not force guards; default fail_open stays open.
+    assert limits.fail_open is True
+
+
+def test_resolve_portfolio_resource_limits_fail_closed_when_guards_forced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SYNAPS_ENABLE_RESOURCE_GUARDS", "1")
+    monkeypatch.delenv("SYNAPS_RESOURCE_GUARDS_FAIL_OPEN", raising=False)
+    from synaps.portfolio import resolve_portfolio_resource_limits
+
+    limits = resolve_portfolio_resource_limits(solve_kwargs={"time_limit_s": 30})
+    assert limits is not None
+    assert limits.fail_open is False
 
 
 def test_solve_schedule_records_resource_guard_metadata(

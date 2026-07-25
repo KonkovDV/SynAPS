@@ -28,9 +28,20 @@ function resolveExecutionLimits(): SynapsPythonExecutionLimits {
     process.env.SYNAPS_PYTHON_MAX_OUTPUT_BYTES ?? DEFAULT_PYTHON_MAX_OUTPUT_BYTES,
   );
 
+  let resolvedTimeoutMs = DEFAULT_PYTHON_EXEC_TIMEOUT_MS;
+  if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    resolvedTimeoutMs = Math.floor(timeoutMs);
+  } else if (timeoutMs === 0) {
+    // Unlimited wall-clock is opt-in only (local debugging). Silent disable is refused.
+    if (process.env.SYNAPS_PYTHON_EXEC_ALLOW_UNLIMITED_TIMEOUT === "1") {
+      resolvedTimeoutMs = 0;
+    } else {
+      resolvedTimeoutMs = DEFAULT_PYTHON_EXEC_TIMEOUT_MS;
+    }
+  }
+
   return {
-    // 0 explicitly disables the wall-clock guard for local debugging only.
-    timeoutMs: Number.isFinite(timeoutMs) && timeoutMs >= 0 ? Math.floor(timeoutMs) : DEFAULT_PYTHON_EXEC_TIMEOUT_MS,
+    timeoutMs: resolvedTimeoutMs,
     maxOutputBytes:
       Number.isFinite(maxOutputBytes) && maxOutputBytes > 0
         ? Math.floor(maxOutputBytes)
@@ -105,6 +116,10 @@ function buildPythonBridgeEnv(
   // BFF default: activate portfolio resource guards and align wall-clock with bridge timeout.
   if (env.SYNAPS_ENABLE_RESOURCE_GUARDS === undefined) {
     env.SYNAPS_ENABLE_RESOURCE_GUARDS = "1";
+  }
+  // Fail-closed memory checks under BFF unless explicitly overridden.
+  if (env.SYNAPS_RESOURCE_GUARDS_FAIL_OPEN === undefined) {
+    env.SYNAPS_RESOURCE_GUARDS_FAIL_OPEN = "0";
   }
   if (
     limits.timeoutMs > 0 &&
