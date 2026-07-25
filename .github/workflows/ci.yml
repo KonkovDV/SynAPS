@@ -139,11 +139,15 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: pyproject.toml
+          cache-dependency-path: |
+            pyproject.toml
+            requirements-lock.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          # Prefer the lock so highspy (and peers) match the audited ABI set.
+          python -m pip install -r requirements-lock.txt
           python -m pip install -e ".[dev]"
 
       - name: Run benchmark smoke (tiny instance)

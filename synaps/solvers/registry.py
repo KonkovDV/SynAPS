@@ -13,8 +13,6 @@ from typing import TYPE_CHECKING
 from synaps.solvers.alns_solver import AlnsSolver
 from synaps.solvers.cpsat_solver import CpSatSolver
 from synaps.solvers.greedy_dispatch import BeamSearchDispatch, GreedyDispatch
-from synaps.solvers.lbbd_hd_solver import LbbdHdSolver
-from synaps.solvers.lbbd_solver import LbbdSolver
 from synaps.solvers.pareto_slice_solver import ParetoSliceCpSatSolver
 from synaps.solvers.rhc import RhcSolver
 from synaps.solvers.rhc._policy import RhcPolicy, RhcPolicySpec, build_solve_kwargs_from_spec
@@ -23,6 +21,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from synaps.solvers import BaseSolver
+    from synaps.solvers.lbbd_hd_solver import LbbdHdSolver
+    from synaps.solvers.lbbd_solver import LbbdSolver
 
 
 @dataclass(frozen=True)
@@ -55,10 +55,16 @@ def _build_cpsat() -> BaseSolver:
 
 
 def _build_lbbd() -> BaseSolver:
+    # Lazy import: highspy has had ABI-broken wheels; keep GREED/CPSAT paths
+    # importable without loading HiGHS (benchmark-smoke / control-plane).
+    from synaps.solvers.lbbd_solver import LbbdSolver
+
     return LbbdSolver()
 
 
 def _build_lbbd_hd() -> BaseSolver:
+    from synaps.solvers.lbbd_hd_solver import LbbdHdSolver
+
     return LbbdHdSolver()
 
 

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
+from pathlib import Path
+
 from synaps.solvers.cpsat_solver import CpSatSolver
 from synaps.solvers.greedy_dispatch import GreedyDispatch
 from synaps.solvers.lbbd_solver import LbbdSolver
@@ -14,6 +18,32 @@ from synaps.solvers.router import (
     select_solver,
 )
 from tests.conftest import make_simple_problem
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_registry_create_greed_does_not_import_highspy() -> None:
+    """GREED/CPSAT smoke must not require a working highspy wheel at import time."""
+
+    script = """
+import sys
+from synaps.solvers.registry import create_solver
+
+assert "highspy" not in sys.modules
+assert "synaps.solvers.lbbd_solver" not in sys.modules
+assert "synaps.solvers.lbbd_hd_solver" not in sys.modules
+create_solver("GREED")
+assert "highspy" not in sys.modules
+assert "synaps.solvers.lbbd_solver" not in sys.modules
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_available_solver_configs_matches_public_portfolio() -> None:
