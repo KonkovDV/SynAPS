@@ -192,6 +192,7 @@ test("runtime contract index exposes discoverability metadata", async () => {
 
 test("metrics endpoint exposes Prometheus series", async () => {
   const app = buildControlPlaneApp({
+    publicMetrics: true,
     executor: {
       async executeSolveRequest(): Promise<unknown> {
         throw new Error("unused");
@@ -217,6 +218,7 @@ test("metrics endpoint exposes Prometheus series", async () => {
 
 test("metrics endpoint records violation kinds from portfolio metadata", async () => {
   const app = buildControlPlaneApp({
+    publicMetrics: true,
     executor: {
       async executeSolveRequest(payload: object): Promise<unknown> {
         const request = payload as { request_id?: string };
@@ -276,6 +278,7 @@ test("metrics endpoint records violation kinds from portfolio metadata", async (
 
 test("openapi route exposes solve and repair schemas", async () => {
   const app = buildControlPlaneApp({
+    publicOpenApi: true,
     executor: {
       async executeSolveRequest(): Promise<unknown> {
         throw new Error("unused");
@@ -776,7 +779,7 @@ test("solve route applies limit-guard fallback after timeout", async () => {
     },
   };
 
-  const app = buildControlPlaneApp({ executor, rateLimit: null });
+  const app = buildControlPlaneApp({ executor, rateLimit: null, publicMetrics: true });
   try {
   const response = await app.inject({
     method: "POST",
@@ -872,7 +875,7 @@ test("solve route records status-based fallback transition metrics", async () =>
     },
   };
 
-  const app = buildControlPlaneApp({ executor, rateLimit: null });
+  const app = buildControlPlaneApp({ executor, rateLimit: null, publicMetrics: true });
   const request = createSolveRequest();
   request.solver_config = "CPSAT-30";
 

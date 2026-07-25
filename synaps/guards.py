@@ -86,13 +86,18 @@ def _get_rss_mb() -> int | None:
                     ("PeakPagefileUsage", ctypes.c_size_t),
                 ]
 
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            psapi = ctypes.WinDLL("psapi", use_last_error=True)
+            kernel32.GetCurrentProcess.restype = ctypes.wintypes.HANDLE
+            psapi.GetProcessMemoryInfo.argtypes = [
+                ctypes.wintypes.HANDLE,
+                ctypes.POINTER(PROCESS_MEMORY_COUNTERS),
+                ctypes.wintypes.DWORD,
+            ]
+            psapi.GetProcessMemoryInfo.restype = ctypes.wintypes.BOOL
+
             pmc = PROCESS_MEMORY_COUNTERS()
             pmc.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS)
-            windll = getattr(ctypes, "windll", None)
-            if windll is None:
-                return None
-            kernel32 = windll.kernel32
-            psapi = windll.psapi
             handle = kernel32.GetCurrentProcess()
             if psapi.GetProcessMemoryInfo(handle, ctypes.byref(pmc), pmc.cb):
                 return int(pmc.WorkingSetSize) // (1024 * 1024)
@@ -133,6 +138,46 @@ def _check_memory_limit(limits: ResourceLimits) -> None:
         )
 
 
+def _run_with_memory_watch(
+    solver: BaseSolver,
+    problem: ScheduleProblem,
+    limits: ResourceLimits,
+    solve_kwargs: dict[str, Any],
+) -> ScheduleResult:
+    """Run solve while periodically sampling RSS when a memory limit is set."""
+    import threading
+
+    if limits.memory_limit_mb is None:
+        return solver.solve(problem, **solve_kwargs)
+
+    stop = threading.Event()
+    breached = threading.Event()
+    breach_message = {"text": ""}
+
+    def _watch() -> None:
+        while not stop.wait(1.5):
+            try:
+                _check_memory_limit(limits)
+            except SolverMemoryError as exc:
+                breach_message["text"] = str(exc)
+                breached.set()
+                return
+
+    watcher = threading.Thread(target=_watch, name="synaps-memory-guard", daemon=True)
+    watcher.start()
+    try:
+        result = solver.solve(problem, **solve_kwargs)
+    finally:
+        stop.set()
+        watcher.join(timeout=1.0)
+
+    if breached.is_set():
+        raise SolverMemoryError(breach_message["text"] or "Memory limit exceeded during solve")
+    # Final sample catches a breach that happened after the last poll.
+    _check_memory_limit(limits)
+    return result
+
+
 def guarded_solve(
     solver: BaseSolver,
     problem: ScheduleProblem,
@@ -151,6 +196,10 @@ def guarded_solve(
     This avoids leaking C++ solver resources that occur with daemon-thread
     based timeout wrappers.
 
+    When ``limits.memory_limit_mb`` is set, RSS is checked before solve and
+    sampled periodically during solve (best-effort; does not preempt native
+    C++ threads mid-iteration).
+
     Returns a :class:`ScheduleResult`. If a memory limit is hit,
     raises :class:`SolverMemoryError`.  The caller can catch this and
     produce a result with an appropriate :class:`SolverErrorCategory`.
@@ -160,12 +209,12 @@ def guarded_solve(
 
     _check_memory_limit(limits)
 
+    effective_kwargs = dict(solve_kwargs)
     if limits.timeout_s is not None:
         # Forward the timeout to the solver's native time_limit_s parameter.
         # This ensures the solver (e.g. CP-SAT C++ backend) terminates
         # cleanly and releases all internal resources.  The previous
         # daemon-thread approach leaked C++ solver instances on timeout.
-        effective_kwargs = dict(solve_kwargs)
         existing_limit = effective_kwargs.get("time_limit_s")
         if existing_limit is not None:
             # Use the stricter of the two limits
@@ -179,9 +228,8 @@ def guarded_solve(
             timeout_s=limits.timeout_s,
             effective_time_limit_s=effective_kwargs["time_limit_s"],
         )
-        return solver.solve(problem, **effective_kwargs)
 
-    return solver.solve(problem, **solve_kwargs)
+    return _run_with_memory_watch(solver, problem, limits, effective_kwargs)
 
 
 def timeout_to_error_result(

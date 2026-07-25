@@ -50,18 +50,22 @@ Key env vars:
 - `SYNAPS_CONTROL_PLANE_API_KEY_MAP={"key-a":"tenant-a","key-b":"tenant-b"}` (preferred multi-tenant identity)
 - `SYNAPS_CONTROL_PLANE_TRUST_TENANT_HEADER=1` (opt-in; allow `x-tenant-id` with shared primary key only)
 - `SYNAPS_CONTROL_PLANE_REQUIRE_AUTH=1` / `SYNAPS_CONTROL_PLANE_ALLOW_ANONYMOUS=1` (anonymous loopback-only; refused on public bind)
+- `SYNAPS_CONTROL_PLANE_MAX_OPERATIONS=10000` (gateway admission; override for larger trusted loads)
+- `SYNAPS_CONTROL_PLANE_MAX_CONCURRENT_SOLVES=2`
+- `SYNAPS_CONTROL_PLANE_EXACT_SOLVER_MAX_OPS=500` / `SYNAPS_CONTROL_PLANE_HEAVY_SOLVER_MAX_OPS=5000`
+- `SYNAPS_CONTROL_PLANE_PUBLIC_METRICS=1` / `SYNAPS_CONTROL_PLANE_PUBLIC_OPENAPI=1` (opt-in anonymous discovery)
 - `SYNAPS_CONTROL_PLANE_MAX_BODY_BYTES=10000000`
 - `SYNAPS_CONTROL_PLANE_RATE_LIMIT_MAX=60` (default 60/min when unset; disable with `SYNAPS_CONTROL_PLANE_RATE_LIMIT_DISABLED=1`)
 - `SYNAPS_CONTROL_PLANE_RATE_LIMIT_WINDOW_MS=60000`
 - `SYNAPS_PYTHON_EXEC_TIMEOUT_MS=300000` (default 300s; `0` requires `SYNAPS_PYTHON_EXEC_ALLOW_UNLIMITED_TIMEOUT=1`)
 - `SYNAPS_PYTHON_MAX_OUTPUT_BYTES=5000000`
-- `SYNAPS_INSTANCE_DIR=...` (default `<repo>/benchmark/instances`)
+- `SYNAPS_INSTANCE_DIR=...` (default `<repo>/benchmark/instances`; must be strictly under repo root)
 - `SYNAPS_ALLOW_PYTHONPATH=1` (opt-in; PYTHONPATH is stripped by default)
-- `SYNAPS_ENABLE_RESOURCE_GUARDS=1` / `SYNAPS_SOLVE_TIMEOUT_S` / `SYNAPS_SOLVE_MEMORY_LIMIT_MB`
+- `SYNAPS_ENABLE_RESOURCE_GUARDS=1` / `SYNAPS_SOLVE_TIMEOUT_S` / `SYNAPS_SOLVE_MEMORY_LIMIT_MB` (BFF default memory 4096)
 - `SYNAPS_RESOURCE_GUARDS_FAIL_OPEN=0` (BFF default; fail-closed when RSS unavailable)
 
 The Python bridge defaults `SYNAPS_ENABLE_RESOURCE_GUARDS=1`,
-`SYNAPS_RESOURCE_GUARDS_FAIL_OPEN=0`, and derives
+`SYNAPS_RESOURCE_GUARDS_FAIL_OPEN=0`, `SYNAPS_SOLVE_MEMORY_LIMIT_MB=4096`, and derives
 `SYNAPS_SOLVE_TIMEOUT_S` from `SYNAPS_PYTHON_EXEC_TIMEOUT_MS` unless overridden.
 
 When `SYNAPS_CONTROL_PLANE_API_KEY` or `API_KEY_MAP` is set, the control plane requires either
@@ -69,7 +73,9 @@ When `SYNAPS_CONTROL_PLANE_API_KEY` or `API_KEY_MAP` is set, the control plane r
 Tenant for async jobs is derived from `API_KEY_MAP` when present; otherwise a shared key
 ignores spoofable `x-tenant-id` unless `TRUST_TENANT_HEADER=1`.
 Rate limiting defaults to 60 requests / 60s keyed by API key identity or client IP.
+Admission rejects oversized problems and expensive solver classes before spawning Python.
 Non-success solver statuses return empty `assignments` with `metadata.coverage_complete=false`.
+`/metrics` and `/openapi.json` stay private without auth unless explicitly published.
 
 For locked production Python installs prefer:
 `python -m pip install --require-hashes -r requirements-lock.txt`.

@@ -51,11 +51,25 @@ function resolveExecutionLimits(): SynapsPythonExecutionLimits {
 
 function resolveInstanceDir(repoRoot: string): string {
   const configured = process.env.SYNAPS_INSTANCE_DIR?.trim();
-  if (configured) {
-    return path.resolve(configured);
+  const resolved = configured
+    ? path.resolve(configured)
+    : path.join(repoRoot, "benchmark", "instances");
+
+  const normalizedRepoRoot = path.resolve(repoRoot);
+  const normalizedResolved = path.resolve(resolved);
+
+  // Refuse mounts that expose the whole repository (or anything above it).
+  if (
+    normalizedResolved === normalizedRepoRoot ||
+    normalizedRepoRoot.startsWith(normalizedResolved + path.sep)
+  ) {
+    throw new Error(
+      "SYNAPS_INSTANCE_DIR must be a directory strictly under the repository root " +
+        `(refusing ${normalizedResolved})`,
+    );
   }
-  // Default sandbox: only benchmark instances, never the whole repository.
-  return path.join(repoRoot, "benchmark", "instances");
+
+  return normalizedResolved;
 }
 
 const ALLOWED_SYNAPS_BRIDGE_ENV_KEYS = new Set([
@@ -120,6 +134,10 @@ function buildPythonBridgeEnv(
   // Fail-closed memory checks under BFF unless explicitly overridden.
   if (env.SYNAPS_RESOURCE_GUARDS_FAIL_OPEN === undefined) {
     env.SYNAPS_RESOURCE_GUARDS_FAIL_OPEN = "0";
+  }
+  // Default RSS ceiling for the Python subprocess (operator may raise/lower).
+  if (env.SYNAPS_SOLVE_MEMORY_LIMIT_MB === undefined || env.SYNAPS_SOLVE_MEMORY_LIMIT_MB === "") {
+    env.SYNAPS_SOLVE_MEMORY_LIMIT_MB = "4096";
   }
   if (
     limits.timeoutMs > 0 &&

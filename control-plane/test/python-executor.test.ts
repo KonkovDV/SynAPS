@@ -99,6 +99,7 @@ test("python bridge environment allowlist keeps SynAPS and runtime variables onl
   assert.equal(env.SYNAPS_DISABLE_NATIVE_ACCELERATION, "1");
   assert.equal(env.SYNAPS_ENABLE_RESOURCE_GUARDS, "1");
   assert.equal(env.SYNAPS_RESOURCE_GUARDS_FAIL_OPEN, "0");
+  assert.equal(env.SYNAPS_SOLVE_MEMORY_LIMIT_MB, "4096");
   assert.ok(Number(env.SYNAPS_SOLVE_TIMEOUT_S) > 0);
   assert.equal(env.SYNAPS_CONTROL_PLANE_API_KEY, undefined);
   assert.equal(env.SYNAPS_CONTROL_PLANE_RATE_LIMIT_MAX, undefined);

@@ -86,7 +86,7 @@ function detectCycle(operations: Record<string, unknown>[]): string[] | null {
   return null;
 }
 
-const MAX_ACL_INTERPOLATED_SETUP_ENTRIES = 250_000;
+const MAX_ACL_INTERPOLATED_SETUP_ENTRIES = 50_000;
 
 function interpolateSetupMatrix(problem: Record<string, unknown>): Record<string, unknown> {
   const workCenters = asArray(problem.work_centers).map(asObject);
@@ -102,8 +102,25 @@ function interpolateSetupMatrix(problem: Record<string, unknown>): Record<string
     return problem;
   }
 
-  const missingBudget =
-    workCenterIds.length * stateIds.length * stateIds.length - setupMatrix.length;
+  const setupCube = workCenterIds.length * stateIds.length * stateIds.length;
+  if (setupCube > MAX_ACL_INTERPOLATED_SETUP_ENTRIES) {
+    throw new AclValidationError("Setup matrix cube exceeds safety budget", [
+      {
+        code: "SETUP_CUBE_BUDGET",
+        message:
+          `Full SDST cube |W|×|S|² = ${setupCube} exceeds limit ` +
+          `${MAX_ACL_INTERPOLATED_SETUP_ENTRIES}`,
+        details: {
+          work_centers: workCenterIds.length,
+          states: stateIds.length,
+          setup_cube: setupCube,
+          limit: MAX_ACL_INTERPOLATED_SETUP_ENTRIES,
+        },
+      },
+    ]);
+  }
+
+  const missingBudget = setupCube - setupMatrix.length;
   if (missingBudget > MAX_ACL_INTERPOLATED_SETUP_ENTRIES) {
     throw new AclValidationError("Setup matrix interpolation exceeds safety budget", [
       {

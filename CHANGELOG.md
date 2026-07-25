@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tenant ID abstraction in control-plane (`x-tenant-id` header, per-tenant rate limits, cross-tenant job ACL).
 - `SYNAPS_CONTROL_PLANE_API_KEY_MAP` (JSON `{apiKey: tenantId}`) so multi-tenant identity is derived from credentials, not spoofable headers.
 - Control-plane strips `assignments` on non-`feasible`/`optimal` solve responses and annotates `metadata.coverage_complete`.
+- Control-plane admission gate: max ops/WCs/states/setup-cube, solver-class op caps, concurrent sync solve limit (default 2).
+- `/metrics` and `/openapi.json` are private without auth unless `SYNAPS_CONTROL_PLANE_PUBLIC_METRICS` / `PUBLIC_OPENAPI` are set.
 - `SYNAPS_REQUEST_ID` env var propagation to Python bridge for subprocess traceability.
 - CI `benchmark-smoke` job for end-to-end solver validation on tiny instances.
 - `installed-wheel-smoke` CI job that builds the wheel, installs it into a fresh venv, and runs `tests/smoke`.
@@ -41,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Shared API key ignores spoofable `x-tenant-id` unless `SYNAPS_CONTROL_PLANE_TRUST_TENANT_HEADER=1` or the key is mapped via `API_KEY_MAP`.
 - `SYNAPS_PYTHON_EXEC_TIMEOUT_MS=0` is ignored unless `SYNAPS_PYTHON_EXEC_ALLOW_UNLIMITED_TIMEOUT=1` (defaults back to 300s).
 - BFF defaults `SYNAPS_RESOURCE_GUARDS_FAIL_OPEN=0`; portfolio fail-closed when `SYNAPS_ENABLE_RESOURCE_GUARDS=1`.
+- BFF defaults `SYNAPS_SOLVE_MEMORY_LIMIT_MB=4096` and samples RSS during guarded solves.
+- ACL setup interpolation budget lowered to 50k with full `|W|×|S|²` pre-check.
+- `SYNAPS_INSTANCE_DIR` refuses repository-root (or parent) mounts.
 - All GitHub Actions in `.github/workflows/` pinned to full commit SHAs for supply-chain security.
 - README updated with OpenSSF Scorecard badge and supply-chain hardening notes.
 - `pyproject.toml` excludes `synaps/scripts` and `tests/fixtures` from ruff/mypy to avoid diagnostic noise on debug scripts.

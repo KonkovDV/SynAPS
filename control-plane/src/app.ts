@@ -1,6 +1,13 @@
 import { timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 
+import {
+  AdmissionError,
+  admitRepairPayload,
+  admitSolvePayload,
+  resolveAdmissionLimits,
+  type AdmissionLimits,
+} from "./admission";
 import { applyAclGuardrails, AclValidationError } from "./anti-corruption";
 import { buildGanttModel, type BuildGanttModelRequest } from "./gantt-view";
 import { buildOpenApiDocument } from "./openapi";
@@ -41,6 +48,13 @@ export interface BuildControlPlaneAppOptions {
    * primary API key (no key→tenant map entry). Default false closes spoofing.
    */
   trustTenantHeader?: boolean;
+  admissionLimits?: Partial<AdmissionLimits>;
+  /** Max concurrent sync Python bridge calls (solve + repair). */
+  maxConcurrentSolves?: number;
+  /** Expose /metrics without auth (default false; tests/local may opt in). */
+  publicMetrics?: boolean;
+  /** Expose /openapi.json without auth (default false). */
+  publicOpenApi?: boolean;
   bodyLimitBytes?: number;
   rateLimit?: {
     maxRequests: number;
@@ -349,6 +363,46 @@ function resolveTrustTenantHeader(optionValue: boolean | undefined): boolean {
   return process.env.SYNAPS_CONTROL_PLANE_TRUST_TENANT_HEADER === "1";
 }
 
+function resolveMaxConcurrentSolves(optionValue: number | undefined): number {
+  if (optionValue !== undefined && Number.isFinite(optionValue) && optionValue > 0) {
+    return Math.floor(optionValue);
+  }
+  return parsePositiveInteger(process.env.SYNAPS_CONTROL_PLANE_MAX_CONCURRENT_SOLVES) ?? 2;
+}
+
+function resolvePublicMetrics(optionValue: boolean | undefined): boolean {
+  if (optionValue !== undefined) {
+    return optionValue;
+  }
+  return process.env.SYNAPS_CONTROL_PLANE_PUBLIC_METRICS === "1";
+}
+
+function resolvePublicOpenApi(optionValue: boolean | undefined): boolean {
+  if (optionValue !== undefined) {
+    return optionValue;
+  }
+  return process.env.SYNAPS_CONTROL_PLANE_PUBLIC_OPENAPI === "1";
+}
+
+function createSolveConcurrencyGate(maxConcurrent: number): {
+  acquire: () => boolean;
+  release: () => void;
+} {
+  let inflight = 0;
+  return {
+    acquire: () => {
+      if (inflight >= maxConcurrent) {
+        return false;
+      }
+      inflight += 1;
+      return true;
+    },
+    release: () => {
+      inflight = Math.max(0, inflight - 1);
+    },
+  };
+}
+
 function resolveBodyLimitBytes(optionValue: number | undefined): number {
   if (optionValue !== undefined && Number.isFinite(optionValue) && optionValue > 0) {
     return Math.floor(optionValue);
@@ -640,6 +694,12 @@ export function buildControlPlaneApp(
   const authConfigured = apiKey !== null || apiKeyMap.size > 0;
   const requireAuth = resolveRequireAuth();
   const rateLimit = resolveRateLimit(options.rateLimit);
+  const admissionLimits = resolveAdmissionLimits(options.admissionLimits);
+  const solveConcurrency = createSolveConcurrencyGate(
+    resolveMaxConcurrentSolves(options.maxConcurrentSolves),
+  );
+  const publicMetrics = resolvePublicMetrics(options.publicMetrics);
+  const publicOpenApi = resolvePublicOpenApi(options.publicOpenApi);
   const rateLimitBuckets = new Map<string, { resetAt: number; count: number }>();
   const resolveTenant = (request: {
     headers: Record<string, string | string[] | undefined>;
@@ -682,7 +742,10 @@ export function buildControlPlaneApp(
   });
 
   app.addHook("onRequest", async (request, reply) => {
-    const isHealthz = request.url === "/healthz" || request.url.startsWith("/healthz?");
+    const pathOnly = request.url.split("?")[0] ?? request.url;
+    const isHealthz = pathOnly === "/healthz";
+    const isMetrics = pathOnly === "/metrics";
+    const isOpenApi = pathOnly === "/openapi.json";
 
     if (requireAuth && !authConfigured && !isHealthz) {
       reply.code(503).send({
@@ -705,6 +768,24 @@ export function buildControlPlaneApp(
         });
         return;
       }
+    }
+
+    // Discovery endpoints are private by default (even on anonymous loopback).
+    if (isMetrics && !authConfigured && !publicMetrics) {
+      reply.code(404).send({
+        statusCode: 404,
+        error: "Not Found",
+        message: "Metrics are disabled without auth (set SYNAPS_CONTROL_PLANE_PUBLIC_METRICS=1)",
+      });
+      return;
+    }
+    if (isOpenApi && !authConfigured && !publicOpenApi) {
+      reply.code(404).send({
+        statusCode: 404,
+        error: "Not Found",
+        message: "OpenAPI is disabled without auth (set SYNAPS_CONTROL_PLANE_PUBLIC_OPENAPI=1)",
+      });
+      return;
     }
 
     if (rateLimit !== null) {
@@ -839,6 +920,7 @@ export function buildControlPlaneApp(
       const rawPayload = normalizeSolvePayload(
         withRequestId(request.body as Record<string, unknown>, request.id),
       );
+      admitSolvePayload(rawPayload, admissionLimits);
 
       const preValidationSpan = startObservedSpan(
         "Feasibility_Check_Pre",
@@ -859,6 +941,7 @@ export function buildControlPlaneApp(
       const attempts: SolveAttempt[] = [];
       let lastBridgeError: SynapsPythonBridgeError | null = null;
       let lastContractFailure: Record<string, unknown> | null = null;
+      let lastAdmissionError: AdmissionError | null = null;
 
       for (let index = 0; index < solveAttemptChain.length; index += 1) {
         const solverConfig = solveAttemptChain[index];
@@ -876,6 +959,35 @@ export function buildControlPlaneApp(
           ...guardedPayload,
           solver_config: solverConfig,
         });
+
+        try {
+          admitSolvePayload(attemptPayload, admissionLimits);
+        } catch (error) {
+          if (error instanceof AdmissionError) {
+            lastAdmissionError = error;
+            const canRetry =
+              limitGuardsEnabled && index < solveAttemptChain.length - 1;
+            closeObservedSpan(attemptSpan, "error", {
+              admission_rejected: true,
+              retry_next_solver: canRetry,
+            });
+            if (canRetry) {
+              continue;
+            }
+            throw error;
+          }
+          throw error;
+        }
+
+        if (!solveConcurrency.acquire()) {
+          closeObservedSpan(attemptSpan, "error", { concurrency_saturated: true });
+          closeObservedSpan(rootSpan, "error");
+          return reply.code(429).send({
+            statusCode: 429,
+            error: "Too Many Requests",
+            message: "SynAPS control-plane concurrent solve capacity exhausted",
+          });
+        }
 
         try {
           const response = await executor.executeSolveRequest(attemptPayload);
@@ -992,12 +1104,18 @@ export function buildControlPlaneApp(
             attempts: attempts.length,
           });
           throw error;
+        } finally {
+          solveConcurrency.release();
         }
       }
 
       closeObservedSpan(rootSpan, "error", {
         attempts: attempts.length,
       });
+
+      if (lastAdmissionError !== null && lastContractFailure === null && lastBridgeError === null) {
+        throw lastAdmissionError;
+      }
 
       if (lastContractFailure !== null) {
         return reply.code(502).send(lastContractFailure);
@@ -1056,6 +1174,7 @@ export function buildControlPlaneApp(
       const rawPayload = normalizeSolvePayload(
         withRequestId(request.body as Record<string, unknown>, request.id),
       );
+      admitSolvePayload(rawPayload, admissionLimits);
       const guardedPayload: Record<string, unknown> = {
         ...rawPayload,
         problem: maybeApplyAclGuardrails(rawPayload.problem),
@@ -1171,6 +1290,7 @@ export function buildControlPlaneApp(
       const rawPayload = normalizeRepairPayload(
         withRequestId(request.body as Record<string, unknown>, request.id),
       );
+      admitRepairPayload(rawPayload, admissionLimits);
 
       const preValidationSpan = startObservedSpan(
         "Feasibility_Check_Pre",
@@ -1189,31 +1309,45 @@ export function buildControlPlaneApp(
         rootSpan,
       );
 
-      const response = await executor.executeRepairRequest(guardedPayload);
-
-      if (!validators.repairResponse(response)) {
-        closeObservedSpan(solverSpan, "error", { contract_validation: false });
+      if (!solveConcurrency.acquire()) {
+        closeObservedSpan(solverSpan, "error", { concurrency_saturated: true });
         closeObservedSpan(rootSpan, "error");
-        return reply.code(502).send({
-          statusCode: 502,
-          error: "Bad Gateway",
-          message: "Python repair response failed contract validation",
-          errors: collectValidationFailure(
-            validators.repairResponse,
-            "invalid repair response",
-          ).errors,
+        return reply.code(429).send({
+          statusCode: 429,
+          error: "Too Many Requests",
+          message: "SynAPS control-plane concurrent solve capacity exhausted",
         });
       }
 
-      const result = asObject(asObject(response).result);
-      metrics.recordScheduleResult(result);
+      try {
+        const response = await executor.executeRepairRequest(guardedPayload);
 
-      closeObservedSpan(solverSpan, "ok", {
-        result_status: asString(result.status) ?? "unknown",
-      });
-      closeObservedSpan(rootSpan, "ok");
+        if (!validators.repairResponse(response)) {
+          closeObservedSpan(solverSpan, "error", { contract_validation: false });
+          closeObservedSpan(rootSpan, "error");
+          return reply.code(502).send({
+            statusCode: 502,
+            error: "Bad Gateway",
+            message: "Python repair response failed contract validation",
+            errors: collectValidationFailure(
+              validators.repairResponse,
+              "invalid repair response",
+            ).errors,
+          });
+        }
 
-      return reply.code(200).send(sanitizeSolveResponse(response as Record<string, unknown>));
+        const result = asObject(asObject(response).result);
+        metrics.recordScheduleResult(result);
+
+        closeObservedSpan(solverSpan, "ok", {
+          result_status: asString(result.status) ?? "unknown",
+        });
+        closeObservedSpan(rootSpan, "ok");
+
+        return reply.code(200).send(sanitizeSolveResponse(response as Record<string, unknown>));
+      } finally {
+        solveConcurrency.release();
+      }
     },
   );
 
@@ -1227,6 +1361,15 @@ export function buildControlPlaneApp(
         error: "Bad Request",
         message: knownError.message,
         errors: maybeValidationError.validation,
+      });
+    }
+
+    if (knownError instanceof AdmissionError) {
+      return reply.code(422).send({
+        statusCode: 422,
+        error: "Unprocessable Entity",
+        message: knownError.message,
+        errors: knownError.issues,
       });
     }
 
