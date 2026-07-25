@@ -97,6 +97,7 @@
       "description": "Single processing step within a work item.",
       "properties": {
         "base_duration_min": {
+          "minimum": 0,
           "title": "Base Duration Min",
           "type": "integer"
         },
@@ -350,6 +351,7 @@
           "type": "number"
         },
         "setup_minutes": {
+          "minimum": 0,
           "title": "Setup Minutes",
           "type": "integer"
         },
