@@ -214,9 +214,70 @@ Unit coverage for the new behavior is tracked:
 ## 8. Next steps
 
 1. ~~Feasibility-gated window commit~~ — **done (iteration 3)** for the
-   precedence component; extend the same commit gate to auxiliary-resource
-   capacity (event-sweep over setup+processing windows) to close the
-   remaining aux residual.
+   precedence component. The auxiliary-resource residual is **not** closed;
+   see §9 for the iteration-4 negative result and the corrected approach.
 2. ~~Native-agnostic hardening of the eight §6 tests~~ — **done (iteration 3)**.
 3. Full 50K matrix run of `RHC-ALNS-SEARCH-COVER` vs `RHC-GREEDY-COVER` under
    the canonical evidence protocol.
+4. Auxiliary-resource feasibility (see §9): bounded cluster re-solve — extract
+   each aux-violating operation's precedence+machine neighbourhood and repair
+   it jointly with CP-SAT / aux-constrained LNS (the LBBD decompose-and-repair
+   pattern), since local gating, forward-shifting, and point-repair are all
+   shown non-viable.
+
+---
+
+## 9. Iteration 4 — auxiliary-resource boundary: negative result (2026-07-29)
+
+**Goal.** Close the last residual class from §3: `AUX_RESOURCE_CAPACITY`
+(industrial: 4, industrial-2k: 8 after precedence reached 0).
+
+**Root cause (confirmed).** Unlike precedence (a *pairwise* edge constraint
+closed by the commit gate), aux-capacity is a *cumulative temporal* constraint
+— `Σ q_o ≤ cap(r)` over every op holding `r` at time `t` across the
+`[start−setup, end)` reservation window. The violations are **born in the
+final `stabilize_temporal_consistency` + `recompute_assignment_setups` pass**
+(`_solver.py`), which moves operations forward to repair precedence/machine
+conflicts and recomputes setups — both slide aux reservation windows, and
+that stabilizer is aux-agnostic. Diagnostic: with `fallback_repair=False` the
+5 aux violations persist on the commit path itself, so residual greedy fill
+(which *is* aux-aware via `find_earliest_feasible_slot`) is not the source.
+
+**Two approaches attempted and rejected (with evidence):**
+
+1. *Commit-time aux gate* (event-sweep mirroring FeasibilityChecker §5,
+   defer-and-refill like the precedence gate). Unit-correct (12 tests) but it
+   runs *before* the stabilizer, so it does not address where the violations
+   arise: industrial stayed 4→6, industrial-2k 8→8. Not a fix.
+2. *Aux-aware forward-shift inside the stabilizer* (a third shift type
+   alongside precedence/machine). It **diverges**: the three forward shifts
+   conflict and do not converge within the pass budget — industrial-2k
+   regressed 8→76 violations (56 precedence + 9 overlap + 3 setup + 8 aux).
+   Forward-only shifting is the wrong tool for a cumulative shared-resource
+   constraint.
+3. *Post-stabilize point-repair* (remove aux-violating ops, re-place them
+   through the aux-aware `find_earliest_feasible_slot`). It **cascades**:
+   moving a violating op forward leaves its successors starting before the
+   op's new end, so precedence breaks — industrial 4 aux → 3 aux + 12
+   precedence; industrial-2k 8 → 6 + 26. Local re-placement cannot hold a
+   globally coupled schedule feasible.
+
+All three were reverted; no aux code shipped this iteration (the honest
+outcome is knowledge, not a false-progress commit).
+
+**Why the residual is hard.** The remaining aux violations are small in count
+(<1% of operations: 4/791, 8/2082) but they are **globally coupled**: any
+local move that fixes an aux overrun perturbs precedence, machine setup, or
+another resource's timeline, which re-introduces violations elsewhere. A
+commit-time gate is too early (the stabilizer runs after it); a forward-shift
+is non-convergent; a point-repair cascades. The constraint is inherently
+joint.
+
+**Corrected approach for the next iteration.** Solve the coupling jointly, not
+locally: extract the connected cluster of each aux-violating operation plus its
+precedence closure and machine neighbours, and re-solve that bounded cluster
+with CP-SAT (which already models aux as a cumulative constraint) or an
+aux-constrained LNS repair, freezing the rest. This is the same
+decompose-and-exactly-repair pattern LBBD already uses for bottleneck
+sequencing, applied to aux-capacity clusters — the only shown-sound way to keep
+precedence, machine, and aux simultaneously feasible.
