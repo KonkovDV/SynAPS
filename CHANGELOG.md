@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `benchmark/fjs_loader.py`: strict parser for the standard `.fjs` public FJSP benchmark format (Brandimarte / Hurink / DAFJS) with documented mapping caveats; `run_benchmark` now accepts `.fjs` files and directories.
 - `JsonKnnRuntimeModel` + `RuntimePredictor.load_json()` (`synaps/ml_advisory.py`): torch-free deterministic k-NN solver advisor; `benchmark/train_runtime_advisor.py` trains the JSON artifact from `--compare` benchmark reports with a verified-feasible-only labeling gate (ADR-006).
 - Tests: `test_coverage_pace_guard.py`, `test_fjs_loader.py`, `test_ml_advisory_json_model.py` (55 tests incl. reruns of touched suites).
+- `benchmark/BENCHMARK_EVIDENCE_SEARCH_COVER_2026_07_29.md`: bounded A/B/C evidence — `SEARCH_COVER` lifts `industrial-2k` coverage 0.386→1.0 and cuts independent violations 11× vs the `BALANCED` baseline; documents a localized pre-existing RHC cross-window precedence boundary and pre-existing native-seed test brittleness (both confirmed on the parent commit).
 
 ### Changed
 

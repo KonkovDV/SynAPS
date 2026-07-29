@@ -59,6 +59,8 @@ Mapping caveats (see `benchmark/fjs_loader.py`, `describe_fjs_mapping()`):
 
 Published protocol and non-claims: [`BENCHMARK_EVIDENCE_50K_2026_05_18.md`](BENCHMARK_EVIDENCE_50K_2026_05_18.md).
 
+SEARCH_COVER + coverage-pace guard + `.fjs` loader evidence (2026-07): [`BENCHMARK_EVIDENCE_SEARCH_COVER_2026_07_29.md`](BENCHMARK_EVIDENCE_SEARCH_COVER_2026_07_29.md).
+
 Study index (how to keep local runs): [`STUDIES_INDEX.md`](STUDIES_INDEX.md).
 
 For coverage-complete large solves use portfolio config `RHC-GREEDY-COVER`. Historical ALNS/GREEDY 50K timeboxes remain stress/profiling slices, not a “factory plan at 100%” guarantee.
