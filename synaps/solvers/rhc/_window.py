@@ -136,6 +136,72 @@ def collect_commit_candidates(
 
 
 # ---------------------------------------------------------------------------
+# Commit-time precedence gate (temporal closure)
+# ---------------------------------------------------------------------------
+
+
+def filter_commit_candidates_by_precedence(
+    candidates: dict[UUID, Assignment],
+    *,
+    committed_assignment_by_op: Mapping[UUID, Assignment],
+    ops_by_id: Mapping[UUID, Operation],
+) -> tuple[dict[UUID, Assignment], set[UUID]]:
+    """Defer commit candidates that would violate cross-window precedence.
+
+    ``collect_commit_candidates`` enforces a *structural* precedence closure
+    (the predecessor is frozen or co-committed) but not a *temporal* one:
+    an inner solver may return an incumbent where a successor starts before
+    its predecessor ends, and committing it bakes the violation into the
+    frozen schedule (the boundary documented in
+    BENCHMARK_EVIDENCE_SEARCH_COVER_2026_07_29.md §3).
+
+    This gate walks candidates in ``(start_time, seq_in_order)`` order and
+    defers any candidate whose predecessor either
+
+    * is not placed at all (neither committed earlier nor kept in this
+      batch — defense in depth on top of the structural closure), or
+    * ends after the candidate starts (mirrors the strict
+      ``start < pred_end`` check in ``FeasibilityChecker``).
+
+    Deferral cascades: once a predecessor is deferred it never enters the
+    kept set, so all its co-committed descendants defer too. Deferred ops
+    stay unscheduled and are picked up by later windows or the residual
+    greedy fill, both of which place with the true predecessor end time.
+
+    Returns ``(kept_candidates, deferred_op_ids)``. Pure function.
+    """
+    kept: dict[UUID, Assignment] = {}
+    deferred: set[UUID] = set()
+
+    ordered = sorted(
+        candidates.items(),
+        key=lambda item: (
+            item[1].start_time,
+            ops_by_id[item[0]].seq_in_order if item[0] in ops_by_id else 0,
+        ),
+    )
+    for op_id, assignment in ordered:
+        operation = ops_by_id.get(op_id)
+        predecessor_op_id = operation.predecessor_op_id if operation is not None else None
+        if predecessor_op_id is not None:
+            predecessor_assignment = kept.get(predecessor_op_id)
+            if predecessor_assignment is None:
+                predecessor_assignment = committed_assignment_by_op.get(predecessor_op_id)
+            if predecessor_assignment is None:
+                # Predecessor is deferred, unplaced, or ordered after this
+                # candidate (start(child) <= start(pred) < end(pred) would
+                # violate precedence anyway): defer the child.
+                deferred.add(op_id)
+                continue
+            if assignment.start_time < predecessor_assignment.end_time:
+                deferred.add(op_id)
+                continue
+        kept[op_id] = assignment
+
+    return kept, deferred
+
+
+# ---------------------------------------------------------------------------
 # Reanchor inner assignments on the frozen baseline
 # ---------------------------------------------------------------------------
 

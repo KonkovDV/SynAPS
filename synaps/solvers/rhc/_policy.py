@@ -85,6 +85,9 @@ class GuardSpec:
     coverage_pace_guard_enabled: bool = False
     coverage_pace_threshold: float = 1.0
     coverage_pace_min_windows: int = 2
+    # W-A commit-time precedence gate: defer commit candidates that would
+    # bake a cross-window precedence violation into the frozen schedule.
+    commit_precedence_gate_enabled: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -345,6 +348,7 @@ PRESETS: dict[RhcPolicy, RhcPolicySpec] = {
             coverage_pace_guard_enabled=True,
             coverage_pace_threshold=1.0,
             coverage_pace_min_windows=2,
+            commit_precedence_gate_enabled=True,
         ),
         inner=InnerSpec(
             inner_kwargs={
@@ -420,6 +424,7 @@ def build_solve_kwargs_from_spec(
         "coverage_pace_guard_enabled": spec.guards.coverage_pace_guard_enabled,
         "coverage_pace_threshold": spec.guards.coverage_pace_threshold,
         "coverage_pace_min_windows": spec.guards.coverage_pace_min_windows,
+        "commit_precedence_gate_enabled": spec.guards.commit_precedence_gate_enabled,
         # inner
         "inner_solver": spec.inner.selected_inner_solver_name,
         "inner_window_time_fraction": spec.inner.inner_window_time_fraction,

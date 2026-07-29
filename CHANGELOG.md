@@ -9,12 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `filter_commit_candidates_by_precedence` (`synaps/solvers/rhc/_window.py`) + opt-in `commit_precedence_gate_enabled` (default off; enabled in `SEARCH_COVER`): commit-time temporal precedence gate that defers candidates which would bake cross-window precedence violations into the frozen schedule; deferred ops are re-placed by later windows or residual greedy fill. Eliminates all PRECEDENCE_VIOLATIONs on `industrial` (20→0) and `industrial-2k` (107→0) at full coverage with slightly better makespan. Telemetry (emitted regardless of the flag): `commit_precedence_gate_enabled`, `commit_precedence_deferred_ops_total` (unique ops), per-window `commit_precedence_deferred_ops` (per-event, gate-on only). Tests: `tests/test_commit_precedence_gate.py`.
 - `CoveragePaceController` (`synaps/solvers/rhc/_budget.py`): deterministic outer/inner objective alignment for RHC — projects final coverage from the observed per-window commit rate and, when the projection falls below threshold, reroutes the next window to the greedy commit path. Opt-in via `coverage_pace_guard_enabled` (default off; historical behavior unchanged). Telemetry: `coverage_pace_interventions`, `coverage_pace_final_ratio`.
 - `RhcPolicy.SEARCH_COVER` preset and `RHC-ALNS-SEARCH-COVER` portfolio config: search-active DOE geometry (360/90, presearch cap 2000) combined with the coverage-pace guard and a 15% residual-fill time reserve, targeting 50K+ search-entry without scheduled_ratio regression.
 - `benchmark/fjs_loader.py`: strict parser for the standard `.fjs` public FJSP benchmark format (Brandimarte / Hurink / DAFJS) with documented mapping caveats; `run_benchmark` now accepts `.fjs` files and directories.
 - `JsonKnnRuntimeModel` + `RuntimePredictor.load_json()` (`synaps/ml_advisory.py`): torch-free deterministic k-NN solver advisor; `benchmark/train_runtime_advisor.py` trains the JSON artifact from `--compare` benchmark reports with a verified-feasible-only labeling gate (ADR-006).
 - Tests: `test_coverage_pace_guard.py`, `test_fjs_loader.py`, `test_ml_advisory_json_model.py` (55 tests incl. reruns of touched suites).
 - `benchmark/BENCHMARK_EVIDENCE_SEARCH_COVER_2026_07_29.md`: bounded A/B/C evidence — `SEARCH_COVER` lifts `industrial-2k` coverage 0.386→1.0 and cuts independent violations 11× vs the `BALANCED` baseline; documents a localized pre-existing RHC cross-window precedence boundary and pre-existing native-seed test brittleness (both confirmed on the parent commit).
+
+### Fixed
+
+- Eight native/ortools-9.15-brittle tests in `tests/test_alns_rhc_scaling.py` hardened without masking intent: explicit `native_initial_seed_enabled=False` on Python-seed-lane tests, state-based fake clock instead of a fixed `time.monotonic` mark sequence, deterministic checker-call sequence via `max_iterations=0`, budget-scaling expectations derived from the ALNS window cap, and full-horizon inner-solve contract pinned via `window_bound_inner_horizon=False`. Suite green with native built (96/96) and on the native-disabled CI lane.
+- `tests/test_e2e_rhc_alns_integration.py` zero-violation contract (pre-existing failure: 19 cross-window PRECEDENCE_VIOLATIONs on the 500-op fixture, reproduced on HEAD before this change) now holds by enabling the commit-time precedence gate in the E2E solve configuration.
 
 ### Changed
 

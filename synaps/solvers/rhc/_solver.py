@@ -70,6 +70,7 @@ from synaps.solvers.rhc._warm_start import filter_warm_start_assignments
 from synaps.solvers.rhc._window import (
     collect_commit_candidates as _collect_commit_candidates,
     detect_cross_window_stable_ops as _detect_cross_window_stable_ops,
+    filter_commit_candidates_by_precedence as _filter_commit_candidates_by_precedence,
     reanchor_inner_assignments as _reanchor_inner_assignments,
     select_backtracking_assignments as _select_backtracking_assignments,
     stabilize_temporal_consistency as _stabilize_temporal_consistency,
@@ -357,6 +358,18 @@ class RhcSolver(BaseSolver):
             min_windows=coverage_pace_min_windows,
         )
         coverage_pace_interventions = 0
+        # W-A (2026-07): commit-time precedence gate — defers commit candidates
+        # that would bake a cross-window precedence violation into the frozen
+        # schedule. Opt-in; default preserves historical behavior bit-for-bit.
+        commit_precedence_gate_enabled: bool = bool(
+            kwargs.get("commit_precedence_gate_enabled", False)
+        )
+        # Unique operation ids ever deferred by the gate. A carried-over op
+        # re-deferred in a later window must not inflate the total (M-1,
+        # Red Team iteration 3): the metadata reports unique ops, while the
+        # per-window summary keeps per-event counts.
+        commit_precedence_deferred_op_ids: set[UUID] = set()
+        window_commit_precedence_deferred_last = 0
         max_candidate_pool_raw = kwargs.get("max_candidate_pool")
         external_warm_start_assignments = list(kwargs.get("warm_start_assignments", []) or [])
 
@@ -800,6 +813,7 @@ class RhcSolver(BaseSolver):
             # The closure still owns the mutable `horizon_clipped_assignments`
             # counter; the kernel returns the per-call clipped count.
             nonlocal horizon_clipped_assignments
+            nonlocal window_commit_precedence_deferred_last
             frozen_ids = committed_op_ids if frozen_committed_ids is None else frozen_committed_ids
             candidates, clipped_count = _collect_commit_candidates(
                 assignments,
@@ -812,6 +826,21 @@ class RhcSolver(BaseSolver):
                 ops_by_id=ops_by_id,
             )
             horizon_clipped_assignments += clipped_count
+            window_commit_precedence_deferred_last = 0
+            if commit_precedence_gate_enabled and candidates:
+                candidates, deferred_op_ids = _filter_commit_candidates_by_precedence(
+                    candidates,
+                    committed_assignment_by_op=frozen_committed_assignment_by_op,
+                    ops_by_id=ops_by_id,
+                )
+                if deferred_op_ids:
+                    window_commit_precedence_deferred_last = len(deferred_op_ids)
+                    commit_precedence_deferred_op_ids.update(deferred_op_ids)
+                    logger.info(
+                        "RHC commit precedence gate: deferred %d candidate(s) "
+                        "to preserve cross-window precedence",
+                        len(deferred_op_ids),
+                    )
             return candidates
 
         def reanchor_inner_assignments(
@@ -1927,6 +1956,10 @@ class RhcSolver(BaseSolver):
                         inner_window_summaries[-1]["boundary_reanchor_changed_ops"] = (
                             boundary_reanchor_changed_ops
                         )
+                        if commit_precedence_gate_enabled:
+                            inner_window_summaries[-1]["commit_precedence_deferred_ops"] = (
+                                window_commit_precedence_deferred_last
+                            )
                         if alns_budget_profile is not None:
                             inner_window_summaries[-1]["alns_budget_auto_scaled"] = bool(
                                 alns_budget_profile["scaled"]
@@ -2211,6 +2244,10 @@ class RhcSolver(BaseSolver):
                             rewound_assignments
                         )
                     inner_window_summaries[-1]["inner_solver_selected"] = selected_inner_solver_name
+                    if commit_precedence_gate_enabled:
+                        inner_window_summaries[-1]["commit_precedence_deferred_ops"] = (
+                            window_commit_precedence_deferred_last
+                        )
                     if hybrid_routing_reason is not None:
                         inner_window_summaries[-1]["hybrid_routing_reason"] = hybrid_routing_reason
 
@@ -2468,6 +2505,8 @@ class RhcSolver(BaseSolver):
                 "coverage_pace_final_ratio": (
                     round(final_pace_ratio, 4) if final_pace_ratio is not None else None
                 ),
+                "commit_precedence_gate_enabled": commit_precedence_gate_enabled,
+                "commit_precedence_deferred_ops_total": len(commit_precedence_deferred_op_ids),
                 "preprocessing_ms": preprocessing_ms,
                 "preprocessing_phase_ms": dict(preprocess_phase_ms),
                 "peak_window_candidate_count": peak_window_candidate_count,

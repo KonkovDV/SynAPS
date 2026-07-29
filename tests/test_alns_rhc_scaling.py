@@ -743,6 +743,9 @@ class TestAlnsSolver:
             max_iterations=1,
             time_limit_s=5,
             repair_time_limit_s=1,
+            # This test targets the Python seed branch (beam vs greedy choice);
+            # the native fast-path seed is a separate lane with its own tests.
+            native_initial_seed_enabled=False,
         )
 
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
@@ -760,16 +763,17 @@ class TestAlnsSolver:
         problem = _make_3state_problem(n_orders=2, ops_per_order=2)
         seed_result = GreedyDispatch().solve(problem)
 
+        # State-based clock: 0.0 until the beam seed returns, then jump past
+        # the budget. Robust to the number of time.monotonic() call sites
+        # (a fixed mark sequence broke whenever instrumentation was added).
+        clock = {"now": 0.0}
+
         def fake_beam_solve(self, problem, **kwargs):
+            clock["now"] = 10.0
             return seed_result
 
-        monotonic_marks = iter([0.0, 0.0, 10.0, 10.0, 10.0])
-
         def fake_monotonic() -> float:
-            try:
-                return next(monotonic_marks)
-            except StopIteration:
-                return 10.0
+            return clock["now"]
 
         monkeypatch.setattr(
             "synaps.solvers.greedy_dispatch.BeamSearchDispatch.solve",
@@ -782,13 +786,21 @@ class TestAlnsSolver:
             max_iterations=10,
             time_limit_s=5,
             initial_beam_op_limit=100,
+            native_initial_seed_enabled=False,
         )
 
         assert result.metadata["initial_solver"] == "beam"
         assert result.metadata["time_limit_exhausted_before_search"] is True
         assert result.metadata["iterations_completed"] == 0
-        assert result.metadata["cpsat_repair_attempts"] == 0
-        assert result.metadata["greedy_repair_attempts"] == 0
+        # Pre-search error paths may omit repair counters entirely; a missing
+        # key is semantically "no repair attempts" (the invariant under test).
+        # Require both keys to be jointly present or jointly absent so a
+        # partial metadata-contract regression stays detectable (L-2).
+        assert ("cpsat_repair_attempts" in result.metadata) == (
+            "greedy_repair_attempts" in result.metadata
+        )
+        assert result.metadata.get("cpsat_repair_attempts", 0) == 0
+        assert result.metadata.get("greedy_repair_attempts", 0) == 0
 
     def test_alns_rejects_infeasible_beam_seed_before_search(
         self,
@@ -823,6 +835,7 @@ class TestAlnsSolver:
             time_limit_s=10,
             initial_beam_op_limit=100,
             use_cpsat_repair=False,
+            native_initial_seed_enabled=False,
         )
 
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
@@ -1015,9 +1028,11 @@ class TestAlnsSolver:
         import synaps.solvers.alns_solver as alns_module
 
         # n_ops > initial_beam_op_limit (default 60) keeps Phase 1 on the
-        # single-greedy branch, so the checker call sequence is deterministic:
-        # #1 = post-Phase-1 validation, #2 = final incumbent check (forced
-        # violation here), #3 = recovered-initial-solution check.
+        # single-greedy branch, and max_iterations=0 skips the search loop
+        # (which invokes the checker once per iteration), so the checker call
+        # sequence is deterministic: #1 = post-Phase-1 validation, #2 = final
+        # incumbent check (forced violation here), #3 = recovered-initial-
+        # solution check.
         problem = _make_3state_problem(n_orders=12, ops_per_order=6)
         check_calls = {"count": 0}
 
@@ -1031,9 +1046,10 @@ class TestAlnsSolver:
 
         result = alns_module.AlnsSolver().solve(
             problem,
-            max_iterations=20,
+            max_iterations=0,
             time_limit_s=15,
             use_cpsat_repair=False,
+            native_initial_seed_enabled=False,
         )
 
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
@@ -2192,6 +2208,12 @@ class TestRhcInnerSolver:
                 "overlap_minutes": 60,
                 "inner_solver": "alns",
                 "max_ops_per_window": 100,
+                # This test asserts the full-horizon inner-solve contract on a
+                # small instance where one window holds every operation. The
+                # window-bounded sub-horizon default would make the 36-op
+                # sub-problem infeasible by construction (HORIZON_BOUND),
+                # which is not what this test exercises.
+                "window_bound_inner_horizon": False,
                 "inner_kwargs": {
                     "max_iterations": 30,
                     "time_limit_s": 15,
@@ -2199,6 +2221,8 @@ class TestRhcInnerSolver:
                     "min_destroy": 2,
                     "max_destroy": 8,
                     "repair_time_limit_s": 3,
+                    # Assertions below target the Python beam/greedy seed lane.
+                    "native_initial_seed_enabled": False,
                 },
             },
         )
@@ -2306,7 +2330,10 @@ class TestRhcInnerSolver:
             window_minutes=240,
             overlap_minutes=0,
             inner_solver="alns",
-            time_limit_s=10,
+            # Generous global budget so the ALNS-specific 10s window cap (not
+            # the remaining-time fraction) deterministically bounds the inner
+            # budget — the scaling math below is derived from that cap.
+            time_limit_s=100,
             alns_inner_window_time_cap_s=10,
             max_ops_per_window=50,
             max_windows=1,
@@ -3181,6 +3208,7 @@ class TestRhcInnerSolver:
             initial_beam_op_limit=0,
             frozen_initial_repair_max_ops=0,
             use_cpsat_repair=False,
+            native_initial_seed_enabled=False,
         )
 
         assert result.status == SolverStatus.ERROR
@@ -3226,6 +3254,7 @@ class TestRhcInnerSolver:
             initial_beam_op_limit=0,
             frozen_initial_repair_max_ops=0,
             use_cpsat_repair=False,
+            native_initial_seed_enabled=False,
         )
 
         assert captured_budgets

@@ -73,6 +73,11 @@ def _solve_rhc(problem, *, cross_window_learning_enabled: bool = False, **extra_
             "inner_solver": "alns",
             "window_minutes": 120,
             "overlap_minutes": 30,
+            # The E2E contract below is zero FeasibilityChecker violations;
+            # the commit-time precedence gate is the runtime mechanism that
+            # upholds it across window boundaries (see
+            # BENCHMARK_EVIDENCE_SEARCH_COVER_2026_07_29.md §3 update).
+            "commit_precedence_gate_enabled": True,
             "inner_kwargs": {
                 "max_iterations": 30,
                 "max_no_improve_iters": 15,

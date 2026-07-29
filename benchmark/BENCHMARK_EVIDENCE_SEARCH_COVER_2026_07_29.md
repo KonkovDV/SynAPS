@@ -87,6 +87,31 @@ initiative and is intentionally **not** attempted here.
 does **not** currently guarantee a fully feasible schedule on dense
 `industrial-2k`+ instances within short budgets.
 
+### Update (2026-07-29, iteration 3): commit-time precedence gate closes the precedence component
+
+A commit-time precedence gate
+(`filter_commit_candidates_by_precedence`, opt-in
+`commit_precedence_gate_enabled`, enabled in the `SEARCH_COVER` preset) now
+defers commit candidates that would bake a cross-window precedence violation
+into the frozen schedule; deferred ops are re-placed by later windows or the
+residual greedy fill. Re-run of the §3 protocol (same seeds/budgets):
+
+| Preset | before gate | after gate | coverage | deferred ops (unique) | makespan |
+|---|---|---|---|---|---|
+| `industrial` | 20 precedence + 6 aux | **0 precedence** + 4 aux | 1.000 | 134 | 2018 |
+| `industrial-2k` | 107 precedence + 8 aux | **0 precedence** + 8 aux | 1.000 | 336 | 2237–2357¹ |
+
+¹ Makespan varies across repeat runs because per-window budgets are
+wall-clock-derived; the precedence-violation count is 0 in every observed run.
+`deferred ops` counts unique operations ever deferred by the gate (a
+carried-over op re-deferred in a later window is counted once).
+
+The precedence component of the §3 boundary is eliminated at both scales with
+no coverage loss and no systematic makespan penalty. Remaining residual:
+AUX_RESOURCE_CAPACITY violations (aux reservation across setup+processing
+windows is a different mechanism — event-sweep-aware commit gating — and
+remains the next boundary).
+
 ---
 
 ## 4. W3 — `.fjs` public-format round-trip
@@ -122,9 +147,9 @@ halves the greedy makespan. All schedules pass independent feasibility.
 
 ---
 
-## 6. Known pre-existing test brittleness (localized, not fixed here)
+## 6. Known pre-existing test brittleness (localized; fixed in iteration 3)
 
-Eight tests in `tests/test_alns_rhc_scaling.py` fail **locally when
+Eight tests in `tests/test_alns_rhc_scaling.py` failed **locally when
 `synaps_native` is built** and under OR-Tools 9.15. Confirmed **pre-existing**
 by re-running them on the parent commit `85b6b92` (before the 2026-07 change
 set) in an isolated `git worktree` — all eight fail there too, so this is not a
@@ -142,6 +167,28 @@ Recommended separate initiative: make these tests native-agnostic — either set
 or widen the accepted `initial_solver` set to include `native_greedy`. Not
 attempted here because the eight tests have heterogeneous root causes and live
 in a file untouched by this change set (avoid masking semantics).
+
+### Update (2026-07-29, iteration 3): hardened
+
+All eight tests were made native-agnostic without masking their intent:
+
+1. Tests targeting the Python beam/greedy seed lane now pass
+   `native_initial_seed_enabled=False` explicitly (the lane CI exercises).
+2. The fixed `time.monotonic` mark sequence in the budget-exhaustion test was
+   replaced by a state-based clock robust to instrumentation call counts.
+3. The recovery test pins `max_iterations=0` so the checker call sequence is
+   deterministic again (the search loop invokes the checker once per
+   iteration — the original "call #2 = final" assumption predated that).
+4. The RHC budget-scaling test now derives its expected numbers from the
+   ALNS window time cap instead of the remaining-time fraction, and the
+   full-horizon inner-solve test opts out of the newer window-bounded
+   sub-horizon default it never intended to exercise (root cause of its
+   `inner_status=error`: a 36-op sub-problem cannot fit a 360+90-minute
+   bounded sub-horizon by construction).
+
+Result: `tests/test_alns_rhc_scaling.py` is green with native built (96/96)
+and the fixed tests stay green with `SYNAPS_DISABLE_NATIVE_ACCELERATION=1`
+(CI lane preserved).
 
 ---
 
@@ -166,8 +213,10 @@ Unit coverage for the new behavior is tracked:
 
 ## 8. Next steps
 
-1. Feasibility-gated window commit (or pre-commit cross-window precedence
-   repair) to close the §3 boundary at `industrial-2k`+ scale.
-2. Native-agnostic hardening of the eight §6 tests.
+1. ~~Feasibility-gated window commit~~ — **done (iteration 3)** for the
+   precedence component; extend the same commit gate to auxiliary-resource
+   capacity (event-sweep over setup+processing windows) to close the
+   remaining aux residual.
+2. ~~Native-agnostic hardening of the eight §6 tests~~ — **done (iteration 3)**.
 3. Full 50K matrix run of `RHC-ALNS-SEARCH-COVER` vs `RHC-GREEDY-COVER` under
-   the canonical evidence protocol once §1 lands.
+   the canonical evidence protocol.
