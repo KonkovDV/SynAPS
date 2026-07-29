@@ -306,13 +306,29 @@ class CpSatSolver(BaseSolver):
                     if setup_minutes:
                         setup_terms.append(setup_minutes * lit)
 
-                        # Create optional setup interval [end_i, start_j] for aux resource tracking
-                        setup_start = ends[(op_i.id, work_center.id)]
-                        setup_end = starts[(op_j.id, work_center.id)]
+                        # Reserve setup as an optional window ending exactly at
+                        # op_j's start: [start_j - setup, start_j], with its own
+                        # start var constrained only under `lit`. The previous
+                        # form passed ends[i] as the interval start, which — since
+                        # a CP-SAT IntervalVar enforces start + size == end —
+                        # welded start_j == end_i + setup and forbade machine
+                        # idle, right-shifting op_i and cutting the true optimum
+                        # (P0-1). This still feeds the aux-resource cumulative
+                        # below and matches FeasibilityChecker's setup-window
+                        # semantics (start - setup).
+                        su_start = model.new_int_var(
+                            0, horizon, f"su_start_{op_i.id}_{op_j.id}_{work_center.id}"
+                        )
+                        model.add(
+                            su_start == starts[(op_j.id, work_center.id)] - setup_minutes
+                        ).only_enforce_if(lit)
+                        model.add(
+                            su_start >= ends[(op_i.id, work_center.id)]
+                        ).only_enforce_if(lit)
                         setup_interval = model.new_optional_interval_var(
-                            setup_start,
+                            su_start,
                             setup_minutes,
-                            setup_end,
+                            starts[(op_j.id, work_center.id)],
                             lit,
                             f"setup_interval_{op_i.id}_{op_j.id}_{work_center.id}",
                         )
@@ -635,7 +651,7 @@ class CpSatSolver(BaseSolver):
             op_id: int(offset)
             for op_id, offset in dict(kwargs.get("frozen_predecessor_end_offsets", {})).items()
         }
-        enable_symmetry_breaking = bool(kwargs.get("enable_symmetry_breaking", True))
+        enable_symmetry_breaking = bool(kwargs.get("enable_symmetry_breaking", False))
 
         t0 = time.monotonic()
         model = cp_model.CpModel()
@@ -758,26 +774,71 @@ class CpSatSolver(BaseSolver):
         )
 
         if enable_symmetry_breaking:
-            machine_groups: dict[tuple[str, float], list[Any]] = {}
+            # A capacity-ordering symmetry cut is sound only between genuinely
+            # interchangeable machines: any schedule of A must be transferable
+            # wholesale onto B. That requires identical capability_group,
+            # speed_factor, max_parallel, setup matrix, AND identical eligible-
+            # operation sets. The old form grouped only by (capability_group,
+            # speed_factor) and summed over "shared" ops, cutting the optimum
+            # whenever an op was eligible on A but not B (P0-2).
+            setup_rows_by_wc: dict[Any, list[tuple[Any, Any, int, float, float]]] = {}
+            for entry in solve_problem.setup_matrix:
+                setup_rows_by_wc.setdefault(entry.work_center_id, []).append(
+                    (
+                        entry.from_state_id,
+                        entry.to_state_id,
+                        entry.setup_minutes,
+                        entry.material_loss,
+                        entry.energy_kwh,
+                    )
+                )
+            eligible_ops_by_wc: dict[Any, frozenset[Any]] = {
+                work_center.id: frozenset(
+                    operation.id
+                    for operation in solve_problem.operations
+                    if work_center.id in eligible_by_op[operation.id]
+                )
+                for work_center in solve_problem.work_centers
+            }
+            # Machines carrying frozen (fixed) intervals are not interchangeable
+            # with unfrozen peers even when all other attributes match: the
+            # frozen blocks differ per machine, so a wholesale A<->B swap need
+            # not preserve feasibility. Exclude them from symmetry classes.
+            frozen_wc_ids = {assignment.work_center_id for assignment in frozen_assignments}
+            symmetry_classes: dict[tuple[Any, ...], list[Any]] = {}
             for work_center in solve_problem.work_centers:
-                key = (work_center.capability_group, work_center.speed_factor)
-                machine_groups.setdefault(key, []).append(work_center)
-            for group_work_centers in machine_groups.values():
-                if len(group_work_centers) < 2:
+                if work_center.id in frozen_wc_ids:
                     continue
-                group_work_center_ids = {work_center.id for work_center in group_work_centers}
-                for work_center_a, work_center_b in itertools.pairwise(group_work_centers):
-                    presences_a: list[Any] = []
-                    presences_b: list[Any] = []
-                    for operation in solve_problem.operations:
-                        if not group_work_center_ids.issubset(set(eligible_by_op[operation.id])):
-                            continue
-                        presence_a = presences.get((operation.id, work_center_a.id))
-                        presence_b = presences.get((operation.id, work_center_b.id))
-                        if presence_a is not None:
-                            presences_a.append(presence_a)
-                        if presence_b is not None:
-                            presences_b.append(presence_b)
+                setup_signature = tuple(
+                    sorted(
+                        setup_rows_by_wc.get(work_center.id, []),
+                        key=lambda row: (str(row[0]), str(row[1])),
+                    )
+                )
+                class_key = (
+                    work_center.capability_group,
+                    work_center.speed_factor,
+                    work_center.max_parallel,
+                    setup_signature,
+                    eligible_ops_by_wc[work_center.id],
+                )
+                symmetry_classes.setdefault(class_key, []).append(work_center)
+            for class_work_centers in symmetry_classes.values():
+                if len(class_work_centers) < 2:
+                    continue
+                for work_center_a, work_center_b in itertools.pairwise(class_work_centers):
+                    # Eligible sets are identical within a class, so summing over
+                    # A's ops covers exactly the same operations as B's.
+                    presences_a = [
+                        presences[(op_id, work_center_a.id)]
+                        for op_id in eligible_ops_by_wc[work_center_a.id]
+                        if (op_id, work_center_a.id) in presences
+                    ]
+                    presences_b = [
+                        presences[(op_id, work_center_b.id)]
+                        for op_id in eligible_ops_by_wc[work_center_b.id]
+                        if (op_id, work_center_b.id) in presences
+                    ]
                     if presences_a and presences_b:
                         model.add(sum(presences_a) >= sum(presences_b))
 
