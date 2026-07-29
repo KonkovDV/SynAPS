@@ -26,6 +26,7 @@ class RhcPolicy(Enum):
     BOUNDED_100K = "bounded-100k"  # aggressive 5h/90m ALNS
     FAST_50K = "fast-50k"  # 50K wall-time optimized
     GREEDY_COVER = "greedy-cover"  # coverage-complete constructive path
+    SEARCH_COVER = "search-cover"  # search-active geometry + coverage guard
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +81,10 @@ class GuardSpec:
     inner_solver_min_budget_s: float = 0.0
     # Multiply declared planning horizon for slot clipping (coverage ceiling).
     coverage_horizon_extension_factor: float = 1.0
+    # W1 coverage pace guard: deterministic outer/inner objective alignment.
+    coverage_pace_guard_enabled: bool = False
+    coverage_pace_threshold: float = 1.0
+    coverage_pace_min_windows: int = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -298,6 +303,59 @@ PRESETS: dict[RhcPolicy, RhcPolicySpec] = {
             hybrid_inner_routing_enabled=False,
         ),
     ),
+    # SEARCH_COVER: search-active ALNS geometry with a coverage safety net.
+    # Geometry 360/90 is the search-active point from the 2026-04-26 bounded
+    # DOE (fallback=0.0, search-active=1.0); the coverage-pace guard and the
+    # GREEDY_COVER reserve mechanics keep the outer scheduled_ratio KPI from
+    # regressing while ALNS runs the destroy-repair loop inside windows.
+    RhcPolicy.SEARCH_COVER: RhcPolicySpec(
+        admission=AdmissionSpec(
+            window_minutes=360,
+            overlap_minutes=90,
+            max_ops_per_window=2000,
+            candidate_pool_factor=2.0,
+            due_admission_horizon_factor=2.0,
+            admission_tail_weight=0.5,
+            progressive_admission_relaxation_enabled=True,
+            precedence_ready_candidate_filter_enabled=False,
+            admission_relaxation_min_fill_ratio=0.30,
+            admission_full_scan_enabled=True,
+        ),
+        budget=BudgetSpec(
+            alns_inner_window_time_cap_s=120.0,
+            alns_inner_window_time_cap_scale_threshold_ops=2000,
+            alns_inner_window_time_cap_scaled_s=120.0,
+            alns_budget_auto_scaling_enabled=True,
+            alns_budget_estimated_repair_s_per_destroyed_op=0.125,
+            alns_dynamic_repair_budget_enabled=True,
+            alns_dynamic_repair_s_per_destroyed_op=0.1,
+            alns_dynamic_repair_time_limit_min_s=1.0,
+            alns_dynamic_repair_time_limit_max_s=3.0,
+            alns_presearch_max_window_ops=2000,
+            coverage_time_reserve_fraction=0.15,
+            coverage_time_reserve_min_s=60.0,
+            coverage_time_reserve_max_s=240.0,
+        ),
+        guards=GuardSpec(
+            fallback_repair_enabled=True,
+            fallback_repair_on_timeout=True,
+            fallback_repair_soft_budget_s=60.0,
+            backtracking_enabled=False,
+            coverage_horizon_extension_factor=1.0,
+            coverage_pace_guard_enabled=True,
+            coverage_pace_threshold=1.0,
+            coverage_pace_min_windows=2,
+        ),
+        inner=InnerSpec(
+            inner_kwargs={
+                **_PRESET_ALNS_INNER_KWARGS,
+                "max_iterations": 80,
+                "max_no_improve_iters": 20,
+            },
+            hybrid_inner_routing_enabled=False,
+            hybrid_inner_kwargs=_PRESET_HYBRID_INNER_KWARGS,
+        ),
+    ),
 }
 
 
@@ -359,6 +417,9 @@ def build_solve_kwargs_from_spec(
         "inner_fallback_kpi_threshold": spec.guards.inner_fallback_kpi_threshold,
         "inner_solver_min_budget_s": spec.guards.inner_solver_min_budget_s,
         "coverage_horizon_extension_factor": spec.guards.coverage_horizon_extension_factor,
+        "coverage_pace_guard_enabled": spec.guards.coverage_pace_guard_enabled,
+        "coverage_pace_threshold": spec.guards.coverage_pace_threshold,
+        "coverage_pace_min_windows": spec.guards.coverage_pace_min_windows,
         # inner
         "inner_solver": spec.inner.selected_inner_solver_name,
         "inner_window_time_fraction": spec.inner.inner_window_time_fraction,

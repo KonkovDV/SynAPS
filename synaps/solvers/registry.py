@@ -21,8 +21,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from synaps.solvers import BaseSolver
-    from synaps.solvers.lbbd_hd_solver import LbbdHdSolver
-    from synaps.solvers.lbbd_solver import LbbdSolver
 
 
 @dataclass(frozen=True)
@@ -316,6 +314,20 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
             "Named 100K+ RHC-ALNS search-entry profile. "
             "5-hour windows, 90-minute overlap, greedy-only repair, and the April 2026 "
             "geometry-refresh settings that re-entered ALNS search on bounded 100K runs."
+        ),
+    ),
+    "RHC-ALNS-SEARCH-COVER": SolverRegistration(
+        factory=_build_rhc,
+        solve_kwargs=build_solve_kwargs_from_spec(
+            RhcPolicySpec.from_preset(RhcPolicy.SEARCH_COVER)
+        ),
+        description=(
+            "Search-active RHC-ALNS with coverage safety net. "
+            "6-hour windows / 90-minute overlap (search-active DOE geometry), "
+            "deterministic coverage-pace guard that reroutes lagging windows to "
+            "greedy commits, plus a 15% residual-fill time reserve. "
+            "Targets 50K+ instances where ALNS must enter the destroy-repair "
+            "loop without regressing scheduled_ratio."
         ),
     ),
     "RHC-CPSAT": SolverRegistration(

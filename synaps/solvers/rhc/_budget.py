@@ -189,6 +189,66 @@ class EmpiricalRepairCostEstimator:
         return self.estimate
 
 
+# ---------------------------------------------------------------------------
+# Coverage pace guard (objective-alignment between outer and inner loops)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CoveragePaceController:
+    """Deterministic pace controller aligning inner-window budgets with the
+    outer coverage KPI (scheduled_ratio).
+
+    Motivated by the outer/inner objective mismatch documented in the 50K
+    academic audit: ALNS windows improved local makespan while global
+    coverage collapsed. Following the rolling-horizon budget-control idea
+    (learning-guided RHO literature, arXiv:2502.15791) but implemented as a
+    pure deterministic rule (ADR-003: deterministic baseline is mandatory).
+
+    After each solved window the controller records committed operations.
+    ``pace_ratio`` linearly projects final coverage from the observed commit
+    rate; when the projection falls below ``threshold`` the RHC loop may
+    switch the next window to the cheap greedy inner path so coverage
+    recovers before search resumes.
+
+    Pure state machine: no wall-clock reads; the caller supplies elapsed
+    seconds so the controller stays unit-testable and replay-deterministic.
+    """
+
+    total_ops: int
+    time_limit_s: float
+    threshold: float = 1.0
+    min_windows: int = 2
+    windows_observed: int = 0
+    ops_committed_total: int = 0
+
+    def observe_window(self, ops_committed: int) -> None:
+        """Record one completed window's commit count."""
+        self.windows_observed += 1
+        self.ops_committed_total += max(0, int(ops_committed))
+
+    def pace_ratio(self, elapsed_s: float) -> float | None:
+        """Projected final coverage divided by full coverage.
+
+        ``None`` when the projection is undefined (no ops, no elapsed time).
+        Values below 1.0 mean the run is on pace to finish with partial
+        coverage under the current commit rate.
+        """
+        if self.total_ops <= 0 or elapsed_s <= 0.0:
+            return None
+        commit_rate = self.ops_committed_total / elapsed_s
+        remaining_s = max(0.0, self.time_limit_s - elapsed_s)
+        projected_final = self.ops_committed_total + commit_rate * remaining_s
+        return projected_final / self.total_ops
+
+    def should_intervene(self, elapsed_s: float) -> bool:
+        """True when enough windows were observed and pace is below threshold."""
+        if self.windows_observed < self.min_windows:
+            return False
+        ratio = self.pace_ratio(elapsed_s)
+        return ratio is not None and ratio < self.threshold
+
+
 def scale_alns_inner_budget(
     *,
     effective_kwargs: dict[str, Any],

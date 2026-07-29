@@ -53,6 +53,7 @@ from synaps.solvers.rhc._admission import (
 )
 from synaps.solvers.rhc._budget import (
     AlnsBudgetPolicy,
+    CoveragePaceController,
     EmpiricalRepairCostEstimator,
     InnerWindowTimeCapPolicy,
     resolve_inner_window_time_cap as _resolve_inner_window_time_cap,
@@ -337,6 +338,25 @@ class RhcSolver(BaseSolver):
         hybrid_max_ops: int = int(kwargs.get("hybrid_max_ops", 1500))
         hybrid_inner_kwargs: dict[str, Any] = dict(kwargs.get("hybrid_inner_kwargs", {}))
         inner_fallback_kpi_threshold: float = float(kwargs.get("inner_fallback_kpi_threshold", 0.1))
+        # W1 (2026-07): coverage pace guard — aligns inner-window budget
+        # decisions with the outer coverage KPI. Opt-in; default preserves
+        # the historical behavior bit-for-bit.
+        coverage_pace_guard_enabled: bool = bool(kwargs.get("coverage_pace_guard_enabled", False))
+        coverage_pace_threshold: float = max(
+            0.0,
+            float(kwargs.get("coverage_pace_threshold", 1.0)),
+        )
+        coverage_pace_min_windows: int = max(
+            1,
+            int(kwargs.get("coverage_pace_min_windows", 2)),
+        )
+        coverage_pace_controller = CoveragePaceController(
+            total_ops=len(problem.operations),
+            time_limit_s=window_time_limit_s,
+            threshold=coverage_pace_threshold,
+            min_windows=coverage_pace_min_windows,
+        )
+        coverage_pace_interventions = 0
         max_candidate_pool_raw = kwargs.get("max_candidate_pool")
         external_warm_start_assignments = list(kwargs.get("warm_start_assignments", []) or [])
 
@@ -1418,6 +1438,30 @@ class RhcSolver(BaseSolver):
                     else:
                         hybrid_routing_reason = "candidate"
 
+            if (
+                coverage_pace_guard_enabled
+                and selected_inner_solver_name != "greedy"
+                and coverage_pace_controller.should_intervene(
+                    time.monotonic() - time_budget_t0
+                )
+            ):
+                # Coverage pace below threshold: spend this window on the
+                # cheap greedy commit path instead of inner search so the
+                # outer coverage KPI recovers (objective-contour alignment).
+                inner_rejection_reason = "coverage_pace_guard"
+                selected_inner_solver_name = "greedy"
+                coverage_pace_interventions += 1
+                logger.info(
+                    "RHC coverage pace guard: window %d switched to greedy "
+                    "(pace_ratio=%.3f < threshold=%.3f)",
+                    window_count,
+                    coverage_pace_controller.pace_ratio(
+                        time.monotonic() - time_budget_t0
+                    )
+                    or 0.0,
+                    coverage_pace_threshold,
+                )
+
             def resolve_inner_window_time_cap(
                 selected_solver_name: str = selected_inner_solver_name,
                 window_op_count: int = 0,
@@ -2170,6 +2214,10 @@ class RhcSolver(BaseSolver):
                     if hybrid_routing_reason is not None:
                         inner_window_summaries[-1]["hybrid_routing_reason"] = hybrid_routing_reason
 
+                if coverage_pace_guard_enabled:
+                    coverage_pace_controller.observe_window(
+                        len(committed_op_ids) - committed_before_window
+                    )
                 window_start_offset += window_minutes
                 if time_limit_reached:
                     break
@@ -2341,6 +2389,11 @@ class RhcSolver(BaseSolver):
         )
 
         elapsed_ms = int((time.monotonic() - t0) * 1000)
+        final_pace_ratio = (
+            coverage_pace_controller.pace_ratio(time.monotonic() - time_budget_t0)
+            if coverage_pace_guard_enabled
+            else None
+        )
 
         logger.info(
             "RHC finished: %d windows, %d/%d ops scheduled, makespan=%.1f min, %d ms",
@@ -2408,6 +2461,13 @@ class RhcSolver(BaseSolver):
                 ),
                 "inner_fallback_kpi_threshold": inner_fallback_kpi_threshold,
                 "inner_fallback_kpi_passed": inner_fallback_ratio <= inner_fallback_kpi_threshold,
+                "coverage_pace_guard_enabled": coverage_pace_guard_enabled,
+                "coverage_pace_threshold": coverage_pace_threshold,
+                "coverage_pace_min_windows": coverage_pace_min_windows,
+                "coverage_pace_interventions": coverage_pace_interventions,
+                "coverage_pace_final_ratio": (
+                    round(final_pace_ratio, 4) if final_pace_ratio is not None else None
+                ),
                 "preprocessing_ms": preprocessing_ms,
                 "preprocessing_phase_ms": dict(preprocess_phase_ms),
                 "peak_window_candidate_count": peak_window_candidate_count,

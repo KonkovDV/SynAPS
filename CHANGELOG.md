@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `CoveragePaceController` (`synaps/solvers/rhc/_budget.py`): deterministic outer/inner objective alignment for RHC — projects final coverage from the observed per-window commit rate and, when the projection falls below threshold, reroutes the next window to the greedy commit path. Opt-in via `coverage_pace_guard_enabled` (default off; historical behavior unchanged). Telemetry: `coverage_pace_interventions`, `coverage_pace_final_ratio`.
+- `RhcPolicy.SEARCH_COVER` preset and `RHC-ALNS-SEARCH-COVER` portfolio config: search-active DOE geometry (360/90, presearch cap 2000) combined with the coverage-pace guard and a 15% residual-fill time reserve, targeting 50K+ search-entry without scheduled_ratio regression.
+- `benchmark/fjs_loader.py`: strict parser for the standard `.fjs` public FJSP benchmark format (Brandimarte / Hurink / DAFJS) with documented mapping caveats; `run_benchmark` now accepts `.fjs` files and directories.
+- `JsonKnnRuntimeModel` + `RuntimePredictor.load_json()` (`synaps/ml_advisory.py`): torch-free deterministic k-NN solver advisor; `benchmark/train_runtime_advisor.py` trains the JSON artifact from `--compare` benchmark reports with a verified-feasible-only labeling gate (ADR-006).
+- Tests: `test_coverage_pace_guard.py`, `test_fjs_loader.py`, `test_ml_advisory_json_model.py` (55 tests incl. reruns of touched suites).
+
 ### Changed
 
 - Public GitHub surface hygiene: removed session audits/plans, Habr drafts, study JSON dumps, and debug scripts from the tracked tree; README trimmed to install / quick start / portfolio / claim boundary.

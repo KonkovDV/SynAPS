@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import dataclasses
 import importlib
+import json
+import math
 from typing import TYPE_CHECKING, Any
 
 from synaps.logging import get_logger
@@ -146,6 +148,170 @@ class RuntimeAdvisory:
     model_version: str
 
 
+# ── JSON k-NN runtime model (torch-free, deterministic) ──
+
+#: Current on-disk schema version for JSON k-NN model artifacts.
+JSON_KNN_MODEL_SCHEMA: str = "synaps-knn-advisor-v1"
+
+#: Feature dimensionality of :class:`ProblemFeatures` (order of ``as_list``).
+_FEATURE_DIM = 9
+
+
+def _finite_float(value: Any, *, context: str) -> float:
+    """Coerce *value* to a finite float or raise ``ValueError``.
+
+    ``json.loads`` accepts the non-standard ``NaN`` / ``Infinity`` literals,
+    and ``max(nan, 1e-9)`` returns ``nan`` (NaN comparisons are always
+    False), so a crafted model artifact could otherwise smuggle NaN/Inf
+    into normalized distances and advisory metadata. Reject them here.
+    """
+    try:
+        result = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{context} value {value!r} is not numeric") from exc
+    if math.isnan(result) or math.isinf(result):
+        raise ValueError(f"{context} value {value!r} is not finite")
+    return result
+
+
+class JsonKnnRuntimeModel:
+    """Deterministic k-nearest-neighbour solver recommender.
+
+    Loaded from a JSON artifact produced by
+    ``benchmark/train_runtime_advisor.py``. Pure Python, no torch: this is
+    the smallest algorithm-selection model family (feature-space instance
+    similarity, Kerschke et al. 2019 survey) that upgrades the advisory
+    layer from \"scaffold\" to \"functional\" while remaining auditable.
+
+    Artifact schema (``JSON_KNN_MODEL_SCHEMA``)::
+
+        {
+          "schema": "synaps-knn-advisor-v1",
+          "model_version": "knn-2026-07-29",
+          "k": 3,
+          "feature_means": [... 9 floats ...],
+          "feature_stds":  [... 9 floats ...],
+          "samples": [
+            {"features": [... 9 floats ...],
+             "best_solver": "CPSAT-30",
+             "runtime_ms": {"GREED": 12.0, "CPSAT-30": 810.0}},
+            ...
+          ]
+        }
+
+    Prediction: z-score normalise the query, take the ``k`` nearest
+    training samples (Euclidean), vote with weights ``1/(eps+dist)``.
+    ``confidence`` is the winning weight share; the deterministic router
+    still wins below the caller's confidence threshold.
+    """
+
+    def __init__(
+        self,
+        *,
+        model_version: str,
+        k: int,
+        feature_means: list[float],
+        feature_stds: list[float],
+        samples: list[dict[str, Any]],
+    ) -> None:
+        if len(feature_means) != _FEATURE_DIM or len(feature_stds) != _FEATURE_DIM:
+            raise ValueError(
+                f"feature_means/feature_stds must have length {_FEATURE_DIM}"
+            )
+        if k < 1:
+            raise ValueError("k must be >= 1")
+        if not samples:
+            raise ValueError("JsonKnnRuntimeModel requires at least one sample")
+        normalized_means = [
+            _finite_float(value, context="feature_means") for value in feature_means
+        ]
+        normalized_stds = [
+            max(_finite_float(value, context="feature_stds"), 1e-9) for value in feature_stds
+        ]
+        for index, sample in enumerate(samples):
+            features = sample.get("features")
+            if not isinstance(features, list) or len(features) != _FEATURE_DIM:
+                raise ValueError(f"sample #{index} features must have length {_FEATURE_DIM}")
+            # Reject non-numeric / NaN / Inf feature values up front so
+            # predict() can never raise on a crafted artifact (the router
+            # only guards against ImportError).
+            for value in features:
+                _finite_float(value, context=f"sample #{index} feature")
+            if not isinstance(sample.get("best_solver"), str):
+                raise ValueError(f"sample #{index} is missing best_solver")
+        self.model_version = model_version
+        self.k = k
+        self.feature_means = normalized_means
+        self.feature_stds = normalized_stds
+        self.samples = samples
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> JsonKnnRuntimeModel:
+        if payload.get("schema") != JSON_KNN_MODEL_SCHEMA:
+            raise ValueError(
+                f"unsupported advisor model schema {payload.get('schema')!r}; "
+                f"expected {JSON_KNN_MODEL_SCHEMA!r}"
+            )
+        return cls(
+            model_version=str(payload.get("model_version", "knn-unversioned")),
+            k=int(payload.get("k", 3)),
+            feature_means=list(payload["feature_means"]),
+            feature_stds=list(payload["feature_stds"]),
+            samples=list(payload["samples"]),
+        )
+
+    def _normalize(self, raw: list[float]) -> list[float]:
+        return [
+            (value - mean) / std
+            for value, mean, std in zip(raw, self.feature_means, self.feature_stds, strict=True)
+        ]
+
+    def predict(self, features: ProblemFeatures) -> RuntimeAdvisory:
+        query = self._normalize(features.as_list())
+        scored: list[tuple[float, dict[str, Any]]] = []
+        for sample in self.samples:
+            point = self._normalize([float(value) for value in sample["features"]])
+            distance = math.sqrt(
+                sum((q - p) ** 2 for q, p in zip(query, point, strict=True))
+            )
+            scored.append((distance, sample))
+        scored.sort(key=lambda item: item[0])
+        neighbours = scored[: self.k]
+
+        vote_weights: dict[str, float] = {}
+        predicted_ms_acc: dict[str, list[tuple[float, float]]] = {}
+        for distance, sample in neighbours:
+            weight = 1.0 / (1e-6 + distance)
+            solver = str(sample["best_solver"])
+            vote_weights[solver] = vote_weights.get(solver, 0.0) + weight
+            runtime_ms = sample.get("runtime_ms")
+            if isinstance(runtime_ms, dict):
+                for solver_name, value in runtime_ms.items():
+                    predicted_ms_acc.setdefault(str(solver_name), []).append(
+                        (weight, float(value))
+                    )
+
+        recommended = max(sorted(vote_weights), key=lambda name: vote_weights[name])
+        total_weight = sum(vote_weights.values())
+        confidence = vote_weights[recommended] / total_weight if total_weight > 0 else 0.0
+
+        predicted_ms = {
+            solver_name: round(
+                sum(weight * value for weight, value in pairs)
+                / max(sum(weight for weight, _ in pairs), 1e-9),
+                1,
+            )
+            for solver_name, pairs in sorted(predicted_ms_acc.items())
+        }
+
+        return RuntimeAdvisory(
+            predicted_ms=predicted_ms,
+            recommended_solver=recommended,
+            confidence=round(confidence, 4),
+            model_version=self.model_version,
+        )
+
+
 class RuntimePredictor:
     """GNN-based solver runtime predictor.
 
@@ -189,12 +355,45 @@ class RuntimePredictor:
         return cls(model=model, model_version=str(model_path.stem))
 
     @classmethod
+    def load_json(cls, path: Path | str) -> RuntimePredictor:
+        """Load a torch-free JSON k-NN advisor model from disk.
+
+        Unlike :meth:`load`, a successfully parsed JSON model counts as a
+        loaded model (``has_loaded_model=True``) and therefore may override
+        the deterministic router when its confidence clears the caller's
+        threshold. Missing or malformed artifacts degrade to the heuristic
+        predictor with a warning — never an exception at runtime.
+        """
+        from pathlib import Path as _Path
+
+        model_path = _Path(path)
+        if not model_path.exists():
+            _log.warning("json_model_not_found", path=str(path))
+            return cls(model=None, model_version="heuristic")
+        try:
+            payload = json.loads(model_path.read_text(encoding="utf-8"))
+            model = JsonKnnRuntimeModel.from_dict(payload)
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
+            _log.warning("json_model_invalid", path=str(path), error=str(exc))
+            return cls(model=None, model_version="heuristic")
+        return cls(model=model, model_version=model.model_version)
+
+    @classmethod
     def heuristic(cls) -> RuntimePredictor:
         """Create a pure heuristic predictor (no model needed)."""
         return cls(model=None, model_version="heuristic")
 
     def predict(self, features: ProblemFeatures) -> RuntimeAdvisory:
         """Predict solver runtimes and recommend the best solver config."""
+        if isinstance(self._model, JsonKnnRuntimeModel):
+            # Defense in depth: the deterministic router only guards against
+            # ImportError, so a predict-time failure on a crafted artifact
+            # must degrade to the heuristic rather than crash the solve.
+            try:
+                return self._model.predict(features)
+            except (ValueError, TypeError, ArithmeticError) as exc:
+                _log.warning("json_model_predict_error", error=str(exc))
+                return self._predict_heuristic(features)
         if self._model is not None and _TORCH_AVAILABLE:
             return self._predict_with_model(features)
         return self._predict_heuristic(features)
@@ -267,6 +466,8 @@ class RuntimePredictor:
 
 
 __all__ = [
+    "JSON_KNN_MODEL_SCHEMA",
+    "JsonKnnRuntimeModel",
     "ProblemFeatures",
     "RuntimeAdvisory",
     "RuntimePredictor",

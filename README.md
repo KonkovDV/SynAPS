@@ -42,16 +42,16 @@ JSON contracts live under [`schema/contracts/`](schema/contracts/). Examples: [`
 
 ## Solver portfolio
 
-23 named configs in [`synaps/solvers/registry.py`](synaps/solvers/registry.py), routed by [`synaps/solvers/router.py`](synaps/solvers/router.py):
+25 named configs in [`synaps/solvers/registry.py`](synaps/solvers/registry.py), routed by [`synaps/solvers/router.py`](synaps/solvers/router.py):
 
 | Family | Examples | Role |
 | --- | --- | --- |
 | Constructive | `GREED`, `BEAM-3` | Fast feasible baselines |
 | Exact / MIP | `CPSAT-*`, `LBBD-*` | Small–medium exact / decomposed |
 | Metaheuristic | `ALNS-*` | Local search quality |
-| Horizon | `RHC-GREEDY`, `RHC-ALNS`, `RHC-GREEDY-COVER` | Large instances (10K–100K+ ops) |
+| Horizon | `RHC-GREEDY`, `RHC-ALNS`, `RHC-ALNS-SEARCH-COVER`, `RHC-GREEDY-COVER` | Large instances (10K–100K+ ops) |
 
-For **full coverage** on large instances, prefer `RHC-GREEDY-COVER` (reserved residual fill). `RHC-ALNS` is a refine/quality lane, not a completeness guarantee under short timeboxes.
+For **full coverage** on large instances, prefer `RHC-GREEDY-COVER` (reserved residual fill). `RHC-ALNS` is a refine/quality lane, not a completeness guarantee under short timeboxes. `RHC-ALNS-SEARCH-COVER` combines the search-active DOE geometry with a deterministic coverage-pace guard for 50K+ instances.
 
 ## What is (and is not) claimed
 

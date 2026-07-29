@@ -220,7 +220,16 @@ def _build_compare_statistics(comparisons: list[dict[str, Any]]) -> dict[str, An
 
 
 def load_problem(path: Path) -> ScheduleProblem:
-    """Deserialise a JSON instance into a ScheduleProblem."""
+    """Deserialise a benchmark instance into a ScheduleProblem.
+
+    Supports the native JSON contract and the standard ``.fjs`` public
+    benchmark format (Brandimarte / Hurink / DAFJS) via
+    :mod:`benchmark.fjs_loader`.
+    """
+    if path.suffix.lower() == ".fjs":
+        from benchmark.fjs_loader import load_fjs_problem
+
+        return load_fjs_problem(path)
     data = json.loads(path.read_text(encoding="utf-8"))
     return ScheduleProblem.model_validate(data)
 
@@ -488,7 +497,9 @@ def main() -> None:
     args = parser.parse_args()
     path: Path = args.path
 
-    instances = sorted(path.glob("*.json")) if path.is_dir() else [path]
+    instances = (
+        sorted([*path.glob("*.json"), *path.glob("*.fjs")]) if path.is_dir() else [path]
+    )
 
     all_reports: list[dict[str, Any]] = []
     for inst in instances:
