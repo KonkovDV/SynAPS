@@ -721,14 +721,6 @@ def _solve_precedence_aware_master(
                     np.array(cut_indices, dtype=np.int32),
                     np.array(cut_coeffs),
                 )
-        elif cut.kind == "load_balance":
-            h.addRow(
-                cut.rhs,
-                highspy.kHighsInf,
-                1,
-                np.array([cmax_idx], dtype=np.int32),
-                np.array([1.0]),
-            )
         elif cut.kind in ("setup_cost", "machine_tsp"):
             # R1 (2026-05-03): machine_tsp shares the combinatorial Benders
             # form of setup_cost (rhs = total_processing + L; LHS adds
@@ -1468,22 +1460,16 @@ def _generate_all_cuts(
             )
         )
 
-    # 3. Load-balance cut (Hooker 2007, §7.3)
-    if machine_loads:
-        total_load = sum(machine_loads.values())
-        num_machines = max(len(machine_loads), 1)
-        avg_load = total_load / num_machines
-        max_load = max(machine_loads.values())
-        lb_rhs = max(max_load, avg_load)
-        if lb_rhs > 0:
-            benders_cuts.append(
-                _BendersCut(
-                    assignment_map=dict(assignment_map),
-                    kind="load_balance",
-                    rhs=lb_rhs,
-                    bottleneck_ops=set(),
-                )
-            )
+    # 3. Load-balance bound: REMOVED (S1 fix, 2026-07).
+    # The previous `load_balance` cut added `C_max >= max_k completion_k`
+    # unconditionally (no y variables), where completion_k is the incumbent's
+    # per-machine finish time (`machine_loads` above is completion time, not
+    # processing load). That asserts `C_max >= makespan(incumbent)` for every
+    # assignment, forbidding improvement and forcing a fake gap -> 0. The valid
+    # y-dependent load bound is already the master capacity constraint; the
+    # valid y-independent global floor is `average_capacity_lb` in
+    # lower_bounds.py. Note: LBBD-HD had no `if lb_rhs > lb` guard, so this
+    # implementation was even more aggressive than the base solver's.
 
     # 4. Critical-path cut (Naderi & Roshanaei 2022)
     # Find the longest path in the schedule DAG (critical path)

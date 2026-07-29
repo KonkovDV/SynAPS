@@ -11,8 +11,10 @@ Features:
       GreedyDispatch (toggle via use_greedy_warm_start).
     - Parallel subproblem execution via ProcessPoolExecutor for
       O(K) speedup (toggle via parallel_subproblems).
-        - Five families of Benders cuts: nogood, capacity,
-            setup_cost, load_balance, critical_path.
+        - Families of Benders cuts: nogood, capacity, setup_cost,
+            machine_tsp, critical_path. (The `load_balance` cut was removed
+            in the 2026-07 S1 fix: it added an unconditional
+            `C_max >= makespan(incumbent)` row and produced a fake gap.)
 """
 
 from __future__ import annotations
@@ -291,7 +293,7 @@ class LbbdSolver(BaseSolver):
 
             # --- Generate Benders cut ---
             bottleneck_wc = max(
-                _makespan_by_machine(sub_assignments, problem).items(),
+                _completion_time_by_machine(sub_assignments, problem).items(),
                 key=lambda kv: kv[1],
             )[0]
             bottleneck_ops = {
@@ -373,27 +375,18 @@ class LbbdSolver(BaseSolver):
                     )
                 )
 
-            # --- Load-balance cut (Hooker 2007, §7.3) ---
-            # Strengthened form: C_max ≥ max(max_k load_k, total / |M|).
-            # The max-load term is a tighter relaxation-free lower bound
-            # than the average alone, especially on imbalanced instances
-            # where one machine dominates.
-            machine_loads = _makespan_by_machine(sub_assignments, problem)
-            if machine_loads:
-                total_load = sum(machine_loads.values())
-                num_machines = max(len(machine_loads), 1)
-                avg_load = total_load / num_machines
-                max_load = max(machine_loads.values())
-                lb_cut_rhs = max(max_load, avg_load)
-                if lb_cut_rhs > lb:
-                    _register_cut(
-                        _BendersCut(
-                            assignment_map=dict(assignment_map),
-                            kind="load_balance",
-                            rhs=lb_cut_rhs,
-                            bottleneck_ops=set(),
-                        )
-                    )
+            # --- Load-balance bound ---
+            # S1 fix (2026-07): the previous `load_balance` cut added
+            # `C_max >= max_k completion_k` unconditionally (no y variables),
+            # where completion_k came from `_completion_time_by_machine` — the
+            # incumbent's per-machine finish times, NOT its processing load.
+            # That asserts `C_max >= makespan(incumbent)` for *every*
+            # assignment, forbidding any improvement and forcing gap -> 0 in
+            # 1-2 iterations (a fake optimality certificate). Removed.
+            # The valid y-dependent load bound is already Constraint 2 in the
+            # master (Sum_i p_ik y_ik <= C_max per machine); the valid
+            # y-independent global floor is `average_capacity_lb` in
+            # lower_bounds.py. No per-iteration cut is needed or sound here.
 
             critical_ops, critical_duration = _find_critical_path(
                 problem,
@@ -422,10 +415,13 @@ class LbbdSolver(BaseSolver):
         for cut in benders_cuts:
             cut_kinds[cut.kind] = cut_kinds.get(cut.kind, 0) + 1
 
-        # Cap reported lower bound: in LBBD the master relaxation with
-        # heuristic cuts (load_balance) can push lb above best_ub,
-        # signaling convergence. Report min(lb, best_ub) so consumers
-        # always see lb <= ub.
+        # Cap reported lower bound: the residual optimization cuts
+        # (capacity / setup_cost / machine_tsp / critical_path) can still
+        # over-claim on setup instances (their master-row discount covers only
+        # processing time, not the setup contribution — audit S2/S3), pushing
+        # the raw master lb above best_ub. Report min(lb, best_ub) so consumers
+        # always see lb <= ub. NOTE: this clamp is defensive, not a validity
+        # guarantee — a valid lower bound requires the S2/S3 cut fixes.
         reported_lb = min(lb, best_ub) if best_ub < float("inf") else lb
 
         # Aggregate per-iteration LB deltas back to the cut kinds that drove
@@ -688,15 +684,6 @@ def _solve_master(
                     np.array(capacity_cut_indices, dtype=np.int32),
                     np.array(capacity_cut_coeffs),
                 )
-        elif cut.kind == "load_balance":
-            # Load-balance cut: C_max ≥ rhs (simple lower bound)
-            h.addRow(
-                cut.rhs,
-                highspy.kHighsInf,
-                1,
-                np.array([cmax_idx], dtype=np.int32),
-                np.array([1.0]),
-            )
         elif cut.kind == "setup_cost":
             setup_cut_indices = [cmax_idx]
             setup_cut_coeffs = [1.0]
@@ -1134,11 +1121,15 @@ def _build_subproblem(
 # ---------------------------------------------------------------------------
 
 
-def _makespan_by_machine(
+def _completion_time_by_machine(
     assignments: list[Assignment],
     problem: ScheduleProblem,
 ) -> dict[UUID, float]:
-    """Compute per-machine makespan (max end time offset)."""
+    """Per-machine completion time (max end-time offset).
+
+    NOTE: this is finish time, not processing load. Do not use it as a
+    load-balance bound (see the S1 fix in the Benders loop).
+    """
     horizon_start = problem.planning_horizon_start
     by_machine: dict[UUID, float] = {}
     for a in assignments:
