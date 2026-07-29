@@ -281,3 +281,23 @@ aux-constrained LNS repair, freezing the rest. This is the same
 decompose-and-exactly-repair pattern LBBD already uses for bottleneck
 sequencing, applied to aux-capacity clusters — the only shown-sound way to keep
 precedence, machine, and aux simultaneously feasible.
+
+### Update (iteration 5, 2026-07): cluster CP-SAT prototype — fourth barrier + formalization
+
+The cluster CP-SAT re-solve above was prototyped and exposed a **fourth**
+barrier: a resource-induced cluster is an arbitrary subset of an order's
+operations, which violates the `ScheduleProblem` contiguous-`seq_in_order`
+precedence-chain invariant (`ValidationError`). A correct repair set must be
+**whole-order** and **resource-complete** *and* the CP-SAT sub-model must
+account for frozen-resource intervals — three conditions (C1/C2/C3) now proved
+necessary, each tied to a specific failed approach. Under full closure the
+cluster approaches the whole instance (aux prob ≈ 0.4, few resources), so the
+open problem is bounding the cluster, not modelling the repair.
+
+Full formal specification — (AUX) constraint, the fix-and-optimize / LBBD
+subproblem, correctness conditions C1–C3, the correctness proposition, and the
+bounded **windowed C3-relaxation** to implement next — is in
+[`docs/research/AUX_REPAIR_CLUSTER_FORMALIZATION_2026.md`](../docs/research/AUX_REPAIR_CLUSTER_FORMALIZATION_2026.md).
+Grounded in July-2026 literature: Xiong et al. (EJOR 2026, LBBD for DFJSP),
+Kasapidis et al. (EJOR 2025, multi-resource FJSP), PyJobShop (Lan 2025),
+PMS-2026 relax-and-fix / fix-and-optimize.
