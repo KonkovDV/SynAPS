@@ -28,6 +28,7 @@ class ProblemProfile:
     nonzero_setup_density: float
     has_aux_constraints: bool
     has_nonzero_setups: bool
+    sdst_metric: bool
     size_band: str
     precedence_depth: int
     resource_contention: float
@@ -54,6 +55,39 @@ def _size_band(operation_count: int) -> str:
     if operation_count <= 50_000:
         return "mega"
     return "ultra"
+
+
+def _setup_matrix_is_metric(problem: ScheduleProblem) -> bool:
+    """True iff the SDST matrix satisfies the triangle inequality everywhere (M3).
+
+    Mirrors ``synaps.validation.is_setup_matrix_metric`` but is computed inline
+    to keep this lightweight profiling module free of solver imports. A missing
+    (from, to) cell is treated as unknown and never fabricates a violation.
+    """
+    setup = {
+        (e.work_center_id, e.from_state_id, e.to_state_id): float(e.setup_minutes)
+        for e in problem.setup_matrix
+    }
+    wc_ids = {e.work_center_id for e in problem.setup_matrix}
+    state_ids = [s.id for s in problem.states]
+    for wc_id in wc_ids:
+        for a in state_ids:
+            for c in state_ids:
+                if a == c:
+                    continue
+                direct = setup.get((wc_id, a, c))
+                if direct is None:
+                    continue
+                for b in state_ids:
+                    if b in (a, c):
+                        continue
+                    ab = setup.get((wc_id, a, b))
+                    bc = setup.get((wc_id, b, c))
+                    if ab is None or bc is None:
+                        continue
+                    if direct > ab + bc + 1e-9:
+                        return False
+    return True
 
 
 def build_problem_profile(problem: ScheduleProblem) -> ProblemProfile:
@@ -136,6 +170,7 @@ def build_problem_profile(problem: ScheduleProblem) -> ProblemProfile:
         nonzero_setup_density=nonzero_setup_density,
         has_aux_constraints=bool(problem.auxiliary_resources or problem.aux_requirements),
         has_nonzero_setups=setup_nonzero_entry_count > 0,
+        sdst_metric=_setup_matrix_is_metric(problem),
         size_band=_size_band(operation_count),
         precedence_depth=precedence_depth,
         resource_contention=resource_contention,

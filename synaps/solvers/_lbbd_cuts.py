@@ -146,6 +146,15 @@ def compute_machine_tsp_lower_bound(
     (12 by default; BHK cost is O(n^2 * 2^n)) or when fewer than two state
     types are present.
 
+    Metricity (M3): the Hamiltonian-path value itself is valid on ANY sdst
+    matrix (metric or not) as a lower bound on the setup contribution of a
+    FIXED op set. It is only unsafe to *discount* it per removed op (the S3
+    over-claim), which is why the machine_tsp optimality cut was removed. On a
+    non-metric matrix (`problem_profile.sdst_metric is False`,
+    `synaps.validation.validate_setup_matrix_metricity`) the dominance claim
+    over the sequence-independent floor still holds because this takes the BHK
+    optimum; callers needing metricity should check `sdst_metric` first.
+
     Reference: Naderi & Roshanaei (2021), "Critical-Path-Search Logic-Based
     Benders Decomposition Approaches for Flexible Job Shop Scheduling",
     INFORMS Journal on Optimization 4(1).

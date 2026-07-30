@@ -4,9 +4,83 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from synaps.model import ScheduleProblem, ScheduleResult, SolverStatus
 from synaps.solvers.feasibility_checker import FeasibilityChecker, FeasibilityViolation
+
+if TYPE_CHECKING:
+    from uuid import UUID
+
+
+@dataclass(frozen=True)
+class SetupTriangleViolation:
+    """A single SDST triangle-inequality violation on one work center.
+
+    ``setup(from -> to) > setup(from -> via) + setup(via -> to)`` on
+    ``work_center_id`` — i.e. going direct costs more than routing through an
+    intermediate state, which breaks the metric assumption that TSP-style setup
+    bounds and greedy insertion rely on.
+    """
+
+    work_center_id: UUID
+    from_state_id: UUID
+    via_state_id: UUID
+    to_state_id: UUID
+    direct_minutes: float
+    via_minutes: float
+
+
+def validate_setup_matrix_metricity(
+    problem: ScheduleProblem,
+) -> list[SetupTriangleViolation]:
+    """Return every triangle-inequality violation in the SDST matrix (M3).
+
+    The policy is *flag, don't forbid*: non-metric matrices are legal, but this
+    surface makes the violations enumerable so metricity-dependent bounds and
+    heuristics can warn instead of silently under/over-claiming. A missing
+    (from, to) cell is treated as +inf (no assertion possible), so it never
+    fabricates a violation.
+    """
+    setup: dict[tuple[UUID, UUID, UUID], float] = {
+        (e.work_center_id, e.from_state_id, e.to_state_id): float(e.setup_minutes)
+        for e in problem.setup_matrix
+    }
+    wc_ids = {e.work_center_id for e in problem.setup_matrix}
+    state_ids = [s.id for s in problem.states]
+    violations: list[SetupTriangleViolation] = []
+    for wc_id in wc_ids:
+        for a in state_ids:
+            for c in state_ids:
+                if a == c:
+                    continue
+                direct = setup.get((wc_id, a, c))
+                if direct is None:
+                    continue
+                for b in state_ids:
+                    if b in (a, c):
+                        continue
+                    ab = setup.get((wc_id, a, b))
+                    bc = setup.get((wc_id, b, c))
+                    if ab is None or bc is None:
+                        continue
+                    if direct > ab + bc + 1e-9:
+                        violations.append(
+                            SetupTriangleViolation(
+                                work_center_id=wc_id,
+                                from_state_id=a,
+                                via_state_id=b,
+                                to_state_id=c,
+                                direct_minutes=direct,
+                                via_minutes=ab + bc,
+                            )
+                        )
+    return violations
+
+
+def is_setup_matrix_metric(problem: ScheduleProblem) -> bool:
+    """True iff the SDST matrix satisfies the triangle inequality everywhere (M3)."""
+    return not validate_setup_matrix_metricity(problem)
 
 
 @dataclass(frozen=True)
