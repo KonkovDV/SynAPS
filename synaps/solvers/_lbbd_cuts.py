@@ -75,6 +75,26 @@ def cut_pool_fingerprint(
     return (cut.kind, frozenset(cut.bottleneck_ops), frozenset(), round(float(cut.rhs), 3))
 
 
+def reported_lower_bound(raw_relaxation: float, best_ub: float) -> tuple[float, bool]:
+    """Return ``(reported_lb, invariant_violated)`` for an LBBD run (N5).
+
+    The reported lower bound is the RAW cut-free master relaxation, never
+    ``min(raw_relaxation, best_ub)``. Clamping to the incumbent would make
+    ``lb <= ub`` hold by construction and silence an invalid relaxation (one
+    that exceeds a feasible solution) — the same muffle-your-own-sentinel
+    anti-pattern as ``_clamp_non_negative`` in ``lower_bounds.py``.
+
+    A finite incumbent that the relaxation exceeds is a bug: the relaxation is
+    supposed to be a valid lower bound on the optimum, and the optimum is
+    <= any feasible incumbent. We therefore report the raw value and set the
+    violation flag so the caller can diagnose (and tests can assert) instead of
+    hiding it. ``eps`` absorbs integer-minute float drift.
+    """
+    eps = 1e-6
+    invariant_violated = best_ub < float("inf") and raw_relaxation > best_ub + eps
+    return raw_relaxation, invariant_violated
+
+
 def compute_machine_transition_floor(
     problem: ScheduleProblem,
     eligible_by_op: dict[UUID, list[UUID]],

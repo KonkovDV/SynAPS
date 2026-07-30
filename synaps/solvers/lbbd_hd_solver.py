@@ -49,6 +49,7 @@ from synaps.solvers._lbbd_cuts import (
     compute_machine_tsp_lower_bound,
     compute_sequence_independent_setup_lower_bound,
     cut_pool_fingerprint,
+    reported_lower_bound,
 )
 from synaps.solvers.cpsat_solver import CpSatSolver
 from synaps.solvers.partitioning import partition_machines
@@ -440,9 +441,20 @@ class LbbdHdSolver(BaseSolver):
         # is an UPPER bound on the assignment's true cost, not a proven
         # minimum. Nogood cuts drive the search but must not tighten the
         # reported lower bound. The only provably-valid bound is the cut-free
-        # master relaxation (first iteration's bound). Report min(that, best_ub).
-        relaxation_lb = lb_evolution[0] if lb_evolution else 0.0
-        reported_lb = min(relaxation_lb, best_ub) if best_ub < float("inf") else relaxation_lb
+        # master relaxation (first iteration's bound).
+        #
+        # N5 (audit v3): report the RAW relaxation, never min(relaxation,
+        # best_ub) — the clamp would make lb <= ub true by construction and
+        # silence an invalid relaxation; flag the violation instead.
+        raw_relaxation = lb_evolution[0] if lb_evolution else 0.0
+        reported_lb, lb_invariant_violated = reported_lower_bound(raw_relaxation, best_ub)
+        if lb_invariant_violated:
+            warnings.warn(
+                f"LBBD-HD lower-bound invariant violated: raw master relaxation "
+                f"{raw_relaxation} exceeds incumbent {best_ub}; the relaxation "
+                f"is not a valid lower bound.",
+                stacklevel=2,
+            )
 
         # R10 (2026-05-03): aggregate per-iteration LB deltas back to the cut
         # kinds that drove them. Iteration-1 (no attributable cuts) and any
@@ -482,6 +494,7 @@ class LbbdHdSolver(BaseSolver):
                 else None,
                 "benders_active": benders_active,
                 "quality_warning": quality_warning,
+                "lower_bound_invariant_violated": lb_invariant_violated,
                 "lower_bound_method": "master_relaxation_benders_hd",
                 "lower_bound_components": {
                     "master_relaxation_lb": reported_lb,
