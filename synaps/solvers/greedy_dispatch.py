@@ -458,16 +458,96 @@ class GreedyDispatch(BaseSolver):
         )
 
 
+def _greedy_complete(
+    dispatch_context: Any,
+    orders_by_id: dict[Any, Any],
+    horizon_start: Any,
+    assignments: list[Assignment],
+    scheduled_ops: set[Any],
+    op_end_offsets: dict[Any, float],
+    remaining: list[Any],
+) -> tuple[list[Assignment], float] | None:
+    """Q1: deterministic completion-to-go rollout (Ow & Morton second stage).
+
+    Extends a partial schedule to a full one by repeatedly dispatching the
+    (operation, work center) with the earliest feasible completion (ties broken
+    deterministically), honoring precedence and release_date. Returns the full
+    assignment list and its makespan, or None if it cannot be completed. This is
+    a fixed function of the partial state, so a wider beam — which rolls out a
+    superset of partial states — can only lower the global incumbent.
+    """
+    machine_idx = MachineIndex(dispatch_context)
+    for assignment in assignments:
+        machine_idx.add(assignment)
+    out = list(assignments)
+    scheduled = set(scheduled_ops)
+    offsets = dict(op_end_offsets)
+    todo = list(remaining)
+
+    while todo:
+        ready = [
+            op
+            for op in todo
+            if op.predecessor_op_id is None or op.predecessor_op_id in scheduled
+        ]
+        if not ready:
+            return None  # precedence cycle / dead partial
+        best: tuple[Any, Any, Any] | None = None
+        best_key: tuple[float, float, str, str] | None = None
+        for op in ready:
+            order = orders_by_id[op.order_id]
+            pred_end = offsets.get(op.predecessor_op_id, 0.0)
+            if order.release_date is not None:
+                pred_end = max(
+                    pred_end, (order.release_date - horizon_start).total_seconds() / 60.0
+                )
+            eligible = (
+                op.eligible_wc_ids
+                if op.eligible_wc_ids
+                else list(dispatch_context.wc_by_id.keys())
+            )
+            for wc_id in eligible:
+                slot = find_earliest_feasible_slot(
+                    dispatch_context, out, op, wc_id, pred_end, machine_index=machine_idx
+                )
+                if slot is None:
+                    continue
+                key = (slot.end_offset, float(slot.setup_minutes), str(wc_id), str(op.id))
+                if best_key is None or key < best_key:
+                    best_key = key
+                    best = (op, wc_id, slot)
+        if best is None:
+            return None
+        op, wc_id, slot = best
+        assignment = Assignment(
+            operation_id=op.id,
+            work_center_id=wc_id,
+            start_time=horizon_start + timedelta(minutes=slot.start_offset),
+            end_time=horizon_start + timedelta(minutes=slot.end_offset),
+            setup_minutes=slot.setup_minutes,
+            aux_resource_ids=slot.aux_resource_ids,
+        )
+        out.append(assignment)
+        machine_idx.add(assignment)
+        offsets[op.id] = slot.end_offset
+        scheduled.add(op.id)
+        todo.remove(op)
+
+    makespan = max((a.end_time - horizon_start).total_seconds() / 60.0 for a in out) if out else 0.0
+    return out, makespan
+
+
 class BeamSearchDispatch(BaseSolver):
     """Filtered Beam Search extension of ATCS dispatch (Ow & Morton 1989).
 
-    Maintains B candidate partial schedules in parallel, selecting the top-B
-    scoring candidates at each decision point. This mitigates the myopia of
-    the single-trajectory greedy approach on heavy SDST matrices.
+    Two-stage per the source method (Q1 fix): the cheap ATCS priority index is
+    the first-stage filter that selects each beam's child expansions, and a
+    completion-to-go greedy rollout of the actual objective is the second-stage
+    ranking that decides which beams survive. A global incumbent is kept over
+    every completed rollout (not only the last-step survivors), so makespan is
+    non-increasing in the beam width.
 
     Memory: O(B · N) where N = number of operations.
-    Typical quality improvement: 20-50% reduction in makespan over greedy on
-    high-SDST instances with B=3..5.
     """
 
     def __init__(
@@ -489,11 +569,25 @@ class BeamSearchDispatch(BaseSolver):
     def solve(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
         # M2: virtualize parallel lanes (see GreedyDispatch.solve).
         virtual_problem, virtual_to_original = _virtualize_parallel_lanes(problem)
-        result = self._solve_core(virtual_problem, **kwargs)
-        _unroll_lane_assignments(result, virtual_to_original)
-        return result
+        # Q1: beam search is not monotone in the beam width in general, so
+        # return the best schedule over effective widths 1..B. This makes
+        # makespan non-increasing in beam_width by construction (a wider beam
+        # can never be worse than a narrower one) while still exploring the
+        # full requested width. B is small (<= ~12), instances are small.
+        best: ScheduleResult | None = None
+        for width in range(1, self._beam_width + 1):
+            candidate = self._solve_core(virtual_problem, width, **kwargs)
+            if best is None or (
+                candidate.objective.makespan_minutes < best.objective.makespan_minutes
+            ):
+                best = candidate
+        assert best is not None
+        _unroll_lane_assignments(best, virtual_to_original)
+        return best
 
-    def _solve_core(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
+    def _solve_core(
+        self, problem: ScheduleProblem, beam_width: int, **kwargs: Any
+    ) -> ScheduleResult:
         t0 = time.monotonic()
         acceleration_status = get_acceleration_status()
 
@@ -510,9 +604,22 @@ class BeamSearchDispatch(BaseSolver):
 
         total_ops = len(problem.operations)
 
+        # Q1: global incumbent over EVERY completed rollout, not just the beams
+        # that survive the last step. A wider beam rolls out a superset of
+        # partial states, so this is non-increasing in the beam width.
+        incumbent: list[Assignment] | None = None
+        incumbent_makespan = float("inf")
+
         for _step in range(total_ops):
             candidates: list[
-                tuple[float, list[Assignment], set[Any], dict[Any, float], list[Any]]
+                tuple[
+                    float,
+                    tuple[tuple[str, float, str], ...],
+                    list[Assignment],
+                    set[Any],
+                    dict[Any, float],
+                    list[Any],
+                ]
             ] = []
 
             for assignments, scheduled_ops, op_end_offsets, remaining in beams:
@@ -521,8 +628,41 @@ class BeamSearchDispatch(BaseSolver):
                     machine_idx.add(assignment)
 
                 if not remaining:
-                    # Beam already complete — preserve with neutral score
-                    candidates.append((0.0, assignments, scheduled_ops, op_end_offsets, remaining))
+                    # Beam already complete — rank by its own makespan and let
+                    # it update the incumbent.
+                    completed_mk = (
+                        max(
+                            (a.end_time - horizon_start).total_seconds() / 60.0
+                            for a in assignments
+                        )
+                        if assignments
+                        else 0.0
+                    )
+                    if completed_mk < incumbent_makespan:
+                        # Snapshot: assignment objects are shared across beams and
+                        # mutated in place by later steps, so copy to freeze it.
+                        incumbent = [a.model_copy() for a in assignments]
+                        incumbent_makespan = completed_mk
+                    completed_fp = tuple(
+                        sorted(
+                            (
+                                str(a.work_center_id),
+                                (a.start_time - horizon_start).total_seconds(),
+                                str(a.operation_id),
+                            )
+                            for a in assignments
+                        )
+                    )
+                    candidates.append(
+                        (
+                            completed_mk,
+                            completed_fp,
+                            assignments,
+                            scheduled_ops,
+                            op_end_offsets,
+                            remaining,
+                        )
+                    )
                     continue
 
                 ready = [
@@ -594,16 +734,16 @@ class BeamSearchDispatch(BaseSolver):
                 _best_by_op: dict[Any, dict[str, Any]] = {}
                 for record in candidate_records:
                     op_id = record["operation"].id
-                    incumbent = _best_by_op.get(op_id)
+                    existing_best = _best_by_op.get(op_id)
                     key = (
                         record["slot"].end_offset,
                         record["slot"].setup_minutes,
                         str(record["work_center_id"]),
                     )
-                    if incumbent is None or key < (
-                        incumbent["slot"].end_offset,
-                        incumbent["slot"].setup_minutes,
-                        str(incumbent["work_center_id"]),
+                    if existing_best is None or key < (
+                        existing_best["slot"].end_offset,
+                        existing_best["slot"].setup_minutes,
+                        str(existing_best["work_center_id"]),
                     ):
                         _best_by_op[op_id] = record
                 candidate_records = list(_best_by_op.values())
@@ -659,10 +799,21 @@ class BeamSearchDispatch(BaseSolver):
                 for record, log_score in zip(candidate_records, log_scores, strict=True):
                     scored.append((log_score, record))
 
-                scored.sort(key=lambda x: x[0], reverse=True)
-                top_candidates = scored[: self._beam_width]
+                # Deterministic tie-break (op id, wc id) so the top-beam_width
+                # child set is a prefix independent of the beam width — the key
+                # to width-monotonicity: beams(B) then contains beams(B-1).
+                scored.sort(
+                    key=lambda x: (
+                        -x[0],
+                        str(x[1]["operation"].id),
+                        str(x[1]["work_center_id"]),
+                    )
+                )
+                # First stage (Ow & Morton): cheap ATCS priority filter selects
+                # up to beam_width child expansions of this beam.
+                top_candidates = scored[:beam_width]
 
-                for score, record in top_candidates:
+                for _score, record in top_candidates:
                     new_assignments = list(assignments)
                     new_scheduled = set(scheduled_ops)
                     new_offsets = dict(op_end_offsets)
@@ -685,32 +836,66 @@ class BeamSearchDispatch(BaseSolver):
                     new_scheduled.add(best_op.id)
                     new_remaining = [op for op in remaining if op.id != best_op.id]
 
+                    # Second stage: completion-to-go rollout ranks this beam by
+                    # the ACTUAL objective and updates the global incumbent.
+                    rollout = _greedy_complete(
+                        dispatch_context,
+                        orders_by_id,
+                        horizon_start,
+                        new_assignments,
+                        new_scheduled,
+                        new_offsets,
+                        new_remaining,
+                    )
+                    if rollout is None:
+                        continue
+                    full_assignments, projected_mk = rollout
+                    if projected_mk < incumbent_makespan:
+                        # Snapshot: the rollout reuses assignment objects that
+                        # later steps mutate in place, so copy to freeze it.
+                        incumbent = [a.model_copy() for a in full_assignments]
+                        incumbent_makespan = projected_mk
+                    # Fingerprint is a deterministic function of the partial
+                    # schedule (independent of the beam width), so the top-B
+                    # beam set is a prefix and nests across widths.
+                    fingerprint = tuple(
+                        sorted(
+                            (
+                                str(a.work_center_id),
+                                (a.start_time - horizon_start).total_seconds(),
+                                str(a.operation_id),
+                            )
+                            for a in new_assignments
+                        )
+                    )
                     candidates.append(
-                        (score, new_assignments, new_scheduled, new_offsets, new_remaining),
+                        (
+                            projected_mk,
+                            fingerprint,
+                            new_assignments,
+                            new_scheduled,
+                            new_offsets,
+                            new_remaining,
+                        ),
                     )
 
             if not candidates:
                 break
 
-            # Keep top-B beams by cumulative score proxy: use makespan as tiebreaker
-            candidates.sort(key=lambda x: x[0], reverse=True)
-            beams = [(c[1], c[2], c[3], c[4]) for c in candidates[: self._beam_width]]
+            # Second-stage ranking: keep the B beams with the best completion-
+            # to-go projection (lower makespan is better), tie-broken by the
+            # deterministic fingerprint so top-B nests across beam widths.
+            candidates.sort(key=lambda x: (x[0], x[1]))
+            beams = [(c[2], c[3], c[4], c[5]) for c in candidates[:beam_width]]
 
-        # Select best completed beam by makespan
-        best_result: tuple[list[Assignment], float] | None = None
-        for assignments, _scheduled, _offsets, _rem in beams:
-            if len(assignments) != total_ops:
-                continue
-            makespan = max((a.end_time - horizon_start).total_seconds() / 60.0 for a in assignments)
-            if best_result is None or makespan < best_result[1]:
-                best_result = (assignments, makespan)
-
-        if best_result is None:
+        # The incumbent is the best of every completed rollout. It is the
+        # returned schedule; a wider beam can only lower it (Q1 monotonicity).
+        if incumbent is None:
             # Fall back to standard greedy
             greedy = GreedyDispatch(k1=self._k1, k2=self._k2, k3=self._k3)
             return greedy.solve(problem, **kwargs)
 
-        assignments, makespan = best_result
+        assignments, makespan = incumbent, incumbent_makespan
 
         # Recompute setups and objectives
         total_setup = recompute_assignment_setups(assignments, dispatch_context)

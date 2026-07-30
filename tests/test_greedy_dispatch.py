@@ -449,7 +449,7 @@ class TestBeamSearchDispatch:
         result = solver.solve(simple_problem)
         assert result.metadata["beam_width"] == 5
 
-    def test_beam_width_1_equals_greedy(self, simple_problem: ScheduleProblem) -> None:
+    def test_beam_width_1_not_worse_than_greedy(self, simple_problem: ScheduleProblem) -> None:
         from synaps.solvers.greedy_dispatch import BeamSearchDispatch
 
         beam1 = BeamSearchDispatch(beam_width=1)
@@ -458,10 +458,14 @@ class TestBeamSearchDispatch:
         greedy = GreedyDispatch()
         result_greedy = greedy.solve(simple_problem)
 
-        # With width=1, beam search degenerates to greedy
+        # Q1: beam search now ranks beams by a completion-to-go rollout (Ow &
+        # Morton second stage) rather than replaying the one-step ATCS greedy
+        # trajectory, so width-1 beam is no longer identical to GreedyDispatch
+        # — but it must never be worse (a beam that contains the greedy rollout
+        # can only improve on it).
         assert (
-            abs(result_beam.objective.makespan_minutes - result_greedy.objective.makespan_minutes)
-            < 0.1
+            result_beam.objective.makespan_minutes
+            <= result_greedy.objective.makespan_minutes + 1e-6
         )
 
     def test_respects_precedence(self, simple_problem: ScheduleProblem) -> None:
