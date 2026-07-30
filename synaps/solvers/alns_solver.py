@@ -3816,6 +3816,12 @@ class AlnsSolver(BaseSolver):
                 "final_violation_recovered": final_violation_recovered,
                 "final_violation_recovery_source": final_violation_recovery_source,
                 "final_violations_before_recovery": final_violations_before_recovery,
+                # Q4: when the search incumbent was discarded and the initial
+                # seed returned, the whole search budget produced nothing usable
+                # — surface it so the portfolio can prefer a genuine improvement.
+                "quality_warning": (
+                    "search_discarded_returned_seed" if final_violation_recovered else None
+                ),
                 "final_violations": len(violations),
                 "destroy_operators": {
                     name: {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import math
 import time
 from collections.abc import Mapping
 from datetime import timedelta
@@ -573,6 +574,7 @@ class CpSatSolver(BaseSolver):
         weights: dict[str, int],
         material_loss_scale: int,
         secondary_bound: int,
+        makespan_bound_divisor: float = 1.0,
     ) -> tuple[list[Assignment], ObjectiveValues, dict[str, Any]]:
         assignments: list[Assignment] = []
         metadata: dict[str, Any] = {
@@ -641,9 +643,26 @@ class CpSatSolver(BaseSolver):
                 total_tardiness_minutes=float(solver.value(total_tardiness)),
                 weighted_sum=float(solver.objective_value),
             )
+            # Q3: solver.best_objective_bound is the dual bound of the scalarized
+            # (big-M) objective, in big-M units. Publish it verbatim under its
+            # own key, and report best_objective_bound in makespan minutes by
+            # dividing out the makespan coefficient (secondary_bound for the
+            # default weighted-sum objective; 1 when makespan is minimized
+            # directly). This is a valid makespan lower bound (<= achieved).
+            scalarized_bound = float(solver.best_objective_bound)
+            divisor = makespan_bound_divisor if makespan_bound_divisor > 0 else 1.0
+            # Floor: in the weighted-sum objective C_max*S + secondary (with
+            # 0 <= secondary < S), floor(bound / S) is a valid makespan lower
+            # bound (integer minutes); the fractional part is the secondary
+            # terms, which must not inflate the makespan bound above C_max.
+            makespan_bound = (
+                float(math.floor(scalarized_bound / divisor)) if divisor > 1.0 else scalarized_bound
+            )
             metadata.update(
                 {
-                    "best_objective_bound": float(solver.best_objective_bound),
+                    "best_objective_bound": makespan_bound,
+                    "objective_bound_units": "makespan_minutes",
+                    "scalarized_objective_bound": scalarized_bound,
                     "objective_components": {
                         "makespan_minutes": objective.makespan_minutes,
                         "total_setup_minutes": objective.total_setup_minutes,
@@ -955,6 +974,14 @@ class CpSatSolver(BaseSolver):
             weights,
             scale,
             secondary_bound,
+            makespan_bound_divisor=(
+                # Q3: the default weighted-sum objective scales makespan by
+                # secondary_bound; the epsilon modes minimize makespan (or the
+                # primary) directly, so the bound is already in its own units.
+                float(secondary_bound)
+                if objective_mode == "weighted_sum" and not epsilon_constraints
+                else 1.0
+            ),
         )
         if virtual_to_original:
             for assignment in assignments:
