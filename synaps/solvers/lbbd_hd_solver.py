@@ -69,8 +69,10 @@ class LbbdHdSolver(BaseSolver):
     SDST + ARC), connected by four families of Benders cuts.
 
     Key parameters (passed via **kwargs to ``solve``):
-        max_iterations: Benders iteration cap (default 10).
-        time_limit_s: Wall-clock budget in seconds (default 300).
+        max_iterations: Benders iteration CEILING (default 10).
+        time_limit_s: HARD wall-clock deadline in seconds (default 300);
+            whichever of the two is hit first wins (D3/D4). Per-cluster
+            CP-SAT budgets are clamped to the remaining deadline.
         random_seed: CP-SAT random seed (default 42).
         gap_threshold: Optimality gap at which to stop (default 0.01).
         max_ops_per_cluster: Cluster size cap for partitioning (default 200).
@@ -109,6 +111,8 @@ class LbbdHdSolver(BaseSolver):
         )
 
         sub_time_limit_s: int = max(2, time_limit_s // max(max_iterations, 1))
+        # D3: hard wall-clock deadline shared by all cluster solves.
+        deadline = t0 + float(time_limit_s)
 
         # ---- Precompute lookups ----
         wc_by_id = {wc.id: wc for wc in problem.work_centers}
@@ -278,6 +282,7 @@ class LbbdHdSolver(BaseSolver):
                 random_seed,
                 num_workers=num_workers,
                 sub_num_workers=sub_num_workers,
+                deadline=deadline,
             )
 
             if sub_result[0] is None:
@@ -920,6 +925,7 @@ def _solve_subproblems_parallel(
     *,
     num_workers: int = 4,
     sub_num_workers: int = 4,
+    deadline: float | None = None,
 ) -> tuple[list[Assignment] | None, float, bool, bool]:
     """Solve CP-SAT subproblems in parallel via ProcessPoolExecutor.
 
@@ -928,9 +934,19 @@ def _solve_subproblems_parallel(
     gate); ``infeasible_proven`` only on a proven INFEASIBLE cluster.
     For small instance counts (≤ 3 clusters), falls back to sequential
     execution to avoid multiprocessing overhead.
+
+    D3: the per-cluster budget is clamped to the remaining wall-clock budget
+    (``deadline`` is a ``time.monotonic()`` timestamp); no new cluster batch
+    is started past the deadline.
     """
     if not clusters:
         return None, 0.0, False, False
+
+    if deadline is not None:
+        remaining_s = deadline - time.monotonic()
+        if remaining_s <= 0:
+            return None, 0.0, False, False
+        sub_time_limit_s = max(1, min(sub_time_limit_s, int(remaining_s)))
 
     # Serialize problem once
     problem_dict = problem.model_dump(mode="json")
@@ -948,6 +964,7 @@ def _solve_subproblems_parallel(
             sub_time_limit_s,
             random_seed,
             sub_num_workers,
+            deadline=deadline,
         )
 
     all_assignments: list[Assignment] = []
@@ -1001,10 +1018,14 @@ def _solve_subproblems_sequential(
     sub_time_limit_s: int,
     random_seed: int,
     sub_num_workers: int,
+    *,
+    deadline: float | None = None,
 ) -> tuple[list[Assignment] | None, float, bool, bool]:
     """Sequential fallback for small cluster counts.
 
     Same 4-tuple contract as :func:`_solve_subproblems_parallel`.
+    D3: per-cluster budget clamped to the remaining deadline; no new cluster
+    is started past the deadline.
     """
     all_assignments: list[Assignment] = []
     overall_makespan = 0.0
@@ -1029,10 +1050,16 @@ def _solve_subproblems_sequential(
             orders_by_id,
         )
 
+        cluster_limit_s = sub_time_limit_s
+        if deadline is not None:
+            remaining_s = deadline - time.monotonic()
+            if remaining_s <= 0:
+                return None, 0.0, False, False
+            cluster_limit_s = max(1, min(sub_time_limit_s, int(remaining_s)))
         cpsat = CpSatSolver()
         result = cpsat.solve(
             sub_problem,
-            time_limit_s=sub_time_limit_s,
+            time_limit_s=cluster_limit_s,
             random_seed=random_seed,
             num_workers=sub_num_workers,
         )

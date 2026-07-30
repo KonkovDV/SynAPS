@@ -59,6 +59,11 @@ class LbbdSolver(BaseSolver):
     Iterates between a HiGHS master (assignment) and CP-SAT subproblems
     (per-machine-cluster sequencing) until the optimality gap closes or
     the iteration budget is exhausted.
+
+    Budget contract (D3/D4): ``max_iterations`` is a ceiling and
+    ``time_limit_s`` is a hard wall-clock deadline — whichever is hit first
+    wins. The per-cluster CP-SAT budget is clamped to the remaining deadline
+    before every cluster solve.
     """
 
     @property
@@ -71,6 +76,8 @@ class LbbdSolver(BaseSolver):
         time_limit_s: int = int(kwargs.get("time_limit_s", 60))
         random_seed: int = int(kwargs.get("random_seed", 42))
         sub_time_limit_s: int = max(1, time_limit_s // max(max_iterations, 1))
+        # D3: hard wall-clock deadline shared by all cluster solves.
+        deadline = t0 + float(time_limit_s)
         gap_threshold: float = float(kwargs.get("gap_threshold", 0.01))
         setup_relaxation: bool = bool(kwargs.get("setup_relaxation", True))
         use_greedy_warm_start: bool = bool(kwargs.get("use_greedy_warm_start", True))
@@ -231,6 +238,7 @@ class LbbdSolver(BaseSolver):
                     sub_time_limit_s,
                     random_seed,
                     num_workers=num_workers,
+                    deadline=deadline,
                 )
             else:
                 sub_result = _solve_subproblems(
@@ -242,6 +250,7 @@ class LbbdSolver(BaseSolver):
                     orders_by_id,
                     sub_time_limit_s,
                     random_seed,
+                    deadline=deadline,
                 )
             sub_assignments, sub_makespan, sub_proven_optimal, sub_infeasible_proven = sub_result
 
@@ -780,6 +789,8 @@ def _solve_subproblems(
     orders_by_id: dict[UUID, Order],
     sub_time_limit_s: int,
     random_seed: int,
+    *,
+    deadline: float | None = None,
 ) -> tuple[list[Assignment] | None, float, bool, bool]:
     """Solve CP-SAT subproblems for each machine cluster.
 
@@ -793,6 +804,12 @@ def _solve_subproblems(
     * ``infeasible_proven`` is True only when a cluster returned a proven
       INFEASIBLE — the only case where a feasibility no-good may be emitted
       (TIMEOUT/ERROR without assignments proves nothing).
+
+    D3: when ``deadline`` (a ``time.monotonic()`` timestamp) is given, the
+    per-cluster budget is clamped to the remaining wall-clock budget and no
+    new cluster is started past the deadline — previously each cluster spent
+    the full ``sub_time_limit_s``, overshooting the solver budget by the
+    number of clusters.
     """
     clusters = _cluster_machines(assignment_map, aux_links)
 
@@ -828,10 +845,18 @@ def _solve_subproblems(
         )
 
         # Solve with CP-SAT
+        # D3: clamp the cluster budget to the remaining wall-clock budget.
+        cluster_limit_s = sub_time_limit_s
+        if deadline is not None:
+            remaining_s = deadline - time.monotonic()
+            if remaining_s <= 0:
+                # Deadline hit — incomplete, proves nothing (no cut).
+                return None, 0.0, False, False
+            cluster_limit_s = max(1, min(sub_time_limit_s, int(remaining_s)))
         cpsat = CpSatSolver()
         result = cpsat.solve(
             sub_problem,
-            time_limit_s=sub_time_limit_s,
+            time_limit_s=cluster_limit_s,
             random_seed=random_seed,
             num_workers=4,
         )
@@ -1144,6 +1169,7 @@ def _solve_subproblems_parallel(
     random_seed: int,
     *,
     num_workers: int = 4,
+    deadline: float | None = None,
 ) -> tuple[list[Assignment] | None, float, bool, bool]:
     """Solve CP-SAT subproblems in parallel via ProcessPoolExecutor.
 
@@ -1153,7 +1179,16 @@ def _solve_subproblems_parallel(
     Provides O(K) speedup proportional to the number of machine clusters K,
     removing the GIL bottleneck from the sequential Benders loop.
     Falls back to sequential for ≤3 clusters to avoid multiprocessing overhead.
+
+    D3: the shared per-cluster budget is clamped to the remaining wall-clock
+    budget at submission time; with all clusters running concurrently this
+    bounds the wall overshoot to a single clamped cluster budget.
     """
+    if deadline is not None:
+        remaining_s = deadline - time.monotonic()
+        if remaining_s <= 0:
+            return None, 0.0, False, False
+        sub_time_limit_s = max(1, min(sub_time_limit_s, int(remaining_s)))
     problem_dict = problem.model_dump(mode="json")
     assignment_items = [(str(k), str(v)) for k, v in assignment_map.items()]
 

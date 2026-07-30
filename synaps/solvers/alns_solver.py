@@ -2163,11 +2163,14 @@ class AlnsSolver(BaseSolver):
         4. Adapt operator selection probabilities based on success history
 
     Key parameters:
-        max_iterations: Total ALNS iterations (default 500)
+        max_iterations: Iteration CEILING (default 500). ``time_limit_s`` is a
+            hard wall-clock deadline; whichever is hit first wins (D3/D4).
+            ``min_iterations`` never overrides the deadline.
         destroy_fraction: Fraction of operations to destroy per iteration (default 0.05)
         min_destroy: Minimum destroy size (default 20)
         max_destroy: Maximum destroy size per iteration (default 300)
-        repair_time_limit_s: Time limit for micro CP-SAT repair (default 10)
+        repair_time_limit_s: Time limit for micro CP-SAT repair (default 10);
+            clamped every iteration to the remaining wall-clock budget.
         sa_initial_temp: Starting temperature for SA (default 100.0)
         sa_cooling_rate: Geometric cooling factor (default 0.995)
         random_seed: For reproducibility (default 42)
@@ -2182,7 +2185,9 @@ class AlnsSolver(BaseSolver):
 
         # Parameters
         max_iterations: int = int(kwargs.get("max_iterations", 500))
-        min_iterations: int = int(kwargs.get("min_iterations", 5))
+        # D3: min_iterations is accepted but no longer overrides the hard
+        # wall-clock deadline; time_limit_s always wins.
+        _ = kwargs.get("min_iterations")
         time_limit_s: float = float(kwargs.get("time_limit_s", 300))
         destroy_fraction: float = float(kwargs.get("destroy_fraction", 0.05))
         min_destroy: int = int(kwargs.get("min_destroy", 20))
@@ -2589,7 +2594,7 @@ class AlnsSolver(BaseSolver):
 
         initial_solution_t0 = time.monotonic()
         # Hard ceiling for Phase-1 seed+completion so RHC windows retain search
-        # (or fall back to inline greedy) instead of burning 180–320s on seed alone.
+        # (or fall back to inline greedy) instead of burning 180-320s on seed alone.
         phase1_wall_fraction: float = max(
             0.1, min(0.9, float(kwargs.get("phase1_wall_fraction", 0.5)))
         )
@@ -2931,14 +2936,17 @@ class AlnsSolver(BaseSolver):
                         time_limit_exhausted_before_search=True,
                     )
 
-        if initial_result is not None and _phase1_budget_exhausted():
-            # Seed finished but consumed the Phase-1 ceiling — surface as
+        if (
+            initial_result is not None
+            and _phase1_budget_exhausted()
+            and (time.monotonic() - t0) > time_limit_s * 0.85
+        ):
+            # Seed finished but consumed the Phase-1 ceiling - surface as
             # pre-search timeout so RHC prefers inline greedy coverage path.
-            if (time.monotonic() - t0) > time_limit_s * 0.85:
-                return _initial_generation_error_result(
-                    "phase1_wall_budget_exhausted_after_seed",
-                    time_limit_exhausted_before_search=True,
-                )
+            return _initial_generation_error_result(
+                "phase1_wall_budget_exhausted_after_seed",
+                time_limit_exhausted_before_search=True,
+            )
 
         initial_solution_ms = int((time.monotonic() - initial_solution_t0) * 1000)
         time_limit_exhausted_before_search = (time.monotonic() - t0) > time_limit_s
@@ -3244,7 +3252,10 @@ class AlnsSolver(BaseSolver):
         else:
             for iteration in range(1, max_iterations + 1):
                 elapsed = time.monotonic() - t0
-                if elapsed > time_limit_s and iteration > min_iterations:
+                # D3: time_limit_s is a HARD deadline. It must win over
+                # min_iterations — the old `iteration > min_iterations` gate
+                # let 5 unbounded repair iterations overshoot an 8s budget 5x.
+                if elapsed >= time_limit_s:
                     logger.info("ALNS time limit reached at iteration %d", iteration)
                     break
 
@@ -3322,11 +3333,16 @@ class AlnsSolver(BaseSolver):
                 if use_cpsat_repair and len(destroyed_ids) <= cpsat_max_destroy_ops:
                     cpsat_repair_attempts += 1
                     cpsat_repair_t0 = time.monotonic()
+                    # D3: clamp the micro-repair budget to the remaining
+                    # wall-clock budget so a single repair cannot blow the
+                    # solver deadline (floor of 1s keeps CP-SAT usable).
+                    remaining_s = time_limit_s - (time.monotonic() - t0)
+                    effective_repair_limit_s = max(1, min(repair_time_limit_s, int(remaining_s)))
                     cpsat_outcome = _repair_cpsat_outcome(
                         problem,
                         frozen,
                         destroyed_ids,
-                        time_limit_s=repair_time_limit_s,
+                        time_limit_s=effective_repair_limit_s,
                         num_workers=repair_num_workers,
                         ops_by_id=ops_by_id,
                         op_positions=op_positions,

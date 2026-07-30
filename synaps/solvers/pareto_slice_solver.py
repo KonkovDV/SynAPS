@@ -15,6 +15,7 @@ through the public solver registry.
 from __future__ import annotations
 
 import math
+import time
 from typing import Any
 
 from synaps.model import ObjectiveValues, ScheduleProblem, ScheduleResult, SolverStatus
@@ -124,7 +125,13 @@ class ParetoSliceCpSatSolver(BaseSolver):
         return "cpsat_pareto_slice"
 
     def solve(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
+        t0 = time.monotonic()
         total_time_limit_s = int(kwargs.get("time_limit_s", 30))
+        # D3: time_limit_s is a hard wall-clock deadline. Stage splits are
+        # planning hints; every stage-2 slice is clamped to the remaining
+        # budget and slices past the deadline are skipped (model-build
+        # overhead per CP-SAT call previously pushed wall to 1.65x budget).
+        deadline = t0 + float(total_time_limit_s)
         stage1_time_limit_s = int(
             kwargs.get(
                 "stage1_time_limit_s",
@@ -173,6 +180,17 @@ class ParetoSliceCpSatSolver(BaseSolver):
 
         for index, epsilon_ratio in enumerate(epsilon_grid):
             allocated_time_s = per_slice_stage2_time_s + (1 if index < stage2_remainder_s else 0)
+            remaining_s = deadline - time.monotonic()
+            if remaining_s <= 0:
+                epsilon_points.append(
+                    {
+                        "epsilon_ratio": epsilon_ratio,
+                        "status": "skipped_deadline",
+                        "time_limit_s": 0,
+                    }
+                )
+                continue
+            allocated_time_s = max(1, min(allocated_time_s, int(remaining_s)))
             max_makespan_minutes = math.ceil(baseline.objective.makespan_minutes * epsilon_ratio)
             epsilon_constraints = {"max_makespan_minutes": max_makespan_minutes}
 
