@@ -29,6 +29,92 @@ from synaps.solvers._dispatch_support import (
 )
 
 
+def _virtualize_parallel_lanes(
+    problem: ScheduleProblem,
+) -> tuple[ScheduleProblem, dict[Any, Any]]:
+    """M2: expand every ``max_parallel > 1`` work center into disjunctive lanes.
+
+    The dispatch layer has no cumulative-capacity concept, so the only way to
+    let a machine run operations concurrently is to model each lane as its own
+    ``max_parallel == 1`` work center (the same lane model CP-SAT uses via
+    ``_virtualize_parallel_work_centers``). Unlike the CP-SAT variant this is
+    NOT gated on setups: a parallel machine must allow concurrency regardless.
+    Returns the transformed problem and a ``virtual_lane_id -> original_wc_id``
+    map; the caller re-attaches ``lane_id`` and restores ``work_center_id`` on
+    the resulting assignments. Returns ``({}, )`` unchanged when nothing to do.
+    """
+    from uuid import NAMESPACE_DNS, uuid5
+
+    expandable = {wc.id: wc for wc in problem.work_centers if wc.max_parallel > 1}
+    if not expandable:
+        return problem, {}
+
+    virtual_to_original: dict[Any, Any] = {}
+    expanded_ids: dict[Any, list[Any]] = {}
+    new_work_centers = []
+    for wc in problem.work_centers:
+        if wc.id not in expandable:
+            new_work_centers.append(wc)
+            continue
+        lane_ids = []
+        for lane in range(1, wc.max_parallel + 1):
+            lane_id = uuid5(NAMESPACE_DNS, f"{wc.id}:lane:{lane}")
+            lane_ids.append(lane_id)
+            virtual_to_original[lane_id] = wc.id
+            new_work_centers.append(
+                wc.model_copy(
+                    update={
+                        "id": lane_id,
+                        "code": f"{wc.code}::L{lane}",
+                        "max_parallel": 1,
+                    }
+                )
+            )
+        expanded_ids[wc.id] = lane_ids
+
+    default_eligible = [wc.id for wc in problem.work_centers]
+    new_operations = []
+    for op in problem.operations:
+        base_eligible = list(op.eligible_wc_ids) if op.eligible_wc_ids else list(default_eligible)
+        expanded_eligible: list[Any] = []
+        for wc_id in base_eligible:
+            expanded_eligible.extend(expanded_ids.get(wc_id, [wc_id]))
+        new_operations.append(op.model_copy(update={"eligible_wc_ids": expanded_eligible}))
+
+    new_setup_matrix = []
+    for entry in problem.setup_matrix:
+        entry_lane_ids = expanded_ids.get(entry.work_center_id)
+        if not entry_lane_ids:
+            new_setup_matrix.append(entry)
+            continue
+        for lane_id in entry_lane_ids:
+            new_setup_matrix.append(entry.model_copy(update={"work_center_id": lane_id}))
+
+    transformed = ScheduleProblem(
+        states=problem.states,
+        orders=problem.orders,
+        operations=new_operations,
+        work_centers=new_work_centers,
+        setup_matrix=new_setup_matrix,
+        auxiliary_resources=problem.auxiliary_resources,
+        aux_requirements=problem.aux_requirements,
+        planning_horizon_start=problem.planning_horizon_start,
+        planning_horizon_end=problem.planning_horizon_end,
+    )
+    return transformed, virtual_to_original
+
+
+def _unroll_lane_assignments(result: ScheduleResult, virtual_to_original: dict[Any, Any]) -> None:
+    """M2: restore original work_center_id and expose the chosen lane_id in place."""
+    if not virtual_to_original:
+        return
+    for assignment in result.assignments:
+        original = virtual_to_original.get(assignment.work_center_id)
+        if original is not None:
+            assignment.lane_id = assignment.work_center_id
+            assignment.work_center_id = original
+
+
 class GreedyDispatch(BaseSolver):
     """Single-pass priority dispatch using the ATCS composite index.
 
@@ -56,6 +142,15 @@ class GreedyDispatch(BaseSolver):
         return "greedy_dispatch"
 
     def solve(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
+        # M2: virtualize parallel lanes so a max_parallel>1 machine can run ops
+        # concurrently; the core dispatch treats each lane as its own machine
+        # (no phantom setup between concurrent lanes), then lane_id is unrolled.
+        virtual_problem, virtual_to_original = _virtualize_parallel_lanes(problem)
+        result = self._solve_core(virtual_problem, **kwargs)
+        _unroll_lane_assignments(result, virtual_to_original)
+        return result
+
+    def _solve_core(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
         t0 = time.monotonic()
         acceleration_status = get_acceleration_status()
         time_limit_s_raw = kwargs.get("time_limit_s")
@@ -263,6 +358,24 @@ class GreedyDispatch(BaseSolver):
                     best_record = record
 
             best_op = best_record["operation"]
+            # M2: ATCS decides WHICH operation to dispatch next; the work-center
+            # choice for that op is then the earliest-completion feasible slot
+            # among its candidates. This lets a max_parallel machine use an idle
+            # lane instead of queuing behind a busy one (the ATCS composite,
+            # dominated by the slack term at large due offsets, otherwise
+            # preferred a much later start on the same lane, charging a phantom
+            # setup). Deterministic tie-break: (end, setup, wc id).
+            best_op_candidates = [
+                record for record in candidate_records if record["operation"].id == best_op.id
+            ]
+            best_record = min(
+                best_op_candidates,
+                key=lambda record: (
+                    record["slot"].end_offset,
+                    record["slot"].setup_minutes,
+                    str(record["work_center_id"]),
+                ),
+            )
             best_wc_id = best_record["work_center_id"]
             best_slot = best_record["slot"]
 
@@ -374,6 +487,13 @@ class BeamSearchDispatch(BaseSolver):
         return "beam_search"
 
     def solve(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
+        # M2: virtualize parallel lanes (see GreedyDispatch.solve).
+        virtual_problem, virtual_to_original = _virtualize_parallel_lanes(problem)
+        result = self._solve_core(virtual_problem, **kwargs)
+        _unroll_lane_assignments(result, virtual_to_original)
+        return result
+
+    def _solve_core(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
         t0 = time.monotonic()
         acceleration_status = get_acceleration_status()
 
@@ -465,6 +585,28 @@ class BeamSearchDispatch(BaseSolver):
 
                 if not candidate_records:
                     continue  # Dead beam
+
+                # M2: collapse each operation's candidates to its earliest-
+                # completion feasible slot before scoring, so a max_parallel
+                # machine's idle lane is used instead of queuing behind a busy
+                # lane (mirrors GreedyDispatch). Deterministic key (end, setup,
+                # wc id). Beam then explores which OPERATION to place next.
+                _best_by_op: dict[Any, dict[str, Any]] = {}
+                for record in candidate_records:
+                    op_id = record["operation"].id
+                    incumbent = _best_by_op.get(op_id)
+                    key = (
+                        record["slot"].end_offset,
+                        record["slot"].setup_minutes,
+                        str(record["work_center_id"]),
+                    )
+                    if incumbent is None or key < (
+                        incumbent["slot"].end_offset,
+                        incumbent["slot"].setup_minutes,
+                        str(incumbent["work_center_id"]),
+                    ):
+                        _best_by_op[op_id] = record
+                candidate_records = list(_best_by_op.values())
 
                 # Compute setup and material scales
                 local_setup_scale_by_wc: dict[Any, float] = {}

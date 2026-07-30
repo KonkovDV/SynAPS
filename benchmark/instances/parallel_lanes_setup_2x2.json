@@ -1,0 +1,23 @@
+{
+  "states": [
+    {"id": "a1000001-0001-4001-8001-000000000001", "code": "STATE_A", "label": "State A"},
+    {"id": "a1000001-0001-4001-8001-000000000002", "code": "STATE_B", "label": "State B"}
+  ],
+  "orders": [
+    {"id": "b1000001-0001-4001-8001-000000000001", "external_ref": "ORD-P1", "due_date": "2026-04-02T00:00:00Z", "priority": 500, "quantity": 10.0, "unit": "pcs"},
+    {"id": "b1000001-0001-4001-8001-000000000002", "external_ref": "ORD-P2", "due_date": "2026-04-02T00:00:00Z", "priority": 500, "quantity": 10.0, "unit": "pcs"}
+  ],
+  "work_centers": [
+    {"id": "c1000001-0001-4001-8001-000000000001", "code": "PARALLEL-2LANE", "capability_group": "shared", "speed_factor": 1.0, "max_parallel": 2}
+  ],
+  "operations": [
+    {"id": "d1000001-0001-4001-8001-000000000001", "order_id": "b1000001-0001-4001-8001-000000000001", "seq_in_order": 1, "state_id": "a1000001-0001-4001-8001-000000000001", "base_duration_min": 60, "eligible_wc_ids": ["c1000001-0001-4001-8001-000000000001"]},
+    {"id": "d1000001-0001-4001-8001-000000000002", "order_id": "b1000001-0001-4001-8001-000000000002", "seq_in_order": 1, "state_id": "a1000001-0001-4001-8001-000000000002", "base_duration_min": 60, "eligible_wc_ids": ["c1000001-0001-4001-8001-000000000001"]}
+  ],
+  "setup_matrix": [
+    {"work_center_id": "c1000001-0001-4001-8001-000000000001", "from_state_id": "a1000001-0001-4001-8001-000000000001", "to_state_id": "a1000001-0001-4001-8001-000000000002", "setup_minutes": 600, "material_loss": 0.0, "energy_kwh": 0.0},
+    {"work_center_id": "c1000001-0001-4001-8001-000000000001", "from_state_id": "a1000001-0001-4001-8001-000000000002", "to_state_id": "a1000001-0001-4001-8001-000000000001", "setup_minutes": 600, "material_loss": 0.0, "energy_kwh": 0.0}
+  ],
+  "planning_horizon_start": "2026-04-01T00:00:00Z",
+  "planning_horizon_end": "2026-04-11T00:00:00Z"
+}

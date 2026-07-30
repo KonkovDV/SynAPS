@@ -2208,6 +2208,21 @@ class AlnsSolver(BaseSolver):
         return "alns"
 
     def solve(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
+        # M2: virtualize max_parallel>1 work centers into disjunctive lanes so
+        # the destroy/repair loop (which has no cumulative-capacity concept)
+        # can run ops concurrently on a parallel machine instead of serializing
+        # them and charging a phantom setup. lane_id is unrolled on the result.
+        from synaps.solvers.greedy_dispatch import (
+            _unroll_lane_assignments,
+            _virtualize_parallel_lanes,
+        )
+
+        virtual_problem, virtual_to_original = _virtualize_parallel_lanes(problem)
+        result = self._solve_core(virtual_problem, **kwargs)
+        _unroll_lane_assignments(result, virtual_to_original)
+        return result
+
+    def _solve_core(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
         t0 = time.monotonic()
 
         # Parameters
