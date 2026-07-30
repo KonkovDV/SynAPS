@@ -27,18 +27,40 @@ def _apply_sat_parameter_overrides(
     time_limit_s: int,
     random_seed: int,
     num_workers: int,
+    determinism: str,
     overrides: Any,
 ) -> dict[str, Any]:
-    """Apply explicit SatParameters overrides and return the effective audit snapshot."""
+    """Apply explicit SatParameters overrides and return the effective audit snapshot.
+
+    ``determinism`` (D1):
+
+    * ``"strict"`` (default) makes a fixed ``random_seed`` reproducible under
+      multi-threading. OR-Tools portfolio workers race under a pure
+      wall-clock limit, so we enable ``interleave_search`` with
+      ``interleave_batch_size = 2 * num_workers`` (OR-Tools' guidance) and cap
+      the search by ``max_deterministic_time`` instead of wall time. Explicit
+      ``overrides`` still win, so callers may override any of these.
+    * ``"fast"`` keeps the previous wall-clock portfolio behavior, which is
+      faster but not reproducible with more than one worker.
+    """
 
     solver.parameters.max_time_in_seconds = time_limit_s
     solver.parameters.random_seed = random_seed
     solver.parameters.num_workers = num_workers
 
+    if determinism == "strict":
+        # Deterministic multi-threaded search (OR-Tools prescription).
+        solver.parameters.interleave_search = True
+        solver.parameters.interleave_batch_size = max(1, 2 * num_workers)
+        # A wall-clock limit is inherently non-deterministic; bound the search
+        # by deterministic time so the stopping point is reproducible too.
+        solver.parameters.max_deterministic_time = float(time_limit_s)
+
     effective_parameters: dict[str, Any] = {
         "max_time_in_seconds": float(solver.parameters.max_time_in_seconds),
         "random_seed": int(solver.parameters.random_seed),
         "num_workers": int(solver.parameters.num_workers),
+        "determinism": determinism,
     }
     if not isinstance(overrides, Mapping):
         return effective_parameters
@@ -637,6 +659,11 @@ class CpSatSolver(BaseSolver):
         time_limit_s = int(kwargs.get("time_limit_s", 30))
         random_seed = int(kwargs.get("random_seed", 42))
         num_workers = int(kwargs.get("num_workers", 8))
+        # D1: default to reproducible multi-threaded search. "fast" opts back
+        # into the non-deterministic wall-clock portfolio.
+        determinism = str(kwargs.get("determinism", "strict"))
+        if determinism not in ("strict", "fast"):
+            raise ValueError(f"determinism must be 'strict' or 'fast', got {determinism!r}")
         sat_parameter_overrides = kwargs.get("sat_parameters")
         auto_greedy_warm_start = bool(kwargs.get("auto_greedy_warm_start", True))
         objective_weights = dict(kwargs.get("objective_weights", {}))
@@ -881,6 +908,7 @@ class CpSatSolver(BaseSolver):
             time_limit_s=time_limit_s,
             random_seed=random_seed,
             num_workers=num_workers,
+            determinism=determinism,
             overrides=sat_parameter_overrides,
         )
         random_seed = int(effective_sat_parameters["random_seed"])
@@ -927,6 +955,7 @@ class CpSatSolver(BaseSolver):
                 "warm_started": warm_start_assignments is not None and not virtual_to_original,
                 "hint_count": hint_count,
                 "symmetry_breaking": enable_symmetry_breaking,
+                "determinism": determinism,
                 "sat_parameters": effective_sat_parameters,
                 "parallel_virtualization": {
                     "enabled": bool(virtual_to_original),

@@ -99,6 +99,7 @@ def test_cpsat_records_explicit_sat_parameters_in_metadata() -> None:
         time_limit_s=5,
         random_seed=7,
         num_workers=1,
+        determinism="fast",
         sat_parameters={
             "randomize_search": False,
             "permute_variable_randomly": False,
@@ -112,6 +113,9 @@ def test_cpsat_records_explicit_sat_parameters_in_metadata() -> None:
         "max_time_in_seconds": 5.0,
         "random_seed": 7,
         "num_workers": 1,
+        # D1: the snapshot now records the determinism mode. strict adds
+        # interleave params, so pin the mode to fast for this exact snapshot.
+        "determinism": "fast",
         "randomize_search": False,
         "permute_variable_randomly": False,
         "permute_presolve_constraint_order": False,

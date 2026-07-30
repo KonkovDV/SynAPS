@@ -14,6 +14,8 @@ Language: **EN** | [RU](README_RU.md)
 
 SynAPS builds **explainable, reproducible** schedules: named solver configs, auditable metadata, independent feasibility checks, and a benchmark harness.
 
+> **Reproducibility scope.** CP-SAT runs in `determinism="strict"` by default: a fixed `random_seed` yields a byte-identical schedule under multi-threading (interleaved search bounded by deterministic time). Opt into `determinism="fast"` for the faster non-reproducible wall-clock portfolio. LBBD collects clusters in a deterministic order. The `random_seed` field only guarantees reproducibility in `strict` mode.
+
 ## Install
 
 ```bash
