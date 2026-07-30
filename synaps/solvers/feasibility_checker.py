@@ -94,6 +94,7 @@ class FeasibilityChecker:
     ) -> list[FeasibilityViolation]:
         violations: list[FeasibilityViolation] = []
         ops_by_id = {op.id: op for op in problem.operations}
+        orders_by_id = {order.id: order for order in problem.orders}
         work_centers_by_id = {work_center.id: work_center for work_center in problem.work_centers}
         setup_lookup = {
             (entry.work_center_id, entry.from_state_id, entry.to_state_id): entry.setup_minutes
@@ -468,5 +469,27 @@ class FeasibilityChecker:
                         operation_id=a.operation_id,
                     )
                 )
+
+        # 7. Release dates (M1): an operation may not start before its order's
+        # release_date (production meaning: material not available before it).
+        for a in assignments:
+            checked_op = ops_by_id.get(a.operation_id)
+            if checked_op is None:
+                continue
+            order = orders_by_id.get(checked_op.order_id)
+            release = getattr(order, "release_date", None) if order is not None else None
+            if release is not None and a.start_time < release:
+                violations.append(
+                    FeasibilityViolation(
+                        "RELEASE_DATE_VIOLATION",
+                        (
+                            f"Operation {a.operation_id} starts at {a.start_time}, "
+                            f"before order release_date {release}."
+                        ),
+                        operation_id=a.operation_id,
+                    )
+                )
+                if not exhaustive:
+                    break
 
         return violations

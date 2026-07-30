@@ -146,6 +146,12 @@ class GreedyDispatch(BaseSolver):
                 due_offset = (order.due_date - horizon_start).total_seconds() / 60.0
                 w_j = order.priority / 500.0  # normalise around default priority
                 pred_end = op_end_offsets.get(op.predecessor_op_id, 0.0)
+                # M1: cannot start before the order release_date (material release).
+                if order.release_date is not None:
+                    pred_end = max(
+                        pred_end,
+                        (order.release_date - horizon_start).total_seconds() / 60.0,
+                    )
 
                 eligible = (
                     op.eligible_wc_ids
@@ -418,6 +424,12 @@ class BeamSearchDispatch(BaseSolver):
                     due_offset = (order.due_date - horizon_start).total_seconds() / 60.0
                     w_j = order.priority / 500.0
                     pred_end = op_end_offsets.get(op.predecessor_op_id, 0.0)
+                    # M1: cannot start before the order release_date (material release).
+                    if order.release_date is not None:
+                        pred_end = max(
+                            pred_end,
+                            (order.release_date - horizon_start).total_seconds() / 60.0,
+                        )
 
                     eligible = (
                         op.eligible_wc_ids

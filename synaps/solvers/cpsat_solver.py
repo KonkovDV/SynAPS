@@ -753,6 +753,20 @@ class CpSatSolver(BaseSolver):
 
             model.add_exactly_one(presence_vars)
 
+        # M1: release_date lower bound on the start time. An operation may not
+        # start before its order becomes available (material release).
+        orders_by_id = {order.id: order for order in solve_problem.orders}
+        release_offset_by_op: dict[Any, int] = {}
+        for operation in solve_problem.operations:
+            order = orders_by_id.get(operation.order_id)
+            release = getattr(order, "release_date", None) if order is not None else None
+            if release is not None:
+                offset = int(
+                    (release - solve_problem.planning_horizon_start).total_seconds() / 60.0
+                )
+                if offset > 0:
+                    release_offset_by_op[operation.id] = offset
+
         for operation in solve_problem.operations:
             if operation.predecessor_op_id is not None:
                 model.add(
@@ -761,6 +775,9 @@ class CpSatSolver(BaseSolver):
             frozen_predecessor_end_offset = frozen_predecessor_end_offsets.get(operation.id)
             if frozen_predecessor_end_offset is not None:
                 model.add(selected_starts[operation.id] >= frozen_predecessor_end_offset)
+            release_offset = release_offset_by_op.get(operation.id)
+            if release_offset is not None:
+                model.add(selected_starts[operation.id] >= release_offset)
 
         setup_terms, material_terms, setup_intervals_by_op = self._add_machine_order_and_adjacency(
             model,

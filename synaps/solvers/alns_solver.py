@@ -1331,6 +1331,21 @@ def _repair_greedy_outcome(
     )
 
 
+def _release_offset_by_op(problem: ScheduleProblem) -> dict[UUID, float]:
+    """M1: minutes-from-horizon start floor per op from its order's release_date."""
+    horizon_start = problem.planning_horizon_start
+    orders_by_id = {order.id: order for order in problem.orders}
+    offsets: dict[UUID, float] = {}
+    for op in problem.operations:
+        order = orders_by_id.get(op.order_id)
+        release = getattr(order, "release_date", None) if order is not None else None
+        if release is not None:
+            offset = (release - horizon_start).total_seconds() / 60.0
+            if offset > 0:
+                offsets[op.id] = offset
+    return offsets
+
+
 def _try_native_greedy_repair(
     problem: ScheduleProblem,
     frozen_assignments: list[Assignment],
@@ -1353,6 +1368,7 @@ def _try_native_greedy_repair(
     try:
         # Build index mappings
         ops_by_id = {op.id: op for op in problem.operations}
+        release_offsets = _release_offset_by_op(problem)
         wc_id_to_idx = {wc.id: idx for idx, wc in enumerate(problem.work_centers)}
         state_id_to_idx = {s.id: idx for idx, s in enumerate(problem.states)}
         idx_to_wc_id = {idx: wc_id for wc_id, idx in wc_id_to_idx.items()}
@@ -1515,6 +1531,11 @@ def _try_native_greedy_repair(
             # Minimum start from frozen predecessor
             min_start = machine_available_at[m]
 
+            # M1: cannot start before the order release_date.
+            release_offset = release_offsets.get(op_id)
+            if release_offset is not None:
+                min_start = max(min_start, release_offset)
+
             # Check frozen predecessor constraint
             if op.predecessor_op_id is not None and op.predecessor_op_id not in disrupted_local_idx:
                 pred_end = frozen_end_offsets.get(op.predecessor_op_id, 0.0)
@@ -1621,6 +1642,7 @@ def _try_native_initial_seed(
         n_wc = len(problem.work_centers)
         n_states = len(problem.states)
         horizon_start = problem.planning_horizon_start
+        release_offsets = _release_offset_by_op(problem)
 
         # Build topological order of ALL operations in the problem.
         # Operations are already in topological order in problem.operations
@@ -1743,6 +1765,11 @@ def _try_native_initial_seed(
 
             # Minimum start from frozen predecessor
             min_start = machine_available_at[m]
+
+            # M1: cannot start before the order release_date.
+            release_offset = release_offsets.get(op_id)
+            if release_offset is not None:
+                min_start = max(min_start, release_offset)
 
             # Check frozen predecessor constraint
             if op.predecessor_op_id is not None and op.predecessor_op_id not in local_idx:
