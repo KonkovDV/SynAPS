@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from benchmark._stats import expand_seed_repeats, summarize_runs
 from benchmark.study_rhc_50k import _apply_lane_profile
 from synaps.benchmarks.run_scaling_benchmark import run_benchmark as run_scaling_case
 
@@ -118,9 +119,14 @@ def run_rhc_alns_doe(
     sa_due_alphas: list[float] | None = None,
     sa_candidate_betas: list[float] | None = None,
     max_combinations: int | None = 24,
+    repeats: int = 1,
+    bks_makespan_minutes: float | None = None,
     write_dir: Path | None = None,
 ) -> dict[str, Any]:
-    study_seeds = seeds or [1, 2, 3]
+    # D5: run each base seed `repeats` times with distinct derived seeds so the
+    # per-config sample captures within-config (native) variance too. repeats<=1
+    # preserves the historical single-shot-per-seed behavior.
+    study_seeds = expand_seed_repeats(seeds or [1, 2, 3], repeats)
 
     grid = _build_doe_grid(
         due_thresholds=due_thresholds or [0.25, 0.35, 0.45],
@@ -200,6 +206,10 @@ def run_rhc_alns_doe(
                     ),
                     "mean_solve_ms": round(statistics.mean(run["solve_ms"] for run in per_run), 2),
                 },
+                # D5: literature-standard best/mean/std/CI + BKS deviation.
+                "quality_statistics": summarize_runs(
+                    makespans, bks=bks_makespan_minutes, minimize=True
+                ),
             }
         )
 
@@ -259,6 +269,8 @@ def run_rhc_alns_doe(
         "n_machines": n_machines,
         "n_states": n_states,
         "seed_count": len(study_seeds),
+        "repeats": repeats,
+        "bks_makespan_minutes": bks_makespan_minutes,
         "cvar_alpha": cvar_alpha,
         "max_makespan_degradation_ratio": max_makespan_degradation_ratio,
         "max_inner_fallback_ratio": max_inner_fallback_ratio,
@@ -284,6 +296,18 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--n-states", type=int, default=15)
     parser.add_argument("--cvar-alpha", type=float, default=0.95)
     parser.add_argument("--max-combinations", type=int, default=24)
+    parser.add_argument(
+        "--repeats",
+        type=int,
+        default=1,
+        help="Repetitions per seed (distinct derived seeds) for variance/CI (D5)",
+    )
+    parser.add_argument(
+        "--bks-makespan",
+        type=float,
+        default=None,
+        help="Best-known makespan for deviation-from-BKS reporting (D5)",
+    )
     parser.add_argument("--write-dir", type=Path)
     return parser
 
@@ -298,6 +322,8 @@ def main(argv: list[str] | None = None) -> int:
         n_states=args.n_states,
         cvar_alpha=args.cvar_alpha,
         max_combinations=args.max_combinations,
+        repeats=args.repeats,
+        bks_makespan_minutes=args.bks_makespan,
         write_dir=args.write_dir,
     )
     json.dump(report, sys.stdout, indent=2)

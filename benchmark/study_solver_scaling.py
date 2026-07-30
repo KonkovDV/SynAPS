@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from benchmark._stats import summarize_runs
 from benchmark.generate_instances import preset_spec, write_problem_instance
 from benchmark.run_benchmark import available_solvers, run_benchmark
 
@@ -117,6 +118,12 @@ def _summarize_preset(records: list[dict[str, Any]]) -> dict[str, Any]:
         "feasibility_rate_by_solver": {
             solver: round(sum(1 for value in values if value) / len(values), 3)
             for solver, values in feasibility_by_solver.items()
+        },
+        # D5: literature-standard best/mean/std/CI of makespan per solver so a
+        # scaling conclusion rests on a distribution, not a point estimate.
+        "quality_statistics_by_solver": {
+            solver: summarize_runs(values, minimize=True)
+            for solver, values in makespan_by_solver.items()
         },
     }
 

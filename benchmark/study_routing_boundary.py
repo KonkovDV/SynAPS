@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from benchmark._stats import expand_seed_repeats
 from benchmark.generate_instances import generate_problem, preset_spec, write_problem_instance
 from synaps.problem_profile import build_problem_profile
 from synaps.solvers.router import route_solver_config
@@ -27,15 +28,19 @@ def study_routing_boundary(
     *,
     presets: list[str],
     seeds: list[int],
+    repeats: int = 1,
     write_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Generate a routing-boundary report for preset/seed combinations."""
 
     records: list[dict[str, Any]] = []
     grouped_records: dict[str, list[dict[str, Any]]] = {preset: [] for preset in presets}
+    # D5: expand seeds for consistency with the quality studies; routing
+    # decisions are deterministic per seed, so repeats widen seed coverage.
+    study_seeds = expand_seed_repeats(seeds, repeats)
 
     for preset in presets:
-        for seed in seeds:
+        for seed in study_seeds:
             spec = preset_spec(preset, seed=seed)
             instance_path: str | None = None
             if write_dir is not None:
@@ -122,6 +127,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Deterministic seeds to evaluate per preset",
     )
     parser.add_argument(
+        "--repeats",
+        type=int,
+        default=1,
+        help="Repetitions per seed (distinct derived seeds) for seed coverage (D5)",
+    )
+    parser.add_argument(
         "--write-dir",
         type=Path,
         help="Optional directory where generated JSON instances should be materialized",
@@ -135,6 +146,7 @@ def main(argv: list[str] | None = None) -> int:
     report = study_routing_boundary(
         presets=args.presets,
         seeds=args.seeds,
+        repeats=args.repeats,
         write_dir=args.write_dir,
     )
     json.dump(report, sys.stdout, indent=2)

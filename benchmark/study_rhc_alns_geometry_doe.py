@@ -21,6 +21,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from benchmark._stats import expand_seed_repeats, summarize_runs
 from benchmark.study_rhc_50k import _apply_lane_profile
 from synaps.benchmarks.run_scaling_benchmark import run_benchmark as run_scaling_case
 
@@ -334,10 +335,12 @@ def run_rhc_alns_geometry_doe(
     max_windows: int = 2,
     time_limit_s: float = 200.0,
     per_run_timeout_s: float | None = None,
+    repeats: int = 1,
     write_dir: Path | None = None,
 ) -> dict[str, Any]:
     study_geometries = geometries or [(480, 120), (360, 90), (300, 90), (240, 60)]
-    study_seeds = seeds or [1]
+    # D5: distinct derived seeds per base seed for within-config variance.
+    study_seeds = expand_seed_repeats(seeds or [1], repeats)
     artifact_dir = write_dir or Path("benchmark") / "studies" / "rhc_alns_geometry_doe"
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
@@ -589,6 +592,8 @@ def run_rhc_alns_geometry_doe(
                         ),
                     },
                 },
+                # D5: best/mean/std/CI over process-completed makespans.
+                "quality_statistics": summarize_runs(makespans, minimize=True),
             }
         )
 
@@ -663,6 +668,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Hard timeout per seed/geometry run in wall seconds (marks run as timeout_censored).",
     )
     parser.add_argument("--cvar-alpha", type=float, default=0.95)
+    parser.add_argument(
+        "--repeats",
+        type=int,
+        default=1,
+        help="Repetitions per seed (distinct derived seeds) for variance/CI (D5)",
+    )
     parser.add_argument("--write-dir", type=Path)
     return parser
 
@@ -677,6 +688,7 @@ def main(argv: list[str] | None = None) -> int:
         max_windows=args.max_windows,
         time_limit_s=args.time_limit_s,
         per_run_timeout_s=args.per_run_timeout_s,
+        repeats=args.repeats,
         write_dir=args.write_dir,
     )
     json.dump(report, sys.stdout, indent=2)
