@@ -69,6 +69,7 @@ def test_available_solver_configs_matches_public_portfolio() -> None:
         "ALNS-1000",
         "RHC-ALNS",
         "RHC-ALNS-100K",
+        "RHC-ALNS-SEARCH-COVER",
         "RHC-CPSAT",
         "RHC-GREEDY",
         "RHC-GREEDY-COVER",

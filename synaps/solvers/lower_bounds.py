@@ -7,6 +7,8 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from synaps.timegrain import duration_minutes
+
 if TYPE_CHECKING:
     from uuid import UUID
 
@@ -152,8 +154,16 @@ def compute_relaxed_makespan_lower_bound(problem: ScheduleProblem) -> MakespanLo
     max_operation_lb = 0.0
     for operation in problem.operations:
         eligible_work_centers = operation.eligible_wc_ids or all_work_center_ids
+        # P0-4: use the canonical integer time grain shared with every solver,
+        # so the bound cannot exceed a realized schedule just because it used a
+        # finer (raw) duration than the round-based dispatch/CP-SAT models.
         min_duration = min(
-            operation.base_duration_min / work_centers_by_id[work_center_id].speed_factor
+            float(
+                duration_minutes(
+                    operation.base_duration_min,
+                    work_centers_by_id[work_center_id].speed_factor,
+                )
+            )
             for work_center_id in eligible_work_centers
         )
         min_duration_by_op[operation.id] = min_duration
