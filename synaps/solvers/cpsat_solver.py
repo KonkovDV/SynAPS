@@ -576,6 +576,7 @@ class CpSatSolver(BaseSolver):
         material_loss_scale: int,
         secondary_bound: int,
         makespan_bound_divisor: float = 1.0,
+        bound_is_makespan: bool = True,
     ) -> tuple[list[Assignment], ObjectiveValues, dict[str, Any]]:
         assignments: list[Assignment] = []
         metadata: dict[str, Any] = {
@@ -659,19 +660,25 @@ class CpSatSolver(BaseSolver):
             makespan_bound = (
                 float(math.floor(scalarized_bound / divisor)) if divisor > 1.0 else scalarized_bound
             )
-            metadata.update(
-                {
-                    "best_objective_bound": makespan_bound,
-                    "objective_bound_units": "makespan_minutes",
-                    "scalarized_objective_bound": scalarized_bound,
-                    "objective_components": {
-                        "makespan_minutes": objective.makespan_minutes,
-                        "total_setup_minutes": objective.total_setup_minutes,
-                        "total_material_loss": objective.total_material_loss,
-                        "total_tardiness_minutes": objective.total_tardiness_minutes,
-                    },
-                }
-            )
+            # Q3: only claim makespan-minute units when the minimized objective
+            # actually bounds makespan (weighted-sum, or makespan minimized
+            # directly). In epsilon_primary mode with a non-makespan primary the
+            # objective is primary*(H+1)+makespan, so the dual bound is in
+            # scalarized units, not minutes — label it honestly and do not
+            # expose a spurious best_objective_bound as a makespan bound.
+            metadata["objective_components"] = {
+                "makespan_minutes": objective.makespan_minutes,
+                "total_setup_minutes": objective.total_setup_minutes,
+                "total_material_loss": objective.total_material_loss,
+                "total_tardiness_minutes": objective.total_tardiness_minutes,
+            }
+            metadata["scalarized_objective_bound"] = scalarized_bound
+            if bound_is_makespan:
+                metadata["best_objective_bound"] = makespan_bound
+                metadata["objective_bound_units"] = "makespan_minutes"
+            else:
+                metadata["best_objective_bound"] = scalarized_bound
+                metadata["objective_bound_units"] = "scalarized_objective"
 
         return assignments, objective, metadata
 
@@ -982,6 +989,13 @@ class CpSatSolver(BaseSolver):
                 float(secondary_bound)
                 if objective_mode == "weighted_sum" and not epsilon_constraints
                 else 1.0
+            ),
+            bound_is_makespan=(
+                # The dual bound is a makespan bound only when the minimized
+                # objective is makespan (weighted-sum, epsilon-constraint, or
+                # epsilon_primary with primary==makespan). With a non-makespan
+                # primary the objective is scalarized, so the bound is not.
+                objective_mode != "epsilon_primary" or primary_objective == "makespan"
             ),
         )
         if virtual_to_original:

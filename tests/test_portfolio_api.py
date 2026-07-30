@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import timedelta
-
-import pytest
+from typing import TYPE_CHECKING
 
 from synaps import recommend_repair_radius, repair_schedule, solve_schedule
 from synaps.model import Assignment, ScheduleProblem, SolverStatus
@@ -14,6 +13,9 @@ from synaps.solvers.greedy_dispatch import GreedyDispatch
 from synaps.solvers.router import SolveRegime, SolverRoutingContext
 from synaps.validation import verify_schedule_result
 from tests.conftest import HORIZON_START
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def test_solve_schedule_routes_small_nominal_problem(simple_problem: ScheduleProblem) -> None:
@@ -254,6 +256,8 @@ def test_solve_schedule_records_resource_guard_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("SYNAPS_ENABLE_RESOURCE_GUARDS", "1")
-    result = solve_schedule(simple_problem, solver_config="GREED", solve_kwargs={"time_limit_s": 30})
+    result = solve_schedule(
+        simple_problem, solver_config="GREED", solve_kwargs={"time_limit_s": 30}
+    )
     assert result.metadata["portfolio"]["resource_guards_active"] is True
     assert result.metadata["portfolio"]["resource_limits"]["timeout_s"] == 30

@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 from uuid import uuid4
-
-import pytest
 
 from synaps.model import (
     Operation,
@@ -18,6 +17,8 @@ from synaps.model import (
 from synaps.solvers.registry import available_solver_configs, create_solver
 from synaps.solvers.rhc import RhcPolicy, RhcSolver
 
+if TYPE_CHECKING:
+    import pytest
 
 HORIZON_START = datetime(2026, 4, 1, 8, 0, tzinfo=UTC)
 
@@ -154,7 +155,7 @@ class TestCoverageReserveAndSoftFallback:
         captured_ends: list[object] = []
 
         def fake_alns_solve(self: object, sub_problem: object, **kwargs: object) -> object:
-            captured_ends.append(getattr(sub_problem, "planning_horizon_end"))
+            captured_ends.append(sub_problem.planning_horizon_end)
             return GreedyDispatch().solve(sub_problem)  # type: ignore[arg-type]
 
         monkeypatch.setattr(AlnsSolver, "solve", fake_alns_solve)
