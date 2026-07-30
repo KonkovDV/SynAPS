@@ -49,6 +49,7 @@ from synaps.solvers._lbbd_cuts import (
     cut_pool_fingerprint,
 )
 from synaps.solvers.cpsat_solver import CpSatSolver
+from synaps.timegrain import duration_minutes
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -604,7 +605,7 @@ def _solve_master(
                 # (matching average_capacity_lb in lower_bounds.py). Without the
                 # division the bound over-claims on max_parallel > 1 machines.
                 lanes = float(max(1, wc.max_parallel))
-                duration = float(max(1, round(op.base_duration_min / wc.speed_factor))) / lanes
+                duration = float(duration_minutes(op.base_duration_min, wc.speed_factor)) / lanes
                 capacity_indices.append(var_index[key])
                 capacity_coeffs.append(duration)
         if not capacity_indices:
