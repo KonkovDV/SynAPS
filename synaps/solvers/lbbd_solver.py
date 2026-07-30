@@ -19,6 +19,7 @@ Features:
 
 from __future__ import annotations
 
+import math
 import os
 import time
 import warnings
@@ -200,6 +201,9 @@ class LbbdSolver(BaseSolver):
                 benders_cuts,
                 min_setup_by_wc=min_setup_by_wc,
                 prev_solution=prev_assignment_map,
+                master_time_limit_s=max(
+                    1.0, min(deadline - time.monotonic(), float(sub_time_limit_s) + 2.0)
+                ),
             )
             if master_result is None:
                 # Master infeasible. With the S2 no-good cuts this usually means
@@ -521,6 +525,7 @@ def _solve_master(
     cuts: list[_BendersCut],
     min_setup_by_wc: dict[UUID, float] | None = None,
     prev_solution: dict[UUID, UUID] | None = None,
+    master_time_limit_s: float | None = None,
 ) -> tuple[dict[UUID, UUID], float] | None:
     """Solve the assignment master problem via HiGHS MIP.
 
@@ -537,6 +542,13 @@ def _solve_master(
     """
     h = highspy.Highs()
     h.silent()
+    # D3: bound the master MILP by the remaining wall budget. An unbounded
+    # HiGHS run on a large assignment problem (thousands of binary y vars)
+    # could exceed the solver's total time_limit_s on its own; a HiGHS time
+    # limit returns the best incumbent (or the LP relaxation bound) instead of
+    # blocking. Floored at 1s so the master still makes progress.
+    if master_time_limit_s is not None:
+        h.setOptionValue("time_limit", max(1.0, float(master_time_limit_s)))
 
     # Index maps for variables
     var_index: dict[tuple[UUID, UUID], int] = {}
@@ -714,6 +726,17 @@ def _solve_master(
             assignment_map[op.id] = best_wc
 
     master_bound = col_values[cmax_idx]
+    # D3 validity: when the master is time-limited it may return a FEASIBLE but
+    # non-optimal incumbent, whose C_max is an UPPER bound on the master
+    # optimum, not a valid lower bound. Use the proven dual bound for the
+    # reported relaxation LB (it equals the primal at optimality) so the S1/S2/
+    # S3 lower-bound-validity invariant is preserved even on time-limited runs.
+    try:
+        dual_bound = float(h.getInfoValue("mip_dual_bound")[1])
+    except (IndexError, TypeError, ValueError):
+        dual_bound = master_bound
+    if math.isfinite(dual_bound):
+        master_bound = min(master_bound, dual_bound)
     return assignment_map, master_bound
 
 

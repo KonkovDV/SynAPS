@@ -21,6 +21,7 @@ Academic basis:
 from __future__ import annotations
 
 import itertools
+import math
 import os
 import time
 import warnings
@@ -238,6 +239,9 @@ class LbbdHdSolver(BaseSolver):
                 benders_cuts,
                 min_setup_by_wc=min_setup_by_wc,
                 prev_solution=prev_assignment_map,
+                master_time_limit_s=max(
+                    1.0, min(deadline - time.monotonic(), float(sub_time_limit_s) + 2.0)
+                ),
             )
             if master_result is None:
                 # Master infeasible: with S2 no-good cuts this is usually an
@@ -567,6 +571,7 @@ def _solve_precedence_aware_master(
     cuts: list[_BendersCut],
     min_setup_by_wc: dict[UUID, float] | None = None,
     prev_solution: dict[UUID, UUID] | None = None,
+    master_time_limit_s: float | None = None,
 ) -> tuple[dict[UUID, UUID], float] | None:
     """Solve the precedence-aware assignment master problem via HiGHS MIP.
 
@@ -593,6 +598,9 @@ def _solve_precedence_aware_master(
     """
     h = highspy.Highs()
     h.silent()
+    # D3: bound the master MILP by the remaining wall budget (see lbbd_solver).
+    if master_time_limit_s is not None:
+        h.setOptionValue("time_limit", max(1.0, float(master_time_limit_s)))
 
     # ---- Index maps ----
     var_index: dict[tuple[UUID, UUID], int] = {}
@@ -841,6 +849,15 @@ def _solve_precedence_aware_master(
             assignment_map[op.id] = best_wc
 
     master_bound = col_values[cmax_idx]
+    # D3 validity: a time-limited master returns a primal incumbent (upper
+    # bound on the master optimum); use the proven dual bound so the reported
+    # relaxation lower bound stays valid (equals primal at optimality).
+    try:
+        dual_bound = float(h.getInfoValue("mip_dual_bound")[1])
+    except (IndexError, TypeError, ValueError):
+        dual_bound = master_bound
+    if math.isfinite(dual_bound):
+        master_bound = min(master_bound, dual_bound)
     return assignment_map, master_bound
 
 
