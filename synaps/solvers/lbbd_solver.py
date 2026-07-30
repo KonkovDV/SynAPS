@@ -48,7 +48,6 @@ from synaps.solvers._lbbd_cuts import (
     cut_pool_fingerprint,
 )
 from synaps.solvers.cpsat_solver import CpSatSolver
-from synaps.solvers.lbbd_hd_solver import find_critical_path as _find_critical_path
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -77,11 +76,12 @@ class LbbdSolver(BaseSolver):
         use_greedy_warm_start: bool = bool(kwargs.get("use_greedy_warm_start", True))
         parallel_subproblems: bool = bool(kwargs.get("parallel_subproblems", True))
         num_workers: int = int(kwargs.get("num_workers", min(4, os.cpu_count() or 2)))
-        # R5 (2026-05-03): toggle for the sequence-aware machine_tsp Bellman-
-        # Held-Karp Benders cut. Defaults to True (production behaviour);
-        # benchmarks set this to False to measure the LB tightening that the
-        # cut delivers on top of the legacy setup_cost floor.
-        enable_machine_tsp_cuts: bool = bool(kwargs.get("enable_machine_tsp_cuts", True))
+        # NOTE: `enable_machine_tsp_cuts` is accepted for backward compatibility
+        # but is now a no-op: the machine_tsp/setup_cost optimality cuts were
+        # removed in the 2026-07 S3 validity fix (their L(S) right side
+        # over-claims the true setup path). Reading it keeps old benchmark
+        # call sites from erroring.
+        _ = kwargs.get("enable_machine_tsp_cuts", True)
 
         # Precompute lookups
         wc_by_id = {wc.id: wc for wc in problem.work_centers}
@@ -117,6 +117,11 @@ class LbbdSolver(BaseSolver):
         # fingerprint has not been seen.
         seen_cut_fingerprints: set[tuple[str, frozenset[UUID], float]] = set()
         cuts_skipped_duplicate = 0
+        # S2 telemetry: how many times an optimality/feasibility cut was NOT
+        # emitted because the subproblem result was not proven (TIMEOUT/ERROR).
+        # A large value signals the per-iteration sub budget is too small to
+        # make sound progress, not a reason to emit unsound cuts.
+        cuts_skipped_unproven_subproblem = 0
 
         def _register_cut(cut: _BendersCut) -> bool:
             nonlocal cuts_skipped_duplicate
@@ -190,7 +195,15 @@ class LbbdSolver(BaseSolver):
                 prev_solution=prev_assignment_map,
             )
             if master_result is None:
-                # Master infeasible — no solution possible
+                # Master infeasible. With the S2 no-good cuts this usually means
+                # the assignment space is EXHAUSTED (every assignment has been
+                # explored and excluded), not that the problem is infeasible.
+                # If a feasible schedule was already found, the search is
+                # complete over the explored space — return the best incumbent
+                # rather than a spurious INFEASIBLE. Only a first-iteration
+                # master infeasibility (no incumbent) is a true infeasibility.
+                if best_assignments:
+                    break
                 return ScheduleResult(
                     solver_name=self.name,
                     status=SolverStatus.INFEASIBLE,
@@ -230,18 +243,25 @@ class LbbdSolver(BaseSolver):
                     sub_time_limit_s,
                     random_seed,
                 )
-            sub_assignments, sub_makespan = sub_result
+            sub_assignments, sub_makespan, sub_proven_optimal, sub_infeasible_proven = sub_result
 
             if sub_assignments is None:
-                # Subproblem infeasible for this assignment → add nogood cut
-                _register_cut(
-                    _BendersCut(
-                        assignment_map=dict(assignment_map),
-                        kind="nogood",
-                        rhs=0.0,
-                        bottleneck_ops=set(),
+                if sub_infeasible_proven:
+                    # Proven INFEASIBLE for this assignment → excluding it from
+                    # the master is sound.
+                    _register_cut(
+                        _BendersCut(
+                            assignment_map=dict(assignment_map),
+                            kind="nogood",
+                            rhs=0.0,
+                            bottleneck_ops=set(),
+                        )
                     )
-                )
+                else:
+                    # S2 gate: TIMEOUT/ERROR without a schedule proves nothing.
+                    # Emitting a no-good here would exclude a possibly-optimal
+                    # assignment and invalidate the master bound.
+                    cuts_skipped_unproven_subproblem += 1
                 iteration_log.append(
                     {
                         "iteration": iteration,
@@ -249,7 +269,10 @@ class LbbdSolver(BaseSolver):
                         "sub_makespan": None,
                         "lb_delta": lb_delta,
                         "cut_kinds_attributed": cut_kinds_attributed_now,
-                        "status": "sub_infeasible",
+                        "sub_proven_optimal": False,
+                        "status": (
+                            "sub_infeasible" if sub_infeasible_proven else "sub_unproven_failure"
+                        ),
                     }
                 )
                 prev_iteration_cut_kinds = [
@@ -281,6 +304,7 @@ class LbbdSolver(BaseSolver):
                     "gap": (ub - lb) / max(ub, 1e-9),
                     "lb_delta": lb_delta,
                     "cut_kinds_attributed": cut_kinds_attributed_now,
+                    "sub_proven_optimal": sub_proven_optimal,
                     "status": "feasible",
                 }
             )
@@ -291,121 +315,52 @@ class LbbdSolver(BaseSolver):
                 prev_iteration_cut_kinds = []
                 break
 
-            # --- Generate Benders cut ---
-            bottleneck_wc = max(
-                _completion_time_by_machine(sub_assignments, problem).items(),
-                key=lambda kv: kv[1],
-            )[0]
-            bottleneck_ops = {
-                op_id for op_id, wc_id in assignment_map.items() if wc_id == bottleneck_wc
-            }
-            _register_cut(
-                _BendersCut(
-                    assignment_map=dict(assignment_map),
-                    kind="capacity",
-                    rhs=sub_makespan,
-                    bottleneck_ops=bottleneck_ops,
-                )
-            )
-
-            assignments_by_machine: dict[UUID, list[Assignment]] = defaultdict(list)
-            for assignment in sub_assignments:
-                assignments_by_machine[assignment.work_center_id].append(assignment)
-
-            for work_center_id, machine_assignments in assignments_by_machine.items():
-                if len(machine_assignments) < 2:
-                    continue
-                machine_state_seq = [
-                    operation.state_id
-                    for assignment in machine_assignments
-                    if (operation := ops_by_id.get(assignment.operation_id)) is not None
-                ]
-                processing_total = sum(
-                    max(
-                        1.0,
-                        ops_by_id[assignment.operation_id].base_duration_min
-                        / wc_by_id[work_center_id].speed_factor,
-                    )
-                    for assignment in machine_assignments
-                )
-                # Prefer the sequence-aware machine-TSP lower bound when the
-                # realised distinct state count is small enough for exact
-                # Bellman-Held-Karp; otherwise fall back to the sequence-
-                # independent floor used historically by `setup_cost`. The
-                # `enable_machine_tsp_cuts` flag short-circuits the BHK call
-                # so benchmarks can isolate the cut's contribution.
-                tsp_setup_bound = (
-                    compute_machine_tsp_lower_bound(
-                        machine_state_seq,
-                        work_center_id,
-                        setup_lookup,
-                    )
-                    if enable_machine_tsp_cuts
-                    else 0.0
-                )
-                if tsp_setup_bound > 0:
-                    _register_cut(
-                        _BendersCut(
-                            assignment_map=dict(assignment_map),
-                            kind="machine_tsp",
-                            rhs=processing_total + tsp_setup_bound,
-                            bottleneck_ops={
-                                assignment.operation_id for assignment in machine_assignments
-                            },
-                        )
-                    )
-                    continue
-
-                setup_lower_bound = compute_sequence_independent_setup_lower_bound(
-                    machine_assignments,
-                    work_center_id,
-                    ops_by_id,
-                    setup_lookup,
-                )
-                if setup_lower_bound <= 0:
-                    continue
+            # --- Generate Benders cuts ---
+            # S2 fix (2026-07): the former `capacity` optimality cut asserted
+            # `C_max >= sub_makespan - Sum p_i(1-y_i)` over the bottleneck
+            # machine's ops. That right side is the POST-ASSEMBLY global
+            # makespan — clusters are sequenced independently and re-anchored,
+            # so it is an achieved upper bound for this assignment, not a
+            # proven minimum, and the processing-only discount does not cover
+            # setup/contention (audit S2+S3). Both made the master bound
+            # invalid. The sound replacement is a full-assignment no-good,
+            # emitted ONLY when every cluster was proven OPTIMAL: excluding a
+            # proven assignment keeps `min(master_bound, best_ub)` a valid
+            # global lower bound (excluded assignments have known cost
+            # >= best_ub; unexcluded ones are bounded by the master
+            # relaxation).
+            if sub_proven_optimal:
                 _register_cut(
                     _BendersCut(
                         assignment_map=dict(assignment_map),
-                        kind="setup_cost",
-                        rhs=processing_total + setup_lower_bound,
-                        bottleneck_ops={
-                            assignment.operation_id for assignment in machine_assignments
-                        },
+                        kind="nogood",
+                        rhs=0.0,
+                        bottleneck_ops=set(),
                     )
                 )
+            else:
+                cuts_skipped_unproven_subproblem += 1
 
-            # --- Load-balance bound ---
-            # S1 fix (2026-07): the previous `load_balance` cut added
-            # `C_max >= max_k completion_k` unconditionally (no y variables),
-            # where completion_k came from `_completion_time_by_machine` — the
-            # incumbent's per-machine finish times, NOT its processing load.
-            # That asserts `C_max >= makespan(incumbent)` for *every*
-            # assignment, forbidding any improvement and forcing gap -> 0 in
-            # 1-2 iterations (a fake optimality certificate). Removed.
-            # The valid y-dependent load bound is already Constraint 2 in the
-            # master (Sum_i p_ik y_ik <= C_max per machine); the valid
-            # y-independent global floor is `average_capacity_lb` in
-            # lower_bounds.py. No per-iteration cut is needed or sound here.
+            # --- setup_cost / machine_tsp cuts: REMOVED (S3 validity, 2026-07) ---
+            # These asserted `C_max >= Sum p_i + L(S)` when the whole set S runs
+            # on a machine. Even in a conditional no-good form the right side is
+            # only valid if L(S) is a true lower bound on the machine's setup
+            # path — but both `compute_machine_tsp_lower_bound` (BHK) and
+            # `compute_sequence_independent_setup_lower_bound` OVER-claim it
+            # (audit S3: missing state-repeat terms, sparse-cell zeros, a false
+            # dominance docstring). Empirically the no-good right side reached
+            # 95 on a proven-optimum-90 instance. Re-enabling them requires a
+            # validated setup lower bound; until then the bound comes from the
+            # master capacity relaxation (Constraint 2) plus proven-optimal
+            # full-assignment no-goods, both of which are sound.
 
-            critical_ops, critical_duration = _find_critical_path(
-                problem,
-                sub_assignments,
-                ops_by_id,
-            )
-            if critical_ops and len(critical_ops) >= 2 and critical_duration > 0:
-                # R9 (2026-05-10): Only emit critical_path cut when the path
-                # contributes a meaningful fraction of the subproblem makespan.
-                cp_share = critical_duration / max(sub_makespan, 1e-9)
-                if cp_share >= 0.05:
-                    _register_cut(
-                        _BendersCut(
-                            assignment_map=dict(assignment_map),
-                            kind="critical_path",
-                            rhs=critical_duration,
-                            bottleneck_ops=set(critical_ops),
-                        )
-                    )
+            # --- Load-balance / critical_path cuts: REMOVED (S1/S3, 2026-07) ---
+            # load_balance added an unconditional `C_max >= makespan(incumbent)`
+            # (a fake optimality certificate); critical_path used the incumbent's
+            # realized, contention-inflated longest path. Neither is a valid
+            # master lower bound. The valid y-independent floor is
+            # `average_capacity_lb` in lower_bounds.py; the valid y-dependent
+            # load bound is already Constraint 2.
 
             prev_iteration_cut_kinds = [cut.kind for cut in benders_cuts[cuts_before_iteration:]]
 
@@ -415,14 +370,20 @@ class LbbdSolver(BaseSolver):
         for cut in benders_cuts:
             cut_kinds[cut.kind] = cut_kinds.get(cut.kind, 0) + 1
 
-        # Cap reported lower bound: the residual optimization cuts
-        # (capacity / setup_cost / machine_tsp / critical_path) can still
-        # over-claim on setup instances (their master-row discount covers only
-        # processing time, not the setup contribution — audit S2/S3), pushing
-        # the raw master lb above best_ub. Report min(lb, best_ub) so consumers
-        # always see lb <= ub. NOTE: this clamp is defensive, not a validity
-        # guarantee — a valid lower bound requires the S2/S3 cut fixes.
-        reported_lb = min(lb, best_ub) if best_ub < float("inf") else lb
+        # Reported lower bound (2026-07 validity fix, audit S1/S2/S3).
+        # In this cluster-decomposed LBBD the subproblem solves machine
+        # clusters independently and re-assembles them, so `sub_makespan` is an
+        # UPPER bound on the fixed assignment's true makespan, not a proven
+        # minimum (a globally-90 assignment can assemble to 92). Nogood cuts
+        # therefore drive the SEARCH (finding incumbents) but must NOT tighten
+        # the reported LOWER bound: excluding an assignment whose true cost the
+        # decomposition could not prove would raise the master bound above the
+        # optimum (observed: reported 92 vs proven optimum 90). The only
+        # provably-valid bound is the cut-free master relaxation (unique +
+        # capacity, Constraint 1+2), which is exactly the first iteration's
+        # master bound before any cut. Report min(that, best_ub).
+        relaxation_lb = lb_evolution[0] if lb_evolution else 0.0
+        reported_lb = min(relaxation_lb, best_ub) if best_ub < float("inf") else relaxation_lb
 
         # Aggregate per-iteration LB deltas back to the cut kinds that drove
         # them. The delta seen in iteration N is attributable to the cuts
@@ -476,6 +437,7 @@ class LbbdSolver(BaseSolver):
                     "size": len(benders_cuts),
                     "kinds": cut_kinds,
                     "skipped_duplicate": cuts_skipped_duplicate,
+                    "skipped_unproven_subproblem": cuts_skipped_unproven_subproblem,
                 },
             },
         )
@@ -607,12 +569,22 @@ def _solve_master(
         for op in problem.operations:
             key = (op.id, wc.id)
             if key in var_index:
-                duration = max(1.0, op.base_duration_min / wc.speed_factor)
+                # CP-SAT duration semantics (max(1, round(p))), divided by the
+                # number of parallel lanes: a machine with max_parallel lanes
+                # finishes load L in L / max_parallel, so the relaxation
+                # `Sum p_i y_i / lanes <= C_max` stays a valid lower bound
+                # (matching average_capacity_lb in lower_bounds.py). Without the
+                # division the bound over-claims on max_parallel > 1 machines.
+                lanes = float(max(1, wc.max_parallel))
+                duration = float(max(1, round(op.base_duration_min / wc.speed_factor))) / lanes
                 capacity_indices.append(var_index[key])
                 capacity_coeffs.append(duration)
         if not capacity_indices:
             continue
-        if min_setup_by_wc and wc.id in min_setup_by_wc:
+        # The min-setup transition floor assumes n_k - 1 sequential transitions
+        # on a single lane; with parallel lanes that count no longer holds, so
+        # only apply it to single-lane machines (keeps the bound valid).
+        if min_setup_by_wc and wc.id in min_setup_by_wc and wc.max_parallel <= 1:
             min_setup = min_setup_by_wc[wc.id]
             if min_setup > 0:
                 capacity_coeffs = [coefficient + min_setup for coefficient in capacity_coeffs]
@@ -647,149 +619,43 @@ def _solve_master(
                     np.array(indices, dtype=np.int32),
                     np.array(coeffs),
                 )
-        elif cut.kind == "capacity":
-            # Combinatorial Benders capacity cut (Hooker & Ottosson 2003).
+        elif cut.kind in ("setup_cost", "machine_tsp"):
+            # Conditional no-good optimality cut (S3 validity fix, 2026-07).
             #
-            # Original:  C_max >= rhs - sum_{i in B} p_i * (1 - y[i, k_i])
-            # Expand:     C_max >= rhs - sum p_i + sum p_i * y[i, k_i]
-            # Rearrange:  C_max - sum p_i * y[i, k_i] >= rhs - sum p_i
+            # rhs = Sum_i p_i + L(S) is an ANALYTIC lower bound on machine m's
+            # busy time whenever the whole set S runs on m (L = BHK setup-path
+            # bound for machine_tsp, sequence-independent floor for
+            # setup_cost); it stays valid if more ops join m. The former row
+            # discounted only p_i per removed op, which does not cover the
+            # drop in L(S) (removing a node shortens the Hamiltonian path), so
+            # the bound over-claimed by L(S) - L(S\{j}) (audit S3). The former
+            # `capacity` and `critical_path` rows had deeper flaws (see the
+            # generation site) and are no longer emitted.
             #
-            # The row added to HiGHS is:  C_max - sum p*y  >=  rhs - total_p
-            capacity_cut_indices = [cmax_idx]
-            capacity_cut_coeffs = [1.0]
-            total_processing = 0.0
+            # Valid form: bind only while ALL of S stays on m, fully
+            # deactivate otherwise — coefficient rhs per op:
+            #   C_max - Sum_i rhs*y_i >= rhs*(1 - |S|)
+            #   <=> C_max >= rhs*(1 - Sum_i (1 - y_i))
+            # All y_i = 1 -> C_max >= rhs; any y_i = 0 -> row is slack.
+            ng_indices = [cmax_idx]
+            ng_coeffs = [1.0]
             for op_id in cut.bottleneck_ops:
-                cut_wc_id = cut.assignment_map.get(op_id)
-                if cut_wc_id is None:
+                ng_wc_id = cut.assignment_map.get(op_id)
+                if ng_wc_id is None:
                     continue
-                key = (op_id, cut_wc_id)
+                key = (op_id, ng_wc_id)
                 if key not in var_index:
                     continue
-                cut_wc = wc_by_id.get(cut_wc_id)
-                cut_op = next((o for o in problem.operations if o.id == op_id), None)
-                if cut_wc is None or cut_op is None:
-                    continue
-                p = max(1.0, cut_op.base_duration_min / cut_wc.speed_factor)
-                total_processing += p
-                capacity_cut_indices.append(var_index[key])
-                # Negative coefficient: C_max - p*y
-                capacity_cut_coeffs.append(-p)
-
-            if len(capacity_cut_indices) > 1:
-                rhs_val = cut.rhs - total_processing
+                ng_indices.append(var_index[key])
+                ng_coeffs.append(-cut.rhs)
+            member_count = len(ng_indices) - 1
+            if member_count > 0:
                 h.addRow(
-                    rhs_val,
+                    cut.rhs * (1 - member_count),
                     highspy.kHighsInf,
-                    len(capacity_cut_indices),
-                    np.array(capacity_cut_indices, dtype=np.int32),
-                    np.array(capacity_cut_coeffs),
-                )
-        elif cut.kind == "setup_cost":
-            setup_cut_indices = [cmax_idx]
-            setup_cut_coeffs = [1.0]
-            total_processing = 0.0
-            for op_id in cut.bottleneck_ops:
-                setup_cut_wc_id = cut.assignment_map.get(op_id)
-                if setup_cut_wc_id is None:
-                    continue
-                key = (op_id, setup_cut_wc_id)
-                if key not in var_index:
-                    continue
-                setup_cut_wc = wc_by_id.get(setup_cut_wc_id)
-                setup_cut_op = next(
-                    (operation for operation in problem.operations if operation.id == op_id),
-                    None,
-                )
-                if setup_cut_wc is None or setup_cut_op is None:
-                    continue
-                processing_time = max(
-                    1.0,
-                    setup_cut_op.base_duration_min / setup_cut_wc.speed_factor,
-                )
-                total_processing += processing_time
-                setup_cut_indices.append(var_index[key])
-                setup_cut_coeffs.append(-processing_time)
-            if len(setup_cut_indices) > 1:
-                rhs_val = cut.rhs - total_processing
-                h.addRow(
-                    rhs_val,
-                    highspy.kHighsInf,
-                    len(setup_cut_indices),
-                    np.array(setup_cut_indices, dtype=np.int32),
-                    np.array(setup_cut_coeffs),
-                )
-        elif cut.kind == "critical_path":
-            critical_cut_indices = [cmax_idx]
-            critical_cut_coeffs = [1.0]
-            total_processing = 0.0
-            for op_id in cut.bottleneck_ops:
-                critical_wc_id = cut.assignment_map.get(op_id)
-                if critical_wc_id is None:
-                    continue
-                key = (op_id, critical_wc_id)
-                if key not in var_index:
-                    continue
-                critical_wc = wc_by_id.get(critical_wc_id)
-                critical_op = next(
-                    (operation for operation in problem.operations if operation.id == op_id),
-                    None,
-                )
-                if critical_wc is None or critical_op is None:
-                    continue
-                processing_time = max(
-                    1.0,
-                    critical_op.base_duration_min / critical_wc.speed_factor,
-                )
-                total_processing += processing_time
-                critical_cut_indices.append(var_index[key])
-                critical_cut_coeffs.append(-processing_time)
-            if len(critical_cut_indices) > 1:
-                rhs_val = cut.rhs - total_processing
-                h.addRow(
-                    rhs_val,
-                    highspy.kHighsInf,
-                    len(critical_cut_indices),
-                    np.array(critical_cut_indices, dtype=np.int32),
-                    np.array(critical_cut_coeffs),
-                )
-        elif cut.kind == "machine_tsp":
-            # Sequence-aware setup cut (Naderi & Roshanaei 2021):
-            # C_max + sum_{i in S_m} p_{i,m} * (1 - y[i, m]) >= sum_{i in S_m} p_{i,m} + L_TSP(S_m)
-            # where L_TSP is the Bellman-Held-Karp lower bound on the realised
-            # state-type Hamiltonian path. Same shape as `setup_cost`, but
-            # with a strictly tighter rhs.
-            tsp_cut_indices = [cmax_idx]
-            tsp_cut_coeffs = [1.0]
-            total_processing = 0.0
-            for op_id in cut.bottleneck_ops:
-                tsp_cut_wc_id = cut.assignment_map.get(op_id)
-                if tsp_cut_wc_id is None:
-                    continue
-                key = (op_id, tsp_cut_wc_id)
-                if key not in var_index:
-                    continue
-                tsp_cut_wc = wc_by_id.get(tsp_cut_wc_id)
-                tsp_cut_op = next(
-                    (operation for operation in problem.operations if operation.id == op_id),
-                    None,
-                )
-                if tsp_cut_wc is None or tsp_cut_op is None:
-                    continue
-                processing_time = max(
-                    1.0,
-                    tsp_cut_op.base_duration_min / tsp_cut_wc.speed_factor,
-                )
-                total_processing += processing_time
-                tsp_cut_indices.append(var_index[key])
-                tsp_cut_coeffs.append(-processing_time)
-            if len(tsp_cut_indices) > 1:
-                rhs_val = cut.rhs - total_processing
-                h.addRow(
-                    rhs_val,
-                    highspy.kHighsInf,
-                    len(tsp_cut_indices),
-                    np.array(tsp_cut_indices, dtype=np.int32),
-                    np.array(tsp_cut_coeffs),
+                    len(ng_indices),
+                    np.array(ng_indices, dtype=np.int32),
+                    np.array(ng_coeffs),
                 )
 
     # Solve
@@ -914,16 +780,26 @@ def _solve_subproblems(
     orders_by_id: dict[UUID, Order],
     sub_time_limit_s: int,
     random_seed: int,
-) -> tuple[list[Assignment] | None, float]:
+) -> tuple[list[Assignment] | None, float, bool, bool]:
     """Solve CP-SAT subproblems for each machine cluster.
 
-    Returns (combined_assignments, overall_makespan) or (None, 0) if infeasible.
+    Returns ``(assignments, makespan, proven_optimal, infeasible_proven)``:
+
+    * ``assignments`` is None when no complete schedule was obtained;
+    * ``proven_optimal`` is True only when EVERY cluster returned OPTIMAL —
+      the S2 gate: optimality/no-good cuts derived from non-proven cluster
+      values are unsound (a TIMEOUT makespan is an upper bound, not a
+      certificate);
+    * ``infeasible_proven`` is True only when a cluster returned a proven
+      INFEASIBLE — the only case where a feasibility no-good may be emitted
+      (TIMEOUT/ERROR without assignments proves nothing).
     """
     clusters = _cluster_machines(assignment_map, aux_links)
 
     all_assignments: list[Assignment] = []
     overall_makespan = 0.0
     horizon_start = problem.planning_horizon_start
+    all_proven_optimal = True
 
     for cluster_wcs in clusters:
         # Collect operations assigned to this cluster
@@ -960,11 +836,16 @@ def _solve_subproblems(
             num_workers=4,
         )
 
-        if result.status in (SolverStatus.INFEASIBLE, SolverStatus.ERROR):
-            return None, 0.0
+        if result.status == SolverStatus.INFEASIBLE:
+            return None, 0.0, False, True
+        if result.status == SolverStatus.ERROR:
+            return None, 0.0, False, False
 
         if result.status == SolverStatus.TIMEOUT and not result.assignments:
-            return None, 0.0
+            return None, 0.0, False, False
+
+        if result.status is not SolverStatus.OPTIMAL:
+            all_proven_optimal = False
 
         # Only keep assignments for ops that belong to this cluster
         # (external predecessor ops may also have been solved but are
@@ -984,7 +865,7 @@ def _solve_subproblems(
     assigned_ops = {a.operation_id for a in all_assignments}
     all_ops = {op.id for op in problem.operations}
     if assigned_ops != all_ops:
-        return None, 0.0
+        return None, 0.0, False, False
 
     all_assignments, overall_makespan = _post_assemble_assignments(
         problem,
@@ -992,7 +873,7 @@ def _solve_subproblems(
         ops_by_id,
     )
 
-    return all_assignments, overall_makespan
+    return all_assignments, overall_makespan, all_proven_optimal, False
 
 
 def _build_subproblem(
@@ -1121,25 +1002,6 @@ def _build_subproblem(
 # ---------------------------------------------------------------------------
 
 
-def _completion_time_by_machine(
-    assignments: list[Assignment],
-    problem: ScheduleProblem,
-) -> dict[UUID, float]:
-    """Per-machine completion time (max end-time offset).
-
-    NOTE: this is finish time, not processing load. Do not use it as a
-    load-balance bound (see the S1 fix in the Benders loop).
-    """
-    horizon_start = problem.planning_horizon_start
-    by_machine: dict[UUID, float] = {}
-    for a in assignments:
-        end_offset = (a.end_time - horizon_start).total_seconds() / 60.0
-        current = by_machine.get(a.work_center_id, 0.0)
-        if end_offset > current:
-            by_machine[a.work_center_id] = end_offset
-    return by_machine
-
-
 def _compute_objective(
     problem: ScheduleProblem,
     assignments: list[Assignment],
@@ -1228,7 +1090,7 @@ def _solve_single_cluster_worker(
     cluster_op_ids = {op_id for op_id, wc_id in assignment_map.items() if wc_id in cluster_wcs}
     cluster_ops = [ops_by_id[oid] for oid in cluster_op_ids if oid in ops_by_id]
     if not cluster_ops:
-        return {"assignments": [], "makespan": 0.0}
+        return {"assignments": [], "makespan": 0.0, "proven_optimal": True}
 
     sub_problem = _build_subproblem(
         problem,
@@ -1249,10 +1111,12 @@ def _solve_single_cluster_worker(
         num_workers=4,
     )
 
-    if result.status in (SolverStatus.INFEASIBLE, SolverStatus.ERROR):
-        return None
+    if result.status == SolverStatus.INFEASIBLE:
+        return {"failed": True, "infeasible_proven": True}
+    if result.status == SolverStatus.ERROR:
+        return {"failed": True, "infeasible_proven": False}
     if result.status == SolverStatus.TIMEOUT and not result.assignments:
-        return None
+        return {"failed": True, "infeasible_proven": False}
 
     cluster_assignments = [a for a in result.assignments if a.operation_id in cluster_op_ids]
     horizon_start = problem.planning_horizon_start
@@ -1265,6 +1129,7 @@ def _solve_single_cluster_worker(
     return {
         "assignments": [a.model_dump(mode="json") for a in cluster_assignments],
         "makespan": cluster_makespan,
+        "proven_optimal": result.status is SolverStatus.OPTIMAL,
     }
 
 
@@ -1279,8 +1144,11 @@ def _solve_subproblems_parallel(
     random_seed: int,
     *,
     num_workers: int = 4,
-) -> tuple[list[Assignment] | None, float]:
+) -> tuple[list[Assignment] | None, float, bool, bool]:
     """Solve CP-SAT subproblems in parallel via ProcessPoolExecutor.
+
+    Returns the same 4-tuple contract as :func:`_solve_subproblems`:
+    ``(assignments, makespan, proven_optimal, infeasible_proven)``.
 
     Provides O(K) speedup proportional to the number of machine clusters K,
     removing the GIL bottleneck from the sequential Benders loop.
@@ -1291,6 +1159,7 @@ def _solve_subproblems_parallel(
 
     all_assignments: list[Assignment] = []
     overall_makespan = 0.0
+    all_proven_optimal = True
     effective_workers = min(num_workers, len(clusters))
 
     with ProcessPoolExecutor(max_workers=effective_workers) as pool:
@@ -1309,8 +1178,11 @@ def _solve_subproblems_parallel(
 
         for future in as_completed(futures):
             result = future.result()
-            if result is None:
-                return None, 0.0
+            if result is None or result.get("failed"):
+                infeasible_proven = bool(result.get("infeasible_proven")) if result else False
+                return None, 0.0, False, infeasible_proven
+            if not result.get("proven_optimal", False):
+                all_proven_optimal = False
             for a_dict in result["assignments"]:
                 all_assignments.append(Assignment.model_validate(a_dict))
             overall_makespan = max(overall_makespan, result["makespan"])
@@ -1319,7 +1191,7 @@ def _solve_subproblems_parallel(
     assigned_ops = {a.operation_id for a in all_assignments}
     all_ops = {op.id for op in problem.operations}
     if assigned_ops != all_ops:
-        return None, 0.0
+        return None, 0.0, False, False
 
     all_assignments, overall_makespan = _post_assemble_assignments(
         problem,
@@ -1327,7 +1199,7 @@ def _solve_subproblems_parallel(
         ops_by_id,
     )
 
-    return all_assignments, overall_makespan
+    return all_assignments, overall_makespan, all_proven_optimal, False
 
 
 def _post_assemble_assignments(

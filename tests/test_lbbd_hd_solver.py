@@ -331,7 +331,13 @@ class TestLbbdHdSolver:
         assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
         assert len(result.assignments) == len(problem.operations)
 
-    def test_cut_pool_grows_with_iterations(self) -> None:
+    def test_cut_pool_is_wellformed_and_only_valid_kinds(self) -> None:
+        # S2/S3 (2026-07): after removing the capacity/setup_cost/machine_tsp/
+        # critical_path/load_balance cuts, the pool only ever contains the
+        # sound families (nogood + local_branching). Cut growth is no longer
+        # guaranteed (only proven-optimal or proven-infeasible iterations add a
+        # nogood), so this asserts pool well-formedness and kind validity
+        # rather than the former unconditional `size > 0`.
         problem = _make_medium_problem(n_orders=5, ops_per_order=3, n_machines=3)
         solver = LbbdHdSolver()
         result = solver.solve(
@@ -340,10 +346,15 @@ class TestLbbdHdSolver:
             time_limit_s=60,
         )
 
-        # After multiple iterations, cuts should have been generated
-        cut_pool = result.metadata.get("cut_pool", {})
-        if result.metadata.get("iterations", 0) > 1:
-            assert cut_pool.get("size", 0) > 0
+        cut_pool = result.metadata["cut_pool"]
+        assert isinstance(cut_pool.get("size"), int)
+        assert cut_pool["size"] >= 0
+        kinds = cut_pool.get("kinds", {})
+        assert set(kinds).issubset({"nogood", "local_branching"}), (
+            f"unexpected (removed/invalid) cut kinds in pool: {kinds}"
+        )
+        # The S2 skip counter must be present for observability.
+        assert "skipped_unproven_subproblem" in cut_pool
 
     def test_few_strong_cut_controls_are_exposed(self) -> None:
         problem = _make_medium_problem(n_orders=6, ops_per_order=3, n_machines=4)

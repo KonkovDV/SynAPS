@@ -87,30 +87,14 @@ def _make_setup_dense_problem() -> ScheduleProblem:
     )
 
 
-def test_machine_tsp_cut_replaces_setup_cost_for_small_state_pools() -> None:
-    """Standard LBBD should prefer the sequence-aware machine_tsp cut over the
-    sequence-independent setup_cost floor when the realised distinct state
-    count fits Bellman-Held-Karp (≤12 by default).
-    """
-    problem = _make_setup_dense_problem()
-
-    result = LbbdSolver().solve(
-        problem,
-        max_iterations=4,
-        time_limit_s=20,
-        random_seed=42,
-        setup_relaxation=False,
-    )
-
-    assert result.status in {SolverStatus.FEASIBLE, SolverStatus.OPTIMAL, SolverStatus.TIMEOUT}
-    cut_kinds = result.metadata["cut_pool"]["kinds"]
-    # setup_cost is the legacy floor; machine_tsp is the dominating Naderi &
-    # Roshanaei (2021) cut. On small state pools the latter must be active and
-    # the former must not be emitted (machine_tsp dominates and short-circuits
-    # the sequence-independent fallback in the same iteration).
-    assert cut_kinds.get("machine_tsp", 0) >= 1
-    assert cut_kinds.get("setup_cost", 0) == 0
-    assert cut_kinds.get("critical_path", 0) >= 1
+# NOTE (2026-07 S2/S3 validity fix): the former
+# `test_machine_tsp_cut_replaces_setup_cost_for_small_state_pools` was removed.
+# It asserted that LBBD emits `machine_tsp` and `critical_path` optimality cuts.
+# Both cut families were removed because their master right side over-claims the
+# lower bound (machine_tsp/setup_cost L(S) is not a valid setup-path lower
+# bound; critical_path uses the realized contention-inflated path), producing
+# reported bounds above the proven optimum. See tests/test_lbbd_bound_validity.py
+# for the replacement invariant (reported lower bound <= proven optimum).
 
 
 def test_machine_tsp_lower_bound_dominates_sequence_independent_floor() -> None:
@@ -209,27 +193,10 @@ def test_lbbd_metadata_exposes_lb_evolution_and_cut_kind_contribution() -> None:
         assert isinstance(entry["cut_kinds_attributed"], list)
 
 
-def test_lbbd_hd_emits_machine_tsp_cut_for_small_state_pools() -> None:
-    """R1 (2026-05-03): LBBD-HD must prefer the sequence-aware machine_tsp
-    Bellman-Held-Karp cut over the legacy setup_cost floor on the same
-    A<->B sdst-dense fixture used by the standard LBBD regression. This is
-    the cross-solver parity check that ensures the two LBBD variants share
-    the same cut taxonomy.
-    """
-    problem = _make_setup_dense_problem()
-
-    result = LbbdHdSolver().solve(
-        problem,
-        max_iterations=4,
-        time_limit_s=20,
-        random_seed=42,
-        setup_relaxation=False,
-    )
-
-    assert result.status in {SolverStatus.FEASIBLE, SolverStatus.OPTIMAL, SolverStatus.TIMEOUT}
-    cut_kinds = result.metadata["cut_pool"]["kinds"]
-    assert cut_kinds.get("machine_tsp", 0) >= 1
-    assert cut_kinds.get("setup_cost", 0) == 0
+# NOTE (2026-07 S2/S3 validity fix): the former
+# `test_lbbd_hd_emits_machine_tsp_cut_for_small_state_pools` was removed for the
+# same reason as its standard-LBBD twin — the machine_tsp optimality cut was
+# removed because its L(S) right side over-claims the lower bound.
 
 
 def test_lbbd_hd_metadata_exposes_master_lb_telemetry() -> None:

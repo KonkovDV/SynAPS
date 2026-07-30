@@ -199,6 +199,9 @@ class LbbdHdSolver(BaseSolver):
         # generator.
         seen_cut_fingerprints: set[tuple[str, frozenset[UUID], float]] = set()
         cuts_skipped_duplicate = 0
+        # S2 telemetry: optimality/feasibility cuts skipped because the
+        # subproblem was not proven (TIMEOUT/ERROR).
+        cuts_skipped_unproven_subproblem = 0
 
         def _register_cut(cut: _BendersCut) -> bool:
             nonlocal cuts_skipped_duplicate
@@ -233,6 +236,12 @@ class LbbdHdSolver(BaseSolver):
                 prev_solution=prev_assignment_map,
             )
             if master_result is None:
+                # Master infeasible: with S2 no-good cuts this is usually an
+                # exhausted assignment space, not problem infeasibility. Return
+                # the best incumbent if one was found; only a first-iteration
+                # failure (no incumbent) is a true infeasibility.
+                if best_assignments:
+                    break
                 return ScheduleResult(
                     solver_name=self.name,
                     status=SolverStatus.INFEASIBLE,
@@ -271,16 +280,22 @@ class LbbdHdSolver(BaseSolver):
                 sub_num_workers=sub_num_workers,
             )
 
-            if sub_result is None:
-                # Subproblem infeasible → add nogood cut
-                _register_cut(
-                    _BendersCut(
-                        assignment_map=dict(assignment_map),
-                        kind="nogood",
-                        rhs=0.0,
-                        bottleneck_ops=set(),
+            if sub_result[0] is None:
+                _sub_ok, _sub_mk, _sub_opt, sub_infeasible_proven = sub_result
+                if sub_infeasible_proven:
+                    # Proven INFEASIBLE → excluding this assignment is sound.
+                    _register_cut(
+                        _BendersCut(
+                            assignment_map=dict(assignment_map),
+                            kind="nogood",
+                            rhs=0.0,
+                            bottleneck_ops=set(),
+                        )
                     )
-                )
+                else:
+                    # S2 gate: a TIMEOUT/ERROR proves nothing; a no-good here
+                    # could exclude the optimum and inflate the master bound.
+                    cuts_skipped_unproven_subproblem += 1
                 iteration_log.append(
                     {
                         "iteration": iteration,
@@ -288,7 +303,9 @@ class LbbdHdSolver(BaseSolver):
                         "sub_makespan": None,
                         "lb_delta": lb_delta,
                         "cut_kinds_attributed": cut_kinds_attributed_now,
-                        "status": "sub_infeasible",
+                        "status": (
+                            "sub_infeasible" if sub_infeasible_proven else "sub_unproven_failure"
+                        ),
                     }
                 )
                 prev_iteration_cut_kinds = [
@@ -296,7 +313,8 @@ class LbbdHdSolver(BaseSolver):
                 ]
                 continue
 
-            sub_assignments, sub_makespan = sub_result
+            sub_assignments, sub_makespan, sub_proven_optimal, _ = sub_result
+            assert sub_assignments is not None  # narrowed by the `sub_result[0] is None` guard
 
             # ---- Measure 5: Accelerated post-assembly ----
             assembled = _topological_post_assembly(problem, sub_assignments, ops_by_id)
@@ -355,7 +373,21 @@ class LbbdHdSolver(BaseSolver):
                 break
 
             # ---- Generate Benders cuts ----
+            # S2 (2026-07): a full-assignment no-good is emitted only when every
+            # cluster was proven OPTIMAL, so its cost is captured in best_ub and
+            # `min(master_bound, best_ub)` stays a valid global lower bound.
             cuts_before_gen = len(benders_cuts)
+            if sub_proven_optimal:
+                _register_cut(
+                    _BendersCut(
+                        assignment_map=dict(assignment_map),
+                        kind="nogood",
+                        rhs=0.0,
+                        bottleneck_ops=set(),
+                    )
+                )
+            else:
+                cuts_skipped_unproven_subproblem += 1
             _generate_all_cuts(
                 problem,
                 sub_assignments,
@@ -385,7 +417,14 @@ class LbbdHdSolver(BaseSolver):
         for cut in benders_cuts:
             cut_kinds[cut.kind] = cut_kinds.get(cut.kind, 0) + 1
 
-        reported_lb = min(lb, best_ub) if best_ub < float("inf") else lb
+        # Reported lower bound (2026-07 validity fix, audit S1/S2/S3): the
+        # cluster subproblem re-assembles independent clusters, so its makespan
+        # is an UPPER bound on the assignment's true cost, not a proven
+        # minimum. Nogood cuts drive the search but must not tighten the
+        # reported lower bound. The only provably-valid bound is the cut-free
+        # master relaxation (first iteration's bound). Report min(that, best_ub).
+        relaxation_lb = lb_evolution[0] if lb_evolution else 0.0
+        reported_lb = min(relaxation_lb, best_ub) if best_ub < float("inf") else relaxation_lb
 
         # R10 (2026-05-03): aggregate per-iteration LB deltas back to the cut
         # kinds that drove them. Iteration-1 (no attributable cuts) and any
@@ -442,6 +481,7 @@ class LbbdHdSolver(BaseSolver):
                     "size": len(benders_cuts),
                     "kinds": cut_kinds,
                     "skipped_duplicate": cuts_skipped_duplicate,
+                    "skipped_unproven_subproblem": cuts_skipped_unproven_subproblem,
                 },
             },
         )
@@ -607,7 +647,9 @@ def _solve_precedence_aware_master(
         for wc_id in eligible_by_op[op.id]:
             wc = wc_by_id.get(wc_id)
             speed = wc.speed_factor if wc else 1.0
-            duration = max(1.0, op.base_duration_min / speed)
+            # CP-SAT duration semantics (max(1, round(p))) so the master timing
+            # model matches what the subproblem model realises (S2/S3 validity).
+            duration = float(max(1, round(op.base_duration_min / speed)))
             indices.append(var_index[(op.id, wc_id)])
             coeffs.append(-duration)
 
@@ -642,12 +684,16 @@ def _solve_precedence_aware_master(
         for op in problem.operations:
             key = (op.id, wc.id)
             if key in var_index:
-                duration = max(1.0, op.base_duration_min / wc.speed_factor)
+                # CP-SAT duration semantics divided by parallel lanes: a
+                # max_parallel-lane machine finishes load L in L / lanes, so
+                # the relaxation stays a valid lower bound (see lbbd_solver).
+                lanes = float(max(1, wc.max_parallel))
+                duration = float(max(1, round(op.base_duration_min / wc.speed_factor))) / lanes
                 cap_indices.append(var_index[key])
                 cap_coeffs.append(duration)
         if not cap_indices:
             continue
-        if min_setup_by_wc and wc.id in min_setup_by_wc:
+        if min_setup_by_wc and wc.id in min_setup_by_wc and wc.max_parallel <= 1:
             ms = min_setup_by_wc[wc.id]
             if ms > 0:
                 cap_coeffs = [c + ms for c in cap_coeffs]
@@ -693,95 +739,34 @@ def _solve_precedence_aware_master(
                     np.array(indices, dtype=np.int32),
                     np.array(coeffs),
                 )
-        elif cut.kind == "capacity":
-            # Combinatorial Benders capacity cut (Hooker & Ottosson 2003)
-            cut_indices = [cmax_idx]
-            cut_coeffs = [1.0]
-            total_p = 0.0
-            for op_id in cut.bottleneck_ops:
-                cut_wc = cut.assignment_map.get(op_id)
-                if cut_wc is None:
-                    continue
-                key = (op_id, cut_wc)
-                if key not in var_index:
-                    continue
-                wc = wc_by_id.get(cut_wc)
-                operation = ops_by_id.get(op_id)
-                if wc is None or operation is None:
-                    continue
-                p = max(1.0, operation.base_duration_min / wc.speed_factor)
-                total_p += p
-                cut_indices.append(var_index[key])
-                cut_coeffs.append(-p)
-            if len(cut_indices) > 1:
-                h.addRow(
-                    cut.rhs - total_p,
-                    highspy.kHighsInf,
-                    len(cut_indices),
-                    np.array(cut_indices, dtype=np.int32),
-                    np.array(cut_coeffs),
-                )
         elif cut.kind in ("setup_cost", "machine_tsp"):
-            # R1 (2026-05-03): machine_tsp shares the combinatorial Benders
-            # form of setup_cost (rhs = total_processing + L; LHS adds
-            # -p_i * y_{i,wc} so that any reassignment relaxes the bound by
-            # exactly the removed processing time). The sub-problem already
-            # encoded the choice of L (BHK for machine_tsp, sequence-independent
-            # floor for setup_cost), so the master row is identical.
-            sc_indices = [cmax_idx]
-            sc_coeffs = [1.0]
-            total_p = 0.0
+            # Conditional no-good optimality cut (S3 validity fix, 2026-07).
+            # rhs = Sum p_i + L(S) is an analytic lower bound on the machine's
+            # busy time whenever the whole set S stays on it; the former row
+            # discounted only p_i per removed op, which does not cover the
+            # drop in L(S), over-claiming the bound (audit S3). The former
+            # `capacity` and `critical_path` rows had deeper flaws (see
+            # `_generate_all_cuts`) and are no longer emitted.
+            # Valid form: C_max - Sum_i rhs*y_i >= rhs*(1 - |S|).
+            ng_indices = [cmax_idx]
+            ng_coeffs = [1.0]
             for op_id in cut.bottleneck_ops:
-                sc_wc = cut.assignment_map.get(op_id)
-                if sc_wc is None:
+                ng_wc = cut.assignment_map.get(op_id)
+                if ng_wc is None:
                     continue
-                key = (op_id, sc_wc)
+                key = (op_id, ng_wc)
                 if key not in var_index:
                     continue
-                wc = wc_by_id.get(sc_wc)
-                operation = ops_by_id.get(op_id)
-                if wc is None or operation is None:
-                    continue
-                p = max(1.0, operation.base_duration_min / wc.speed_factor)
-                total_p += p
-                sc_indices.append(var_index[key])
-                sc_coeffs.append(-p)
-            if len(sc_indices) > 1:
+                ng_indices.append(var_index[key])
+                ng_coeffs.append(-cut.rhs)
+            member_count = len(ng_indices) - 1
+            if member_count > 0:
                 h.addRow(
-                    cut.rhs - total_p,
+                    cut.rhs * (1 - member_count),
                     highspy.kHighsInf,
-                    len(sc_indices),
-                    np.array(sc_indices, dtype=np.int32),
-                    np.array(sc_coeffs),
-                )
-        elif cut.kind == "critical_path":
-            # Critical-path cut (Naderi & Roshanaei 2022):
-            # C_max ≥ sum of path durations for the critical chain
-            cp_indices = [cmax_idx]
-            cp_coeffs = [1.0]
-            total_cp = 0.0
-            for op_id in cut.bottleneck_ops:
-                cp_wc = cut.assignment_map.get(op_id)
-                if cp_wc is None:
-                    continue
-                key = (op_id, cp_wc)
-                if key not in var_index:
-                    continue
-                wc = wc_by_id.get(cp_wc)
-                operation = ops_by_id.get(op_id)
-                if wc is None or operation is None:
-                    continue
-                p = max(1.0, operation.base_duration_min / wc.speed_factor)
-                total_cp += p
-                cp_indices.append(var_index[key])
-                cp_coeffs.append(-p)
-            if len(cp_indices) > 1:
-                h.addRow(
-                    cut.rhs - total_cp,
-                    highspy.kHighsInf,
-                    len(cp_indices),
-                    np.array(cp_indices, dtype=np.int32),
-                    np.array(cp_coeffs),
+                    len(ng_indices),
+                    np.array(ng_indices, dtype=np.int32),
+                    np.array(ng_coeffs),
                 )
         elif cut.kind == "local_branching":
             lb_indices: list[int] = []
@@ -881,7 +866,7 @@ def _solve_single_cluster(
     # Collect operations for this cluster
     cluster_op_ids = {op_id for op_id, wc_id in assignment.items() if wc_id in cluster_wc_set}
     if not cluster_op_ids:
-        return {"assignments": [], "makespan": 0.0}
+        return {"assignments": [], "makespan": 0.0, "proven_optimal": True}
 
     cluster_ops = [ops_by_id[oid] for oid in cluster_op_ids if oid in ops_by_id]
 
@@ -904,10 +889,12 @@ def _solve_single_cluster(
         num_workers=sub_num_workers,
     )
 
-    if result.status in (SolverStatus.INFEASIBLE, SolverStatus.ERROR):
-        return None
+    if result.status == SolverStatus.INFEASIBLE:
+        return {"failed": True, "infeasible_proven": True}
+    if result.status == SolverStatus.ERROR:
+        return {"failed": True, "infeasible_proven": False}
     if result.status == SolverStatus.TIMEOUT and not result.assignments:
-        return None
+        return {"failed": True, "infeasible_proven": False}
 
     # Only keep cluster-owned assignments
     kept = [a for a in result.assignments if a.operation_id in cluster_op_ids]
@@ -917,6 +904,7 @@ def _solve_single_cluster(
     return {
         "assignments": [a.model_dump(mode="json") for a in kept],
         "makespan": mk,
+        "proven_optimal": result.status is SolverStatus.OPTIMAL,
     }
 
 
@@ -932,14 +920,17 @@ def _solve_subproblems_parallel(
     *,
     num_workers: int = 4,
     sub_num_workers: int = 4,
-) -> tuple[list[Assignment], float] | None:
+) -> tuple[list[Assignment] | None, float, bool, bool]:
     """Solve CP-SAT subproblems in parallel via ProcessPoolExecutor.
 
+    Returns ``(assignments, makespan, proven_optimal, infeasible_proven)`` —
+    ``proven_optimal`` is True only when every cluster returned OPTIMAL (S2
+    gate); ``infeasible_proven`` only on a proven INFEASIBLE cluster.
     For small instance counts (≤ 3 clusters), falls back to sequential
     execution to avoid multiprocessing overhead.
     """
     if not clusters:
-        return None
+        return None, 0.0, False, False
 
     # Serialize problem once
     problem_dict = problem.model_dump(mode="json")
@@ -961,6 +952,7 @@ def _solve_subproblems_parallel(
 
     all_assignments: list[Assignment] = []
     overall_makespan = 0.0
+    all_proven_optimal = True
 
     effective_workers = min(num_workers, len(clusters))
 
@@ -981,9 +973,11 @@ def _solve_subproblems_parallel(
 
         for future in as_completed(futures):
             result = future.result()
-            if result is None:
-                return None
-
+            if result is None or result.get("failed"):
+                infeasible_proven = bool(result.get("infeasible_proven")) if result else False
+                return None, 0.0, False, infeasible_proven
+            if not result.get("proven_optimal", False):
+                all_proven_optimal = False
             for a_dict in result["assignments"]:
                 all_assignments.append(Assignment.model_validate(a_dict))
             overall_makespan = max(overall_makespan, result["makespan"])
@@ -992,9 +986,9 @@ def _solve_subproblems_parallel(
     assigned_ops = {a.operation_id for a in all_assignments}
     all_ops = {op.id for op in problem.operations}
     if assigned_ops != all_ops:
-        return None
+        return None, 0.0, False, False
 
-    return all_assignments, overall_makespan
+    return all_assignments, overall_makespan, all_proven_optimal, False
 
 
 def _solve_subproblems_sequential(
@@ -1007,11 +1001,15 @@ def _solve_subproblems_sequential(
     sub_time_limit_s: int,
     random_seed: int,
     sub_num_workers: int,
-) -> tuple[list[Assignment], float] | None:
-    """Sequential fallback for small cluster counts."""
+) -> tuple[list[Assignment] | None, float, bool, bool]:
+    """Sequential fallback for small cluster counts.
+
+    Same 4-tuple contract as :func:`_solve_subproblems_parallel`.
+    """
     all_assignments: list[Assignment] = []
     overall_makespan = 0.0
     horizon_start = problem.planning_horizon_start
+    all_proven_optimal = True
 
     for cluster_wcs in clusters:
         cluster_op_ids = {op_id for op_id, wc_id in assignment_map.items() if wc_id in cluster_wcs}
@@ -1039,10 +1037,14 @@ def _solve_subproblems_sequential(
             num_workers=sub_num_workers,
         )
 
-        if result.status in (SolverStatus.INFEASIBLE, SolverStatus.ERROR):
-            return None
+        if result.status == SolverStatus.INFEASIBLE:
+            return None, 0.0, False, True
+        if result.status == SolverStatus.ERROR:
+            return None, 0.0, False, False
         if result.status == SolverStatus.TIMEOUT and not result.assignments:
-            return None
+            return None, 0.0, False, False
+        if result.status is not SolverStatus.OPTIMAL:
+            all_proven_optimal = False
 
         kept = [a for a in result.assignments if a.operation_id in cluster_op_ids]
         all_assignments.extend(kept)
@@ -1053,9 +1055,9 @@ def _solve_subproblems_sequential(
     assigned_ops = {a.operation_id for a in all_assignments}
     all_ops = {op.id for op in problem.operations}
     if assigned_ops != all_ops:
-        return None
+        return None, 0.0, False, False
 
-    return all_assignments, overall_makespan
+    return all_assignments, overall_makespan, all_proven_optimal, False
 
 
 def _assignment_sequence_key(assignment: Assignment) -> tuple[UUID, UUID | None]:
@@ -1353,17 +1355,15 @@ def _generate_all_cuts(
 ) -> None:
     """Generate all applicable Benders cuts from subproblem solutions.
 
-    Cut families:
-        1. Capacity cut (Hooker & Ottosson 2003, §7.2)
-        2. Setup-cost cut (SynAPS extension for SDST)
-        3. Load-balance cut (Hooker 2007, §7.3)
-        4. Critical-path cut (Naderi & Roshanaei 2022)
-        5. Local-branching cut (few-but-strong neighborhood exclusion)
+    Cut families (2026-07 validity fixes applied):
+        1. Capacity cut — REMOVED (S2: rhs was an achieved upper bound).
+        2. Setup-cost / machine_tsp — REMOVED (S3: L(S) over-claims).
+        3. Load-balance cut — REMOVED (S1: fake optimality certificate).
+        4. Critical-path cut — REMOVED (realized contention-inflated path).
+        5. Local-branching cut (few-but-strong neighborhood exclusion) — kept.
+    The valid full-assignment no-good is emitted by the caller only when the
+    subproblem was proven OPTIMAL.
     """
-    setup_lookup = {
-        (e.work_center_id, e.from_state_id, e.to_state_id): e.setup_minutes
-        for e in problem.setup_matrix
-    }
     horizon_start = problem.planning_horizon_start
 
     # Per-machine makespan
@@ -1376,89 +1376,26 @@ def _generate_all_cuts(
         if end_offset > current:
             machine_loads[a.work_center_id] = end_offset
 
-    # 1. Capacity cut: bottleneck machine
+    # 1. Capacity cut: REMOVED (S2 validity fix, 2026-07).
+    # The former capacity cut used rhs=sub_makespan (post-assembly global
+    # makespan) with a processing-only discount — an achieved upper bound, not
+    # a proven minimum, invalid as a master lower bound. `bottleneck_ops` is
+    # still computed below for local-branching scoping only.
     bottleneck_ops: set[UUID] = set()
     if machine_loads:
         bottleneck_wc = max(machine_loads, key=machine_loads.get)  # type: ignore[arg-type]
         bottleneck_ops = {
             op_id for op_id, wc_id in assignment_map.items() if wc_id == bottleneck_wc
         }
-        benders_cuts.append(
-            _BendersCut(
-                assignment_map=dict(assignment_map),
-                kind="capacity",
-                rhs=sub_makespan,
-                bottleneck_ops=bottleneck_ops,
-            )
-        )
 
-    # 2. Setup-cost cuts per machine
-    assignments_by_machine: dict[tuple[UUID, UUID | None], list[Assignment]] = defaultdict(list)
-    for a in sub_assignments:
-        assignments_by_machine[_assignment_sequence_key(a)].append(a)
-
-    # R1 (2026-05-03): prefer the sequence-aware machine_tsp Benders cut
-    # (Bellman-Held-Karp on the realised distinct state types per machine,
-    # Naderi & Roshanaei 2021) and only fall back to the legacy
-    # sequence-independent setup_cost floor when the BHK window does not
-    # apply (fewer than two distinct state types or more than max_states).
-    # Both cuts share the same combinatorial form, so a single profile list
-    # can carry either kind alongside its machine fingerprint.
-    machine_setup_profiles: list[tuple[float, set[UUID], float, str]] = []
-    for (wc_id, _lane_id), m_assignments in assignments_by_machine.items():
-        if len(m_assignments) < 2:
-            continue
-        machine_state_seq = [
-            ops_by_id[a.operation_id].state_id for a in m_assignments if a.operation_id in ops_by_id
-        ]
-        tsp_lower_bound = compute_machine_tsp_lower_bound(
-            machine_state_seq,
-            wc_id,
-            setup_lookup,
-        )
-        if tsp_lower_bound > 0:
-            setup_lower_bound = tsp_lower_bound
-            cut_kind = "machine_tsp"
-        else:
-            setup_lower_bound = compute_sequence_independent_setup_lower_bound(
-                m_assignments,
-                wc_id,
-                ops_by_id,
-                setup_lookup,
-            )
-            cut_kind = "setup_cost"
-        if setup_lower_bound <= 0:
-            continue
-        processing_total = sum(
-            max(
-                1.0,
-                ops_by_id[a.operation_id].base_duration_min / wc_by_id[wc_id].speed_factor,
-            )
-            for a in m_assignments
-            if a.operation_id in ops_by_id
-        )
-        machine_setup_profiles.append(
-            (
-                setup_lower_bound,
-                {a.operation_id for a in m_assignments},
-                processing_total + setup_lower_bound,
-                cut_kind,
-            )
-        )
-
-    for _setup_total, setup_ops, setup_rhs, cut_kind in sorted(
-        machine_setup_profiles,
-        key=lambda item: item[0],
-        reverse=True,
-    )[:setup_cut_top_k]:
-        benders_cuts.append(
-            _BendersCut(
-                assignment_map=dict(assignment_map),
-                kind=cut_kind,
-                rhs=setup_rhs,
-                bottleneck_ops=setup_ops,
-            )
-        )
+    # 2. Setup-cost / machine_tsp cuts: REMOVED (S3 validity fix, 2026-07).
+    # These asserted `C_max >= Sum p_i + L(S)` for the set S on a machine. Even
+    # in a conditional no-good form the right side is valid only if L(S) is a
+    # true setup-path lower bound — but `compute_machine_tsp_lower_bound` (BHK)
+    # and `compute_sequence_independent_setup_lower_bound` OVER-claim it (audit
+    # S3), so the no-good right side can exceed the proven optimum. Re-enabling
+    # requires a validated setup lower bound. Bound strength now comes from the
+    # master capacity relaxation plus proven-optimal full-assignment no-goods.
 
     # 3. Load-balance bound: REMOVED (S1 fix, 2026-07).
     # The previous `load_balance` cut added `C_max >= max_k completion_k`
@@ -1471,26 +1408,16 @@ def _generate_all_cuts(
     # lower_bounds.py. Note: LBBD-HD had no `if lb_rhs > lb` guard, so this
     # implementation was even more aggressive than the base solver's.
 
-    # 4. Critical-path cut (Naderi & Roshanaei 2022)
-    # Find the longest path in the schedule DAG (critical path)
-    critical_ops, cp_duration = _find_critical_path(
+    # 4. Critical-path cut: REMOVED (2026-07 validity fix).
+    # The former cut used the incumbent's realized (contention-inflated)
+    # longest path as a master right side with a processing-only discount,
+    # over-claiming even on setup-free instances. `critical_ops` is still
+    # computed for local-branching scoping only, not emitted as a cut.
+    critical_ops, _cp_duration = _find_critical_path(
         problem,
         sub_assignments,
         ops_by_id,
     )
-    if critical_ops and len(critical_ops) >= 2 and cp_duration > 0:
-        # R9 (2026-05-10): Only emit critical_path cut when the path
-        # contributes a meaningful fraction of the subproblem makespan.
-        cp_share = cp_duration / max(sub_makespan, 1e-9)
-        if cp_share >= 0.05:
-            benders_cuts.append(
-                _BendersCut(
-                    assignment_map=dict(assignment_map),
-                    kind="critical_path",
-                    rhs=cp_duration,
-                    bottleneck_ops=set(critical_ops),
-                )
-            )
 
     # 5. Few-but-strong local branching cut (optional)
     if local_branching_enabled and assignment_map:

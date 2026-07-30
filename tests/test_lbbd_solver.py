@@ -546,7 +546,7 @@ class TestLbbdParallelPostAssemblyRegressions:
             orders_by_id,
         ) = _build_parallel_post_assembly_problem()
 
-        sequential_assignments, _ = _solve_subproblems(
+        sequential_assignments, _, _, _ = _solve_subproblems(
             problem,
             assignment_map,
             {},
@@ -556,7 +556,7 @@ class TestLbbdParallelPostAssemblyRegressions:
             5,
             42,
         )
-        parallel_assignments, _ = _solve_subproblems_parallel(
+        parallel_assignments, _, _, _ = _solve_subproblems_parallel(
             problem,
             assignment_map,
             clusters,
@@ -584,7 +584,7 @@ class TestLbbdParallelPostAssemblyRegressions:
             orders_by_id,
         ) = _build_parallel_setup_gap_problem()
 
-        sequential_assignments, _ = _solve_subproblems(
+        sequential_assignments, _, _, _ = _solve_subproblems(
             problem,
             assignment_map,
             {},
@@ -594,7 +594,7 @@ class TestLbbdParallelPostAssemblyRegressions:
             5,
             42,
         )
-        parallel_assignments, _ = _solve_subproblems_parallel(
+        parallel_assignments, _, _, _ = _solve_subproblems_parallel(
             problem,
             assignment_map,
             clusters,
@@ -622,7 +622,7 @@ class TestLbbdParallelPostAssemblyRegressions:
             orders_by_id,
         ) = _build_parallel_setup_gap_problem()
 
-        sequential_assignments, sequential_makespan = _solve_subproblems(
+        sequential_assignments, sequential_makespan, _, _ = _solve_subproblems(
             problem,
             assignment_map,
             {},
@@ -632,7 +632,7 @@ class TestLbbdParallelPostAssemblyRegressions:
             5,
             42,
         )
-        parallel_assignments, parallel_makespan = _solve_subproblems_parallel(
+        parallel_assignments, parallel_makespan, _, _ = _solve_subproblems_parallel(
             problem,
             assignment_map,
             clusters,
