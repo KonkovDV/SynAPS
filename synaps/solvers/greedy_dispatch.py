@@ -364,7 +364,9 @@ class GreedyDispatch(BaseSolver):
             # lane instead of queuing behind a busy one (the ATCS composite,
             # dominated by the slack term at large due offsets, otherwise
             # preferred a much later start on the same lane, charging a phantom
-            # setup). Deterministic tie-break: (end, setup, wc id).
+            # setup). Deterministic tie-break: (end, setup, material, wc id) —
+            # material_loss before wc id preserves the secondary preference for
+            # a lower-material lane when completion and setup tie.
             best_op_candidates = [
                 record for record in candidate_records if record["operation"].id == best_op.id
             ]
@@ -373,6 +375,7 @@ class GreedyDispatch(BaseSolver):
                 key=lambda record: (
                     record["slot"].end_offset,
                     record["slot"].setup_minutes,
+                    record["slot"].material_loss,
                     str(record["work_center_id"]),
                 ),
             )
@@ -738,11 +741,13 @@ class BeamSearchDispatch(BaseSolver):
                     key = (
                         record["slot"].end_offset,
                         record["slot"].setup_minutes,
+                        record["slot"].material_loss,
                         str(record["work_center_id"]),
                     )
                     if existing_best is None or key < (
                         existing_best["slot"].end_offset,
                         existing_best["slot"].setup_minutes,
+                        existing_best["slot"].material_loss,
                         str(existing_best["work_center_id"]),
                     ):
                         _best_by_op[op_id] = record
