@@ -26,6 +26,21 @@ from synaps.timegrain import duration_minutes
 # through ``sat_parameters`` — doing so silently defeats the timebox (D3).
 _TIMEBOX_PARAMETERS = frozenset({"max_time_in_seconds", "max_deterministic_time"})
 
+# N1 (audit v3, ADR-0001): strict determinism runs CP-SAT single-threaded and
+# stops on MACHINE-INDEPENDENT deterministic time — the SOLE binding limit — so
+# a fixed seed yields a byte-identical schedule regardless of host speed or CPU
+# load. The wall clock is only a loose runaway safety (2x the budget); if it,
+# rather than the deterministic stop, ends the search, metadata records
+# determinism_violated. The deterministic budget is a fraction of time_limit_s
+# so that, at the measured single-thread wall/deterministic ratio (~1.1-1.5,
+# rising under load), the run still finishes within ~1.2x the wall budget; 0.5
+# holds for ratios up to ~2.4. The lost ~50% of the search budget is the
+# documented price of reproducibility. A pure wall-clock stop, or a wall cap
+# tight enough to pre-empt the deterministic stop, is inherently
+# non-reproducible under variable load (the original D1/D3 collision).
+_STRICT_DETERMINISTIC_FRACTION = 0.5
+_STRICT_WALL_SAFETY_FACTOR = 2.0
+
 
 def _apply_sat_parameter_overrides(
     solver: cp_model.CpSolver,
@@ -40,13 +55,13 @@ def _apply_sat_parameter_overrides(
 
     ``determinism`` (D1):
 
-    * ``"strict"`` (default) makes a fixed ``random_seed`` reproducible under
-      multi-threading. OR-Tools portfolio workers race under a pure
-      wall-clock limit, so we enable ``interleave_search`` with
-      ``interleave_batch_size = 2 * num_workers`` (OR-Tools' guidance) and cap
-      the search by ``max_deterministic_time`` instead of wall time.
-    * ``"fast"`` keeps the previous wall-clock portfolio behavior, which is
-      faster but not reproducible with more than one worker.
+    * ``"strict"`` (default) makes a fixed ``random_seed`` reproducible. OR-Tools
+      portfolio workers race under a wall-clock limit, and a wall stop is
+      inherently non-deterministic, so ``strict`` runs SINGLE-THREADED and stops
+      on ``max_deterministic_time`` (machine-independent) as the sole binding
+      limit; the wall clock is only a loose runaway safety. See ADR-0001.
+    * ``"fast"`` keeps the multi-threaded wall-clock portfolio, which is faster
+      but not reproducible with more than one worker.
 
     Explicit ``overrides`` win for every parameter EXCEPT the time limits
     (``max_time_in_seconds`` / ``max_deterministic_time``): those are owned by
@@ -59,12 +74,20 @@ def _apply_sat_parameter_overrides(
     solver.parameters.num_workers = num_workers
 
     if determinism == "strict":
-        # Deterministic multi-threaded search (OR-Tools prescription).
-        solver.parameters.interleave_search = True
-        solver.parameters.interleave_batch_size = max(1, 2 * num_workers)
-        # A wall-clock limit is inherently non-deterministic; bound the search
-        # by deterministic time so the stopping point is reproducible too.
-        solver.parameters.max_deterministic_time = float(time_limit_s)
+        # N1 (audit v3, ADR-0001): single-threaded search has a deterministic
+        # order; stopping on deterministic time (machine-independent) as the
+        # SOLE binding limit makes a fixed seed reproducible regardless of host
+        # speed or CPU load. The original fix left max_time_in_seconds at the
+        # budget, so under load (where the wall/deterministic ratio rises) the
+        # wall cap cut before the deterministic stop and reproducibility was
+        # lost (measured: 4/4 distinct schedules). The wall clock is therefore
+        # relaxed to a loose runaway safety; the deterministic stop binds first.
+        # determinism="fast" keeps the multi-threaded portfolio for throughput.
+        num_workers = 1
+        solver.parameters.num_workers = 1
+        deterministic_stop = float(time_limit_s) * _STRICT_DETERMINISTIC_FRACTION
+        solver.parameters.max_deterministic_time = deterministic_stop
+        solver.parameters.max_time_in_seconds = float(time_limit_s) * _STRICT_WALL_SAFETY_FACTOR
 
     effective_parameters: dict[str, Any] = {
         "max_time_in_seconds": float(solver.parameters.max_time_in_seconds),
@@ -72,6 +95,11 @@ def _apply_sat_parameter_overrides(
         "num_workers": int(solver.parameters.num_workers),
         "determinism": determinism,
     }
+    if determinism == "strict":
+        # Recorded only in strict mode, where it is the binding stop (N1).
+        effective_parameters["max_deterministic_time"] = float(
+            solver.parameters.max_deterministic_time
+        )
     if not isinstance(overrides, Mapping):
         return effective_parameters
 
@@ -984,6 +1012,21 @@ class CpSatSolver(BaseSolver):
         }
         result_status = status_map.get(status_code, SolverStatus.TIMEOUT)
 
+        # N1 (audit v3): under strict determinism the search must stop on the
+        # machine-independent deterministic-time budget, not on the wall cap.
+        # If the result was not proven (OPTIMAL/INFEASIBLE) yet the solver
+        # consumed less than its deterministic budget, the wall cap ended the
+        # search first, so the schedule is NOT guaranteed reproducible on this
+        # host. Surface that rather than implying determinism silently.
+        determinism_violated = False
+        if determinism == "strict" and result_status not in (
+            SolverStatus.OPTIMAL,
+            SolverStatus.INFEASIBLE,
+        ):
+            deterministic_stop = float(effective_sat_parameters["max_deterministic_time"])
+            deterministic_time_used = float(solver.deterministic_time)
+            determinism_violated = deterministic_time_used < deterministic_stop * 0.99
+
         assignments, objective, metadata = self._extract_solution_and_objective(
             solve_problem,
             solver,
@@ -1032,6 +1075,7 @@ class CpSatSolver(BaseSolver):
                 "hint_count": hint_count,
                 "symmetry_breaking": enable_symmetry_breaking,
                 "determinism": determinism,
+                "determinism_violated": determinism_violated,
                 "sat_parameters": effective_sat_parameters,
                 "parallel_virtualization": {
                     "enabled": bool(virtual_to_original),
