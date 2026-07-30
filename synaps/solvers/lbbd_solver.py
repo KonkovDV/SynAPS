@@ -374,6 +374,13 @@ class LbbdSolver(BaseSolver):
             prev_iteration_cut_kinds = [cut.kind for cut in benders_cuts[cuts_before_iteration:]]
 
         status = SolverStatus.FEASIBLE if best_assignments else SolverStatus.TIMEOUT
+        # D2: emit assignments in a fully deterministic order. Combined with the
+        # deterministic cluster collection below and the D1 strict CP-SAT
+        # default, two runs at the same seed produce byte-identical schedules.
+        best_assignments = sorted(
+            best_assignments,
+            key=lambda a: (str(a.work_center_id), a.start_time, str(a.operation_id)),
+        )
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         cut_kinds: dict[str, int] = {}
         for cut in benders_cuts:
@@ -1199,7 +1206,7 @@ def _solve_subproblems_parallel(
 
     with ProcessPoolExecutor(max_workers=effective_workers) as pool:
         futures = {}
-        for cluster_wcs in clusters:
+        for cluster_index, cluster_wcs in enumerate(clusters):
             wc_list = [str(w) for w in cluster_wcs]
             future = pool.submit(
                 _solve_single_cluster_worker,
@@ -1209,18 +1216,26 @@ def _solve_subproblems_parallel(
                 sub_time_limit_s,
                 random_seed,
             )
-            futures[future] = cluster_wcs
+            futures[future] = cluster_index
 
+        # D2: buffer results by cluster index so the merged assignment order is
+        # independent of completion order (as_completed is non-deterministic).
+        results_by_index: dict[int, dict[str, Any]] = {}
         for future in as_completed(futures):
+            cluster_index = futures[future]
             result = future.result()
             if result is None or result.get("failed"):
                 infeasible_proven = bool(result.get("infeasible_proven")) if result else False
                 return None, 0.0, False, infeasible_proven
-            if not result.get("proven_optimal", False):
-                all_proven_optimal = False
-            for a_dict in result["assignments"]:
-                all_assignments.append(Assignment.model_validate(a_dict))
-            overall_makespan = max(overall_makespan, result["makespan"])
+            results_by_index[cluster_index] = result
+
+    for cluster_index in sorted(results_by_index):
+        result = results_by_index[cluster_index]
+        if not result.get("proven_optimal", False):
+            all_proven_optimal = False
+        for a_dict in result["assignments"]:
+            all_assignments.append(Assignment.model_validate(a_dict))
+        overall_makespan = max(overall_makespan, result["makespan"])
 
     # Completeness check
     assigned_ops = {a.operation_id for a in all_assignments}
