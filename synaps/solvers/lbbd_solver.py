@@ -124,7 +124,9 @@ class LbbdSolver(BaseSolver):
         # HiGHS rows, so the second one only inflates the master without
         # tightening anything. The closure below registers a cut iff its
         # fingerprint has not been seen.
-        seen_cut_fingerprints: set[tuple[str, frozenset[UUID], float]] = set()
+        seen_cut_fingerprints: set[
+            tuple[str, frozenset[UUID], frozenset[tuple[UUID, UUID]], float]
+        ] = set()
         cuts_skipped_duplicate = 0
         # S2 telemetry: how many times an optimality/feasibility cut was NOT
         # emitted because the subproblem result was not proven (TIMEOUT/ERROR).
@@ -427,6 +429,13 @@ class LbbdSolver(BaseSolver):
             for kind in kinds:
                 cut_kind_lb_contribution[kind] = cut_kind_lb_contribution.get(kind, 0.0) + share
 
+        # N2 (audit v3): when no Benders cut was ever generated (every
+        # subproblem hit the S2 unproven gate), the master never learned and
+        # LBBD degenerated into "solve the relaxation, solve the clusters,
+        # report" — not a converging decomposition. Expose that honestly
+        # instead of implying convergence via a gap number.
+        benders_active = len(benders_cuts) > 0
+        quality_warning = None if benders_active else "lbbd_no_cuts_degenerate"
         return ScheduleResult(
             solver_name=self.name,
             status=status,
@@ -441,6 +450,8 @@ class LbbdSolver(BaseSolver):
                 "gap": (
                     (best_ub - reported_lb) / max(best_ub, 1e-9) if best_ub < float("inf") else None
                 ),
+                "benders_active": benders_active,
+                "quality_warning": quality_warning,
                 "lower_bound_method": "master_relaxation_benders",
                 "lower_bound_components": {
                     "master_relaxation_lb": reported_lb,

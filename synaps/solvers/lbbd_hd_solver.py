@@ -203,7 +203,9 @@ class LbbdHdSolver(BaseSolver):
         # post-`_generate_all_cuts` we dedup the freshly produced cuts in
         # bulk so the helper does not need to be threaded into the cut
         # generator.
-        seen_cut_fingerprints: set[tuple[str, frozenset[UUID], float]] = set()
+        seen_cut_fingerprints: set[
+            tuple[str, frozenset[UUID], frozenset[tuple[UUID, UUID]], float]
+        ] = set()
         cuts_skipped_duplicate = 0
         # S2 telemetry: optimality/feasibility cuts skipped because the
         # subproblem was not proven (TIMEOUT/ERROR).
@@ -461,6 +463,9 @@ class LbbdHdSolver(BaseSolver):
             for kind in kinds:
                 cut_kind_lb_contribution[kind] = cut_kind_lb_contribution.get(kind, 0.0) + share
 
+        # N2 (audit v3): expose whether the Benders master actually learned.
+        benders_active = len(benders_cuts) > 0
+        quality_warning = None if benders_active else "lbbd_no_cuts_degenerate"
         return ScheduleResult(
             solver_name=self.name,
             status=status,
@@ -475,6 +480,8 @@ class LbbdHdSolver(BaseSolver):
                 "gap": (best_ub - reported_lb) / max(best_ub, 1e-9)
                 if best_ub < float("inf")
                 else None,
+                "benders_active": benders_active,
+                "quality_warning": quality_warning,
                 "lower_bound_method": "master_relaxation_benders_hd",
                 "lower_bound_components": {
                     "master_relaxation_lb": reported_lb,

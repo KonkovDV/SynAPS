@@ -32,7 +32,7 @@ class BendersCutLike(Protocol):
     """Structural type for Benders cuts shared by both LBBD solvers.
 
     Both `synaps.solvers.lbbd_solver._BendersCut` and
-    `synaps.solvers.lbbd_hd_solver._BendersCut` carry these four attributes
+    `synaps.solvers.lbbd_hd_solver._BendersCut` carry these attributes
     via `__slots__`. A Protocol keeps `cut_pool_fingerprint` solver-agnostic
     without inviting a hard cross-import.
     """
@@ -40,15 +40,28 @@ class BendersCutLike(Protocol):
     kind: str
     rhs: float
     bottleneck_ops: set[UUID]
+    assignment_map: dict[UUID, UUID]
 
 
-def cut_pool_fingerprint(cut: BendersCutLike) -> tuple[str, frozenset[UUID], float]:
+def cut_pool_fingerprint(
+    cut: BendersCutLike,
+) -> tuple[str, frozenset[UUID], frozenset[tuple[UUID, UUID]], float]:
     """Return a canonical fingerprint for cut-pool deduplication.
 
-    Two cuts collapse to the same fingerprint iff they agree on kind,
-    bottleneck operations, and rhs to three decimals. The rhs rounding
+    Two cuts collapse to the same fingerprint iff they agree on kind, the
+    distinguishing payload, and rhs to three decimals. The rhs rounding
     avoids near-duplicate accumulation when subproblem makespans differ
     only by floating-point drift across iterations or partitions.
+
+    The distinguishing payload depends on the cut family (audit v3, N2):
+
+    * A ``nogood`` forbids an EXACT master assignment, so it is keyed by that
+      assignment (`frozenset(assignment_map.items())`). Every no-good carries
+      an empty ``bottleneck_ops`` and ``rhs == 0.0``; keying it on those alone
+      collapsed all no-goods to one fingerprint, so the master learned only
+      the first assignment and span-spun on the second forever.
+    * An optimality cut (``setup_cost`` / ``machine_tsp`` / ...) is keyed by
+      its bottleneck operations and rhs, which fully determine its HiGHS row.
 
     Units: rhs is in minutes (consistent with makespan_minutes). The 3-decimal
     precision is noise-free for integer minute values and typical float results
@@ -56,7 +69,10 @@ def cut_pool_fingerprint(cut: BendersCutLike) -> tuple[str, frozenset[UUID], flo
     may produce sub-minute precision; rounding prevents near-duplicates.
     """
 
-    return (cut.kind, frozenset(cut.bottleneck_ops), round(float(cut.rhs), 3))
+    if cut.kind == "nogood":
+        assignment_key = frozenset(cut.assignment_map.items())
+        return (cut.kind, frozenset(), assignment_key, round(float(cut.rhs), 3))
+    return (cut.kind, frozenset(cut.bottleneck_ops), frozenset(), round(float(cut.rhs), 3))
 
 
 def compute_machine_transition_floor(
