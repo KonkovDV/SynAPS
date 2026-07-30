@@ -22,6 +22,10 @@ from synaps.model import (
 from synaps.solvers import BaseSolver
 from synaps.timegrain import duration_minutes
 
+# N3 (audit v3): time limits are owned by ``time_limit_s`` and may not be set
+# through ``sat_parameters`` — doing so silently defeats the timebox (D3).
+_TIMEBOX_PARAMETERS = frozenset({"max_time_in_seconds", "max_deterministic_time"})
+
 
 def _apply_sat_parameter_overrides(
     solver: cp_model.CpSolver,
@@ -40,10 +44,14 @@ def _apply_sat_parameter_overrides(
       multi-threading. OR-Tools portfolio workers race under a pure
       wall-clock limit, so we enable ``interleave_search`` with
       ``interleave_batch_size = 2 * num_workers`` (OR-Tools' guidance) and cap
-      the search by ``max_deterministic_time`` instead of wall time. Explicit
-      ``overrides`` still win, so callers may override any of these.
+      the search by ``max_deterministic_time`` instead of wall time.
     * ``"fast"`` keeps the previous wall-clock portfolio behavior, which is
       faster but not reproducible with more than one worker.
+
+    Explicit ``overrides`` win for every parameter EXCEPT the time limits
+    (``max_time_in_seconds`` / ``max_deterministic_time``): those are owned by
+    ``time_limit_s`` and raise ``ValueError`` if overridden, so the timebox
+    cannot be bypassed through ``sat_parameters`` (audit v3, N3).
     """
 
     solver.parameters.max_time_in_seconds = time_limit_s
@@ -68,6 +76,15 @@ def _apply_sat_parameter_overrides(
         return effective_parameters
 
     for key, raw_value in overrides.items():
+        if key in _TIMEBOX_PARAMETERS:
+            # N3 (audit v3): the timebox is set solely through ``time_limit_s``.
+            # Allowing a caller to raise ``max_time_in_seconds`` /
+            # ``max_deterministic_time`` via ``sat_parameters`` let a solve run
+            # ~3x its budget (8s budget -> 24s wall), silently defeating D3.
+            raise ValueError(
+                f"Cannot override CP-SAT time limit {key!r} via sat_parameters; "
+                f"the search budget is controlled only by time_limit_s."
+            )
         if not hasattr(solver.parameters, key):
             raise ValueError(f"Unknown CP-SAT parameter override: {key}")
         try:
