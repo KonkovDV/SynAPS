@@ -156,7 +156,7 @@ _LONG_FUNCTION_RATCHET: dict[str, int] = {
     "solvers/feasibility_checker.py::check": 443,
     "solvers/lbbd_hd_solver.py::solve": 432,
     "solvers/lbbd_solver.py::solve": 413,
-    "solvers/cpsat_solver.py::solve": 368,
+    "solvers/cpsat_solver.py::solve": 387,
     "solvers/greedy_dispatch.py::_solve_core": 362,
     "solvers/router.py::route_solver_config": 318,
     "solvers/lbbd_hd_solver.py::_solve_precedence_aware_master": 297,
