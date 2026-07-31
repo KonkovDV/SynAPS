@@ -472,6 +472,13 @@ class ObjectiveValues(BaseModel):
     total_material_loss: float = 0.0
     total_tardiness_minutes: float = 0.0
     weighted_sum: float = 0.0
+    # P0-5: coverage is a level-0 objective. makespan/tardiness are taken over
+    # SCHEDULED operations, so a schedule that abandons work otherwise looks
+    # better; coverage (fraction of operations scheduled) makes that visible and
+    # is ranked first by ``synaps.objective.objective_sort_key``. Defaults keep
+    # existing fully-scheduled results at coverage 1.0 / 0 unscheduled.
+    coverage: float = 1.0
+    unscheduled_operations: int = 0
 
 
 class ScheduleResult(BaseModel):

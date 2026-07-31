@@ -30,6 +30,27 @@ def _attach_sdst_metric(result: ScheduleResult, problem: ScheduleProblem) -> Non
         metadata["sdst_metric"] = is_setup_matrix_metric(problem)
 
 
+def _attach_coverage(result: ScheduleResult, problem: ScheduleProblem) -> None:
+    """Populate the coverage / unscheduled-operations objective fields (P0-5).
+
+    Centralised so every solver surfaces coverage without re-deriving it, and
+    so the fields cannot silently stay at the default 1.0 when a solver dropped
+    work. Coverage is the fraction of DISTINCT operations that got an
+    assignment.
+    """
+    from synaps.objective import coverage_fraction
+
+    objective = getattr(result, "objective", None)
+    if objective is None:
+        return
+    total = len(problem.operations)
+    scheduled = len({assignment.operation_id for assignment in result.assignments})
+    objective.coverage = coverage_fraction(
+        total_operations=total, scheduled_operations=scheduled
+    )
+    objective.unscheduled_operations = max(0, total - scheduled)
+
+
 class BaseSolver(ABC):
     """Common interface for the entire solver portfolio."""
 
@@ -51,6 +72,7 @@ class BaseSolver(ABC):
         ) -> ScheduleResult:
             result: ScheduleResult = original_solve(self, problem, **solve_kwargs)
             _attach_sdst_metric(result, problem)
+            _attach_coverage(result, problem)
             return result
 
         _solve_with_metricity._sdst_metric_wrapped = True  # type: ignore[attr-defined]

@@ -85,12 +85,17 @@ class ParetoSliceCpSatSolver(BaseSolver):
         if incumbent is None:
             return True
 
+        # P0-5: coverage is the level-0 objective (a slice that abandons work
+        # must never win on makespan alone); the primary objective, makespan,
+        # and the scalarized sum break ties after it.
         candidate_rank = (
+            -float(candidate.objective.coverage),
             self._primary_value(candidate.objective, primary_objective),
             float(candidate.objective.makespan_minutes),
             float(candidate.objective.weighted_sum),
         )
         incumbent_rank = (
+            -float(incumbent.objective.coverage),
             self._primary_value(incumbent.objective, primary_objective),
             float(incumbent.objective.makespan_minutes),
             float(incumbent.objective.weighted_sum),

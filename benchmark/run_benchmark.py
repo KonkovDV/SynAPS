@@ -181,6 +181,10 @@ def _build_performance_profile(
     return profile
 
 
+def _mean_or_none(samples: list[float]) -> float | None:
+    return sum(samples) / len(samples) if samples else None
+
+
 def _build_compare_statistics(comparisons: list[dict[str, Any]]) -> dict[str, Any]:
     """Create paired repeated-run statistics across solver reports."""
     if len(comparisons) < 2:
@@ -188,6 +192,20 @@ def _build_compare_statistics(comparisons: list[dict[str, Any]]) -> dict[str, An
 
     baseline = comparisons[0]
     baseline_name = baseline["solver_config"]
+
+    # P0-5: a winner may not be declared across solvers with different coverage
+    # -- a solver that abandons operations posts an artificially low makespan on
+    # the SCHEDULED subset, so its makespan/weighted-sum are not comparable to a
+    # fuller solver's. Flag the mismatch and let consumers refuse a ranking.
+    coverage_by_solver: dict[str, float | None] = {}
+    for comparison in comparisons:
+        samples = comparison.get("statistics", {}).get("coverage_samples", [])
+        coverage_by_solver[comparison["solver_config"]] = _mean_or_none(samples)
+    finite_coverages = [value for value in coverage_by_solver.values() if value is not None]
+    coverage_mismatch = bool(finite_coverages) and (
+        max(finite_coverages) - min(finite_coverages) > 1e-9
+    )
+
     paired_comparisons: dict[str, dict[str, Any]] = {}
     for candidate in comparisons[1:]:
         paired_comparisons[candidate["solver_config"]] = {
@@ -209,8 +227,19 @@ def _build_compare_statistics(comparisons: list[dict[str, Any]]) -> dict[str, An
             "baseline_solver": baseline_name,
             "effect_size_note": "Negative mean_difference favors the candidate solver.",
         },
+        "coverage_by_solver": coverage_by_solver,
+        "coverage_mismatch": coverage_mismatch,
+        "winner_comparable": not coverage_mismatch,
+        "coverage_note": (
+            "Solvers differ in coverage; makespan/weighted-sum are not comparable "
+            "and no winner is declared (P0-5)."
+            if coverage_mismatch
+            else "All solvers share coverage; objective comparison is valid."
+        ),
         "paired_comparisons": paired_comparisons,
-        "performance_profile": _build_performance_profile(comparisons),
+        "performance_profile": (
+            {} if coverage_mismatch else _build_performance_profile(comparisons)
+        ),
     }
 
 
@@ -264,6 +293,7 @@ def _run_single(
     wall_times: list[float] = []
     weighted_sum_samples: list[float] = []
     makespan_samples: list[float] = []
+    coverage_samples: list[float] = []
     last_result: ScheduleResult | None = None
     peak_rss_kb = 0
 
@@ -281,6 +311,7 @@ def _run_single(
         wall_times.append(time.perf_counter() - t0)
         weighted_sum_samples.append(result.objective.weighted_sum)
         makespan_samples.append(result.objective.makespan_minutes)
+        coverage_samples.append(result.objective.coverage)
         last_result = result
         try:
             getrusage = getattr(_resource, "getrusage", None) if _resource is not None else None
@@ -328,6 +359,7 @@ def _run_single(
         "wall_time_s_samples": [round(value, 6) for value in wall_times],
         "weighted_sum_samples": [round(value, 6) for value in weighted_sum_samples],
         "makespan_minutes_samples": [round(value, 6) for value in makespan_samples],
+        "coverage_samples": [round(value, 6) for value in coverage_samples],
     }
     if runs > 1:
         statistics_block["wall_time_s_median"] = round(statistics.median(wall_times), 4)
