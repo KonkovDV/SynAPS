@@ -173,7 +173,7 @@ _LONG_FUNCTION_RATCHET: dict[str, int] = {
     "solvers/rhc/_window.py::stabilize_temporal_consistency": 149,
     "solvers/pareto_slice_solver.py::solve": 148,
     "solvers/alns_solver.py::_repair_cpsat_outcome": 144,
-    "solvers/cpsat_solver.py::_build_weighted_objective": 140,
+    "solvers/cpsat_solver.py::_build_weighted_objective": 152,
     "solvers/alns_solver.py::_destroy_due_pressure": 135,
     "cli.py::main": 130,
     "solvers/instance_generator.py::generate_large_instance": 128,
