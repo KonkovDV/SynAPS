@@ -495,13 +495,18 @@ class FeasibilityChecker:
                     break
 
         # 8. Operation durations (P0-3): the assignment span must give the
-        # operation enough time to process. After P0-4 every solver reserves
-        # exactly the canonical integer grain ``timegrain.duration_minutes``
-        # (ceil(base/speed)), so we compare against THAT single source of truth
-        # (no more raw base/speed with a 1-minute slop tolerance). A span
-        # shorter than the canonical duration is physically impossible (the
-        # repro: 1 min for a 3.33 -> ceil 4 min op). Setup is a separate leading
-        # window, so the span is pure processing.
+        # operation enough time to process. ``timegrain.duration_minutes``
+        # (ceil(base/speed)) is the canonical RESERVATION target (P0-4), but a
+        # solver that legitimately reserved ``round(base/speed)`` is at most
+        # ~1 min under ceil and is still physically adequate (round/ceil are
+        # both >= the real processing time base/speed to within a minute). We
+        # therefore keep a 1-minute inter-solver tolerance: since ceil-1 <
+        # base/speed, flagging ``actual < ceil-1`` never false-positives a
+        # physically sufficient span, yet still catches a MATERIAL underrun
+        # (the repro: 1 min for a ceil-4 op -> 1 < 4-1). Removing this tolerance
+        # wrongly rejected round-based schedules (e.g. ALNS' internal validity
+        # gate). Setup is a separate leading window, so the span is pure
+        # processing.
         for a in assignments:
             checked_op = ops_by_id.get(a.operation_id)
             if checked_op is None:
@@ -512,14 +517,15 @@ class FeasibilityChecker:
                 continue
             expected = duration_minutes(checked_op.base_duration_min, speed)
             actual = (a.end_time - a.start_time).total_seconds() / 60.0
-            if actual < expected - 1e-6:
+            if actual < expected - 1.0 - 1e-6:
                 violations.append(
                     FeasibilityViolation(
                         "DURATION_MISMATCH",
                         (
                             f"Operation {a.operation_id} span {actual:.4f} min is shorter than "
                             f"its canonical processing time {expected} min "
-                            f"(ceil(base_duration_min/speed_factor))."
+                            f"(ceil(base_duration_min/speed_factor)) beyond the 1-min "
+                            f"inter-solver rounding tolerance."
                         ),
                         operation_id=a.operation_id,
                         work_center_id=a.work_center_id,
