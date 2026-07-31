@@ -70,6 +70,11 @@ class MakespanLowerBound:
     # by pool_size(r) is a valid makespan floor (the pool can serve at most
     # pool_size(r) units of work in parallel at any moment).
     auxiliary_resource_lb: float = 0.0
+    # P1-3: release-aware head-tail (Jackson) bound. For each operation,
+    # Cmax >= est(op) + p(op) + tail(op), where est folds in the order's
+    # release_date and the predecessor chain and tail is the longest successor
+    # chain. Dominates the release-free critical path; valid by construction.
+    head_tail_lb: float = 0.0
 
     def as_metadata(self) -> dict[str, float]:
         return {
@@ -78,6 +83,7 @@ class MakespanLowerBound:
             "exclusive_machine_lb": round(self.exclusive_machine_lb, 4),
             "max_operation_lb": round(self.max_operation_lb, 4),
             "auxiliary_resource_lb": round(self.auxiliary_resource_lb, 4),
+            "head_tail_lb": round(self.head_tail_lb, 4),
         }
 
 
@@ -222,6 +228,57 @@ def compute_relaxed_makespan_lower_bound(problem: ScheduleProblem) -> MakespanLo
                 longest_path_to[successor_id] = candidate
 
     precedence_critical_path_lb = max(longest_path_to.values(), default=0.0)
+
+    # P1-3: release-aware head-tail (Jackson) bound. est(op) folds in the order
+    # release_date and the predecessor chain; tail(op) is the longest successor
+    # chain of min-durations. Cmax >= max_op (est + p + tail) is valid because
+    # every feasible schedule starts op no earlier than est(op) and completes
+    # op's successor chain after op. Operations carry at most one predecessor,
+    # so the precedence graph is a forest of chains.
+    horizon_start = problem.planning_horizon_start
+    order_release_offset: dict[UUID, float] = {}
+    for order in problem.orders:
+        if order.release_date is not None:
+            offset = (order.release_date - horizon_start).total_seconds() / 60.0
+            order_release_offset[order.id] = max(0.0, offset)
+    op_release_offset: dict[UUID, float] = {
+        operation.id: order_release_offset.get(operation.order_id, 0.0)
+        for operation in problem.operations
+    }
+    predecessor_of: dict[UUID, UUID] = {
+        operation.id: operation.predecessor_op_id
+        for operation in problem.operations
+        if operation.predecessor_op_id is not None
+        and operation.predecessor_op_id in min_duration_by_op
+    }
+    est_by_op: dict[UUID, float] = {}
+    for op_id in topo_order:
+        est = op_release_offset.get(op_id, 0.0)
+        predecessor_id = predecessor_of.get(op_id)
+        if predecessor_id is not None:
+            est = max(
+                est,
+                est_by_op.get(predecessor_id, 0.0) + min_duration_by_op.get(predecessor_id, 0.0),
+            )
+        est_by_op[op_id] = est
+    tail_by_op: dict[UUID, float] = {}
+    for op_id in reversed(topo_order):
+        tail = 0.0
+        for successor_id in successors_by_op.get(op_id, []):
+            tail = max(
+                tail,
+                min_duration_by_op.get(successor_id, 0.0) + tail_by_op.get(successor_id, 0.0),
+            )
+        tail_by_op[op_id] = tail
+    head_tail_lb = max(
+        (
+            est_by_op.get(op_id, 0.0)
+            + min_duration_by_op.get(op_id, 0.0)
+            + tail_by_op.get(op_id, 0.0)
+            for op_id in min_duration_by_op
+        ),
+        default=0.0,
+    )
     total_parallel_capacity = max(
         1,
         sum(max(1, work_center.max_parallel) for work_center in problem.work_centers),
@@ -273,6 +330,12 @@ def compute_relaxed_makespan_lower_bound(problem: ScheduleProblem) -> MakespanLo
         operation_count=operation_count,
         machine_count=machine_count,
     )
+    head_tail_lb = _clamp_non_negative(
+        "head_tail_lb",
+        head_tail_lb,
+        operation_count=operation_count,
+        machine_count=machine_count,
+    )
 
     raw_lower_bound = max(
         precedence_critical_path_lb,
@@ -280,6 +343,7 @@ def compute_relaxed_makespan_lower_bound(problem: ScheduleProblem) -> MakespanLo
         exclusive_machine_lb,
         max_operation_lb,
         auxiliary_resource_lb,
+        head_tail_lb,
     )
     lower_bound = _clamp_non_negative(
         "aggregate_value",
@@ -294,6 +358,7 @@ def compute_relaxed_makespan_lower_bound(problem: ScheduleProblem) -> MakespanLo
         exclusive_machine_lb=exclusive_machine_lb,
         max_operation_lb=max_operation_lb,
         auxiliary_resource_lb=auxiliary_resource_lb,
+        head_tail_lb=head_tail_lb,
     )
 
 

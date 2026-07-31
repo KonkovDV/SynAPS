@@ -205,6 +205,7 @@ class TestComputeRelaxedMakespanLowerBound:
             "exclusive_machine_lb",
             "max_operation_lb",
             "auxiliary_resource_lb",
+            "head_tail_lb",
         }
         assert set(meta.keys()) == expected_keys
         for v in meta.values():
@@ -533,7 +534,7 @@ class TestNonNegativeClampingRegression:
         )
         meta = lb.as_metadata()
 
-        assert len(meta) == 5
+        assert len(meta) == 6
         for key, val in meta.items():
             assert isinstance(val, float), f"{key} is not a float: {type(val)}"
             assert val >= 0.0, f"{key} is negative: {val}"
