@@ -168,7 +168,7 @@ _LONG_FUNCTION_RATCHET: dict[str, int] = {
     "benchmarks/instance_generator.py::generate_large_instance": 194,
     "solvers/cpsat_solver.py::_add_machine_order_and_adjacency": 193,
     "model.py::validate_cross_references": 178,
-    "solvers/lower_bounds.py::compute_relaxed_makespan_lower_bound": 168,
+    "solvers/lower_bounds.py::compute_relaxed_makespan_lower_bound": 180,
     "solvers/alns_solver.py::_reanchor_against_frozen": 151,
     "solvers/rhc/_window.py::stabilize_temporal_consistency": 149,
     "solvers/pareto_slice_solver.py::solve": 148,

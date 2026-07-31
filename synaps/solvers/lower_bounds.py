@@ -133,6 +133,67 @@ def _compute_auxiliary_resource_lb(
     )
 
 
+def _compute_head_tail_lb(
+    problem: ScheduleProblem,
+    topo_order: list[UUID],
+    successors_by_op: dict[UUID, list[UUID]],
+    min_duration_by_op: dict[UUID, float],
+) -> float:
+    """Release-aware head-tail (Jackson) makespan bound (P1-3).
+
+    ``Cmax >= max_op (est(op) + p(op) + tail(op))``: est(op) folds in the order
+    release_date and the predecessor chain; tail(op) is the longest successor
+    chain of min-durations. Valid because every feasible schedule starts op no
+    earlier than est(op) and completes op's successor chain after op.
+    Operations carry at most one predecessor, so the precedence graph is a
+    forest of chains.
+    """
+    horizon_start = problem.planning_horizon_start
+    order_release_offset: dict[UUID, float] = {}
+    for order in problem.orders:
+        if order.release_date is not None:
+            offset = (order.release_date - horizon_start).total_seconds() / 60.0
+            order_release_offset[order.id] = max(0.0, offset)
+    op_release_offset: dict[UUID, float] = {
+        operation.id: order_release_offset.get(operation.order_id, 0.0)
+        for operation in problem.operations
+    }
+    predecessor_of: dict[UUID, UUID] = {
+        operation.id: operation.predecessor_op_id
+        for operation in problem.operations
+        if operation.predecessor_op_id is not None
+        and operation.predecessor_op_id in min_duration_by_op
+    }
+    est_by_op: dict[UUID, float] = {}
+    for op_id in topo_order:
+        est = op_release_offset.get(op_id, 0.0)
+        predecessor_id = predecessor_of.get(op_id)
+        if predecessor_id is not None:
+            est = max(
+                est,
+                est_by_op.get(predecessor_id, 0.0) + min_duration_by_op.get(predecessor_id, 0.0),
+            )
+        est_by_op[op_id] = est
+    tail_by_op: dict[UUID, float] = {}
+    for op_id in reversed(topo_order):
+        tail = 0.0
+        for successor_id in successors_by_op.get(op_id, []):
+            tail = max(
+                tail,
+                min_duration_by_op.get(successor_id, 0.0) + tail_by_op.get(successor_id, 0.0),
+            )
+        tail_by_op[op_id] = tail
+    return max(
+        (
+            est_by_op.get(op_id, 0.0)
+            + min_duration_by_op.get(op_id, 0.0)
+            + tail_by_op.get(op_id, 0.0)
+            for op_id in min_duration_by_op
+        ),
+        default=0.0,
+    )
+
+
 def compute_relaxed_makespan_lower_bound(problem: ScheduleProblem) -> MakespanLowerBound:
     """Return a deterministic makespan lower bound from relaxed structure.
 
@@ -229,55 +290,8 @@ def compute_relaxed_makespan_lower_bound(problem: ScheduleProblem) -> MakespanLo
 
     precedence_critical_path_lb = max(longest_path_to.values(), default=0.0)
 
-    # P1-3: release-aware head-tail (Jackson) bound. est(op) folds in the order
-    # release_date and the predecessor chain; tail(op) is the longest successor
-    # chain of min-durations. Cmax >= max_op (est + p + tail) is valid because
-    # every feasible schedule starts op no earlier than est(op) and completes
-    # op's successor chain after op. Operations carry at most one predecessor,
-    # so the precedence graph is a forest of chains.
-    horizon_start = problem.planning_horizon_start
-    order_release_offset: dict[UUID, float] = {}
-    for order in problem.orders:
-        if order.release_date is not None:
-            offset = (order.release_date - horizon_start).total_seconds() / 60.0
-            order_release_offset[order.id] = max(0.0, offset)
-    op_release_offset: dict[UUID, float] = {
-        operation.id: order_release_offset.get(operation.order_id, 0.0)
-        for operation in problem.operations
-    }
-    predecessor_of: dict[UUID, UUID] = {
-        operation.id: operation.predecessor_op_id
-        for operation in problem.operations
-        if operation.predecessor_op_id is not None
-        and operation.predecessor_op_id in min_duration_by_op
-    }
-    est_by_op: dict[UUID, float] = {}
-    for op_id in topo_order:
-        est = op_release_offset.get(op_id, 0.0)
-        predecessor_id = predecessor_of.get(op_id)
-        if predecessor_id is not None:
-            est = max(
-                est,
-                est_by_op.get(predecessor_id, 0.0) + min_duration_by_op.get(predecessor_id, 0.0),
-            )
-        est_by_op[op_id] = est
-    tail_by_op: dict[UUID, float] = {}
-    for op_id in reversed(topo_order):
-        tail = 0.0
-        for successor_id in successors_by_op.get(op_id, []):
-            tail = max(
-                tail,
-                min_duration_by_op.get(successor_id, 0.0) + tail_by_op.get(successor_id, 0.0),
-            )
-        tail_by_op[op_id] = tail
-    head_tail_lb = max(
-        (
-            est_by_op.get(op_id, 0.0)
-            + min_duration_by_op.get(op_id, 0.0)
-            + tail_by_op.get(op_id, 0.0)
-            for op_id in min_duration_by_op
-        ),
-        default=0.0,
+    head_tail_lb = _compute_head_tail_lb(
+        problem, topo_order, successors_by_op, min_duration_by_op
     )
     total_parallel_capacity = max(
         1,

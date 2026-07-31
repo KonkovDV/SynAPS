@@ -169,7 +169,7 @@ class TestAlnsLowerBoundMetadata:
             f"alns_gap_ratio should be >= 0 for feasible schedules, got {gap_ratio}"
         )
 
-        # 4. lower_bound_components exists and is a dict with exactly 5 keys
+        # 4. lower_bound_components exists and is a dict with exactly 6 keys
         assert "lower_bound_components" in result.metadata, (
             "Missing 'lower_bound_components' in metadata"
         )
@@ -183,6 +183,7 @@ class TestAlnsLowerBoundMetadata:
             "exclusive_machine_lb",
             "max_operation_lb",
             "auxiliary_resource_lb",
+            "head_tail_lb",
         }
         assert set(lb_components.keys()) == expected_keys, (
             f"lower_bound_components keys mismatch.\n"
