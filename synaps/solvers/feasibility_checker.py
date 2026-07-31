@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
+from synaps.timegrain import duration_minutes
+
 if TYPE_CHECKING:
     from synaps.model import (
         Assignment,
@@ -493,13 +495,13 @@ class FeasibilityChecker:
                     break
 
         # 8. Operation durations (P0-3): the assignment span must give the
-        # operation enough time to process. We flag only spans that are
-        # materially SHORTER than base_duration_min / speed_factor — a span too
-        # short to physically run the operation (the repro: 1 min for a 3.33
-        # min op). A 1-minute tolerance absorbs the round/ceil/floor divergence
-        # between solvers (P0-4). Longer-than-expected spans (idle padding, or
-        # the separate P0-4 speed-rounding divergence) are not flagged here.
-        # Setup is a separate leading window, so the span is pure processing.
+        # operation enough time to process. After P0-4 every solver reserves
+        # exactly the canonical integer grain ``timegrain.duration_minutes``
+        # (ceil(base/speed)), so we compare against THAT single source of truth
+        # (no more raw base/speed with a 1-minute slop tolerance). A span
+        # shorter than the canonical duration is physically impossible (the
+        # repro: 1 min for a 3.33 -> ceil 4 min op). Setup is a separate leading
+        # window, so the span is pure processing.
         for a in assignments:
             checked_op = ops_by_id.get(a.operation_id)
             if checked_op is None:
@@ -508,16 +510,16 @@ class FeasibilityChecker:
             speed = work_center.speed_factor if work_center is not None else 1.0
             if speed <= 0:
                 continue
-            expected = checked_op.base_duration_min / speed
+            expected = duration_minutes(checked_op.base_duration_min, speed)
             actual = (a.end_time - a.start_time).total_seconds() / 60.0
-            if actual < expected - 1.0 - 1e-6:
+            if actual < expected - 1e-6:
                 violations.append(
                     FeasibilityViolation(
                         "DURATION_MISMATCH",
                         (
                             f"Operation {a.operation_id} span {actual:.4f} min is shorter than "
-                            f"its processing time base_duration_min/speed_factor "
-                            f"{expected:.4f} min."
+                            f"its canonical processing time {expected} min "
+                            f"(ceil(base_duration_min/speed_factor))."
                         ),
                         operation_id=a.operation_id,
                         work_center_id=a.work_center_id,

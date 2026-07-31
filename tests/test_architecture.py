@@ -34,10 +34,11 @@ _RAW_DURATION_DIVISION_RATCHET: dict[str, int] = {
     "solvers/greedy_dispatch.py": 2,
     # Window sizing estimate; unify in Phase 3.
     "solvers/rhc/_solver.py": 1,
-    # DURATION_MISMATCH compares against the raw physical expectation on
-    # purpose (tolerance absorbs the grain divergence until Phase 3 ceil);
-    # the second hit is the violation message text quoting the formula.
-    "solvers/feasibility_checker.py": 2,
+    # DURATION_MISMATCH now compares against the canonical timegrain grain; the
+    # single remaining hit is the violation message text quoting the formula
+    # ``ceil(base_duration_min/speed_factor)`` (P0-4 unified the checker onto
+    # timegrain.duration_minutes).
+    "solvers/feasibility_checker.py": 1,
     # Synthetic-instance generator sizing heuristic (not a solver).
     "benchmarks/instance_generator.py": 1,
 }

@@ -2,6 +2,13 @@
 
 > **Status**: Artifact-bound evidence. Not a universal performance guarantee.
 > **Scope**: Reproducible 50K pilot protocol, recent measurements, and honest non-claims.
+>
+> **Superseded numbers (Red Team audit v3, 2026-07):** figures here predate the
+> ceil duration grain (P0-4), the strict single-thread determinism default
+> (N1 / ADR-0001), the LBBD no-good fix (N2), and the dispatch parallel-lane fix
+> (M2). Makespan/timing figures on instances with fractional `speed_factor`,
+> parallel machines, or CP-SAT under the default `determinism="strict"` shift
+> and must be regenerated before being cited.
 
 ---
 

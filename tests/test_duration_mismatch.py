@@ -3,13 +3,14 @@
 Measured before the fix (Red Team audit v1, tag P0-3): an operation with
 base_duration_min=10 on a speed_factor=3 machine (processing 10/3 = 3.33 min)
 submitted with a 1-minute duration produced ZERO violations — the checker never
-compared the assignment span against base/speed, so an arbitrarily short (or
-long) operation passed as feasible.
+compared the assignment span against the processing time, so an arbitrarily
+short operation passed as feasible.
 
-Fix: a DURATION_MISMATCH check comparing the assignment span to base/speed with
-a 1-minute tolerance. The tolerance absorbs the round/ceil/floor divergence
-between solvers (P0-4, a separate defect) so a correct CP-SAT (round) or greedy
-(exact) duration passes, while a grossly wrong span (1 vs 3.33) is caught.
+Fix: a DURATION_MISMATCH check comparing the assignment span to the CANONICAL
+integer grain ``timegrain.duration_minutes`` = ``ceil(base/speed)`` (P0-4). A
+span below that canonical duration under-reserves the operation and is flagged.
+The earlier round-tolerant 1-minute slop was removed: after P0-4 every solver
+reserves the exact ceil grain, so the comparison is exact.
 """
 
 from __future__ import annotations
@@ -53,10 +54,10 @@ def test_checker_flags_too_short_duration() -> None:
     )
 
 
-def test_checker_accepts_rounded_duration() -> None:
-    """P0-3: the round (3) and exact (3.333) durations must both pass."""
+def test_checker_accepts_canonical_ceil_duration() -> None:
+    """P0-3/P0-4: the canonical ceil(10/3)=4 span (and longer) must pass."""
     problem, op, wc = _speed3_problem()
-    for minutes in (3.0, 10.0 / 3.0, 4.0):
+    for minutes in (4.0, 5.0):
         ok = [
             Assignment(
                 operation_id=op.id, work_center_id=wc.id,
@@ -66,4 +67,22 @@ def test_checker_accepts_rounded_duration() -> None:
         violations = FeasibilityChecker().check(problem, ok, exhaustive=True)
         assert not any(v.kind == "DURATION_MISMATCH" for v in violations), (
             f"duration {minutes} wrongly flagged: {[v.kind for v in violations]}"
+        )
+
+
+def test_checker_flags_sub_canonical_round_down_duration() -> None:
+    """P0-4: a round-down (3) or raw-physical (3.333) span under-reserves the
+    ceil(10/3)=4 grain and is now flagged — the exact behavior the pre-ceil
+    1-minute tolerance wrongly permitted."""
+    problem, op, wc = _speed3_problem()
+    for minutes in (3.0, 10.0 / 3.0):
+        under = [
+            Assignment(
+                operation_id=op.id, work_center_id=wc.id,
+                start_time=H0, end_time=H0 + timedelta(minutes=minutes),
+            )
+        ]
+        violations = FeasibilityChecker().check(problem, under, exhaustive=True)
+        assert any(v.kind == "DURATION_MISMATCH" for v in violations), (
+            f"sub-canonical duration {minutes} not flagged: {[v.kind for v in violations]}"
         )

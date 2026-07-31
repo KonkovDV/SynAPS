@@ -19,9 +19,12 @@ SOLVERS_DIR = Path(__file__).resolve().parent.parent / "synaps" / "solvers"
 
 
 def test_duration_minutes_canonical_values() -> None:
-    assert duration_minutes(10, 3.0) == 3  # 10/3 = 3.33 -> round -> 3
+    # P0-4 (final brief): ceil, not round. Rounding DOWN reserves less than the
+    # physical processing time and yields an infeasible schedule.
+    assert duration_minutes(10, 3.0) == 4  # 10/3 = 3.33 -> ceil -> 4
     assert duration_minutes(10, 1.0) == 10
     assert duration_minutes(10, 2.0) == 5
+    assert duration_minutes(10, 4.0) == 3  # 10/4 = 2.5 -> ceil -> 3 (round would give 2)
     assert duration_minutes(1, 100.0) == 1  # floored at 1
     assert duration_minutes(10, 0.0) == 10  # non-positive speed treated as 1.0
 
@@ -31,9 +34,12 @@ def test_no_adhoc_duration_formula_in_solvers() -> None:
 
     The canonical grain lives only in synaps/timegrain.py; every other module
     must call ``duration_minutes``. This catches a regression where a solver
-    reintroduces its own rounding and desynchronizes from the rest.
+    reintroduces its own rounding and desynchronizes from the rest. (The
+    broader raw ``base/speed`` division ratchet lives in
+    ``tests/test_architecture.py``; here we pin the specific round/ceil-inline
+    anti-pattern in EXECUTABLE code, excluding message-string mentions.)
     """
-    pattern = re.compile(r"round\(\s*[\w.]*base_duration_min\s*/")
+    pattern = re.compile(r"=\s*(round|math\.ceil|ceil|floor)\(\s*[\w.]*base_duration_min\s*/")
     offenders: list[str] = []
     for path in SOLVERS_DIR.rglob("*.py"):
         text = path.read_text(encoding="utf-8")
