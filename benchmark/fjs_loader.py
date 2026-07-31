@@ -5,7 +5,8 @@ benchmark suites (Brandimarte 1993 ``mk01``-``mk10``, Hurink et al. 1994
 ``edata``/``rdata``/``vdata``, Dauzère-Pérès & Paulli / DAFJS) into a
 SynAPS :class:`~synaps.model.ScheduleProblem`.
 
-Format (whitespace-separated, 1-indexed machines):
+Format (whitespace-separated; machine ids 1-indexed in the classical files,
+0-indexed in some mirrors — the base is auto-detected per file, see below):
 
     line 1: <n_jobs> <n_machines> [<avg_machines_per_op>]
     then one line per job:
@@ -125,6 +126,56 @@ def load_fjs_problem(path: Path | str) -> ScheduleProblem:
     if stream.remaining() > 0 and "." in tokens[stream.index]:
         stream.next_int(context="average machines per operation (ignored)")
 
+    # Machine-id indexing base. The classical suites are 1-indexed
+    # (1..n_machines) but several public mirrors (e.g.
+    # SchedulingLab/fjsp-instances) re-emit the same instances 0-indexed
+    # (0..n_machines-1). Auto-detect via a strict structural pre-pass over the
+    # remaining tokens: walk the job/op/alternative grammar and collect every
+    # machine reference, then decide the base. Mixed or out-of-range ids stay
+    # hard errors — never a silent guess.
+    body_start = stream.index
+    machine_refs: list[int] = []
+    for job_idx in range(n_jobs):
+        n_ops = stream.next_int(context=f"operation count of job {job_idx + 1}")
+        if n_ops <= 0:
+            raise FjsParseError(f"job {job_idx + 1} declares {n_ops} operations")
+        for op_idx in range(n_ops):
+            n_alternatives = stream.next_int(
+                context=f"alternative count of job {job_idx + 1} op {op_idx + 1}"
+            )
+            if n_alternatives <= 0:
+                raise FjsParseError(
+                    f"job {job_idx + 1} op {op_idx + 1} declares {n_alternatives} alternatives"
+                )
+            for alt_idx in range(n_alternatives):
+                machine_refs.append(
+                    stream.next_int(
+                        context=(
+                            f"machine id of job {job_idx + 1} op {op_idx + 1} "
+                            f"alt {alt_idx + 1}"
+                        )
+                    )
+                )
+                stream.next_int(
+                    context=f"duration of job {job_idx + 1} op {op_idx + 1} alt {alt_idx + 1}"
+                )
+    if not machine_refs:
+        raise FjsParseError("no machine references found in body")
+    min_ref, max_ref = min(machine_refs), max(machine_refs)
+    if min_ref >= 1 and max_ref <= n_machines:
+        machine_index_base = 1
+    elif min_ref >= 0 and max_ref <= n_machines - 1:
+        machine_index_base = 0
+    else:
+        raise FjsParseError(
+            f"machine ids span {min_ref}..{max_ref}, consistent with neither "
+            f"1..{n_machines} (1-indexed) nor 0..{n_machines - 1} (0-indexed)"
+        )
+
+    # Re-parse the body for real from the recorded start.
+    stream = _TokenStream(tokens)
+    stream._index = body_start
+
     shared_state = State(code="FJS-DEFAULT", label="single shared state (no SDST)")
     work_centers = [
         WorkCenter(code=f"M{machine_idx + 1}", capability_group="fjs")
@@ -164,9 +215,12 @@ def load_fjs_problem(path: Path | str) -> ScheduleProblem:
                         f"duration of job {job_idx + 1} op {op_idx + 1} alt {alt_idx + 1}"
                     )
                 )
-                if not 1 <= machine_ref <= n_machines:
+                if not machine_index_base <= machine_ref <= (
+                    n_machines - 1 + machine_index_base
+                ):
                     raise FjsParseError(
-                        f"machine id {machine_ref} out of range 1..{n_machines} "
+                        f"machine id {machine_ref} out of range "
+                        f"{machine_index_base}..{n_machines - 1 + machine_index_base} "
                         f"(job {job_idx + 1} op {op_idx + 1})"
                     )
                 if duration < 0:
@@ -178,8 +232,8 @@ def load_fjs_problem(path: Path | str) -> ScheduleProblem:
                         f"duration {duration} exceeds sanity limit "
                         f"{MAX_FJS_DURATION_MINUTES} (job {job_idx + 1} op {op_idx + 1})"
                     )
-                eligible_wc_ids.append(wc_id_by_index[machine_ref - 1])
-                machine_durations[f"M{machine_ref}"] = duration
+                eligible_wc_ids.append(wc_id_by_index[machine_ref - machine_index_base])
+                machine_durations[f"M{machine_ref - machine_index_base + 1}"] = duration
 
             base_duration = min(machine_durations.values())
             horizon_upper_bound_min += max(machine_durations.values())
