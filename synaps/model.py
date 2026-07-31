@@ -35,7 +35,8 @@ class Order(BaseModel):
     release_date: datetime | None = None
     due_date: datetime
     priority: int = 500
-    quantity: float = 1.0
+    # P1-2: a produced quantity is physically positive.
+    quantity: float = Field(default=1.0, gt=0)
     unit: str = "pcs"
     domain_attributes: dict[str, Any] = Field(default_factory=dict)
 
@@ -46,8 +47,10 @@ class WorkCenter(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     code: str
     capability_group: str
-    speed_factor: float = 1.0
-    max_parallel: int = 1
+    # P1-2: speed_factor divides base_duration_min (a zero -> ZeroDivisionError,
+    # a negative -> negative durations); max_parallel is a lane count >= 1.
+    speed_factor: float = Field(default=1.0, gt=0)
+    max_parallel: int = Field(default=1, ge=1)
     domain_attributes: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -83,7 +86,7 @@ class AuxiliaryResource(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     code: str
     resource_type: str
-    pool_size: int = 1
+    pool_size: int = Field(default=1, ge=1)  # P1-2: a resource pool has >= 1 unit
     domain_attributes: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -92,7 +95,7 @@ class OperationAuxRequirement(BaseModel):
 
     operation_id: UUID
     aux_resource_id: UUID
-    quantity_needed: int = 1
+    quantity_needed: int = Field(default=1, ge=1)  # P1-2: a requirement needs >= 1 unit
 
 
 def normalize_schedule_problem_data(data: object) -> object:

@@ -29,11 +29,17 @@ def _clamp_non_negative(
 
     Any valid relaxation of a makespan is non-negative by construction. A
     negative intermediate value therefore always signals a pathological input
-    (empty eligible-machine sets, zero-duration operations, precedence cycles,
-    auxiliary-resource mismatches) or an upstream bug. Clamping keeps the
-    aggregated lower bound sound and prevents ``as_metadata`` from surfacing
-    misleading negative numbers downstream, while the WARNING log preserves
-    observability so the offending input can still be diagnosed.
+    (empty eligible-machine sets, precedence cycles, auxiliary-resource
+    mismatches) or an upstream bug. Clamping keeps the aggregated lower bound
+    sound (a 0 floor is always a valid — if weak — bound) and prevents
+    ``as_metadata`` from surfacing misleading negative numbers downstream, while
+    the WARNING log preserves observability so the offending input can still be
+    diagnosed. This is a diagnostic clamp, not a silent mask.
+
+    P1-2 note: the ``speed_factor <= 0`` source (negative durations) is now
+    rejected at model construction (``WorkCenter.speed_factor`` has ``gt=0``), so
+    this guard remains only for the other pathologies above — a firing WARNING
+    now genuinely indicates one of them, not a bad speed factor.
     """
 
     if raw_value < 0.0:
