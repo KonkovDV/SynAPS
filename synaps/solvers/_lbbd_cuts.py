@@ -103,9 +103,24 @@ def compute_machine_transition_floor(
 ) -> float:
     """Return the strongest safe per-transition setup floor for the master.
 
-    The master does not know the realized state sequence, so a positive floor
-    is valid only when every possible transition between states that may be
-    routed to the machine carries a positive setup cost.
+    The master's capacity row applies this floor as ``ms * (n_k - 1)`` for a
+    machine carrying ``n_k`` operations (``C_max >= sum p_i + ms*(n_k-1)``). That
+    is valid ONLY if EVERY one of the ``n_k - 1`` consecutive transitions costs
+    at least ``ms`` — including a transition between two operations of the SAME
+    state. The master does not know the realized sequence, so it cannot preclude
+    repeated same-state operations (whose changeover is typically 0). Therefore
+    the min is taken over ALL ordered state pairs routable to the machine,
+    ``from == to`` INCLUDED: if any such transition (same-state included) is not
+    strictly positive, no positive per-transition floor is safe and 0 is
+    returned.
+
+    This is why the floor is 0 on the usual matrices (same-state setup = 0) —
+    that is a conservatively VALID bound, not dead code (Q2). A stronger,
+    sequence-aware setup bound requires the realized state MULTIPLICITIES and so
+    lives in the per-cluster ``compute_sequence_independent_setup_lower_bound`` /
+    ``compute_machine_tsp_lower_bound``; naively dropping ``from == to`` here
+    (``ms * (n_k-1)`` with ``ms = min_{s != t}``) would OVER-claim whenever a
+    state repeats and reintroduce the S1/S2/S3 invalid-bound defect.
     """
 
     relevant_state_ids = {
@@ -119,6 +134,9 @@ def compute_machine_transition_floor(
     min_transition = float("inf")
     for from_state_id in relevant_state_ids:
         for to_state_id in relevant_state_ids:
+            # from == to is intentionally included: see the docstring. A free
+            # same-state changeover makes any positive floor unsafe under the
+            # master's ms*(n_k-1) application.
             transition = float(setup_lookup.get((work_center_id, from_state_id, to_state_id), 0.0))
             if transition <= 0:
                 return 0.0
