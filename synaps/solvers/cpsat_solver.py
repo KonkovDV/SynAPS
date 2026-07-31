@@ -784,6 +784,18 @@ class CpSatSolver(BaseSolver):
 
         solve_problem, virtual_to_original = self._virtualize_parallel_work_centers(problem)
 
+        # P1-4: frozen assignments are defined on the ORIGINAL work centers, not
+        # the virtual lanes created for max_parallel > 1. Silently dropping them
+        # (the prior behavior) let a repair overlap frozen work with no signal.
+        # Fail loudly instead; a proper lane mapping is a future enhancement.
+        if frozen_assignments and virtual_to_original:
+            raise ValueError(
+                "frozen_assignments are not supported together with max_parallel>1 "
+                "work-center lane virtualization: the frozen intervals reference the "
+                "original work centers, not the virtual lanes. Provide a single-lane "
+                "instance or omit frozen_assignments (P1-4)."
+            )
+
         horizon = int(
             (
                 solve_problem.planning_horizon_end - solve_problem.planning_horizon_start
@@ -889,7 +901,7 @@ class CpSatSolver(BaseSolver):
             setup_material_lookup,
             planning_horizon_start=solve_problem.planning_horizon_start,
             horizon=horizon,
-            frozen_assignments=frozen_assignments if not virtual_to_original else [],
+            frozen_assignments=frozen_assignments,
         )
         self._add_aux_resource_cumulative_constraints(
             model, solve_problem, eligible_by_op, intervals, setup_intervals_by_op
