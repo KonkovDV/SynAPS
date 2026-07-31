@@ -146,9 +146,66 @@ class GreedyDispatch(BaseSolver):
         # concurrently; the core dispatch treats each lane as its own machine
         # (no phantom setup between concurrent lanes), then lane_id is unrolled.
         virtual_problem, virtual_to_original = _virtualize_parallel_lanes(problem)
-        result = self._solve_core(virtual_problem, **kwargs)
+        # Q5: a single ATCS rule is myopic on a NON-metric setup matrix (the
+        # audit's 120-vs-32). Only then sweep several (k1,k2,k3) rules and keep
+        # the best by the canonical objective; metric matrices (the common case,
+        # and every warm-start consumer relies on the exact single trajectory)
+        # keep the plain single-rule path unchanged.
+        from synaps.validation import is_setup_matrix_metric
+
+        if is_setup_matrix_metric(problem):
+            result = self._solve_core(virtual_problem, **kwargs)
+            result.metadata["priority_rule_sweep"] = False
+            result.metadata["priority_rules_evaluated"] = 1
+        else:
+            result = self._solve_priority_rule_sweep(virtual_problem, **kwargs)
         _unroll_lane_assignments(result, virtual_to_original)
         return result
+
+    def _solve_priority_rule_sweep(
+        self, virtual_problem: ScheduleProblem, **kwargs: Any
+    ) -> ScheduleResult:
+        """Q5: run several priority rules on a non-metric matrix, keep the best.
+
+        Deterministic: a fixed candidate order and a strict ``<`` on the
+        canonical objective sort key (coverage, then makespan, then weighted
+        sum), so a fixed seed still yields one reproducible schedule. The
+        configured rule is always among the candidates, so the sweep can never
+        be worse than the plain single rule.
+        """
+        from synaps.objective import evaluate, objective_sort_key
+
+        candidate_rules: list[tuple[float, float, float]] = []
+        seen: set[tuple[float, float, float]] = set()
+        for rule in (
+            (self._k1, self._k2, self._k3),
+            (5.0, 0.5, 0.5),
+            (1.0, 1.0, 0.5),
+            (2.0, 0.1, 0.5),
+        ):
+            if rule not in seen:
+                seen.add(rule)
+                candidate_rules.append(rule)
+
+        best_result: ScheduleResult | None = None
+        best_key: tuple[float, float, float] | None = None
+        best_rule = candidate_rules[0]
+        for k1, k2, k3 in candidate_rules:
+            candidate_solver = GreedyDispatch(k1=k1, k2=k2, k3=k3)
+            candidate_result = candidate_solver._solve_core(virtual_problem, **kwargs)
+            candidate_key = objective_sort_key(
+                evaluate(virtual_problem, candidate_result.assignments)
+            )
+            if best_key is None or candidate_key < best_key:
+                best_key = candidate_key
+                best_result = candidate_result
+                best_rule = (k1, k2, k3)
+
+        assert best_result is not None  # candidate_rules is never empty
+        best_result.metadata["priority_rule_sweep"] = True
+        best_result.metadata["priority_rules_evaluated"] = len(candidate_rules)
+        best_result.metadata["priority_rule_selected"] = list(best_rule)
+        return best_result
 
     def _solve_core(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
         t0 = time.monotonic()
