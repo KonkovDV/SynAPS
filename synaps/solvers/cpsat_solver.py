@@ -41,6 +41,21 @@ _TIMEBOX_PARAMETERS = frozenset({"max_time_in_seconds", "max_deterministic_time"
 _STRICT_DETERMINISTIC_FRACTION = 0.5
 _STRICT_WALL_SAFETY_FACTOR = 2.0
 
+# P1-1: the default hierarchical objective is a big-M scalarization
+# ``makespan * secondary_bound + secondary_terms``. At the model's stated scale
+# (MAX_SCHEDULE_OPERATIONS = 200_000) ``(horizon + 1) * secondary_bound`` can
+# exceed the CP-SAT int64 objective domain, corrupting the solve. When the big-M
+# would overflow this safe ceiling we degrade to a PURE lexicographic objective
+# (minimize makespan alone — the dominant term — leaving the secondary terms as a
+# reported, non-minimized residual) rather than overflowing silently. 2**62
+# leaves headroom below the int64 max (2**63 - 1) for CP-SAT's internal sums.
+_SAFE_OBJECTIVE_MAX = 2**62
+
+
+def _bigm_objective_overflows(horizon: int, secondary_bound: int) -> bool:
+    """True if the big-M objective coefficient product exceeds the safe int64 ceiling."""
+    return (horizon + 1) * secondary_bound > _SAFE_OBJECTIVE_MAX
+
 
 def _apply_sat_parameter_overrides(
     solver: cp_model.CpSolver,
@@ -477,7 +492,7 @@ class CpSatSolver(BaseSolver):
         epsilon_constraints: dict[str, int] | None = None,
         objective_mode: str = "weighted_sum",
         primary_objective: str = "makespan",
-    ) -> tuple[Any, Any, Any, int, dict[str, int], int]:
+    ) -> tuple[Any, Any, Any, int, dict[str, int], int, bool]:
         max_setup = max((entry.setup_minutes for entry in problem.setup_matrix), default=0)
         max_material_scaled = max(
             (round(entry.material_loss * material_loss_scale) for entry in problem.setup_matrix),
@@ -537,6 +552,8 @@ class CpSatSolver(BaseSolver):
             + weights["tardiness"] * max(1, tardiness_ub)
             + 1
         )
+        # P1-1: only the default big-M branch can overflow; other modes leave it False.
+        bigm_degraded = False
 
         if epsilon_constraints:
             # ε-constraint scalarization (Geoffrion 1968 / Haimes et al. 1971):
@@ -587,13 +604,22 @@ class CpSatSolver(BaseSolver):
         elif epsilon_constraints:
             model.minimize(makespan)
         else:
-            # Default: hierarchical weighted-sum with makespan as primary
-            model.minimize(
-                makespan * secondary_bound
-                + weights["setup"] * total_setup
-                + weights["material_loss"] * total_material_scaled
-                + weights["tardiness"] * total_tardiness
-            )
+            # Default: hierarchical weighted-sum with makespan as primary.
+            # P1-1: guard the big-M against int64 overflow at the model's stated
+            # scale. When the coefficient product would exceed the safe ceiling,
+            # degrade to a pure lexicographic objective (makespan only) rather
+            # than overflow the CP-SAT objective domain.
+            if _bigm_objective_overflows(horizon, secondary_bound):
+                bigm_degraded = True
+                model.minimize(makespan)
+            else:
+                bigm_degraded = False
+                model.minimize(
+                    makespan * secondary_bound
+                    + weights["setup"] * total_setup
+                    + weights["material_loss"] * total_material_scaled
+                    + weights["tardiness"] * total_tardiness
+                )
 
         return (
             total_setup,
@@ -602,6 +628,7 @@ class CpSatSolver(BaseSolver):
             secondary_bound,
             weights,
             material_loss_scale,
+            bigm_degraded,
         )
 
     def _extract_solution_and_objective(
@@ -872,21 +899,27 @@ class CpSatSolver(BaseSolver):
         for operation in solve_problem.operations:
             model.add(makespan >= selected_ends[operation.id])
 
-        total_setup, total_material_scaled, total_tardiness, secondary_bound, weights, scale = (
-            self._build_weighted_objective(
-                model,
-                solve_problem,
-                horizon,
-                makespan,
-                setup_terms,
-                material_terms,
-                selected_ends,
-                objective_weights,
-                material_loss_scale,
-                epsilon_constraints=epsilon_constraints,
-                objective_mode=objective_mode,
-                primary_objective=primary_objective,
-            )
+        (
+            total_setup,
+            total_material_scaled,
+            total_tardiness,
+            secondary_bound,
+            weights,
+            scale,
+            bigm_degraded,
+        ) = self._build_weighted_objective(
+            model,
+            solve_problem,
+            horizon,
+            makespan,
+            setup_terms,
+            material_terms,
+            selected_ends,
+            objective_weights,
+            material_loss_scale,
+            epsilon_constraints=epsilon_constraints,
+            objective_mode=objective_mode,
+            primary_objective=primary_objective,
         )
 
         if enable_symmetry_breaking:
@@ -1076,6 +1109,7 @@ class CpSatSolver(BaseSolver):
                 "symmetry_breaking": enable_symmetry_breaking,
                 "determinism": determinism,
                 "determinism_violated": determinism_violated,
+                "objective_bigm_overflow_degraded": bigm_degraded,
                 "sat_parameters": effective_sat_parameters,
                 "parallel_virtualization": {
                     "enabled": bool(virtual_to_original),
