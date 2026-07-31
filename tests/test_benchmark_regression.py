@@ -108,7 +108,14 @@ class TestBenchmarkRegression:
         """CP-SAT on 5 orders x 3 ops x 3 machines must achieve makespan <= 130 min."""
         problem = _make_stress_problem()
         solver = CpSatSolver()
-        result = solver.solve(problem, time_limit_s=10, random_seed=42, num_workers=4)
+        # This is a SEARCH-QUALITY guard with num_workers=4: it belongs to the
+        # multi-threaded 'fast' lane. Per ADR-0001, 'strict' (the default) runs
+        # single-threaded and trades ~50% of the budget for reproducibility, so
+        # it legitimately reaches only 133 here; quality is the 'fast' lane's
+        # job (measured 120).
+        result = solver.solve(
+            problem, time_limit_s=10, random_seed=42, num_workers=4, determinism="fast"
+        )
 
         assert result.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
         assert result.objective.makespan_minutes <= 130, (

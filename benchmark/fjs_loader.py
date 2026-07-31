@@ -168,8 +168,8 @@ def load_fjs_problem(path: Path | str) -> ScheduleProblem:
         machine_index_base = 0
     else:
         raise FjsParseError(
-            f"machine ids span {min_ref}..{max_ref}, consistent with neither "
-            f"1..{n_machines} (1-indexed) nor 0..{n_machines - 1} (0-indexed)"
+            f"machine ids span {min_ref}..{max_ref}, out of range for both "
+            f"1..{n_machines} (1-indexed) and 0..{n_machines - 1} (0-indexed)"
         )
 
     # Re-parse the body for real from the recorded start.
