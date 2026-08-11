@@ -84,7 +84,12 @@ class SolveOptions(BaseModel):
             payload["num_workers"] = max(1, min(raw_workers, 8))
         raw_limit = payload.get("time_limit_s")
         if isinstance(raw_limit, int):
-            payload["time_limit_s"] = max(1, min(raw_limit, 600))
+            # Wave 11 / H5: reject out-of-range limits instead of silently clamping to 600.
+            if raw_limit < 1 or raw_limit > 7200:
+                raise ValueError(
+                    f"SolveOptions.time_limit_s must be in [1, 7200], got {raw_limit}"
+                )
+            payload["time_limit_s"] = raw_limit
         return payload
 
 

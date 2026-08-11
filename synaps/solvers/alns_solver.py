@@ -198,15 +198,34 @@ def _evaluate_objective(
     )
 
 
-def _objective_cost(obj: ObjectiveValues, weights: dict[str, float]) -> float:
-    """Scalar cost from multi-objective values."""
-    return (
-        weights.get("makespan", 1.0) * obj.makespan_minutes
-        + weights.get("setup", 0.3) * obj.total_setup_minutes
-        + weights.get("material_loss", 0.2) * obj.total_material_loss
-        + weights.get("tardiness", 0.5) * obj.total_tardiness_minutes
-        + weights.get("energy", weights.get("energy_kwh", 0.0)) * obj.total_energy_kwh
-    )
+def _normalize_objective_weights(weights: dict[str, float] | None) -> dict[str, float]:
+    """Align ALNS weights with :data:`synaps.objective.DEFAULT_WEIGHTS` + aliases.
+
+    Accepts legacy ``material_loss`` / ``energy_kwh`` keys and maps them onto the
+    canonical ``material`` / ``energy`` keys used by :func:`synaps.objective.scalarize`
+    (Wave 11 / H3).
+    """
+    from synaps.objective import DEFAULT_WEIGHTS
+
+    normalized = dict(DEFAULT_WEIGHTS)
+    if not weights:
+        return normalized
+    normalized.update(weights)
+    if "material" not in weights and "material_loss" in weights:
+        normalized["material"] = float(weights["material_loss"])
+    if "energy" not in weights and "energy_kwh" in weights:
+        normalized["energy"] = float(weights["energy_kwh"])
+    # Keep legacy aliases readable for any direct .get("material_loss") call sites.
+    normalized.setdefault("material_loss", float(normalized.get("material", 0.0)))
+    normalized.setdefault("energy_kwh", float(normalized.get("energy", 0.0)))
+    return normalized
+
+
+def _objective_cost(obj: ObjectiveValues, weights: dict[str, float] | None) -> float:
+    """Scalar cost from multi-objective values (canonical :func:`scalarize`)."""
+    from synaps.objective import scalarize
+
+    return scalarize(obj, _normalize_objective_weights(weights))
 
 
 # ---------------------------------------------------------------------------
@@ -2775,11 +2794,8 @@ class AlnsSolver(BaseSolver):
         use_cpsat_repair: bool = bool(kwargs.get("use_cpsat_repair", True))
         mab_pair_selection: bool = bool(kwargs.get("mab_pair_selection", False))
         cpsat_max_destroy_ops: int = int(kwargs.get("cpsat_max_destroy_ops", min(20, max_destroy)))
-        objective_weights: dict[str, float] = dict(
-            kwargs.get(
-                "objective_weights",
-                {"makespan": 1.0, "setup": 0.3, "material_loss": 0.2, "tardiness": 0.5},
-            )
+        objective_weights = _normalize_objective_weights(
+            dict(kwargs["objective_weights"]) if kwargs.get("objective_weights") else None
         )
         warm_start_assignments_raw = kwargs.get("warm_start_assignments")
         frozen_assignments_raw = kwargs.get("frozen_assignments")

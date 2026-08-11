@@ -143,15 +143,30 @@ def proven_hard_violations(
 ) -> list[FeasibilityViolation]:
     """Return violations that prove a constraint fault for customer feasibility.
 
-    When ``LANE_INFERENCE_UNPROVEN`` is present, also demotes greedy-fallback
-    trigger kinds (``SETUP_GAP_VIOLATION``, capacity/overlap/missing-setup) that
-    may be false positives of the incomplete lane heuristic (Wave 8 / RT17-H2).
+    When ``LANE_INFERENCE_UNPROVEN`` is present on a work center, demotes
+    greedy-fallback trigger kinds **only on that work center** (Wave 8 /
+    RT17-H2 scoped by Wave 11 / H1). Unscoped ``LANE_INFERENCE_UNPROVEN``
+    (``work_center_id is None``) retains the global demotion fallback.
+    Hard faults on other machines remain proven.
     """
-    kinds = {v.kind for v in violations}
-    exclude = set(ADVISORY_VIOLATION_KINDS)
-    if "LANE_INFERENCE_UNPROVEN" in kinds:
-        exclude |= _GREEDY_UNPROVEN_TRIGGER_KINDS
-    return [v for v in violations if v.kind not in exclude]
+    scoped_unproven_wcs = {
+        v.work_center_id
+        for v in violations
+        if v.kind == "LANE_INFERENCE_UNPROVEN" and v.work_center_id is not None
+    }
+    global_unproven = any(
+        v.kind == "LANE_INFERENCE_UNPROVEN" and v.work_center_id is None for v in violations
+    )
+    proven: list[FeasibilityViolation] = []
+    for violation in violations:
+        if violation.kind in ADVISORY_VIOLATION_KINDS:
+            continue
+        if violation.kind in _GREEDY_UNPROVEN_TRIGGER_KINDS and (
+            global_unproven or violation.work_center_id in scoped_unproven_wcs
+        ):
+            continue
+        proven.append(violation)
+    return proven
 
 
 class FeasibilityChecker:

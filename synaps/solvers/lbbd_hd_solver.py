@@ -772,34 +772,11 @@ def _solve_precedence_aware_master(
                     np.array(coeffs),
                 )
         elif cut.kind in ("setup_cost", "machine_tsp"):
-            # Conditional no-good optimality cut (S3 validity fix, 2026-07).
-            # rhs = Sum p_i + L(S) is an analytic lower bound on the machine's
-            # busy time whenever the whole set S stays on it; the former row
-            # discounted only p_i per removed op, which does not cover the
-            # drop in L(S), over-claiming the bound (audit S3). The former
-            # `capacity` and `critical_path` rows had deeper flaws (see
-            # `_generate_all_cuts`) and are no longer emitted.
-            # Valid form: C_max - Sum_i rhs*y_i >= rhs*(1 - |S|).
-            ng_indices = [cmax_idx]
-            ng_coeffs = [1.0]
-            for op_id in cut.bottleneck_ops:
-                ng_wc = cut.assignment_map.get(op_id)
-                if ng_wc is None:
-                    continue
-                key = (op_id, ng_wc)
-                if key not in var_index:
-                    continue
-                ng_indices.append(var_index[key])
-                ng_coeffs.append(-cut.rhs)
-            member_count = len(ng_indices) - 1
-            if member_count > 0:
-                h.addRow(
-                    cut.rhs * (1 - member_count),
-                    highspy.kHighsInf,
-                    len(ng_indices),
-                    np.array(ng_indices, dtype=np.int32),
-                    np.array(ng_coeffs),
-                )
+            # Wave 11 / M1 + KI-S3: generation is retired; refuse to apply if injected.
+            raise ValueError(
+                f"LBBD cut kind {cut.kind!r} is permanently retired (KI-S3); "
+                "refusing to apply sentinel optimality cuts"
+            )
         elif cut.kind == "local_branching":
             lb_indices: list[int] = []
             for op_id in cut.bottleneck_ops:

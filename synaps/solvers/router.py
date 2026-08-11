@@ -421,7 +421,7 @@ def select_solver(
                                 ),
                             ),
                         )
-                    except KeyError:
+                    except (KeyError, ValueError):
                         pass  # advisory recommended unknown config — fall through
         except ImportError:
             pass  # ml_advisory module not available — use deterministic

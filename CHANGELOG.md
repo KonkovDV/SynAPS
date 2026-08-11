@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Wave 11 (Hyper Red Team fix pack):**
+  - IncrementalRepair: CP-SAT fallback honors frozen intervals/preds (C1); INFEASIBLE on unrepaired remainder (C2); refuses `max_parallel>1` (H2).
+  - `proven_hard_violations` demotes greedy triggers per unproven WC only (H1).
+  - ALNS `_objective_cost` unified with `DEFAULT_WEIGHTS` + `material`/`material_loss` aliases (H3).
+  - Router advisory catches `ValueError`; `SolveOptions.time_limit_s` rejects OOB instead of silent 600 clamp (H4/H5).
+  - LBBD/HD applicators refuse retired `setup_cost`/`machine_tsp` cuts (M1 / KI-S3).
+  - Docs: `HYPER_REDTEAM_AUDIT_2026_08_11.md`, `WAVE11_EXECUTION_PLAN.md`.
+  - Tests: `tests/test_wave11_hyper_rt.py`.
+
 - **Wave 10 (CP-SAT energy + permanent deferrals):**
   - CP-SAT hierarchical objective includes scaled setup `energy_kwh` (default weight 0).
   - Permanent decisions: native `p_{o,m}` ABI deferred; dmorill GPL forbid; KI-S3 stays accepted.

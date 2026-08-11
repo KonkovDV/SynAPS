@@ -46,34 +46,58 @@ class IncrementalRepair(BaseSolver):
         *,
         num_workers: int = 1,
     ) -> list[Assignment] | None:
-        """Use a micro CP-SAT solve when constructive repair cannot place the remainder."""
+        """Use a micro CP-SAT solve when constructive repair cannot place the remainder.
+
+        Frozen work stays fixed: machine no-overlap via ``frozen_assignments``,
+        and precedence via ``frozen_predecessor_end_offsets`` (Wave 11 / C1).
+        Only ``remaining_op_ids`` are free decision variables — predecessors that
+        are already scheduled must not be re-timed inside the subproblem.
+        """
         from synaps.solvers.cpsat_solver import CpSatSolver
 
-        ops_by_id = {operation.id: operation for operation in problem.operations}
         op_positions = {operation.id: index for index, operation in enumerate(problem.operations)}
-        needed_ids = set(remaining_op_ids)
-        for op_id in sorted(remaining_op_ids, key=op_positions.__getitem__):
-            operation = ops_by_id.get(op_id)
-            if operation and operation.predecessor_op_id:
-                needed_ids.add(operation.predecessor_op_id)
+        ops_by_id = {operation.id: operation for operation in problem.operations}
+        frozen_by_op = {
+            assignment.operation_id: assignment for assignment in frozen_assignments
+        }
+        _ = already_scheduled_ids  # reserved for future readiness diagnostics
 
         sub_operations = [
-            operation for operation in problem.operations if operation.id in needed_ids
+            operation for operation in problem.operations if operation.id in remaining_op_ids
         ]
         if not sub_operations:
             return None
 
+        horizon_start = problem.planning_horizon_start
+        frozen_predecessor_end_offsets: dict[Any, int] = {}
+        free_operations: list[Operation] = []
+        for operation in sub_operations:
+            pred_id = operation.predecessor_op_id
+            if pred_id is not None and pred_id not in remaining_op_ids:
+                # Pred is outside the free set: drop the model edge (ScheduleProblem
+                # requires preds to be present) and enforce timing via offsets.
+                frozen_pred = frozen_by_op.get(pred_id)
+                if frozen_pred is not None:
+                    frozen_predecessor_end_offsets[operation.id] = int(
+                        (frozen_pred.end_time - horizon_start).total_seconds() / 60.0
+                    )
+                free_operations.append(
+                    operation.model_copy(update={"predecessor_op_id": None})
+                )
+            else:
+                free_operations.append(operation)
+
         sub_problem = ScheduleProblem(
             states=problem.states,
             orders=problem.orders,
-            operations=sub_operations,
+            operations=free_operations,
             work_centers=problem.work_centers,
             setup_matrix=problem.setup_matrix,
             auxiliary_resources=problem.auxiliary_resources,
             aux_requirements=[
                 requirement
                 for requirement in problem.aux_requirements
-                if requirement.operation_id in needed_ids
+                if requirement.operation_id in remaining_op_ids
             ],
             planning_horizon_start=problem.planning_horizon_start,
             planning_horizon_end=problem.planning_horizon_end,
@@ -85,6 +109,8 @@ class IncrementalRepair(BaseSolver):
             num_workers=max(1, int(num_workers)),
             auto_greedy_warm_start=False,
             enable_symmetry_breaking=False,
+            frozen_assignments=list(frozen_assignments),
+            frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
         )
 
         if (
@@ -98,7 +124,20 @@ class IncrementalRepair(BaseSolver):
             for assignment in result.assignments
             if assignment.operation_id in remaining_op_ids
         ]
+        # Reject incomplete CP-SAT returns: missing remaining ops must not look repaired.
+        if {a.operation_id for a in fallback_assignments} != set(remaining_op_ids):
+            return None
         fallback_assignments.sort(key=lambda assignment: op_positions[assignment.operation_id])
+        # Defensive precedence check vs frozen predecessors (C1 fail-closed).
+        for assignment in fallback_assignments:
+            operation = ops_by_id.get(assignment.operation_id)
+            if operation is None or operation.predecessor_op_id is None:
+                continue
+            if operation.predecessor_op_id in remaining_op_ids:
+                continue
+            frozen_pred = frozen_by_op.get(operation.predecessor_op_id)
+            if frozen_pred is not None and assignment.start_time < frozen_pred.end_time:
+                return None
         return fallback_assignments
 
     @property
@@ -122,6 +161,25 @@ class IncrementalRepair(BaseSolver):
                 solver_name=self.name,
                 status=SolverStatus.ERROR,
                 metadata={"error": "base_assignments required"},
+            )
+
+        parallel_wcs = [
+            work_center.code
+            for work_center in problem.work_centers
+            if int(getattr(work_center, "max_parallel", 1) or 1) > 1
+        ]
+        if parallel_wcs:
+            return ScheduleResult(
+                solver_name=self.name,
+                status=SolverStatus.ERROR,
+                metadata={
+                    "error": (
+                        "IncrementalRepair does not virtualize max_parallel>1 "
+                        f"(work centers: {', '.join(parallel_wcs)}); refuse loudly "
+                        "(Wave 11 / H2)."
+                    ),
+                    "unsupported_max_parallel_work_centers": parallel_wcs,
+                },
             )
 
         orders_by_id = {o.id: o for o in problem.orders}
@@ -332,10 +390,15 @@ class IncrementalRepair(BaseSolver):
             total_tardiness += max(completion - due_offset, 0.0)
 
         elapsed_ms = int((time.monotonic() - t0) * 1000)
+        unrepaired_ids = [operation.id for operation in remaining_repair]
+        # Wave 11 / C2: never claim FEASIBLE while neighbourhood ops remain unrepaired.
+        status = (
+            SolverStatus.INFEASIBLE if unrepaired_ids else SolverStatus.FEASIBLE
+        )
 
         return ScheduleResult(
             solver_name=self.name,
-            status=SolverStatus.FEASIBLE,
+            status=status,
             assignments=all_assignments,
             objective=ObjectiveValues(
                 makespan_minutes=makespan,
@@ -348,6 +411,7 @@ class IncrementalRepair(BaseSolver):
                 "neighbourhood_size": len(neighbourhood),
                 "frozen_count": len(frozen),
                 "repaired_count": len(repaired),
+                "unrepaired_count": len(unrepaired_ids),
                 "cpsat_fallback_num_workers": cpsat_fallback_num_workers,
                 "used_cpsat_fallback": used_cpsat_fallback,
             },
