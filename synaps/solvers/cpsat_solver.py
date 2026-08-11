@@ -428,6 +428,7 @@ class CpSatSolver(BaseSolver):
         planning_horizon_start: Any,
         horizon: int,
         frozen_assignments: list[Assignment] | None = None,
+        context_ops_by_id: Mapping[Any, Any] | None = None,
     ) -> tuple[list[Any], list[Any], list[Any], dict[Any, list[tuple[Any, Any]]]]:
         """Model SDST via AddCircuit (O(N²) arcs per machine, not O(N³) booleans).
 
@@ -462,22 +463,35 @@ class CpSatSolver(BaseSolver):
                 intervals[(operation.id, work_center.id)] for operation in machine_operations
             ]
             frozen_machine_intervals: list[Any] = []
+            frozen_metas: list[tuple[Assignment, int, int]] = []
+            ops_ctx = context_ops_by_id or {
+                operation.id: operation for operation in problem.operations
+            }
             for frozen_index, frozen_assignment in enumerate(
                 sorted(
                     frozen_assignments_by_machine.get(work_center.id, []),
                     key=lambda assignment: assignment.start_time,
                 )
             ):
-                start_offset = round(
+                raw_start = round(
                     (frozen_assignment.start_time - planning_horizon_start).total_seconds() / 60.0
                 )
-                end_offset = round(
+                raw_end = round(
                     (frozen_assignment.end_time - planning_horizon_start).total_seconds() / 60.0
                 )
-                start_offset = max(0, min(start_offset, horizon))
-                end_offset = max(0, min(end_offset, horizon))
-                if end_offset <= start_offset:
-                    continue
+                start_offset = max(0, min(raw_start, horizon))
+                end_offset = max(0, min(raw_end, horizon))
+                # Wave 12 / C12-4: refuse silently dropped frozen intervals.
+                if (
+                    start_offset != raw_start
+                    or end_offset != raw_end
+                    or end_offset <= start_offset
+                ):
+                    raise ValueError(
+                        "frozen_assignment collapses or clamps outside the CP-SAT horizon "
+                        f"(op={frozen_assignment.operation_id}, start={raw_start}, "
+                        f"end={raw_end}, horizon={horizon}); refuse loudly (Wave 12 / C12-4)."
+                    )
 
                 frozen_start = model.new_int_var(
                     start_offset,
@@ -497,6 +511,7 @@ class CpSatSolver(BaseSolver):
                         f"frozen_interval_{work_center.id}_{frozen_index}",
                     )
                 )
+                frozen_metas.append((frozen_assignment, start_offset, end_offset))
 
             constrained_machine_intervals = machine_intervals + frozen_machine_intervals
 
@@ -511,6 +526,35 @@ class CpSatSolver(BaseSolver):
 
             if work_center.max_parallel > 1:
                 continue
+
+            # Wave 12 / C12-1: SDST between frozen ↔ free ops (circuit is free-only).
+            for frozen_index, (frozen_assignment, frozen_start_off, frozen_end_off) in enumerate(
+                frozen_metas
+            ):
+                frozen_op = ops_ctx.get(frozen_assignment.operation_id)
+                if frozen_op is None:
+                    raise ValueError(
+                        "frozen_assignment operation missing from frozen_context_operations "
+                        f"(op={frozen_assignment.operation_id}); cannot enforce SDST "
+                        "(Wave 12 / C12-1)."
+                    )
+                for op_j in machine_operations:
+                    presence = presences[(op_j.id, work_center.id)]
+                    setup_fj = setup_minutes_lookup.get(
+                        (work_center.id, frozen_op.state_id, op_j.state_id), 0
+                    )
+                    setup_jf = setup_minutes_lookup.get(
+                        (work_center.id, op_j.state_id, frozen_op.state_id), 0
+                    )
+                    j_before = model.new_bool_var(
+                        f"frozen_ord_{work_center.id}_{frozen_index}_{op_j.id}"
+                    )
+                    model.add(
+                        ends[(op_j.id, work_center.id)] + setup_jf <= frozen_start_off
+                    ).only_enforce_if([j_before, presence])
+                    model.add(
+                        starts[(op_j.id, work_center.id)] >= frozen_end_off + setup_fj
+                    ).only_enforce_if([j_before.negated(), presence])
 
             n = len(machine_operations)
             op_index: dict[Any, int] = {op.id: idx for idx, op in enumerate(machine_operations)}
@@ -618,6 +662,11 @@ class CpSatSolver(BaseSolver):
         eligible_by_op: dict[Any, list[Any]],
         intervals: dict[tuple[Any, Any], Any],
         setup_intervals_by_op: dict[Any, list[tuple[Any, Any]]],
+        *,
+        planning_horizon_start: Any | None = None,
+        horizon: int | None = None,
+        frozen_assignments: list[Assignment] | None = None,
+        frozen_aux_requirements: list[Any] | None = None,
     ) -> None:
         requirements_by_op: dict[Any, list[Any]] = {}
         for requirement in problem.aux_requirements:
@@ -643,6 +692,86 @@ class CpSatSolver(BaseSolver):
                 for setup_interval, _arc_lit in setup_intervals_by_op.get(operation.id, []):
                     resource_intervals.append(setup_interval)
                     demands.append(demand)
+
+            # Wave 12 / C12-2: reserve aux capacity held by frozen work.
+            if (
+                frozen_assignments
+                and planning_horizon_start is not None
+                and horizon is not None
+            ):
+                frozen_reqs_by_op: dict[Any, list[Any]] = {}
+                for requirement in frozen_aux_requirements or []:
+                    frozen_reqs_by_op.setdefault(requirement.operation_id, []).append(
+                        requirement
+                    )
+                for frozen_index, frozen_assignment in enumerate(frozen_assignments):
+                    demand = sum(
+                        requirement.quantity_needed
+                        for requirement in frozen_reqs_by_op.get(
+                            frozen_assignment.operation_id, []
+                        )
+                        if requirement.aux_resource_id == resource.id
+                    )
+                    if demand <= 0:
+                        continue
+                    start_offset = round(
+                        (
+                            frozen_assignment.start_time - planning_horizon_start
+                        ).total_seconds()
+                        / 60.0
+                    )
+                    end_offset = round(
+                        (
+                            frozen_assignment.end_time - planning_horizon_start
+                        ).total_seconds()
+                        / 60.0
+                    )
+                    if end_offset <= start_offset:
+                        raise ValueError(
+                            "frozen aux interval collapses "
+                            f"(op={frozen_assignment.operation_id})"
+                        )
+                    frozen_start = model.new_int_var(
+                        start_offset,
+                        start_offset,
+                        f"frozen_aux_start_{resource.id}_{frozen_index}",
+                    )
+                    frozen_end = model.new_int_var(
+                        end_offset,
+                        end_offset,
+                        f"frozen_aux_end_{resource.id}_{frozen_index}",
+                    )
+                    resource_intervals.append(
+                        model.new_interval_var(
+                            frozen_start,
+                            end_offset - start_offset,
+                            frozen_end,
+                            f"frozen_aux_proc_{resource.id}_{frozen_index}",
+                        )
+                    )
+                    demands.append(demand)
+                    setup_minutes = int(getattr(frozen_assignment, "setup_minutes", 0) or 0)
+                    if setup_minutes > 0:
+                        su_start_off = start_offset - setup_minutes
+                        if su_start_off < 0:
+                            raise ValueError(
+                                "frozen aux setup window starts before horizon "
+                                f"(op={frozen_assignment.operation_id})"
+                            )
+                        su_start = model.new_int_var(
+                            su_start_off,
+                            su_start_off,
+                            f"frozen_aux_su_start_{resource.id}_{frozen_index}",
+                        )
+                        resource_intervals.append(
+                            model.new_interval_var(
+                                su_start,
+                                setup_minutes,
+                                frozen_start,
+                                f"frozen_aux_setup_{resource.id}_{frozen_index}",
+                            )
+                        )
+                        demands.append(demand)
 
             if resource_intervals:
                 model.add_cumulative(resource_intervals, demands, resource.pool_size)
@@ -689,16 +818,30 @@ class CpSatSolver(BaseSolver):
             model, problem, horizon, selected_ends
         )
 
-        # Energy defaults to 0 so existing makespan/setup/material hierarchy is
-        # bit-compatible unless the caller opts into energy (Wave 10 / T-35).
-        weights = {
-            "setup": int(objective_weights.get("setup", 1)),
-            "material_loss": int(objective_weights.get("material_loss", 1)),
-            "tardiness": int(objective_weights.get("tardiness", 1)),
-            "energy": int(
-                objective_weights.get("energy", objective_weights.get("energy_kwh", 0))
-            ),
-        }
+        # When weights are omitted, keep historical CP-SAT hierarchical secondary
+        # defaults (setup/material/tardiness = 1, energy = 0). When provided,
+        # accept canonical `material` alias and default missing keys to 0 to
+        # match DEFAULT_WEIGHTS (Wave 12 / H12-2).
+        if objective_weights:
+            material_w = objective_weights.get(
+                "material",
+                objective_weights.get("material_loss", 0),
+            )
+            weights = {
+                "setup": int(objective_weights.get("setup", 0)),
+                "material_loss": int(material_w),
+                "tardiness": int(objective_weights.get("tardiness", 0)),
+                "energy": int(
+                    objective_weights.get("energy", objective_weights.get("energy_kwh", 0))
+                ),
+            }
+        else:
+            weights = {
+                "setup": 1,
+                "material_loss": 1,
+                "tardiness": 1,
+                "energy": 0,
+            }
         secondary_bound = (
             weights["setup"] * setup_ub
             + weights["material_loss"] * material_ub
@@ -901,6 +1044,10 @@ class CpSatSolver(BaseSolver):
             op_id: int(offset)
             for op_id, offset in dict(kwargs.get("frozen_predecessor_end_offsets", {})).items()
         }
+        frozen_context_operations = list(kwargs.get("frozen_context_operations") or [])
+        frozen_aux_requirements = list(
+            kwargs.get("frozen_aux_requirements") or []
+        )
         enable_symmetry_breaking = bool(kwargs.get("enable_symmetry_breaking", False))
 
         t0 = time.monotonic()
@@ -919,6 +1066,24 @@ class CpSatSolver(BaseSolver):
                 "original work centers, not the virtual lanes. Provide a single-lane "
                 "instance or omit frozen_assignments (P1-4)."
             )
+
+        context_ops_by_id: dict[Any, Any] = {
+            operation.id: operation for operation in solve_problem.operations
+        }
+        for operation in frozen_context_operations:
+            context_ops_by_id.setdefault(operation.id, operation)
+        if frozen_assignments:
+            missing_frozen_ops = [
+                assignment.operation_id
+                for assignment in frozen_assignments
+                if assignment.operation_id not in context_ops_by_id
+            ]
+            if missing_frozen_ops:
+                raise ValueError(
+                    "frozen_assignments require frozen_context_operations covering "
+                    f"missing ops {missing_frozen_ops[:5]}{'...' if len(missing_frozen_ops) > 5 else ''} "
+                    "(Wave 12 / C12-1)."
+                )
 
         # F8 (audit v4): floor here is the CONSERVATIVE direction — all
         # start/end vars are bounded by `horizon`, so a sub-minute remainder is
@@ -1035,10 +1200,20 @@ class CpSatSolver(BaseSolver):
                 planning_horizon_start=solve_problem.planning_horizon_start,
                 horizon=horizon,
                 frozen_assignments=frozen_assignments,
+                context_ops_by_id=context_ops_by_id,
             )
         )
         self._add_aux_resource_cumulative_constraints(
-            model, solve_problem, eligible_by_op, intervals, setup_intervals_by_op
+            model,
+            solve_problem,
+            eligible_by_op,
+            intervals,
+            setup_intervals_by_op,
+            planning_horizon_start=solve_problem.planning_horizon_start,
+            horizon=horizon,
+            frozen_assignments=frozen_assignments,
+            frozen_aux_requirements=frozen_aux_requirements
+            or list(solve_problem.aux_requirements),
         )
 
         makespan = model.new_int_var(0, horizon, "makespan")

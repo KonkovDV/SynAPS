@@ -208,10 +208,19 @@ function normalizeSolvePayload(payload: Record<string, unknown>): Record<string,
       : {};
 
   if (typeof rawOptions.num_workers === "number" && Number.isFinite(rawOptions.num_workers)) {
-    rawOptions.num_workers = Math.max(1, Math.min(Math.floor(rawOptions.num_workers), 8));
+    const workers = Math.floor(rawOptions.num_workers);
+    if (workers < 1 || workers > 8) {
+      throw new Error(`solve_options.num_workers must be in [1, 8], got ${rawOptions.num_workers}`);
+    }
+    rawOptions.num_workers = workers;
   }
   if (typeof rawOptions.time_limit_s === "number" && Number.isFinite(rawOptions.time_limit_s)) {
-    rawOptions.time_limit_s = Math.max(1, Math.min(Math.floor(rawOptions.time_limit_s), 600));
+    const limit = Math.floor(rawOptions.time_limit_s);
+    // Wave 12 / H12-4: match Python SolveOptions honesty ([1, 7200], no silent 600 clamp).
+    if (limit < 1 || limit > 7200) {
+      throw new Error(`solve_options.time_limit_s must be in [1, 7200], got ${rawOptions.time_limit_s}`);
+    }
+    rawOptions.time_limit_s = limit;
   }
 
   return {

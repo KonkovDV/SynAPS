@@ -412,7 +412,7 @@ class RuntimePredictor:
         predictions = {
             "GREED": round(greed_ms, 1),
             "CPSAT-30": round(cpsat_ms, 1),
-            "LBBD": round(lbbd_ms, 1),
+            "LBBD-5": round(lbbd_ms, 1),
         }
 
         # Recommend based on predicted feasibility within time budget
@@ -420,10 +420,10 @@ class RuntimePredictor:
             recommended = "CPSAT-30"
             confidence = 0.7
         elif n <= 300:
-            recommended = "LBBD" if density > 0.3 else "CPSAT-120"
+            recommended = "LBBD-5" if density > 0.3 else "CPSAT-120"
             confidence = 0.5
         else:
-            recommended = "LBBD-HD"
+            recommended = "LBBD-5-HD"
             confidence = 0.4
 
         return RuntimeAdvisory(
@@ -449,7 +449,7 @@ class RuntimePredictor:
             _log.warning("model_output_unexpected", shape=len(values))
             return self._predict_heuristic(features)
 
-        solver_map = {0: "GREED", 1: "CPSAT-30", 2: "LBBD"}
+        solver_map = {0: "GREED", 1: "CPSAT-30", 2: "LBBD-5"}
         recommended_idx = round(values[3])
         recommended = solver_map.get(recommended_idx, "CPSAT-30")
 
@@ -457,7 +457,7 @@ class RuntimePredictor:
             predicted_ms={
                 "GREED": round(values[0], 1),
                 "CPSAT-30": round(values[1], 1),
-                "LBBD": round(values[2], 1),
+                "LBBD-5": round(values[2], 1),
             },
             recommended_solver=recommended,
             confidence=min(max(values[4], 0.0), 1.0),

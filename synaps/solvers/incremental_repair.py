@@ -54,6 +54,7 @@ class IncrementalRepair(BaseSolver):
         are already scheduled must not be re-timed inside the subproblem.
         """
         from synaps.solvers.cpsat_solver import CpSatSolver
+        import math
 
         op_positions = {operation.id: index for index, operation in enumerate(problem.operations)}
         ops_by_id = {operation.id: operation for operation in problem.operations}
@@ -74,13 +75,16 @@ class IncrementalRepair(BaseSolver):
         for operation in sub_operations:
             pred_id = operation.predecessor_op_id
             if pred_id is not None and pred_id not in remaining_op_ids:
-                # Pred is outside the free set: drop the model edge (ScheduleProblem
-                # requires preds to be present) and enforce timing via offsets.
+                # Pred outside free set: must be frozen (Wave 12 / C12-3). Never
+                # clear the edge without an offset — that was fail-open.
                 frozen_pred = frozen_by_op.get(pred_id)
-                if frozen_pred is not None:
-                    frozen_predecessor_end_offsets[operation.id] = int(
+                if frozen_pred is None:
+                    return None
+                frozen_predecessor_end_offsets[operation.id] = int(
+                    math.ceil(
                         (frozen_pred.end_time - horizon_start).total_seconds() / 60.0
                     )
+                )
                 free_operations.append(
                     operation.model_copy(update={"predecessor_op_id": None})
                 )
@@ -103,15 +107,20 @@ class IncrementalRepair(BaseSolver):
             planning_horizon_end=problem.planning_horizon_end,
         )
 
-        result = CpSatSolver().solve(
-            sub_problem,
-            time_limit_s=5,
-            num_workers=max(1, int(num_workers)),
-            auto_greedy_warm_start=False,
-            enable_symmetry_breaking=False,
-            frozen_assignments=list(frozen_assignments),
-            frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
-        )
+        try:
+            result = CpSatSolver().solve(
+                sub_problem,
+                time_limit_s=5,
+                num_workers=max(1, int(num_workers)),
+                auto_greedy_warm_start=False,
+                enable_symmetry_breaking=False,
+                frozen_assignments=list(frozen_assignments),
+                frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
+                frozen_context_operations=list(problem.operations),
+                frozen_aux_requirements=list(problem.aux_requirements),
+            )
+        except ValueError:
+            return None
 
         if (
             result.status in (SolverStatus.INFEASIBLE, SolverStatus.ERROR, SolverStatus.TIMEOUT)

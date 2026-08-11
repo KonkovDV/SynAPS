@@ -1245,13 +1245,19 @@ def _repair_cpsat_outcome(
 
         frozen_predecessor = frozen_assignments_by_op.get(operation.predecessor_op_id)
         if frozen_predecessor is None:
-            continue
+            return RepairOutcome(
+                status=RepairStatus.INFEASIBLE,
+                assignments=(),
+                reason="missing_frozen_predecessor",
+            )
 
         frozen_predecessor_end_offsets[op_id] = max(
             0,
-            round(
-                (frozen_predecessor.end_time - problem.planning_horizon_start).total_seconds()
-                / 60.0
+            int(
+                math.ceil(
+                    (frozen_predecessor.end_time - problem.planning_horizon_start).total_seconds()
+                    / 60.0
+                )
             ),
         )
 
@@ -1270,15 +1276,24 @@ def _repair_cpsat_outcome(
 
     # Solve the sub-problem
     solver = CpSatSolver()
-    result = solver.solve(
-        sub_problem,
-        time_limit_s=time_limit_s,
-        num_workers=max(1, int(num_workers)),
-        auto_greedy_warm_start=False,
-        enable_symmetry_breaking=False,
-        frozen_assignments=relevant_frozen_assignments,
-        frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
-    )
+    try:
+        result = solver.solve(
+            sub_problem,
+            time_limit_s=time_limit_s,
+            num_workers=max(1, int(num_workers)),
+            auto_greedy_warm_start=False,
+            enable_symmetry_breaking=False,
+            frozen_assignments=relevant_frozen_assignments,
+            frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
+            frozen_context_operations=list(problem.operations),
+            frozen_aux_requirements=list(problem.aux_requirements),
+        )
+    except ValueError as exc:
+        return RepairOutcome(
+            status=RepairStatus.INFEASIBLE,
+            assignments=(),
+            reason=f"cpsat_frozen_guard:{exc}",
+        )
 
     if result.status == SolverStatus.TIMEOUT:
         return RepairOutcome(

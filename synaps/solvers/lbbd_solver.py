@@ -1353,7 +1353,11 @@ def _add_benders_cut_rows(
                 f"LBBD cut kind {cut.kind!r} is permanently retired (KI-S3); "
                 "refusing to apply sentinel optimality cuts"
             )
-
+        else:
+            raise ValueError(
+                f"Unknown LBBD cut kind {cut.kind!r}; refusing silent no-op "
+                "(Wave 12 / M12-1)."
+            )
 
 
 def _post_assemble_assignments(

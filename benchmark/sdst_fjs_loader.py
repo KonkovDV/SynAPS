@@ -70,7 +70,19 @@ def load_sdst_fjs_problem(path: str | Path):
             for to_job in range(n_jobs):
                 minutes = matrix_vals[cursor]
                 cursor += 1
-                if from_job == to_job or minutes <= 0:
+                if from_job == to_job:
+                    continue
+                if minutes < 0:
+                    import warnings
+
+                    warnings.warn(
+                        f"SDST matrix negative setup dropped "
+                        f"(wc={wc.code}, from_job={from_job}, to_job={to_job}, minutes={minutes})",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    continue
+                if minutes == 0:
                     continue
                 setups.append(
                     SetupEntry(

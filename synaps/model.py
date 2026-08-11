@@ -79,8 +79,8 @@ class SetupEntry(BaseModel):
     from_state_id: UUID
     to_state_id: UUID
     setup_minutes: int = Field(ge=0)
-    material_loss: float = 0.0
-    energy_kwh: float = 0.0
+    material_loss: float = Field(default=0.0, ge=0.0)
+    energy_kwh: float = Field(default=0.0, ge=0.0)
     domain_attributes: dict[str, Any] = Field(default_factory=dict)
 
 

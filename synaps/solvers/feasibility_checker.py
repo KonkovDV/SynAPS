@@ -104,7 +104,8 @@ ADVISORY_VIOLATION_KINDS: frozenset[str] = frozenset({"LANE_INFERENCE_UNPROVEN"}
 _GREEDY_UNPROVEN_TRIGGER_KINDS: frozenset[str] = frozenset(
     {
         "SETUP_GAP_VIOLATION",
-        "MACHINE_CAPACITY_VIOLATION",
+        # MACHINE_CAPACITY_VIOLATION is physical (sweep / max_parallel) — never demote
+        # it as a lane-heuristic false positive (Wave 12 / H12-1).
         "MACHINE_OVERLAP",
         "MISSING_SETUP_ENTRY",
     }

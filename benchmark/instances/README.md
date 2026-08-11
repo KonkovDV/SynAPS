@@ -25,6 +25,13 @@ Each `.json` file is a serialised `ScheduleProblem` (Pydantic v2):
 | `pareto_setup_tradeoff_4op.json` | 1 | 2 | 4 | 4 | Objective-tradeoff benchmark |
 | `medium_stress_20x4.json` | 8 | 4 | 20 | 15 | Medium stress with aux constraints |
 
+Public slices (also under this tree):
+
+| Path | Notes |
+|------|-------|
+| `public/brandimarte/mk01.fjs`–`mk10.fjs` | Vendored Brandimarte FJSP (T-30 overrides) |
+| `public/sdst/` | Small SDST toys; dmorill pack **not** vendored (GPL-3.0) |
+
 ## Adding New Instances
 
 1. Create a valid `ScheduleProblem` JSON (use `model_dump(mode="json")`)

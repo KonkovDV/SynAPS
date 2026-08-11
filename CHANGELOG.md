@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Wave 12 (Lit Aug 2026 + Hyper Red Team):**
+  - CP-SAT frozen↔free SDST disjunctives + frozen aux cumulatives; refuse collapsed frozen / missing context (C12-1/2/4).
+  - IncrementalRepair/ALNS: refuse missing frozen pred; `ceil` offsets (C12-3 / H12-3).
+  - `proven_hard` no longer demotes physical `MACHINE_CAPACITY_VIOLATION` (H12-1).
+  - CP-SAT accepts `material` alias; BFF rejects OOB time_limit/workers; Brandimarte README honesty.
+  - ML advisory emits registry-valid `LBBD-5` / `LBBD-5-HD`; SDST negative setup warning; energy/material `ge=0`.
+  - Docs: `LIT_AUG2026_SYNAPS_BRIEF.md`, `HYPER_REDTEAM_AUDIT_2026_08_11_W12.md`, `WAVE12_EXECUTION_PLAN.md`.
+  - Tests: `tests/test_wave12_hyper_rt.py`.
+
 - **Wave 11 (Hyper Red Team fix pack):**
   - IncrementalRepair: CP-SAT fallback honors frozen intervals/preds (C1); INFEASIBLE on unrepaired remainder (C2); refuses `max_parallel>1` (H2).
   - `proven_hard_violations` demotes greedy triggers per unproven WC only (H1).
