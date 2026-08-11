@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Wave 6 (Wave 5 Red Team residuals):**
+  - ALNS native greedy skipped when `machine_duration_overrides` present (H2).
+  - ALNS search aggregates setup energy into objective/cost (`get_energy`, weight `energy`).
+  - MAB `mab_pair_selection` selects destroy×repair pairs (`cpsat|greedy`).
+  - SDST public slice: `fattahi_style_3x3`, `medium_4x3` (+ existing toy).
+  - Tests: `tests/test_wave6_residuals.py`.
+
 - **Wave 5 (open KI + Wave 3 RFC implementation):**
   - `docs/rfc/WAVE5_EXECUTION_PLAN.md` — execution order for KI-S3/F7/F16 and T-30/T-34/T-35.
   - **T-30 / p_{o,m}:** `Operation.machine_duration_overrides`; `duration_minutes_for` /

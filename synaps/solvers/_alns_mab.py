@@ -58,4 +58,11 @@ def pair_reward(*, cost_before: float, cost_after: float, accepted: bool) -> flo
     return max(0.0, (cost_before - cost_after) / denom)
 
 
-__all__ = ["PairBandit", "pair_reward"]
+def charge_pair_reject(bandit: PairBandit | None, pair_idx: int) -> None:
+    """Credit a rejected / aborted pair so UCB1 cannot livelock on arm 0."""
+    if bandit is None or pair_idx < 0:
+        return
+    bandit.update(pair_idx, pair_reward(cost_before=1.0, cost_after=1.0, accepted=False))
+
+
+__all__ = ["PairBandit", "charge_pair_reject", "pair_reward"]

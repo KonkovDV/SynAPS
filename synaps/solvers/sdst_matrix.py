@@ -164,6 +164,15 @@ class SdstMatrix:
             return 0.0
         return float(self.material_loss[wi, fi, ti])
 
+    def get_energy(self, wc_id: UUID, from_state: UUID, to_state: UUID) -> float:
+        """O(1) setup energy (kWh) lookup. Returns 0.0 for unknown triples."""
+        wi = self.wc_id_to_idx.get(wc_id)
+        fi = self.state_id_to_idx.get(from_state)
+        ti = self.state_id_to_idx.get(to_state)
+        if wi is None or fi is None or ti is None:
+            return 0.0
+        return float(self.energy_kwh[wi, fi, ti])
+
     def total_setup_for_sequence(
         self,
         wc_id: UUID,

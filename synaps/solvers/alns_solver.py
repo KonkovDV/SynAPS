@@ -110,6 +110,25 @@ class AlnsIterationRecord:
 # ---------------------------------------------------------------------------
 
 
+def _sum_machine_transitions(
+    sdst: SdstMatrix,
+    ops_by_id: dict[Any, Any],
+    machine_assignments: list[Assignment],
+) -> tuple[float, float, float]:
+    """Sum setup / material / energy along a single machine timeline."""
+    setup = 0.0
+    loss = 0.0
+    energy = 0.0
+    for i in range(1, len(machine_assignments)):
+        prev_state = ops_by_id[machine_assignments[i - 1].operation_id].state_id
+        curr_state = ops_by_id[machine_assignments[i].operation_id].state_id
+        wc_id = machine_assignments[i].work_center_id
+        setup += sdst.get_setup(wc_id, prev_state, curr_state)
+        loss += sdst.get_material_loss(wc_id, prev_state, curr_state)
+        energy += sdst.get_energy(wc_id, prev_state, curr_state)
+    return setup, loss, energy
+
+
 def _evaluate_objective(
     problem: ScheduleProblem,
     assignments: list[Assignment],
@@ -145,16 +164,16 @@ def _evaluate_objective(
     # Setup and material loss from machine sequences
     total_setup = 0.0
     total_material_loss = 0.0
+    total_energy = 0.0
     by_machine: dict[Any, list[Assignment]] = {}
     for a in assignments:
         by_machine.setdefault(a.work_center_id, []).append(a)
     for wc_id, machine_assignments in by_machine.items():
         machine_assignments.sort(key=lambda a: a.start_time)
-        for i in range(1, len(machine_assignments)):
-            prev_state = ops_by_id[machine_assignments[i - 1].operation_id].state_id
-            curr_state = ops_by_id[machine_assignments[i].operation_id].state_id
-            total_setup += sdst.get_setup(wc_id, prev_state, curr_state)
-            total_material_loss += sdst.get_material_loss(wc_id, prev_state, curr_state)
+        setup, loss, energy = _sum_machine_transitions(sdst, ops_by_id, machine_assignments)
+        total_setup += setup
+        total_material_loss += loss
+        total_energy += energy
 
     # Tardiness (F10: unscheduled orders complete at the horizon end, so ALNS
     # cannot "improve" the objective by dropping a late order).
@@ -175,6 +194,7 @@ def _evaluate_objective(
         total_setup_minutes=total_setup,
         total_material_loss=total_material_loss,
         total_tardiness_minutes=total_tardiness,
+        total_energy_kwh=total_energy,
     )
 
 
@@ -185,6 +205,7 @@ def _objective_cost(obj: ObjectiveValues, weights: dict[str, float]) -> float:
         + weights.get("setup", 0.3) * obj.total_setup_minutes
         + weights.get("material_loss", 0.2) * obj.total_material_loss
         + weights.get("tardiness", 0.5) * obj.total_tardiness_minutes
+        + weights.get("energy", weights.get("energy_kwh", 0.0)) * obj.total_energy_kwh
     )
 
 
@@ -197,14 +218,16 @@ def _objective_cost(obj: ObjectiveValues, weights: dict[str, float]) -> float:
 class _MachineObjectiveCache:
     """Per-machine cached objective components for incremental ALNS evaluation."""
 
-    # Per-machine makespan (max end offset), setup, and material loss
+    # Per-machine makespan (max end offset), setup, material loss, and energy
     machine_makespan: dict[Any, float]
     machine_setup: dict[Any, float]
     machine_loss: dict[Any, float]
+    machine_energy: dict[Any, float]
     # Aggregate totals
     total_makespan: float
     total_setup: float
     total_material_loss: float
+    total_energy: float
     total_tardiness: float
     # Pre-computed order completion offsets
     order_completion: dict[Any, float]
@@ -225,6 +248,7 @@ def _build_machine_objective_cache(
     machine_makespan: dict[Any, float] = {}
     machine_setup: dict[Any, float] = {}
     machine_loss: dict[Any, float] = {}
+    machine_energy: dict[Any, float] = {}
 
     by_machine: dict[Any, list[Assignment]] = {}
     for a in assignments:
@@ -235,19 +259,15 @@ def _build_machine_objective_cache(
         machine_makespan[wc_id] = max(
             (a.end_time - horizon_start).total_seconds() / 60.0 for a in ma
         )
-        setup = 0.0
-        loss = 0.0
-        for i in range(1, len(ma)):
-            prev_state = ops_by_id[ma[i - 1].operation_id].state_id
-            curr_state = ops_by_id[ma[i].operation_id].state_id
-            setup += sdst.get_setup(wc_id, prev_state, curr_state)
-            loss += sdst.get_material_loss(wc_id, prev_state, curr_state)
+        setup, loss, energy = _sum_machine_transitions(sdst, ops_by_id, ma)
         machine_setup[wc_id] = setup
         machine_loss[wc_id] = loss
+        machine_energy[wc_id] = energy
 
     total_makespan = max(machine_makespan.values()) if machine_makespan else 0.0
     total_setup = sum(machine_setup.values())
     total_material_loss = sum(machine_loss.values())
+    total_energy = sum(machine_energy.values())
 
     order_completion: dict[Any, float] = {}
     for a in assignments:
@@ -275,9 +295,11 @@ def _build_machine_objective_cache(
         machine_makespan=machine_makespan,
         machine_setup=machine_setup,
         machine_loss=machine_loss,
+        machine_energy=machine_energy,
         total_makespan=total_makespan,
         total_setup=total_setup,
         total_material_loss=total_material_loss,
+        total_energy=total_energy,
         total_tardiness=total_tardiness,
         order_completion=order_completion,
         order_due_offsets=order_due_offsets,
@@ -307,6 +329,7 @@ def _evaluate_objective_incremental(
     new_machine_makespan = dict(base_cache.machine_makespan)
     new_machine_setup = dict(base_cache.machine_setup)
     new_machine_loss = dict(base_cache.machine_loss)
+    new_machine_energy = dict(base_cache.machine_energy)
 
     # Remove affected machines that may now be empty
     for wc_id in affected_machine_ids:
@@ -314,25 +337,22 @@ def _evaluate_objective_incremental(
             new_machine_makespan.pop(wc_id, None)
             new_machine_setup.pop(wc_id, None)
             new_machine_loss.pop(wc_id, None)
+            new_machine_energy.pop(wc_id, None)
 
     for wc_id, ma in affected_assignments.items():
         ma.sort(key=lambda a: a.start_time)
         new_machine_makespan[wc_id] = max(
             (a.end_time - horizon_start).total_seconds() / 60.0 for a in ma
         )
-        setup = 0.0
-        loss = 0.0
-        for i in range(1, len(ma)):
-            prev_state = ops_by_id[ma[i - 1].operation_id].state_id
-            curr_state = ops_by_id[ma[i].operation_id].state_id
-            setup += sdst.get_setup(wc_id, prev_state, curr_state)
-            loss += sdst.get_material_loss(wc_id, prev_state, curr_state)
+        setup, loss, energy = _sum_machine_transitions(sdst, ops_by_id, ma)
         new_machine_setup[wc_id] = setup
         new_machine_loss[wc_id] = loss
+        new_machine_energy[wc_id] = energy
 
     total_makespan = max(new_machine_makespan.values()) if new_machine_makespan else 0.0
     total_setup = sum(new_machine_setup.values())
     total_material_loss = sum(new_machine_loss.values())
+    total_energy = sum(new_machine_energy.values())
 
     # Recompute order completion (affected operations may change order completion)
     new_order_completion = dict(base_cache.order_completion)
@@ -369,15 +389,18 @@ def _evaluate_objective_incremental(
         total_setup_minutes=total_setup,
         total_material_loss=total_material_loss,
         total_tardiness_minutes=total_tardiness,
+        total_energy_kwh=total_energy,
     )
 
     new_cache = _MachineObjectiveCache(
         machine_makespan=new_machine_makespan,
         machine_setup=new_machine_setup,
         machine_loss=new_machine_loss,
+        machine_energy=new_machine_energy,
         total_makespan=total_makespan,
         total_setup=total_setup,
         total_material_loss=total_material_loss,
+        total_energy=total_energy,
         total_tardiness=total_tardiness,
         order_completion=new_order_completion,
         order_due_offsets=order_due_offsets,
@@ -1371,6 +1394,16 @@ def _release_offset_by_op(problem: ScheduleProblem) -> dict[UUID, float]:
     return offsets
 
 
+def _ops_have_machine_duration_overrides(operations: list[Any]) -> bool:
+    """True when any op carries T-30 ``machine_duration_overrides``.
+
+    The native greedy kernel ranks machines with ``base_duration / speed`` only
+    (Wave 5 H2 / Wave 6.1). When overrides are present, skip native and use the
+    Python path that calls ``duration_minutes_for``.
+    """
+    return any(getattr(op, "machine_duration_overrides", None) for op in operations)
+
+
 def _try_native_greedy_repair(
     problem: ScheduleProblem,
     frozen_assignments: list[Assignment],
@@ -1393,6 +1426,10 @@ def _try_native_greedy_repair(
     try:
         # Build index mappings
         ops_by_id = {op.id: op for op in problem.operations}
+        if _ops_have_machine_duration_overrides(
+            [ops_by_id[op_id] for op_id in disrupted_op_ids if op_id in ops_by_id]
+        ):
+            return None
         release_offsets = _release_offset_by_op(problem)
         wc_id_to_idx = {wc.id: idx for idx, wc in enumerate(problem.work_centers)}
         state_id_to_idx = {s.id: idx for idx, s in enumerate(problem.states)}
@@ -1661,6 +1698,8 @@ def _try_native_initial_seed(
 
     # Early exit: if native function is not available, don't waste time building arrays
     if _native_greedy_repair_batch is None:
+        return None
+    if _ops_have_machine_duration_overrides(list(ops_by_id.values())):
         return None
 
     try:
@@ -3182,13 +3221,19 @@ class AlnsSolver(BaseSolver):
         operator_scores = [0.0] * n_operators
         operator_attempts = [0] * n_operators
         pair_bandit = None
+        mab_repair_modes: list[str] = []
+        mab_pair_labels: list[str] = []
         if mab_pair_selection:
             from synaps.solvers._alns_mab import PairBandit
 
-            # T-34: UCB1 over destroy operators paired with the active repair
-            # path (CP-SAT/greedy). Full destroy×repair cartesian lands when
-            # repair becomes a first-class roulette family.
-            pair_bandit = PairBandit(n_pairs=n_operators)
+            # T-34 / Wave 6.3: UCB1 over (destroy, repair) cartesian product.
+            mab_repair_modes = ["cpsat", "greedy"] if use_cpsat_repair else ["greedy"]
+            mab_pair_labels = [
+                f"{d_name}|{r_mode}"
+                for d_name, _ in DESTROY_OPERATORS
+                for r_mode in mab_repair_modes
+            ]
+            pair_bandit = PairBandit(n_pairs=len(mab_pair_labels))
 
         # C2 (Task 12.1): Process initial_operator_weights kwarg via helper.
         # Prefer dict keyed by operator name (robust to DESTROY_OPERATORS reordering).
@@ -3343,9 +3388,14 @@ class AlnsSolver(BaseSolver):
 
                 iterations_completed = iteration
 
-                # Select destroy operator (roulette wheel, or UCB1 when MAB on)
+                # Select destroy operator (roulette wheel, or UCB1 pair when MAB on)
+                selected_pair_idx = -1
+                forced_repair_mode: str | None = None
                 if pair_bandit is not None:
-                    selected_op_idx = pair_bandit.select()
+                    selected_pair_idx = pair_bandit.select()
+                    n_modes = max(1, len(mab_repair_modes))
+                    selected_op_idx = selected_pair_idx // n_modes
+                    forced_repair_mode = mab_repair_modes[selected_pair_idx % n_modes]
                 else:
                     total_weight = sum(operator_weights)
                     r = rng.random() * total_weight
@@ -3378,6 +3428,9 @@ class AlnsSolver(BaseSolver):
                     destroyed_ids -= fixed_op_ids
 
                 if not destroyed_ids:
+                    from synaps.solvers._alns_mab import charge_pair_reject
+
+                    charge_pair_reject(pair_bandit, selected_pair_idx)
                     continue
 
                 destroyed_ids = _expand_successor_closure(
@@ -3404,7 +3457,7 @@ class AlnsSolver(BaseSolver):
                     {assignment.operation_id: assignment for assignment in internal_frozen}
                 )
 
-                # Repair — primary depends on use_cpsat_repair flag
+                # Repair — primary depends on use_cpsat_repair flag (or MAB pair)
                 # CP-SAT repair (Laborie & Godard 2007) when enabled, greedy fallback otherwise
                 new_assignments: list[Assignment] | None = None
                 repair_used = "none"
@@ -3415,7 +3468,12 @@ class AlnsSolver(BaseSolver):
                     reason = outcome.reason or outcome.status.value
                     repair_rejection_reasons[reason] = repair_rejection_reasons.get(reason, 0) + 1
 
-                if use_cpsat_repair and len(destroyed_ids) <= cpsat_max_destroy_ops:
+                try_cpsat = use_cpsat_repair and (
+                    forced_repair_mode is None or forced_repair_mode == "cpsat"
+                )
+                try_greedy = forced_repair_mode is None or forced_repair_mode == "greedy"
+
+                if try_cpsat and len(destroyed_ids) <= cpsat_max_destroy_ops:
                     cpsat_repair_attempts += 1
                     cpsat_repair_t0 = time.monotonic()
                     # D3: clamp the micro-repair budget to the remaining
@@ -3462,10 +3520,23 @@ class AlnsSolver(BaseSolver):
                             )
                     else:
                         record_repair_outcome(cpsat_outcome)
-                elif use_cpsat_repair:
+                elif try_cpsat:
                     cpsat_repair_skips_large_destroy += 1
 
-                if new_assignments is None:
+                if (
+                    new_assignments is None
+                    and forced_repair_mode == "cpsat"
+                    and pair_bandit is not None
+                    and selected_pair_idx >= 0
+                ):
+                    from synaps.solvers._alns_mab import charge_pair_reject
+
+                    charge_pair_reject(pair_bandit, selected_pair_idx)
+                    continue
+
+                if new_assignments is None and try_greedy and (
+                    forced_repair_mode == "greedy" or forced_repair_mode is None
+                ):
                     greedy_repair_attempts += 1
                     greedy_repair_t0 = time.monotonic()
                     greedy_outcome = _repair_greedy_outcome(problem, frozen, destroyed_ids)
@@ -3496,6 +3567,9 @@ class AlnsSolver(BaseSolver):
                         record_repair_outcome(greedy_outcome)
 
                 if new_assignments is None:
+                    from synaps.solvers._alns_mab import charge_pair_reject
+
+                    charge_pair_reject(pair_bandit, selected_pair_idx)
                     continue  # repair failed, discard this iteration
 
                 # Assemble candidate solution
@@ -3504,9 +3578,15 @@ class AlnsSolver(BaseSolver):
                 # Quick feasibility sanity check (only check completeness)
                 candidate_op_ids = {a.operation_id for a in candidate}
                 if len(candidate_op_ids) != n_ops:
+                    from synaps.solvers._alns_mab import charge_pair_reject
+
+                    charge_pair_reject(pair_bandit, selected_pair_idx)
                     feasibility_failures += 1
                     continue
                 if _has_precedence_violation(candidate, ops_by_id):
+                    from synaps.solvers._alns_mab import charge_pair_reject
+
+                    charge_pair_reject(pair_bandit, selected_pair_idx)
                     feasibility_failures += 1
                     continue
                 if _violates_frozen_precedence(
@@ -3514,9 +3594,15 @@ class AlnsSolver(BaseSolver):
                     frozen_assignments_by_op,
                     ops_by_id,
                 ):
+                    from synaps.solvers._alns_mab import charge_pair_reject
+
+                    charge_pair_reject(pair_bandit, selected_pair_idx)
                     feasibility_failures += 1
                     continue
                 if _has_machine_overlap(frozen_assignments + candidate):
+                    from synaps.solvers._alns_mab import charge_pair_reject
+
+                    charge_pair_reject(pair_bandit, selected_pair_idx)
                     feasibility_failures += 1
                     continue
 
@@ -3593,7 +3679,7 @@ class AlnsSolver(BaseSolver):
 
                     accepted_move = score_reward > 0.0
                     pair_bandit.update(
-                        selected_op_idx,
+                        selected_pair_idx if selected_pair_idx >= 0 else selected_op_idx,
                         pair_reward(
                             cost_before=cost_before_move,
                             cost_after=candidate_cost,
@@ -3820,6 +3906,8 @@ class AlnsSolver(BaseSolver):
                 ),
                 "cpsat_max_destroy_ops": cpsat_max_destroy_ops,
                 "mab_pair_selection": mab_pair_selection,
+                "mab_pair_count": len(mab_pair_labels),
+                "mab_repair_modes": list(mab_repair_modes),
                 "repair_num_workers": repair_num_workers,
                 "initial_solution_ms": initial_solution_ms,
                 "native_initial_seed_attempted": native_initial_seed_attempted,

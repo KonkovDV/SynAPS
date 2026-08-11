@@ -1,8 +1,7 @@
 # Design note: MAB selection of ALNS destroy/repair pairs (T-34)
 
-- **Status:** Partial (Wave 5) — UCB1 over destroy operators opt-in via
-  `mab_pair_selection`; full destroy×repair cartesian deferred until repair is a
-  first-class roulette family
+- **Status:** Implemented (Wave 6) — UCB1 over destroy×repair pairs
+  (`cpsat|greedy`) via `mab_pair_selection`; default remains legacy roulette
 - **Date:** 2026-08-11
 
 ## Current behavior
