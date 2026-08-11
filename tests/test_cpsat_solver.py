@@ -360,6 +360,91 @@ def test_cpsat_breaks_makespan_tie_by_material_loss() -> None:
     assert result.objective.total_material_loss == 0.5
 
 
+def _make_energy_tiebreak_problem() -> tuple[ScheduleProblem, Operation, Operation]:
+    """Equal setup minutes; A→B is low energy, B→A is high — prefer A then B."""
+    state_a = State(id=uuid4(), code="STATE-A", label="State A")
+    state_b = State(id=uuid4(), code="STATE-B", label="State B")
+    work_center = WorkCenter(id=uuid4(), code="WC-1", capability_group="machining")
+    horizon_start = datetime(2026, 4, 1, 8, 0, tzinfo=UTC)
+    horizon_end = datetime(2026, 4, 1, 20, 0, tzinfo=UTC)
+    order_a = Order(
+        id=uuid4(),
+        external_ref="ORD-A",
+        due_date=horizon_start + timedelta(hours=6),
+        priority=500,
+    )
+    order_b = Order(
+        id=uuid4(),
+        external_ref="ORD-B",
+        due_date=horizon_start + timedelta(hours=6),
+        priority=500,
+    )
+    operation_a = Operation(
+        id=uuid4(),
+        order_id=order_a.id,
+        seq_in_order=0,
+        state_id=state_a.id,
+        base_duration_min=30,
+        eligible_wc_ids=[work_center.id],
+    )
+    operation_b = Operation(
+        id=uuid4(),
+        order_id=order_b.id,
+        seq_in_order=0,
+        state_id=state_b.id,
+        base_duration_min=30,
+        eligible_wc_ids=[work_center.id],
+    )
+    problem = ScheduleProblem(
+        states=[state_a, state_b],
+        orders=[order_a, order_b],
+        operations=[operation_a, operation_b],
+        work_centers=[work_center],
+        setup_matrix=[
+            SetupEntry(
+                work_center_id=work_center.id,
+                from_state_id=state_a.id,
+                to_state_id=state_b.id,
+                setup_minutes=10,
+                energy_kwh=0.5,
+            ),
+            SetupEntry(
+                work_center_id=work_center.id,
+                from_state_id=state_b.id,
+                to_state_id=state_a.id,
+                setup_minutes=10,
+                energy_kwh=5.0,
+            ),
+        ],
+        planning_horizon_start=horizon_start,
+        planning_horizon_end=horizon_end,
+    )
+    return problem, operation_a, operation_b
+
+
+def test_cpsat_breaks_makespan_tie_by_energy_when_weighted() -> None:
+    """Wave 10: non-zero energy weight selects the low-energy transition order."""
+    problem, operation_a, operation_b = _make_energy_tiebreak_problem()
+    result = CpSatSolver().solve(
+        problem,
+        time_limit_s=10,
+        random_seed=9,
+        objective_weights={"setup": 1, "material_loss": 0, "tardiness": 0, "energy": 10},
+    )
+    assert result.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
+    ordered = sorted(result.assignments, key=lambda a: a.start_time)
+    assert [a.operation_id for a in ordered] == [operation_a.id, operation_b.id]
+    assert result.objective.total_energy_kwh == 0.5
+
+
+def test_cpsat_energy_weight_zero_keeps_feasible() -> None:
+    """Default energy weight 0 must still produce a feasible schedule."""
+    problem, _a, _b = _make_energy_tiebreak_problem()
+    result = CpSatSolver().solve(problem, time_limit_s=10, random_seed=9)
+    assert result.status in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}
+    assert result.objective.total_energy_kwh in {0.5, 5.0}
+
+
 def _make_setup_tradeoff_problem() -> ScheduleProblem:
     state_a = State(id=uuid4(), code="STATE-A", label="State A")
     state_b = State(id=uuid4(), code="STATE-B", label="State B")

@@ -126,66 +126,50 @@ def _minimize_scalarized_objective(
     total_setup: Any,
     total_material_scaled: Any,
     total_tardiness: Any,
+    total_energy_scaled: Any,
     horizon: int,
     setup_ub: int,
     material_ub: int,
     tardiness_ub: int,
+    energy_ub: int,
     weights: dict[str, int],
     secondary_bound: int,
 ) -> bool:
-    """Install the scalarized objective; returns True when overflow-degraded.
-
-    F5 (audit v4): BOTH scalarized objectives can overflow — the default big-M
-    branch and epsilon_primary with a non-makespan primary grow with the same
-    law — so the overflow guard is applied per-branch.
-    """
+    """Install the scalarized objective; returns True when overflow-degraded."""
     if objective_mode == "epsilon_primary":
-        objective_targets = {
+        targets = {
             "makespan": makespan,
             "setup": total_setup,
             "material_loss": total_material_scaled,
             "tardiness": total_tardiness,
+            "energy": total_energy_scaled,
         }
-        objective_bounds = {
+        bounds = {
             "makespan": horizon,
             "setup": setup_ub,
             "material_loss": material_ub,
             "tardiness": max(1, tardiness_ub),
+            "energy": energy_ub,
         }
-        try:
-            primary_target = objective_targets[primary_objective]
-        except KeyError as exc:
-            supported = ", ".join(sorted(objective_targets))
+        if primary_objective not in targets:
             raise ValueError(
-                "Unsupported primary_objective "
-                f"'{primary_objective}'. Expected one of: {supported}"
-            ) from exc
-
+                f"Unsupported primary_objective '{primary_objective}'. "
+                f"Expected one of: {', '.join(sorted(targets))}"
+            )
+        primary = targets[primary_objective]
         if primary_objective == "makespan":
-            model.minimize(primary_target)
-        elif _objective_product_overflows(
-            objective_bounds[primary_objective], objective_bounds["makespan"]
-        ):
-            # F5: ``primary * (horizon + 1)`` would overflow the int64 objective
-            # domain at this scale — degrade to makespan, same policy as the
-            # big-M branch, instead of corrupting the solve silently.
+            model.minimize(primary)
+            return False
+        if _objective_product_overflows(bounds[primary_objective], bounds["makespan"]):
             model.minimize(makespan)
             return True
-        # Lexicographic tie-break inside the selected Pareto slice: once the
-        # primary objective is minimized, prefer the shortest makespan still
-        # satisfying the epsilon caps.
-        makespan_bound = objective_bounds["makespan"] + 1
-        model.minimize(primary_target * makespan_bound + makespan)
+        model.minimize(primary * (bounds["makespan"] + 1) + makespan)
         return False
 
     if epsilon_constraints:
         model.minimize(makespan)
         return False
 
-    # Default: hierarchical weighted-sum with makespan as primary. P1-1: guard
-    # the big-M against int64 overflow at the model's stated scale; when the
-    # coefficient product exceeds the safe ceiling, degrade to makespan-only
-    # rather than overflow the CP-SAT objective domain.
     if _bigm_objective_overflows(horizon, secondary_bound):
         model.minimize(makespan)
         return True
@@ -194,8 +178,39 @@ def _minimize_scalarized_objective(
         + weights["setup"] * total_setup
         + weights["material_loss"] * total_material_scaled
         + weights["tardiness"] * total_tardiness
+        + weights["energy"] * total_energy_scaled
     )
     return False
+
+
+def _scaled_transition_lookups(
+    problem: ScheduleProblem,
+    *,
+    material_loss_scale: int,
+    energy_kwh_scale: int,
+) -> tuple[
+    dict[tuple[Any, Any, Any], int],
+    dict[tuple[Any, Any, Any], int],
+    dict[tuple[Any, Any, Any], int],
+]:
+    """Build minute / scaled-material / scaled-energy lookups for circuit arcs."""
+    minutes = {
+        (e.work_center_id, e.from_state_id, e.to_state_id): e.setup_minutes
+        for e in problem.setup_matrix
+    }
+    material = {
+        (e.work_center_id, e.from_state_id, e.to_state_id): round(
+            e.material_loss * material_loss_scale
+        )
+        for e in problem.setup_matrix
+    }
+    energy = {
+        (e.work_center_id, e.from_state_id, e.to_state_id): round(
+            e.energy_kwh * energy_kwh_scale
+        )
+        for e in problem.setup_matrix
+    }
+    return minutes, material, energy
 
 
 def _apply_sat_parameter_overrides(
@@ -408,23 +423,22 @@ class CpSatSolver(BaseSolver):
         presences: dict[tuple[Any, Any], Any],
         setup_minutes_lookup: dict[tuple[Any, Any, Any], int],
         setup_material_lookup: dict[tuple[Any, Any, Any], int],
+        setup_energy_lookup: dict[tuple[Any, Any, Any], int],
         *,
         planning_horizon_start: Any,
         horizon: int,
         frozen_assignments: list[Assignment] | None = None,
-    ) -> tuple[list[Any], list[Any], dict[Any, list[tuple[Any, Any]]]]:
+    ) -> tuple[list[Any], list[Any], list[Any], dict[Any, list[tuple[Any, Any]]]]:
         """Model SDST via AddCircuit (O(N²) arcs per machine, not O(N³) booleans).
 
         Uses a virtual depot node per machine.  Self-loops model absent operations.
         Arc literals carry both the setup-time implication and the objective terms.
 
-        Returns (setup_terms, material_terms, setup_intervals_by_op) where
-        setup_intervals_by_op maps operation_id to a list of (optional_interval, arc_literal)
-        for setup periods preceding that operation.  These are later included in
-        auxiliary resource cumulative constraints.
+        Returns (setup_terms, material_terms, energy_terms, setup_intervals_by_op).
         """
         setup_terms: list[Any] = []
         material_terms: list[Any] = []
+        energy_terms: list[Any] = []
         # Maps operation_id → [(setup_interval, arc_literal)] for aux resource tracking
         setup_intervals_by_op: dict[Any, list[tuple[Any, Any]]] = {}
         frozen_assignments_by_machine: dict[Any, list[Assignment]] = {}
@@ -573,6 +587,11 @@ class CpSatSolver(BaseSolver):
                     )
                     if material_loss:
                         material_terms.append(material_loss * lit)
+                    energy_scaled = setup_energy_lookup.get(
+                        (work_center.id, op_i.state_id, op_j.state_id), 0
+                    )
+                    if energy_scaled:
+                        energy_terms.append(energy_scaled * lit)
 
             # Self-loops for absent operations (not assigned to this machine)
             for operation in machine_operations:
@@ -590,7 +609,7 @@ class CpSatSolver(BaseSolver):
 
             model.add_circuit(arcs)
 
-        return setup_terms, material_terms, setup_intervals_by_op
+        return setup_terms, material_terms, energy_terms, setup_intervals_by_op
 
     def _add_aux_resource_cumulative_constraints(
         self,
@@ -636,64 +655,69 @@ class CpSatSolver(BaseSolver):
         makespan: Any,
         setup_terms: list[Any],
         material_terms: list[Any],
+        energy_terms: list[Any],
         selected_ends: dict[Any, Any],
         objective_weights: dict[str, int],
         material_loss_scale: int,
+        energy_kwh_scale: int,
         epsilon_constraints: dict[str, int] | None = None,
         objective_mode: str = "weighted_sum",
         primary_objective: str = "makespan",
-    ) -> tuple[Any, Any, Any, int, dict[str, int], int, bool]:
+    ) -> tuple[Any, Any, Any, Any, int, dict[str, int], int, int, bool]:
         max_setup = max((entry.setup_minutes for entry in problem.setup_matrix), default=0)
         max_material_scaled = max(
             (round(entry.material_loss * material_loss_scale) for entry in problem.setup_matrix),
             default=0,
         )
-
-        setup_ub = max(1, max_setup * max(len(problem.operations), 1))
-        material_ub = max(1, max_material_scaled * max(len(problem.operations), 1))
+        max_energy_scaled = max(
+            (round(entry.energy_kwh * energy_kwh_scale) for entry in problem.setup_matrix),
+            default=0,
+        )
+        n_ops = max(len(problem.operations), 1)
+        setup_ub = max(1, max_setup * n_ops)
+        material_ub = max(1, max_material_scaled * n_ops)
+        energy_ub = max(1, max_energy_scaled * n_ops)
 
         total_setup = model.new_int_var(0, setup_ub, "total_setup_minutes")
         total_material_scaled = model.new_int_var(0, material_ub, "total_material_loss_scaled")
-        if setup_terms:
-            model.add(total_setup == sum(setup_terms))
-        else:
-            model.add(total_setup == 0)
-        if material_terms:
-            model.add(total_material_scaled == sum(material_terms))
-        else:
-            model.add(total_material_scaled == 0)
+        total_energy_scaled = model.new_int_var(0, energy_ub, "total_energy_kwh_scaled")
+        model.add(total_setup == (sum(setup_terms) if setup_terms else 0))
+        model.add(total_material_scaled == (sum(material_terms) if material_terms else 0))
+        model.add(total_energy_scaled == (sum(energy_terms) if energy_terms else 0))
 
         total_tardiness, tardiness_ub = _build_tardiness_terms(
             model, problem, horizon, selected_ends
         )
 
+        # Energy defaults to 0 so existing makespan/setup/material hierarchy is
+        # bit-compatible unless the caller opts into energy (Wave 10 / T-35).
         weights = {
             "setup": int(objective_weights.get("setup", 1)),
             "material_loss": int(objective_weights.get("material_loss", 1)),
             "tardiness": int(objective_weights.get("tardiness", 1)),
+            "energy": int(
+                objective_weights.get("energy", objective_weights.get("energy_kwh", 0))
+            ),
         }
         secondary_bound = (
             weights["setup"] * setup_ub
             + weights["material_loss"] * material_ub
             + weights["tardiness"] * max(1, tardiness_ub)
+            + weights["energy"] * energy_ub
             + 1
         )
 
         if epsilon_constraints:
-            # ε-constraint scalarization (Geoffrion 1968 / Haimes et al. 1971):
-            # constrain a subset of objectives and optimise a selected primary
-            # objective directly.  This reaches Pareto regions that a pure
-            # weighted-sum scalarization may miss in discrete spaces.
-            if "max_makespan_minutes" in epsilon_constraints:
-                model.add(makespan <= int(epsilon_constraints["max_makespan_minutes"]))
-            if "max_setup_minutes" in epsilon_constraints:
-                model.add(total_setup <= int(epsilon_constraints["max_setup_minutes"]))
-            if "max_tardiness_minutes" in epsilon_constraints:
-                model.add(total_tardiness <= int(epsilon_constraints["max_tardiness_minutes"]))
-            if "max_material_loss_scaled" in epsilon_constraints:
-                model.add(
-                    total_material_scaled <= int(epsilon_constraints["max_material_loss_scaled"])
-                )
+            caps = {
+                "max_makespan_minutes": makespan,
+                "max_setup_minutes": total_setup,
+                "max_tardiness_minutes": total_tardiness,
+                "max_material_loss_scaled": total_material_scaled,
+                "max_energy_kwh_scaled": total_energy_scaled,
+            }
+            for key, var in caps.items():
+                if key in epsilon_constraints:
+                    model.add(var <= int(epsilon_constraints[key]))
 
         bigm_degraded = _minimize_scalarized_objective(
             model,
@@ -704,10 +728,12 @@ class CpSatSolver(BaseSolver):
             total_setup=total_setup,
             total_material_scaled=total_material_scaled,
             total_tardiness=total_tardiness,
+            total_energy_scaled=total_energy_scaled,
             horizon=horizon,
             setup_ub=setup_ub,
             material_ub=material_ub,
             tardiness_ub=tardiness_ub,
+            energy_ub=energy_ub,
             weights=weights,
             secondary_bound=secondary_bound,
         )
@@ -716,9 +742,11 @@ class CpSatSolver(BaseSolver):
             total_setup,
             total_material_scaled,
             total_tardiness,
+            total_energy_scaled,
             secondary_bound,
             weights,
             material_loss_scale,
+            energy_kwh_scale,
             bigm_degraded,
         )
 
@@ -735,8 +763,10 @@ class CpSatSolver(BaseSolver):
         total_setup: Any,
         total_material_scaled: Any,
         total_tardiness: Any,
+        total_energy_scaled: Any,
         weights: dict[str, int],
         material_loss_scale: int,
+        energy_kwh_scale: int,
         secondary_bound: int,
         makespan_bound_divisor: float = 1.0,
         bound_is_makespan: bool = True,
@@ -745,6 +775,7 @@ class CpSatSolver(BaseSolver):
         metadata: dict[str, Any] = {
             "objective_weights": weights,
             "material_loss_scale": material_loss_scale,
+            "energy_kwh_scale": energy_kwh_scale,
             "makespan_secondary_bound": secondary_bound,
         }
         objective = ObjectiveValues()
@@ -806,6 +837,7 @@ class CpSatSolver(BaseSolver):
                 total_material_loss=float(solver.value(total_material_scaled))
                 / material_loss_scale,
                 total_tardiness_minutes=float(solver.value(total_tardiness)),
+                total_energy_kwh=float(solver.value(total_energy_scaled)) / energy_kwh_scale,
                 weighted_sum=float(solver.objective_value),
             )
             # Q3: solver.best_objective_bound is the dual bound of the scalarized
@@ -858,6 +890,7 @@ class CpSatSolver(BaseSolver):
         auto_greedy_warm_start = bool(kwargs.get("auto_greedy_warm_start", True))
         objective_weights = dict(kwargs.get("objective_weights", {}))
         material_loss_scale = int(kwargs.get("material_loss_scale", 1000))
+        energy_kwh_scale = int(kwargs.get("energy_kwh_scale", 1000))
         epsilon_constraints: dict[str, int] | None = kwargs.get("epsilon_constraints")
         objective_mode = str(kwargs.get("objective_mode", "weighted_sum"))
         primary_objective = str(kwargs.get("primary_objective", "makespan"))
@@ -907,16 +940,13 @@ class CpSatSolver(BaseSolver):
             )
             for operation in solve_problem.operations
         }
-        setup_minutes_lookup = {
-            (entry.work_center_id, entry.from_state_id, entry.to_state_id): entry.setup_minutes
-            for entry in solve_problem.setup_matrix
-        }
-        setup_material_lookup = {
-            (entry.work_center_id, entry.from_state_id, entry.to_state_id): round(
-                entry.material_loss * material_loss_scale
+        setup_minutes_lookup, setup_material_lookup, setup_energy_lookup = (
+            _scaled_transition_lookups(
+                solve_problem,
+                material_loss_scale=material_loss_scale,
+                energy_kwh_scale=energy_kwh_scale,
             )
-            for entry in solve_problem.setup_matrix
-        }
+        )
 
         starts: dict[tuple[Any, Any], Any] = {}
         ends: dict[tuple[Any, Any], Any] = {}
@@ -991,18 +1021,21 @@ class CpSatSolver(BaseSolver):
             if release_offset is not None:
                 model.add(selected_starts[operation.id] >= release_offset)
 
-        setup_terms, material_terms, setup_intervals_by_op = self._add_machine_order_and_adjacency(
-            model,
-            solve_problem,
-            starts,
-            ends,
-            intervals,
-            presences,
-            setup_minutes_lookup,
-            setup_material_lookup,
-            planning_horizon_start=solve_problem.planning_horizon_start,
-            horizon=horizon,
-            frozen_assignments=frozen_assignments,
+        setup_terms, material_terms, energy_terms, setup_intervals_by_op = (
+            self._add_machine_order_and_adjacency(
+                model,
+                solve_problem,
+                starts,
+                ends,
+                intervals,
+                presences,
+                setup_minutes_lookup,
+                setup_material_lookup,
+                setup_energy_lookup,
+                planning_horizon_start=solve_problem.planning_horizon_start,
+                horizon=horizon,
+                frozen_assignments=frozen_assignments,
+            )
         )
         self._add_aux_resource_cumulative_constraints(
             model, solve_problem, eligible_by_op, intervals, setup_intervals_by_op
@@ -1016,9 +1049,11 @@ class CpSatSolver(BaseSolver):
             total_setup,
             total_material_scaled,
             total_tardiness,
+            total_energy_scaled,
             secondary_bound,
             weights,
             scale,
+            energy_scale,
             bigm_degraded,
         ) = self._build_weighted_objective(
             model,
@@ -1027,9 +1062,11 @@ class CpSatSolver(BaseSolver):
             makespan,
             setup_terms,
             material_terms,
+            energy_terms,
             selected_ends,
             objective_weights,
             material_loss_scale,
+            energy_kwh_scale,
             epsilon_constraints=epsilon_constraints,
             objective_mode=objective_mode,
             primary_objective=primary_objective,
@@ -1202,8 +1239,10 @@ class CpSatSolver(BaseSolver):
             total_setup,
             total_material_scaled,
             total_tardiness,
+            total_energy_scaled,
             weights,
             scale,
+            energy_scale,
             secondary_bound,
             makespan_bound_divisor=(
                 # Q3: the default weighted-sum objective scales makespan by

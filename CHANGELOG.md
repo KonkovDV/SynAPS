@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Wave 10 (CP-SAT energy + permanent deferrals):**
+  - CP-SAT hierarchical objective includes scaled setup `energy_kwh` (default weight 0).
+  - Permanent decisions: native `p_{o,m}` ABI deferred; dmorill GPL forbid; KI-S3 stays accepted.
+  - Docs: `WAVE10_EXECUTION_PLAN.md`, `WAVE10_DEFERRED_DECISIONS.md`, RFC_E_FJSP update.
+  - Tests: CP-SAT energy tie-break under non-zero weight.
+
 - **Wave 9 (honesty / conformance / CI residuals):**
   - M0 conformance row for `machine_duration_overrides` (+ SOLVER_FIELD_CONFORMANCE).
   - GUARD-D3 soft cushion 1.5×; ALNS skips new repair when remaining wall < 1s.

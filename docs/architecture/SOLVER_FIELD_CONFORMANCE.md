@@ -20,7 +20,7 @@ cores): `GREED`, `BEAM-3`, `CPSAT-10`, `LBBD-5`, `ALNS-300`.
 | `setup_minutes` | ✅ | ✅ | ✅ | ✅ | ✅ | SDST separation on shared machine |
 | `priority` | ✅ | ✅ | ✅ | ✅ | ✅ | ATCS weight / tardiness objective (not in the fast matrix) |
 | `material_loss` | ✅ | ✅ | ✅ | ✅ | ✅ | secondary objective term (not in the fast matrix) |
-| `energy_kwh` | ✅ | ✅ | ✅ | ✅ | ✅ | secondary objective term (not in the fast matrix) |
+| `energy_kwh` | ✅ | ✅ | ✅ | ✅ | ✅ | evaluate + CP-SAT search term (Wave 10; default weight 0) |
 | `planning_horizon_*` | ✅ | ✅ | ✅ | ✅ | ✅ | `HORIZON_BOUND_VIOLATION` in checker |
 | `pool_size` / `quantity_needed` | ✅ | ✅ | ✅ | ✅ | ✅ | auxiliary-resource capacity (aux cumulative) |
 
