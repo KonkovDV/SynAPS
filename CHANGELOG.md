@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Wave 14 (RHC→ALNS composition + crash fix):**
+  - RHC: always init `per_window_limit` (early-greedy UnboundLocal fix).
+  - ALNS: thread op-id `frozen_predecessor_end_offsets` into CP-SAT repair; reanchor fail-closed; skip virtualization under frozen (not ERROR).
+  - LBBD/HD: refuse empty/non-binding nogood apply.
+  - Docs: `HYPER_REDTEAM_AUDIT_2026_08_11_W14.md`, `WAVE14_EXECUTION_PLAN.md`.
+  - Tests: `tests/test_wave14_composition_rt.py`.
+
 - **Wave 13 (architecture / chain / algebra Red Team):**
   - RHC: build frozen pred offsets **before** clear; pass `frozen_context_*` + aux; `ceil`; greedy uses original preds (C13-1).
   - ALNS refuses frozen×`max_parallel` virtualization (C13-2); native missing pred fail-closed (C13-3).

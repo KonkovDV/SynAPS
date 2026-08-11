@@ -1339,14 +1339,18 @@ def _add_benders_cut_rows(
                 if key in var_index:
                     indices.append(var_index[key])
                     coeffs.append(1.0)
-            if indices:
-                h.addRow(
-                    -highspy.kHighsInf,
-                    len(indices) - 1.0,
-                    len(indices),
-                    np.array(indices, dtype=np.int32),
-                    np.array(coeffs),
+            if not indices:
+                raise ValueError(
+                    "LBBD nogood cut has no bindable variables; refusing silent skip "
+                    "(Wave 14 / H14-nogood)."
                 )
+            h.addRow(
+                -highspy.kHighsInf,
+                len(indices) - 1.0,
+                len(indices),
+                np.array(indices, dtype=np.int32),
+                np.array(coeffs),
+            )
         elif cut.kind in ("setup_cost", "machine_tsp"):
             # Wave 11 / M1 + KI-S3: generation is retired; refuse to apply if injected.
             raise ValueError(

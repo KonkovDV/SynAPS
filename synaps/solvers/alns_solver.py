@@ -1177,11 +1177,17 @@ def _repair_cpsat_outcome(
     num_workers: int = 1,
     ops_by_id: dict[UUID, Any] | None = None,
     op_positions: dict[UUID, int] | None = None,
+    frozen_predecessor_end_offsets: Mapping[Any, float] | None = None,
+    frozen_context_operations: list[Any] | None = None,
 ) -> RepairOutcome:
     """Repair by solving a sub-problem with CP-SAT over the destroyed operations.
 
     Frozen assignments constrain the machine timelines. Only the destroyed
     operations (+ their immediate predecessors if outside the set) are modeled.
+
+    ``frozen_predecessor_end_offsets`` is keyed by **operation id** and remains
+    authoritative when predecessor edges were cleared for ScheduleProblem
+    validation (Wave 14 / C14-1; RHC composition).
 
     Returns explicit status for success, timeout, or infeasible outcomes.
     """
@@ -1235,7 +1241,11 @@ def _repair_cpsat_outcome(
     frozen_assignments_by_op = {
         assignment.operation_id: assignment for assignment in frozen_assignments
     }
-    frozen_predecessor_end_offsets: dict[UUID, int] = {}
+    # Wave 14 / C14-1: start from caller offsets (survive pred clear).
+    offsets: dict[Any, int] = {
+        op_id: int(offset)
+        for op_id, offset in dict(frozen_predecessor_end_offsets or {}).items()
+    }
     for op_id in destroyed_op_ids:
         operation = ops_by_id.get(op_id)
         if operation is None or operation.predecessor_op_id is None:
@@ -1245,13 +1255,15 @@ def _repair_cpsat_outcome(
 
         frozen_predecessor = frozen_assignments_by_op.get(operation.predecessor_op_id)
         if frozen_predecessor is None:
-            return RepairOutcome(
-                status=RepairStatus.INFEASIBLE,
-                assignments=(),
-                reason="missing_frozen_predecessor",
-            )
+            if op_id not in offsets:
+                return RepairOutcome(
+                    status=RepairStatus.INFEASIBLE,
+                    assignments=(),
+                    reason="missing_frozen_predecessor",
+                )
+            continue
 
-        frozen_predecessor_end_offsets[op_id] = max(
+        offsets[op_id] = max(
             0,
             int(
                 math.ceil(
@@ -1284,8 +1296,10 @@ def _repair_cpsat_outcome(
             auto_greedy_warm_start=False,
             enable_symmetry_breaking=False,
             frozen_assignments=relevant_frozen_assignments,
-            frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
-            frozen_context_operations=list(problem.operations),
+            frozen_predecessor_end_offsets=offsets,
+            frozen_context_operations=list(
+                frozen_context_operations or problem.operations
+            ),
             frozen_aux_requirements=list(problem.aux_requirements),
         )
     except ValueError as exc:
@@ -2014,19 +2028,36 @@ def _violates_frozen_precedence(
     repaired_assignments: list[Assignment],
     frozen_assignments_by_op: dict[UUID, Assignment],
     ops_by_id: dict[UUID, Any],
+    *,
+    frozen_predecessor_end_offsets: Mapping[Any, float] | None = None,
+    horizon_start: Any | None = None,
 ) -> bool:
-    """Return True when a repaired operation starts before its frozen predecessor ends."""
+    """Return True when a repaired operation starts before its frozen predecessor ends.
 
+    Also honors op-id ``frozen_predecessor_end_offsets`` when predecessor edges
+    were cleared (Wave 14 / C14-1).
+    """
+
+    offsets = dict(frozen_predecessor_end_offsets or {})
     repaired_ids = {assignment.operation_id for assignment in repaired_assignments}
     for assignment in repaired_assignments:
         operation = ops_by_id.get(assignment.operation_id)
-        if operation is None or operation.predecessor_op_id is None:
+        if operation is None:
             continue
-        if operation.predecessor_op_id in repaired_ids:
+        if operation.predecessor_op_id is not None:
+            if operation.predecessor_op_id in repaired_ids:
+                continue
+            frozen_predecessor = frozen_assignments_by_op.get(operation.predecessor_op_id)
+            if frozen_predecessor is None:
+                continue
+            if assignment.start_time < frozen_predecessor.end_time:
+                return True
             continue
-        frozen_predecessor = frozen_assignments_by_op.get(operation.predecessor_op_id)
-        if frozen_predecessor is not None and assignment.start_time < frozen_predecessor.end_time:
-            return True
+        # Cleared pred: enforce provided end-offset floor when horizon is known.
+        if assignment.operation_id in offsets and horizon_start is not None:
+            floor = horizon_start + timedelta(minutes=float(offsets[assignment.operation_id]))
+            if assignment.start_time < floor:
+                return True
     return False
 
 
@@ -2394,10 +2425,19 @@ def _reanchor_against_frozen(
                     next_pending.append(assignment)
                     continue
                 else:
+                    if operation.id not in frozen_predecessor_end_offsets:
+                        # Wave 14 / H14-5: never default missing floor to 0.0
+                        return [], 0
                     earliest_start = max(
                         earliest_start,
-                        frozen_predecessor_end_offsets.get(operation.id, 0.0),
+                        float(frozen_predecessor_end_offsets[operation.id]),
                     )
+            elif operation.id in frozen_predecessor_end_offsets:
+                # Cleared pred edge — still enforce op-id offset floor (C14-1).
+                earliest_start = max(
+                    earliest_start,
+                    float(frozen_predecessor_end_offsets[operation.id]),
+                )
 
             slot = None
             current_earliest_start = earliest_start
@@ -2458,11 +2498,11 @@ def _reanchor_against_frozen(
             progress_made = True
 
         if not progress_made:
-            return list(assignments), 0
+            return [], 0
         pending_assignments = next_pending
 
     if pending_assignments:
-        return list(assignments), 0
+        return [], 0
 
     changed_assignment_count = sum(
         1
@@ -2526,6 +2566,8 @@ def _try_cpsat_repair_lane(
     repair_num_workers: int,
     remaining_s: float,
     rejection_reasons: dict[str, int],
+    frozen_predecessor_end_offsets: Mapping[Any, float] | None = None,
+    frozen_context_operations: list[Any] | None = None,
 ) -> tuple[list[Assignment] | None, dict[str, int]]:
     """One CP-SAT micro-repair attempt; returns (assignments|None, counter deltas)."""
     stats = {
@@ -2553,6 +2595,8 @@ def _try_cpsat_repair_lane(
         num_workers=repair_num_workers,
         ops_by_id=ops_by_id,
         op_positions=op_positions,
+        frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
+        frozen_context_operations=frozen_context_operations,
     )
     stats["cpsat_repair_ms_total"] = int((time.monotonic() - t0) * 1000)
     stats["cpsat_repair_total_destroy_size"] = len(destroyed_ids)
@@ -2564,7 +2608,10 @@ def _try_cpsat_repair_lane(
 
     repaired = list(outcome.assignments)
     if _has_machine_overlap(frozen + repaired) or _violates_frozen_precedence(
-        repaired, frozen_by_op, ops_by_id
+        repaired,
+        frozen_by_op,
+        ops_by_id,
+        frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
     ):
         _record_repair_reject(
             rejection_reasons,
@@ -2644,6 +2691,8 @@ def _attempt_alns_pair_repair(
     remaining_s: float,
     pair_bandit_active: bool,
     native_skip_reasons: list[str] | None = None,
+    frozen_predecessor_end_offsets: Mapping[Any, float] | None = None,
+    frozen_context_operations: list[Any] | None = None,
 ) -> _AlnsRepairAttemptResult:
     """CP-SAT then greedy repair for one ALNS iteration (extracted from ``_solve_core``)."""
     rejection_reasons: dict[str, int] = {}
@@ -2662,6 +2711,8 @@ def _attempt_alns_pair_repair(
             repair_time_limit_s=repair_time_limit_s,
             repair_num_workers=repair_num_workers, remaining_s=remaining_s,
             rejection_reasons=rejection_reasons,
+            frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
+            frozen_context_operations=frozen_context_operations,
         )
         if new_assignments is not None:
             repair_used = "cpsat"
@@ -2739,18 +2790,15 @@ class AlnsSolver(BaseSolver):
 
         frozen_raw = kwargs.get("frozen_assignments") or []
         virtual_problem, virtual_to_original = _virtualize_parallel_lanes(problem)
-        # Wave 13 / C13-2: match CP-SAT — refuse frozen × lane virtualization.
+        # Wave 14 / C14-2: under frozen, skip lane virtualization (serialize
+        # parallel) instead of ERROR — ERROR forced RHC into silent greedy while
+        # still branding RHC-ALNS.
         if frozen_raw and virtual_to_original:
-            return ScheduleResult(
-                solver_name=self.name,
-                status=SolverStatus.ERROR,
-                metadata={
-                    "error": (
-                        "frozen_assignments are not supported together with "
-                        "max_parallel>1 virtualization (Wave 13 / C13-2)"
-                    ),
-                },
-            )
+            result = self._solve_core(problem, **kwargs)
+            if result.metadata is None:
+                result.metadata = {}
+            result.metadata["parallel_virtualization_skipped_due_to_frozen"] = True
+            return result
         result = self._solve_core(virtual_problem, **kwargs)
         _unroll_lane_assignments(result, virtual_to_original)
         return result
@@ -2839,6 +2887,9 @@ class AlnsSolver(BaseSolver):
             op_id: float(offset)
             for op_id, offset in dict(kwargs.get("frozen_predecessor_end_offsets", {})).items()
         }
+        frozen_context_operations = list(
+            kwargs.get("frozen_context_operations") or problem.operations
+        )
 
         # P3.1: Variable fixing — exclude stable ops from destroy
         fixed_op_ids_raw = kwargs.get("fixed_op_ids")
@@ -3817,6 +3868,8 @@ class AlnsSolver(BaseSolver):
                     remaining_s=remaining_s,
                     pair_bandit_active=pair_bandit is not None and selected_pair_idx >= 0,
                     native_skip_reasons=native_greedy_repair_skip_reasons,
+                    frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
+                    frozen_context_operations=frozen_context_operations,
                 )
                 cpsat_repair_attempts += repair_attempt.cpsat_repair_attempts
                 cpsat_repair_ms_total += repair_attempt.cpsat_repair_ms_total

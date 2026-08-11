@@ -1472,6 +1472,9 @@ class RhcSolver(BaseSolver):
             hybrid_routing_reason: str | None = None
             alns_budget_profile: dict[str, Any] | None = None
             boundary_reanchor_changed_ops = 0
+            # Wave 14 / C14-crash: always defined for fallback telemetry.
+            per_window_limit = 0.0
+            window_lower_bound = None
 
             if (
                 hybrid_inner_routing_enabled

@@ -92,8 +92,8 @@ def test_replay_verification_not_pretended() -> None:
     assert snap.feasible is False
 
 
-def test_alns_refuses_frozen_with_parallel_virtualization() -> None:
-    """C13-2: frozen ∧ max_parallel>1 → ERROR (match CP-SAT policy)."""
+def test_alns_skips_virtualization_when_frozen_parallel() -> None:
+    """C14-2: frozen ∧ max_parallel>1 → skip virtualization (not silent ERROR/greedy)."""
     s = State(code="s")
     wc = WorkCenter(code="P", capability_group="G", max_parallel=2)
     order = Order(external_ref="O", due_date=_HE)
@@ -126,8 +126,8 @@ def test_alns_refuses_frozen_with_parallel_virtualization() -> None:
         frozen_assignments=[frozen],
         frozen_context_operations=[op],
     )
-    assert result.status == SolverStatus.ERROR
-    assert "frozen" in str(result.metadata.get("error", "")).lower()
+    assert result.status != SolverStatus.ERROR
+    assert result.metadata.get("parallel_virtualization_skipped_due_to_frozen") is True
 
 
 def test_solve_options_rejects_oob_workers() -> None:
