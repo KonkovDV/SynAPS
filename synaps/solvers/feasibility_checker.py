@@ -6,7 +6,7 @@ import math
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
-from synaps.timegrain import duration_minutes, physical_processing_minutes
+from synaps.timegrain import duration_minutes_for, physical_processing_minutes_for
 
 
 class _LaneSearchBudgetExceeded(Exception):
@@ -94,6 +94,22 @@ _LANE_EXACT_MAX_OPS = 512
 _LANE_EXACT_MAX_PARALLEL = 8
 _LANE_EXACT_STATE_BUDGET = 200_000
 
+#: Advisory kinds that flag checker uncertainty without proving a hard fault.
+#: Callers that treat ``check`` as a boolean feasibility oracle should filter
+#: these via :func:`hard_violations` (Wave 5 / KI-F7).
+ADVISORY_VIOLATION_KINDS: frozenset[str] = frozenset({"LANE_INFERENCE_UNPROVEN"})
+
+#: Hard kinds that, when emitted by the greedy lane path after a size/budget
+#: fallback, justify accompanying ``LANE_INFERENCE_UNPROVEN``.
+_GREEDY_UNPROVEN_TRIGGER_KINDS: frozenset[str] = frozenset(
+    {
+        "SETUP_GAP_VIOLATION",
+        "MACHINE_CAPACITY_VIOLATION",
+        "MACHINE_OVERLAP",
+        "MISSING_SETUP_ENTRY",
+    }
+)
+
 
 class FeasibilityViolation:
     """A single constraint violation."""
@@ -108,6 +124,13 @@ class FeasibilityViolation:
 
     def __repr__(self) -> str:
         return f"Violation({self.kind}: {self.message})"
+
+
+def hard_violations(
+    violations: list[FeasibilityViolation],
+) -> list[FeasibilityViolation]:
+    """Return violations that prove a constraint fault (exclude advisory kinds)."""
+    return [v for v in violations if v.kind not in ADVISORY_VIOLATION_KINDS]
 
 
 class FeasibilityChecker:
@@ -398,6 +421,7 @@ class FeasibilityChecker:
                 violations=violations,
             ), False
 
+        inference_unproven = False
         if (
             len(machine_assignments) <= _LANE_EXACT_MAX_OPS
             and max_parallel <= _LANE_EXACT_MAX_PARALLEL
@@ -432,8 +456,13 @@ class FeasibilityChecker:
                 )
             # Budget exhausted: fall through to the greedy heuristic, whose
             # verdict is unproven (documented F7 bound).
+            inference_unproven = True
+        else:
+            # Size / parallelism beyond the exact-search envelope (KI-F7).
+            inference_unproven = True
 
-        return self._assign_lanes_greedy(
+        before = len(violations)
+        lanes, aborted = self._assign_lanes_greedy(
             wc_id=wc_id,
             machine_assignments=machine_assignments,
             max_parallel=max_parallel,
@@ -443,6 +472,23 @@ class FeasibilityChecker:
             exhaustive=exhaustive,
             strict_setup_matrix=strict_setup_matrix,
         )
+        if inference_unproven and any(
+            v.kind in _GREEDY_UNPROVEN_TRIGGER_KINDS and v.work_center_id == wc_id
+            for v in violations[before:]
+        ):
+            violations.append(
+                FeasibilityViolation(
+                    "LANE_INFERENCE_UNPROVEN",
+                    (
+                        f"Machine {wc_id}: lane inference used the greedy fallback "
+                        f"(n={len(machine_assignments)}, max_parallel={max_parallel} "
+                        f"exceeded exact bounds or exhausted the state budget); "
+                        f"hard lane/setup violations on this machine are UNPROVEN."
+                    ),
+                    work_center_id=wc_id,
+                )
+            )
+        return lanes, aborted
 
     def _assign_lanes_greedy(
         self,
@@ -834,9 +880,9 @@ class FeasibilityChecker:
         """Duration adequacy check (P0-3; hardened by F2, audit v4).
 
         The assignment span must cover the operation's REAL processing time
-        (:func:`synaps.timegrain.physical_processing_minutes` — base duration
-        divided by machine speed): a shorter span is physically impossible and
-        is a hard DURATION_MISMATCH with NO tolerance.
+        (:func:`synaps.timegrain.physical_processing_minutes_for` — override or
+        base/speed): a shorter span is physically impossible and is a hard
+        DURATION_MISMATCH with NO tolerance.
 
         History: the pre-v4 checker kept a 1-minute slop around the canonical
         ceil grain to absorb solver-side round/raw-float divergence, and its
@@ -847,8 +893,9 @@ class FeasibilityChecker:
         (ALNS native repair/seed now snap to the canonical ceil grain), so the
         tolerance is gone.
 
-        Solvers reserve the canonical integer grain ``ceil(base/speed)``
-        (P0-4). A span at/above the physical floor but below the grain is
+        Solvers reserve the canonical integer grain via
+        :func:`synaps.timegrain.duration_minutes_for` (P0-4 / T-30). A span
+        at/above the physical floor but below the grain is
         feasible-but-off-grain and is flagged as DURATION_BELOW_GRAIN only
         under ``strict_grain=True`` (grain policy is a solver obligation;
         physical sufficiency is the checker's).
@@ -858,41 +905,39 @@ class FeasibilityChecker:
             if checked_op is None:
                 continue
             work_center = work_centers_by_id.get(a.work_center_id)
-            speed = work_center.speed_factor if work_center is not None else 1.0
-            if speed <= 0:
+            if work_center is None:
                 continue
-            physical = physical_processing_minutes(checked_op.base_duration_min, speed)
-            actual = (a.end_time - a.start_time).total_seconds() / 60.0
-            if actual < physical - 1e-6:
+            span = (a.end_time - a.start_time).total_seconds() / 60.0
+            physical = physical_processing_minutes_for(checked_op, work_center)
+            if span + 1e-9 < physical:
                 violations.append(
                     FeasibilityViolation(
                         "DURATION_MISMATCH",
                         (
-                            f"Operation {a.operation_id} span {actual:.4f} min is shorter "
-                            f"than its physical processing time {physical:.4f} min "
-                            f"(base duration / machine speed, F2)."
+                            f"Operation {a.operation_id} span {span:.6g} min is below "
+                            f"physical processing floor {physical:.6g} min on "
+                            f"work center {a.work_center_id}."
                         ),
                         operation_id=a.operation_id,
                         work_center_id=a.work_center_id,
                     )
                 )
                 if not exhaustive:
-                    break
-            elif strict_grain:
-                expected = duration_minutes(checked_op.base_duration_min, speed)
-                if actual < expected - 1e-6:
+                    return
+            if strict_grain:
+                expected = duration_minutes_for(checked_op, work_center)
+                if span + 1e-9 < float(expected):
                     violations.append(
                         FeasibilityViolation(
                             "DURATION_BELOW_GRAIN",
                             (
-                                f"Operation {a.operation_id} span {actual:.4f} min is below "
-                                f"the canonical reservation {expected} min "
-                                f"(integer ceil grain, P0-4) though "
-                                f"physically sufficient."
+                                f"Operation {a.operation_id} span {span:.6g} min is below "
+                                f"canonical grain {expected} min on work center "
+                                f"{a.work_center_id}."
                             ),
                             operation_id=a.operation_id,
                             work_center_id=a.work_center_id,
                         )
                     )
                     if not exhaustive:
-                        break
+                        return

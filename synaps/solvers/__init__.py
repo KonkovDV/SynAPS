@@ -74,6 +74,7 @@ def _attach_canonical_objective(result: ScheduleResult, problem: ScheduleProblem
     objective.total_setup_minutes = canonical.total_setup_minutes
     objective.total_material_loss = canonical.total_material_loss
     objective.total_tardiness_minutes = canonical.total_tardiness_minutes
+    objective.total_energy_kwh = canonical.total_energy_kwh
     objective.coverage = canonical.coverage
     objective.unscheduled_operations = canonical.unscheduled_operations
     objective.weighted_sum = scalarize(canonical)

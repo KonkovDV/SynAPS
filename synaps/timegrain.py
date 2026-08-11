@@ -17,6 +17,7 @@ one minute.
 from __future__ import annotations
 
 import math
+from typing import Any
 
 
 def duration_minutes(base_duration_min: float, speed_factor: float) -> int:
@@ -41,3 +42,35 @@ def physical_processing_minutes(base_duration_min: float, speed_factor: float) -
     """
     speed = speed_factor if speed_factor > 0 else 1.0
     return base_duration_min / speed
+
+
+def duration_minutes_for(operation: Any, work_center: Any) -> int:
+    """Integer reservation grain for ``(operation, work_center)`` (T-30 / p_{o,m}).
+
+    Prefer ``operation.machine_duration_overrides[work_center.id]`` when present
+    (already grain-aligned integer minutes). Otherwise fall back to
+    :func:`duration_minutes` on ``base_duration_min`` / ``speed_factor``.
+    """
+    overrides = getattr(operation, "machine_duration_overrides", None) or {}
+    wc_id = getattr(work_center, "id", None)
+    if wc_id is not None and wc_id in overrides:
+        return max(1, int(overrides[wc_id]))
+    return duration_minutes(
+        float(getattr(operation, "base_duration_min", 0)),
+        float(getattr(work_center, "speed_factor", 1.0)),
+    )
+
+
+def physical_processing_minutes_for(operation: Any, work_center: Any) -> float:
+    """Physical processing floor for ``(operation, work_center)`` (T-30 / F2).
+
+    Override values are treated as exact integer minutes (already grain-aligned).
+    """
+    overrides = getattr(operation, "machine_duration_overrides", None) or {}
+    wc_id = getattr(work_center, "id", None)
+    if wc_id is not None and wc_id in overrides:
+        return float(overrides[wc_id])
+    return physical_processing_minutes(
+        float(getattr(operation, "base_duration_min", 0)),
+        float(getattr(work_center, "speed_factor", 1.0)),
+    )

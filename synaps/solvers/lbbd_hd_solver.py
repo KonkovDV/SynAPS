@@ -54,7 +54,7 @@ from synaps.solvers._lbbd_cuts import (
 )
 from synaps.solvers.cpsat_solver import CpSatSolver
 from synaps.solvers.partitioning import partition_machines
-from synaps.timegrain import duration_minutes
+from synaps.timegrain import duration_minutes_for
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -671,10 +671,13 @@ def _solve_precedence_aware_master(
 
         for wc_id in eligible_by_op[op.id]:
             wc = wc_by_id.get(wc_id)
-            speed = wc.speed_factor if wc else 1.0
-            # CP-SAT duration semantics (max(1, round(p))) so the master timing
+            if wc is None:
+                from types import SimpleNamespace
+
+                wc = SimpleNamespace(id=wc_id, speed_factor=1.0)
+            # CP-SAT duration semantics (T-30 aware) so the master timing
             # model matches what the subproblem model realises (S2/S3 validity).
-            duration = float(duration_minutes(op.base_duration_min, speed))
+            duration = float(duration_minutes_for(op, wc))
             indices.append(var_index[(op.id, wc_id)])
             coeffs.append(-duration)
 
@@ -713,7 +716,7 @@ def _solve_precedence_aware_master(
                 # max_parallel-lane machine finishes load L in L / lanes, so
                 # the relaxation stays a valid lower bound (see lbbd_solver).
                 lanes = float(max(1, wc.max_parallel))
-                duration = float(duration_minutes(op.base_duration_min, wc.speed_factor)) / lanes
+                duration = float(duration_minutes_for(op, wc)) / lanes
                 cap_indices.append(var_index[key])
                 cap_coeffs.append(duration)
         if not cap_indices:

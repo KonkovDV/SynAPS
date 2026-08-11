@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from synaps.accelerators import resource_capacity_window_is_feasible
-from synaps.timegrain import duration_minutes
+from synaps.timegrain import duration_minutes_for
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -369,10 +369,12 @@ def find_earliest_feasible_slot(
     machine_index: MachineIndex | None = None,
 ) -> SlotCandidate | None:
     work_center = context.wc_by_id.get(work_center_id)
-    speed_factor = work_center.speed_factor if work_center is not None else 1.0
-    # P0-4: canonical integer time grain, shared with CP-SAT/LBBD, so a given
-    # operation has one duration across all solvers (was raw base/speed here).
-    duration = float(duration_minutes(operation.base_duration_min, speed_factor))
+    if work_center is None:
+        from types import SimpleNamespace
+
+        work_center = SimpleNamespace(id=work_center_id, speed_factor=1.0)
+    # P0-4 / T-30: canonical integer time grain, including p_{o,m} overrides.
+    duration = float(duration_minutes_for(operation, work_center))
     aux_resource_ids = [
         requirement.aux_resource_id
         for requirement in context.requirements_by_op.get(operation.id, [])

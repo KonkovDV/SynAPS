@@ -64,6 +64,10 @@ class Operation(BaseModel):
     base_duration_min: int = Field(ge=0)
     eligible_wc_ids: list[UUID] = Field(default_factory=list)
     predecessor_op_id: UUID | None = None
+    # T-30 / p_{o,m}: optional per-machine INTEGER minutes AFTER all factors.
+    # Missing key → timegrain.duration_minutes(base, speed). Populated by the
+    # .fjs loader for heterogeneous alternatives.
+    machine_duration_overrides: dict[UUID, int] = Field(default_factory=dict)
     domain_attributes: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -290,6 +294,28 @@ class ScheduleProblem(BaseModel):
                     f"{operation.id} references unknown eligible_wc_ids "
                     f"{missing_work_centers}"
                 )
+            override_unknown = [
+                wc_id
+                for wc_id in operation.machine_duration_overrides
+                if wc_id not in work_center_id_set
+            ]
+            if override_unknown:
+                issues.append(
+                    "operation "
+                    f"{operation.id} machine_duration_overrides reference unknown "
+                    f"work centers {override_unknown}"
+                )
+            override_negative = [
+                wc_id
+                for wc_id, minutes in operation.machine_duration_overrides.items()
+                if int(minutes) < 0
+            ]
+            if override_negative:
+                issues.append(
+                    "operation "
+                    f"{operation.id} machine_duration_overrides must be >= 0 "
+                    f"(bad keys {override_negative})"
+                )
             if operation.predecessor_op_id == operation.id:
                 issues.append(f"operation {operation.id} cannot reference itself as predecessor")
             elif (
@@ -474,6 +500,7 @@ class ObjectiveValues(BaseModel):
     total_setup_minutes: float = 0.0
     total_material_loss: float = 0.0
     total_tardiness_minutes: float = 0.0
+    total_energy_kwh: float = 0.0
     weighted_sum: float = 0.0
     # P0-5: coverage is a level-0 objective. makespan/tardiness are taken over
     # SCHEDULED operations, so a schedule that abandons work otherwise looks

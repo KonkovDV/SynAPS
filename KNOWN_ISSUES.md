@@ -1,15 +1,15 @@
 # Known Issues Registry
 
-> SynAPS defect / sentinel registry (audit v4, T-41 / F15).
+> SynAPS defect / sentinel registry (audit v4, T-41 / F15; Wave 5 updates).
 > Every intentional `pytest.mark.xfail` in `tests/test_redteam_guards.py`
 > MUST have a row here. CI enforces the link via
 > `tests/test_known_issues_registry.py`.
 
 | ID | Severity | Status | Summary | Sentinel / tests | Tracking |
 |---|---|---|---|---|---|
-| KI-S3 | MEDIUM | open (sentinel) | `compute_machine_tsp_lower_bound` is not monotone under set shrinkage: `L(S) - L(S\\{j})` can be > 0, so a cut that discounts only `p_j` over-claims. Cuts removed; BHK kept for fixed-set LB + docs (T-23). Use `compute_min_out_assignment_setup_lb` when a cheap non-metric LB is needed. | `tests/test_redteam_guards.py::test_guard_s3_bhk_bound_subset_monotone` (xfail strict) | F6 / GUARD-S3 / T-23 |
-| KI-F7 | LOW | open | Exact lane inference falls back to greedy (UNPROVEN) when `n>512`, `max_parallel>8`, or state budget exhausted — no dedicated violation kind flags heuristic fallback. | `tests/test_exact_lane_inference.py` | F7 residual |
-| KI-F16 | LOW | open | Public BKS invariant is one-sided (claimed OPTIMAL / LB above literature BKS fails; equality on proven OPT subset not yet required). PyJobShop cross-validation is optional-skip when the dep is absent. SDST public pack not yet vendored. | `tests/test_public_instances_bks.py`, `tests/test_pyjobshop_cross_validation.py` | F16 / T-31 |
+| KI-S3 | MEDIUM | accepted (sentinel) | `compute_machine_tsp_lower_bound` is not monotone under set shrinkage: `L(S) - L(S\\{j})` can be > 0, so a cut that discounts only `p_j` over-claims. Cuts removed; BHK kept for fixed-set LB + docs (T-23). Prefer `compute_min_out_assignment_setup_lb` recomputed on the fixed assigned set (also not absolutely subset-monotone; never discount). | `tests/test_redteam_guards.py::test_guard_s3_bhk_bound_subset_monotone` (xfail strict) | F6 / GUARD-S3 / T-23 |
+| KI-F7 | LOW | closed | Exact lane inference falls back to greedy when `n>512`, `max_parallel>8`, or state budget exhausted; greedy-driven hard faults now emit advisory `LANE_INFERENCE_UNPROVEN` (filter via `hard_violations`). | `tests/test_exact_lane_inference.py::test_greedy_fallback_emits_lane_inference_unproven` | F7 residual → Wave 5.1 |
+| KI-F16 | LOW | open (partial) | Brandimarte OPTIMAL equality to literature BKS enabled for `BRANDIMARTE_PROVEN_OPTIMAL` after T-30 overrides (F16a). Tiny SDST fixture + `sdst_fjs_loader` landed (F16c smoke). Full Shen/dmorill pack and mandatory PyJobShop CI job still deferred. ALNS native kernel still ranks machines on `base/speed` before snapping with `*_for`. | `tests/test_public_instances_bks.py`, `tests/test_sdst_fjs_loader.py`, `tests/test_pyjobshop_cross_validation.py` | F16 / T-31 / Wave 5 |
 
 ## How to add an entry
 

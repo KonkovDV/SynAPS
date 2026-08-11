@@ -24,17 +24,11 @@ Mapping decisions (documented for benchmark comparability):
 * The planning horizon is the sum of every operation's maximum
   alternative duration (a trivially safe scheduling upper bound), so no
   feasible schedule is horizon-clipped.
-* Durations are used verbatim as integer minutes; work-center
-  ``speed_factor`` stays 1.0. Machine-dependent durations are expressed
-  through per-operation eligibility: the SynAPS core models duration
-  per operation, not per (operation, machine) pair, so heterogeneous
-  alternatives are approximated by ``base_duration_min = min`` over the
-  listed alternatives with eligibility restricted to the listed
-  machines. The exact per-pair durations are preserved in
-  ``domain_attributes["fjs_machine_durations"]`` for downstream exact
-  solvers or reporting. This approximation is conservative for lower
-  bounds and is reported in the instance metadata so published numbers
-  are never silently compared against per-pair-exact suites.
+* Durations are used as integer minutes via ``machine_duration_overrides``
+  (exact ``p_{o,m}`` per listed alternative, Wave 5 / T-30). ``base_duration_min``
+  remains ``min`` over alternatives as a fallback. Work-center ``speed_factor``
+  stays 1.0. The code-keyed map is still mirrored in
+  ``domain_attributes["fjs_machine_durations"]`` for reporting.
 
 The parser is strict: malformed token streams raise ``FjsParseError``
 with the token index, never a silent partial instance.
@@ -203,6 +197,7 @@ def load_fjs_problem(path: Path | str) -> ScheduleProblem:
                     f"job {job_idx + 1} op {op_idx + 1} declares {n_alternatives} alternatives"
                 )
             machine_durations: dict[str, int] = {}
+            machine_duration_overrides: dict[Any, int] = {}
             eligible_wc_ids = []
             for alt_idx in range(n_alternatives):
                 machine_ref = stream.next_int(
@@ -232,8 +227,10 @@ def load_fjs_problem(path: Path | str) -> ScheduleProblem:
                         f"duration {duration} exceeds sanity limit "
                         f"{MAX_FJS_DURATION_MINUTES} (job {job_idx + 1} op {op_idx + 1})"
                     )
-                eligible_wc_ids.append(wc_id_by_index[machine_ref - machine_index_base])
+                wc_id = wc_id_by_index[machine_ref - machine_index_base]
+                eligible_wc_ids.append(wc_id)
                 machine_durations[f"M{machine_ref - machine_index_base + 1}"] = duration
+                machine_duration_overrides[wc_id] = duration
 
             base_duration = min(machine_durations.values())
             horizon_upper_bound_min += max(machine_durations.values())
@@ -244,6 +241,7 @@ def load_fjs_problem(path: Path | str) -> ScheduleProblem:
                 base_duration_min=base_duration,
                 eligible_wc_ids=eligible_wc_ids,
                 predecessor_op_id=previous_op_id,
+                machine_duration_overrides=machine_duration_overrides,
                 domain_attributes={"fjs_machine_durations": machine_durations},
             )
             operations.append(operation)
@@ -297,13 +295,15 @@ def describe_fjs_mapping() -> dict[str, Any]:
         "setup_matrix": "empty (format has no SDST)",
         "due_dates": "horizon end (tardiness identically zero; makespan-only scoring)",
         "durations": (
-            "base_duration_min = min over listed alternatives; per-pair exact durations "
-            "preserved in operation.domain_attributes['fjs_machine_durations']"
+            "machine_duration_overrides[wc] = listed p_{o,m}; base_duration_min = min "
+            "over alternatives (fallback when overrides empty); code-keyed map still in "
+            "operation.domain_attributes['fjs_machine_durations']"
         ),
         "comparability_note": (
-            "Makespans are NOT directly comparable to per-pair-exact published results "
-            "when an instance has heterogeneous alternative durations; report the "
-            "mapping alongside any numbers."
+            "With machine_duration_overrides populated, makespans ARE comparable to "
+            "per-pair-exact published BKS for Brandimarte/Hurink/DAFJS once a solver "
+            "claims OPTIMAL. Empty overrides retain the historical min-alternative "
+            "relaxation."
         ),
     }
 

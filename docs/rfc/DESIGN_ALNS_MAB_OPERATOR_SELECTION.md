@@ -1,6 +1,8 @@
 # Design note: MAB selection of ALNS destroy/repair pairs (T-34)
 
-- **Status:** Draft design (not implemented)
+- **Status:** Partial (Wave 5) — UCB1 over destroy operators opt-in via
+  `mab_pair_selection`; full destroy×repair cartesian deferred until repair is a
+  first-class roulette family
 - **Date:** 2026-08-11
 
 ## Current behavior

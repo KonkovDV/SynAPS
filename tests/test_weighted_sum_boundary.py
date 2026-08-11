@@ -82,6 +82,7 @@ def test_default_weights_are_makespan_only() -> None:
         "setup": 0.0,
         "material": 0.0,
         "tardiness": 0.0,
+        "energy": 0.0,
     }
-    obj = ObjectiveValues(makespan_minutes=42.0, total_setup_minutes=1000.0)
+    obj = ObjectiveValues(makespan_minutes=42.0, total_setup_minutes=1000.0, total_energy_kwh=99.0)
     assert scalarize(obj) == 42.0

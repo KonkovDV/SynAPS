@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Wave 5 (open KI + Wave 3 RFC implementation):**
+  - `docs/rfc/WAVE5_EXECUTION_PLAN.md` — execution order for KI-S3/F7/F16 and T-30/T-34/T-35.
+  - **T-30 / p_{o,m}:** `Operation.machine_duration_overrides`; `duration_minutes_for` /
+    `physical_processing_minutes_for`; `.fjs` loader fills UUID overrides; solvers/checker
+    use `*_for`.
+  - **T-35 / energy:** `ObjectiveValues.total_energy_kwh` aggregated in `evaluate` and
+    published via BaseSolver boundary; `DEFAULT_WEIGHTS["energy"]=0`.
+  - **T-34 / MAB:** `synaps.solvers._alns_mab.PairBandit` + opt-in `mab_pair_selection`.
+  - **KI-F16c:** `benchmark/sdst_fjs_loader.py` + `benchmark/instances/public/sdst/toy_2x2.sdstfjs`.
+  - Tests: `test_energy_and_pom`, `test_alns_mab`, `test_sdst_fjs_loader`, min-out fixed-set
+    validity companion, F7 `LANE_INFERENCE_UNPROVEN`, solver-boundary energy publish.
+  - **Impact (T-30):** heterogeneous `.fjs` alternatives are no longer the historical
+    min-alternative relaxation — Brandimarte makespans under exact overrides are
+    comparable to literature BKS when a solver claims OPTIMAL (KI-F16a).
+
 - **Audit v4 Waves 1–4 (algebra correctness + governance):**
   - `synaps.timegrain.physical_processing_minutes` — feasibility floor distinct from the integer reservation grain.
   - Exact lane inference (`FeasibilityChecker._assign_lanes_exact` / `_exact_lane_assignment`) with greedy fallback (F7).
@@ -27,6 +42,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `benchmark/BENCHMARK_EVIDENCE_SEARCH_COVER_2026_07_29.md`: bounded A/B/C evidence — `SEARCH_COVER` lifts `industrial-2k` coverage 0.386→1.0 and cuts independent violations 11× vs the `BALANCED` baseline; documents a localized pre-existing RHC cross-window precedence boundary and pre-existing native-seed test brittleness (both confirmed on the parent commit).
 
 ### Fixed
+
+- **Wave 5 residuals:**
+  - **KI-F7:** greedy lane fallback that emits hard lane/setup faults now also emits
+    advisory `LANE_INFERENCE_UNPROVEN` (`hard_violations` filters advisory kinds).
+  - **KI-F16a:** when CP-SAT claims `OPTIMAL` on Brandimarte proven-OPT stems, assert
+    equality to literature BKS (requires T-30 overrides).
+  - **KI-S3:** status recorded as accepted sentinel; assignment LB fixed-set
+    validity property tests land beside GUARD-S3 (no absolute subset-monotone claim).
 
 - **Audit v4 Wave 1–2 algebra fixes:**
   - **F2/T-10:** `DURATION_MISMATCH` uses the physical floor (no 1-minute slop); ALNS native repair/seed snaps to ceil grain; optional `strict_grain` → `DURATION_BELOW_GRAIN`.

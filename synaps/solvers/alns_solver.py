@@ -47,7 +47,7 @@ except ImportError:  # pragma: no cover
     _HAS_NUMPY = False
 from synaps.solvers.lower_bounds import compute_relaxed_makespan_lower_bound
 from synaps.solvers.sdst_matrix import SdstMatrix
-from synaps.timegrain import duration_minutes
+from synaps.timegrain import duration_minutes_for
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -1591,9 +1591,7 @@ def _try_native_greedy_repair(
             # spans; snap to the canonical integer ceil grain (P0-4) so ALNS
             # reserves the same duration as every other solver. The old 1-min
             # checker tolerance existed only to absorb this divergence.
-            duration = float(
-                duration_minutes(op.base_duration_min, float(speed_factors[m]))
-            )
+            duration = float(duration_minutes_for(op, problem.work_centers[m]))
             actual_end = actual_start + duration
 
             start_offsets[i] = actual_start
@@ -1829,10 +1827,8 @@ def _try_native_initial_seed(
 
             actual_start = max(float(start_offsets[i]), min_start + setup)
             # F2 (audit v4): snap the native raw ``base/speed`` span to the
-            # canonical integer ceil grain (P0-4) — same as the repair path.
-            duration = float(
-                duration_minutes(op.base_duration_min, float(speed_factors[m]))
-            )
+            # canonical integer ceil grain (P0-4 / T-30) — same as repair.
+            duration = float(duration_minutes_for(op, problem.work_centers[m]))
             actual_end = actual_start + duration
 
             start_offsets[i] = actual_start
@@ -2326,6 +2322,7 @@ class AlnsSolver(BaseSolver):
             kwargs.get("frozen_initial_repair_min_remaining_time_s", 30.0)
         )
         use_cpsat_repair: bool = bool(kwargs.get("use_cpsat_repair", True))
+        mab_pair_selection: bool = bool(kwargs.get("mab_pair_selection", False))
         cpsat_max_destroy_ops: int = int(kwargs.get("cpsat_max_destroy_ops", min(20, max_destroy)))
         objective_weights: dict[str, float] = dict(
             kwargs.get(
@@ -3179,11 +3176,19 @@ class AlnsSolver(BaseSolver):
                     max_temp=sa_temp_max,
                 )
 
-        # ------- Phase 2: ALNS operator selection (Roulette Wheel) -------
+        # ------- Phase 2: ALNS operator selection (Roulette Wheel / optional MAB) -------
         n_operators = len(DESTROY_OPERATORS)
         operator_names = [name for name, _ in DESTROY_OPERATORS]
         operator_scores = [0.0] * n_operators
         operator_attempts = [0] * n_operators
+        pair_bandit = None
+        if mab_pair_selection:
+            from synaps.solvers._alns_mab import PairBandit
+
+            # T-34: UCB1 over destroy operators paired with the active repair
+            # path (CP-SAT/greedy). Full destroy×repair cartesian lands when
+            # repair becomes a first-class roulette family.
+            pair_bandit = PairBandit(n_pairs=n_operators)
 
         # C2 (Task 12.1): Process initial_operator_weights kwarg via helper.
         # Prefer dict keyed by operator name (robust to DESTROY_OPERATORS reordering).
@@ -3338,16 +3343,19 @@ class AlnsSolver(BaseSolver):
 
                 iterations_completed = iteration
 
-                # Select destroy operator (roulette wheel)
-                total_weight = sum(operator_weights)
-                r = rng.random() * total_weight
-                cumulative = 0.0
-                selected_op_idx = 0
-                for idx, w in enumerate(operator_weights):
-                    cumulative += w
-                    if cumulative >= r:
-                        selected_op_idx = idx
-                        break
+                # Select destroy operator (roulette wheel, or UCB1 when MAB on)
+                if pair_bandit is not None:
+                    selected_op_idx = pair_bandit.select()
+                else:
+                    total_weight = sum(operator_weights)
+                    r = rng.random() * total_weight
+                    cumulative = 0.0
+                    selected_op_idx = 0
+                    for idx, w in enumerate(operator_weights):
+                        cumulative += w
+                        if cumulative >= r:
+                            selected_op_idx = idx
+                            break
 
                 op_name, destroy_fn = DESTROY_OPERATORS[selected_op_idx]
 
@@ -3535,6 +3543,7 @@ class AlnsSolver(BaseSolver):
                     base_cache=current_cache,
                 )
                 candidate_cost = _objective_cost(candidate_obj, objective_weights)
+                cost_before_move = current_cost
                 delta = candidate_cost - current_cost
 
                 # SA acceptance
@@ -3579,6 +3588,18 @@ class AlnsSolver(BaseSolver):
                 # Update operator scores
                 operator_scores[selected_op_idx] += score_reward
                 operator_attempts[selected_op_idx] += 1
+                if pair_bandit is not None:
+                    from synaps.solvers._alns_mab import pair_reward
+
+                    accepted_move = score_reward > 0.0
+                    pair_bandit.update(
+                        selected_op_idx,
+                        pair_reward(
+                            cost_before=cost_before_move,
+                            cost_after=candidate_cost,
+                            accepted=accepted_move,
+                        ),
+                    )
 
                 # B3 (Task 7.4): Cumulative per-operator tracking (never reset)
                 cumulative_operator_attempts[selected_op_idx] += 1
@@ -3798,6 +3819,7 @@ class AlnsSolver(BaseSolver):
                     frozen_initial_repair_min_remaining_time_s
                 ),
                 "cpsat_max_destroy_ops": cpsat_max_destroy_ops,
+                "mab_pair_selection": mab_pair_selection,
                 "repair_num_workers": repair_num_workers,
                 "initial_solution_ms": initial_solution_ms,
                 "native_initial_seed_attempted": native_initial_seed_attempted,

@@ -76,7 +76,7 @@ from synaps.solvers.rhc._window import (
     stabilize_temporal_consistency as _stabilize_temporal_consistency,
 )
 from synaps.solvers.sdst_matrix import SdstMatrix
-from synaps.timegrain import physical_processing_minutes
+from synaps.timegrain import physical_processing_minutes_for
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -451,12 +451,17 @@ class RhcSolver(BaseSolver):
 
         op_mean_duration_by_id: dict[UUID, float] = {}
         op_min_duration_by_id: dict[UUID, float] = {}
+        wc_by_id = {work_center.id: work_center for work_center in problem.work_centers}
         for op in problem.operations:
             eligible_ids = op_eligible_wc_ids[op.id]
-            effective_durations = [
-                physical_processing_minutes(op.base_duration_min, wc_speed_by_id.get(wc_id, 1.0))
-                for wc_id in eligible_ids
-            ]
+            effective_durations = []
+            for wc_id in eligible_ids:
+                wc = wc_by_id.get(wc_id)
+                if wc is None:
+                    from types import SimpleNamespace
+
+                    wc = SimpleNamespace(id=wc_id, speed_factor=wc_speed_by_id.get(wc_id, 1.0))
+                effective_durations.append(physical_processing_minutes_for(op, wc))
             if not effective_durations:
                 effective_durations = [max(op.base_duration_min, 1.0)]
             op_mean_duration_by_id[op.id] = max(

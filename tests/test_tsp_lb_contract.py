@@ -104,3 +104,30 @@ def test_empty_and_singleton_are_zero(n: int) -> None:
     if n < 2:
         assert compute_min_out_assignment_setup_lb(states[:1], wc, {}) == 0.0
         assert compute_machine_tsp_lower_bound(states[:1], wc, {}) == 0.0
+
+
+@given(
+    n=st.integers(min_value=3, max_value=6),
+    seed=st.integers(min_value=0, max_value=10_000),
+)
+@settings(max_examples=40, deadline=None)
+def test_min_out_assignment_lb_valid_on_every_subset(n: int, seed: int) -> None:
+    """Assignment LB stays <= brute path on every subset (fixed-set validity).
+
+    Absolute ``L(S)`` is *not* subset-monotone (cheap edges may vanish); the
+    contract is recomputation on the fixed set, never ``L(S)-L(S\\{j})``.
+    """
+    rng = __import__("random").Random(seed)
+    states = [uuid4() for _ in range(n)]
+    wc_id = uuid4()
+    lookup: dict[tuple[object, object, object], float] = {}
+    for i, a in enumerate(states):
+        for j, b in enumerate(states):
+            if i == j:
+                continue
+            lookup[(wc_id, a, b)] = float(rng.randint(0, 40))
+    for drop in range(n):
+        subset = states[:drop] + states[drop + 1 :]
+        lb = compute_min_out_assignment_setup_lb(subset, wc_id, lookup)
+        brute = _brute_path_optimum(subset, wc_id, lookup)
+        assert lb <= brute + 1e-9

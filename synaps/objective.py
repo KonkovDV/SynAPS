@@ -26,6 +26,7 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "setup": 0.0,
     "material": 0.0,
     "tardiness": 0.0,
+    "energy": 0.0,
 }
 
 
@@ -76,10 +77,11 @@ def evaluate(problem: ScheduleProblem, assignments: list[Assignment]) -> Objecti
     horizon_start = problem.planning_horizon_start
     horizon_end = problem.planning_horizon_end
     ops_by_id = {op.id: op for op in problem.operations}
-    setup_lookup: dict[tuple[UUID, UUID, UUID], tuple[float, float]] = {
+    setup_lookup: dict[tuple[UUID, UUID, UUID], tuple[float, float, float]] = {
         (e.work_center_id, e.from_state_id, e.to_state_id): (
             float(e.setup_minutes),
             e.material_loss,
+            float(e.energy_kwh),
         )
         for e in problem.setup_matrix
     }
@@ -89,7 +91,7 @@ def evaluate(problem: ScheduleProblem, assignments: list[Assignment]) -> Objecti
         end = (a.end_time - horizon_start).total_seconds() / 60.0
         makespan = max(makespan, end)
 
-    total_setup, total_material = _lane_setup_totals(
+    total_setup, total_material, total_energy = _lane_setup_totals(
         problem, assignments, ops_by_id, setup_lookup
     )
     total_tardiness = _total_tardiness(problem, assignments, ops_by_id, horizon_start, horizon_end)
@@ -101,6 +103,7 @@ def evaluate(problem: ScheduleProblem, assignments: list[Assignment]) -> Objecti
         total_setup_minutes=total_setup,
         total_material_loss=total_material,
         total_tardiness_minutes=total_tardiness,
+        total_energy_kwh=total_energy,
         coverage=coverage_fraction(
             total_operations=total_ops, scheduled_operations=scheduled
         ),
@@ -112,9 +115,9 @@ def _lane_setup_totals(
     problem: ScheduleProblem,
     assignments: list[Assignment],
     ops_by_id: dict[UUID, Any],
-    setup_lookup: dict[tuple[UUID, UUID, UUID], tuple[float, float]],
-) -> tuple[float, float]:
-    """Sum setup minutes / material loss over consecutive ops ON THE SAME LANE.
+    setup_lookup: dict[tuple[UUID, UUID, UUID], tuple[float, float, float]],
+) -> tuple[float, float, float]:
+    """Sum setup minutes / material / energy over consecutive ops ON THE SAME LANE.
 
     F3-consistency (audit v4): a parallel machine whose assignments carry NO
     lane metadata cannot be evaluated as one pseudo-lane — that charges
@@ -124,6 +127,8 @@ def _lane_setup_totals(
     setup semantics. If inference fails (infeasible/over budget) the
     pseudo-lane fallback is kept: the schedule is broken anyway and the
     objective merely has to stay defined.
+
+    T-35: ``energy_kwh`` is aggregated along the same transitions as setup.
     """
     by_lane: dict[tuple[UUID, UUID | None], list[Assignment]] = defaultdict(list)
     for a in assignments:
@@ -162,18 +167,20 @@ def _lane_setup_totals(
 
     total_setup = 0.0
     total_material = 0.0
+    total_energy = 0.0
     for (wc_id, _lane), lane_assignments in by_lane.items():
         ordered = sorted(lane_assignments, key=lambda x: x.start_time)
         for i in range(1, len(ordered)):
             prev_op = ops_by_id.get(ordered[i - 1].operation_id)
             curr_op = ops_by_id.get(ordered[i].operation_id)
             if prev_op is not None and curr_op is not None:
-                setup_min, mat_loss = setup_lookup.get(
-                    (wc_id, prev_op.state_id, curr_op.state_id), (0.0, 0.0)
+                setup_min, mat_loss, energy = setup_lookup.get(
+                    (wc_id, prev_op.state_id, curr_op.state_id), (0.0, 0.0, 0.0)
                 )
                 total_setup += setup_min
                 total_material += mat_loss
-    return total_setup, total_material
+                total_energy += energy
+    return total_setup, total_material, total_energy
 
 
 def _total_tardiness(
@@ -219,6 +226,7 @@ def scalarize(objective: ObjectiveValues, weights: dict[str, float] | None = Non
         + w.get("setup", 0.0) * objective.total_setup_minutes
         + w.get("material", 0.0) * objective.total_material_loss
         + w.get("tardiness", 0.0) * objective.total_tardiness_minutes
+        + w.get("energy", 0.0) * objective.total_energy_kwh
     )
 
 

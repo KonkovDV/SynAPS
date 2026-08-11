@@ -57,6 +57,10 @@ class TestFjsParsing:
         assert first.base_duration_min == 3
         assert {wc_code_by_id[wc_id] for wc_id in first.eligible_wc_ids} == {"M1", "M2"}
         assert first.domain_attributes["fjs_machine_durations"] == {"M1": 3, "M2": 5}
+        assert {
+            wc_code_by_id[wc_id]: minutes
+            for wc_id, minutes in first.machine_duration_overrides.items()
+        } == {"M1": 3, "M2": 5}
         assert ops_j1  # precedence chain sanity below
 
     def test_precedence_chain_within_jobs(self, fjs_path: Path) -> None:
@@ -89,7 +93,9 @@ class TestFjsParsing:
 
     def test_mapping_description_mentions_comparability(self) -> None:
         mapping = describe_fjs_mapping()
-        assert "not directly comparable" in mapping["comparability_note"].lower()
+        note = mapping["comparability_note"].lower()
+        assert "comparable" in note
+        assert "machine_duration_overrides" in note or "overrides" in note
 
 
 class TestFjsErrors:

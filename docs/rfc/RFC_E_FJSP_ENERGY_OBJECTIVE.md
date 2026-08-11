@@ -1,14 +1,18 @@
 # RFC: E-FJSP energy objective (T-35)
 
-- **Status:** Draft (research)
+- **Status:** Implemented (Wave 5) — `total_energy_kwh` in evaluate; CP-SAT energy
+  term still deferred (weight default 0)
 - **Date:** 2026-08-11
 - **Audit:** Red Team v4
 
-## Current state
+## Current state (Wave 5)
 
-`SetupEntry.energy_kwh` already exists on the model but is **never aggregated**
-by `objective.evaluate`, CP-SAT, ALNS, or LBBD — a dead field from the goals'
-point of view.
+`SetupEntry.energy_kwh` is aggregated by `objective.evaluate` into
+`ObjectiveValues.total_energy_kwh` and published through
+`BaseSolver._attach_canonical_objective`. Default scalar weight is `energy: 0`.
+CP-SAT / ALNS search still do **not** optimize an energy term (ALNS native
+kernel also selects machines on `base/speed` before snapping spans with
+`duration_minutes_for` — KI residual).
 
 ## Literature sketch (2024–2026)
 

@@ -1,6 +1,7 @@
 # RFC: Machine-dependent durations `p_{o,m}` (T-30)
 
-- **Status:** Draft (design only — no production migration in this change)
+- **Status:** Implemented (Wave 5) — helpers + model field + fjs overrides; full
+  conformance matrix row optional follow-up
 - **Date:** 2026-08-11
 - **Audit:** Red Team v4 / gap vs PyJobShop & classical FJSP
 
@@ -41,7 +42,9 @@ Reservation grain:
 | `benchmark/fjs_loader.py` | map native `p_{o,m}` into overrides (already the natural source) |
 | CP-SAT / LBBD / ALNS / GREED / RHC / checker / lower_bounds | call the new helpers; no raw `base/speed` |
 | Architecture Rule 1 | forbid raw division; prefer the `*_for(op, wc)` API |
-| Benchmarks | Brandimarte mk* stay on speed=1 + overrides empty → bit-identical; `.fjs` gains fidelity |
+| Benchmarks | `.fjs` loader fills overrides → true `p_{o,m}`; Brandimarte makespans
+  become comparable to literature BKS once OPTIMAL is claimed (KI-F16a). Empty
+  overrides still fall back to `base/speed`. |
 
 ## Non-goals (this RFC)
 

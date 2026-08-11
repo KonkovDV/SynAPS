@@ -7,7 +7,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from synaps.timegrain import duration_minutes
+from synaps.timegrain import duration_minutes_for
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -231,12 +231,7 @@ def compute_relaxed_makespan_lower_bound(problem: ScheduleProblem) -> MakespanLo
         # so the bound cannot exceed a realized schedule just because it used a
         # finer (raw) duration than the round-based dispatch/CP-SAT models.
         min_duration = min(
-            float(
-                duration_minutes(
-                    operation.base_duration_min,
-                    work_centers_by_id[work_center_id].speed_factor,
-                )
-            )
+            float(duration_minutes_for(operation, work_centers_by_id[work_center_id]))
             for work_center_id in eligible_work_centers
         )
         min_duration_by_op[operation.id] = min_duration

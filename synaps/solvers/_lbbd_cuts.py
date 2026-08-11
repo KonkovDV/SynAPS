@@ -272,9 +272,11 @@ def compute_min_out_assignment_setup_lb(
     state; a Hamiltonian path on ``n`` nodes uses ``n - 1`` arcs, so summing
     the ``n - 1`` smallest min-outs is a valid lower bound (one node may be
     the path end and contribute no outgoing arc). Dominated by BHK
-    (:func:`compute_machine_tsp_lower_bound`) but O(n^2), safe under set
-    shrinkage without a discount residual, and never over-claims on
-    non-metric matrices.
+    (:func:`compute_machine_tsp_lower_bound`) but O(n^2) and never
+    over-claims on non-metric matrices. **Not** subset-monotone as an
+    absolute value (removing a state can raise min-outs by deleting cheap
+    edges) — do not discount ``L(S) - L(S\\{j})``; recompute on the fixed
+    assigned set instead (same discipline as GUARD-S3 / KI-S3).
     """
     distinct = list(dict.fromkeys(state_ids))
     n = len(distinct)

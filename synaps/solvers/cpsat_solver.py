@@ -20,7 +20,7 @@ from synaps.model import (
     SolverStatus,
 )
 from synaps.solvers import BaseSolver
-from synaps.timegrain import duration_minutes
+from synaps.timegrain import duration_minutes_for
 
 # N3 (audit v3): time limits are owned by ``time_limit_s`` and may not be set
 # through ``sat_parameters`` — doing so silently defeats the timebox (D3).
@@ -934,7 +934,7 @@ class CpSatSolver(BaseSolver):
             presence_vars: list[Any] = []
             for work_center_id in eligible_by_op[operation.id]:
                 work_center = wc_by_id[work_center_id]
-                duration = duration_minutes(operation.base_duration_min, work_center.speed_factor)
+                duration = duration_minutes_for(operation, work_center)
 
                 suffix = f"_{operation.id}_{work_center_id}"
                 start_var = model.new_int_var(0, horizon, f"start{suffix}")
@@ -1062,6 +1062,22 @@ class CpSatSolver(BaseSolver):
                 )
                 for work_center in solve_problem.work_centers
             }
+            # T-30: per-(op, machine) overrides break interchangeability even when
+            # speed/eligibility match — include the override fingerprint in the
+            # symmetry class key (Wave 5 Red Team H4).
+            override_sig_by_wc: dict[Any, tuple[tuple[str, int], ...]] = {
+                work_center.id: tuple(
+                    sorted(
+                        (str(operation.id), int(minutes))
+                        for operation in solve_problem.operations
+                        for minutes in (
+                            operation.machine_duration_overrides.get(work_center.id),
+                        )
+                        if minutes is not None
+                    )
+                )
+                for work_center in solve_problem.work_centers
+            }
             # Machines carrying frozen (fixed) intervals are not interchangeable
             # with unfrozen peers even when all other attributes match: the
             # frozen blocks differ per machine, so a wholesale A<->B swap need
@@ -1083,6 +1099,7 @@ class CpSatSolver(BaseSolver):
                     work_center.max_parallel,
                     setup_signature,
                     eligible_ops_by_wc[work_center.id],
+                    override_sig_by_wc[work_center.id],
                 )
                 symmetry_classes.setdefault(class_key, []).append(work_center)
             for class_work_centers in symmetry_classes.values():

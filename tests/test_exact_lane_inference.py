@@ -98,8 +98,11 @@ def test_exact_inference_still_proves_real_infeasibility() -> None:
 
 def test_explicit_lane_metadata_path_unchanged() -> None:
     """Explicit lane_id metadata still drives lane grouping directly."""
+    from uuid import uuid4
+
     problem, assignments = _greedy_trap_problem()
-    lane_by_seq = {1: "lane-0", 2: "lane-1", 3: "lane-1", 4: "lane-0"}
+    lane_ids = [uuid4(), uuid4()]
+    lane_by_seq = {1: lane_ids[0], 2: lane_ids[1], 3: lane_ids[1], 4: lane_ids[0]}
     for a in assignments:
         seq = next(
             i for i, op in enumerate(problem.operations, start=1)
@@ -108,3 +111,18 @@ def test_explicit_lane_metadata_path_unchanged() -> None:
         a.lane_id = lane_by_seq[seq]
     violations = FeasibilityChecker().check(problem, assignments, exhaustive=True)
     assert not violations, [f"{v.kind}: {v.message}" for v in violations]
+
+
+def test_greedy_fallback_emits_lane_inference_unproven(monkeypatch) -> None:
+    """KI-F7: size/budget greedy path that claims a hard fault must flag UNPROVEN."""
+    import synaps.solvers.feasibility_checker as checker_mod
+    from synaps.solvers.feasibility_checker import hard_violations
+
+    monkeypatch.setattr(checker_mod, "_LANE_EXACT_MAX_OPS", 0)
+    problem, assignments = _greedy_trap_problem()
+    violations = FeasibilityChecker().check(problem, assignments, exhaustive=True)
+    kinds = {v.kind for v in violations}
+    assert "SETUP_GAP_VIOLATION" in kinds
+    assert "LANE_INFERENCE_UNPROVEN" in kinds
+    assert any(v.kind == "LANE_INFERENCE_UNPROVEN" for v in violations)
+    assert hard_violations(violations), "hard faults must remain after filtering advisory"

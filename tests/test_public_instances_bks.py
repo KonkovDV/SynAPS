@@ -4,13 +4,13 @@ The CI threshold that turns S1/S4/S5-class defects from "wait for the next
 audit" into an automatic red build:
 
 * every bundled ``mk01``..``mk10`` parses and matches its published shape;
-* a solver-claimed ``OPTIMAL`` makespan must be <= BKS (the loader's
-  min-alternative mapping makes the loaded instance a RELAXATION, so a claimed
-  optimum ABOVE the BKS is impossible unless the model overstates — exactly
-  how S4/S5 would have been caught on the first run);
+* Wave 5 / T-30: ``fjs_loader`` populates ``machine_duration_overrides``, so
+  the loaded instance is the true Brandimarte model. A claimed ``OPTIMAL`` on
+  ``BRANDIMARTE_PROVEN_OPTIMAL`` stems must equal literature BKS; all stems
+  still forbid OPTIMAL above BKS;
 * every reported LBBD lower bound must be <= BKS (an S1-class invalid bound
   otherwise);
-* the feasibility checker accepts the produced schedule.
+* the feasibility checker accepts the produced schedule (hard violations only).
 
 Fast lane (not slow): mk01/mk02 with CPSAT-30 + LBBD. Full sweep of all ten
 instances is slow-marked.
@@ -23,10 +23,10 @@ from pathlib import Path
 import pytest
 
 from benchmark.fjs_loader import load_fjs_problem
-from benchmark.public_bks import BRANDIMARTE_BKS, BRANDIMARTE_SHAPE
+from benchmark.public_bks import BRANDIMARTE_BKS, BRANDIMARTE_PROVEN_OPTIMAL, BRANDIMARTE_SHAPE
 from synaps.model import ScheduleProblem, SolverStatus
 from synaps.solvers.cpsat_solver import CpSatSolver
-from synaps.solvers.feasibility_checker import FeasibilityChecker
+from synaps.solvers.feasibility_checker import FeasibilityChecker, hard_violations
 from synaps.solvers.lbbd_solver import LbbdSolver
 
 _BRANDIMARTE_DIR = (
@@ -57,13 +57,22 @@ def _assert_bks_invariants(stem: str, *, time_limit_s: int) -> None:
     )
     assert cpsat.status in (SolverStatus.OPTIMAL, SolverStatus.FEASIBLE, SolverStatus.TIMEOUT)
     if cpsat.status is SolverStatus.OPTIMAL:
-        # Relaxed optimum <= true optimum <= BKS: a claimed optimum above BKS
-        # means the model overstates (S4/S5 class).
+        # T-30/KI-F16a: with machine_duration_overrides the loaded instance is
+        # the true Brandimarte model. Proven-OPT literature stems must match
+        # BKS exactly when CP-SAT claims OPTIMAL; all stems still forbid
+        # OPTIMAL above BKS.
         assert cpsat.objective.makespan_minutes <= bks + 1e-6, (
             f"{stem}: claimed OPTIMAL {cpsat.objective.makespan_minutes} > BKS {bks}"
         )
+        if stem in BRANDIMARTE_PROVEN_OPTIMAL:
+            assert abs(cpsat.objective.makespan_minutes - bks) <= 1e-6, (
+                f"{stem}: claimed OPTIMAL {cpsat.objective.makespan_minutes} "
+                f"!= literature OPT/BKS {bks}"
+            )
     if cpsat.assignments:
-        assert not FeasibilityChecker().check(problem, cpsat.assignments, exhaustive=True), (
+        assert not hard_violations(
+            FeasibilityChecker().check(problem, cpsat.assignments, exhaustive=True)
+        ), (
             f"{stem}: CP-SAT schedule failed the independent feasibility check"
         )
     # The CP-SAT dual bound (when published in makespan minutes) is a lower

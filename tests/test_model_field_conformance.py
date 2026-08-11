@@ -19,9 +19,10 @@ setup_minutes, pool_size, quantity_needed, planning_horizon_*, material_loss
 Documented explicit gaps (no hard cross-solver invariant to assert):
 - ``priority`` is a soft ordering hint, not a constraint — no minimal instance
   makes ignoring it *infeasible*; covered instead by heuristic-level tests.
-- ``energy_kwh`` has no ObjectiveValues surface yet (it only gates parallel
-  virtualization); a conformance row must follow when energy enters the
-  objective (final brief, P0-6 unified evaluator).
+- ``energy_kwh`` is aggregated into ``ObjectiveValues.total_energy_kwh`` by
+  ``evaluate`` / the BaseSolver boundary (Wave 5 / T-35) with default scalar
+  weight 0; CP-SAT still does not optimize an energy term. A solver×energy
+  optimization row can land when a non-zero energy weight enters the portfolio.
 """
 
 from __future__ import annotations

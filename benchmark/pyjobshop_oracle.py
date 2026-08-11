@@ -11,9 +11,9 @@ the SAME problem:
 * one PyJobShop machine per ``max_parallel == 1`` work center; a renewable
   resource of capacity ``max_parallel`` for parallel-lane centers (so the M2
   parallel case is a direct, independent oracle);
-* one task per operation, one mode per eligible work center, all with the SAME
-  ``synaps.timegrain.duration_minutes`` duration (SynAPS models duration per
-  operation, not per (operation, machine) pair);
+* one task per operation, one mode per eligible work center, with duration from
+  ``synaps.timegrain.duration_minutes_for(op, wc)`` (honors
+  ``machine_duration_overrides`` / T-30 ``p_{o,m}``);
 * ``end_before_start`` precedence from ``predecessor_op_id``;
 * makespan objective.
 
@@ -31,7 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from synaps.timegrain import duration_minutes
+from synaps.timegrain import duration_minutes_for
 
 if TYPE_CHECKING:
     from synaps.model import ScheduleProblem
@@ -58,9 +58,8 @@ def solve_with_pyjobshop(
     model = pjs.Model()
 
     resource_by_wc = {}
-    speed_by_wc = {}
+    wc_by_id = {work_center.id: work_center for work_center in problem.work_centers}
     for work_center in problem.work_centers:
-        speed_by_wc[work_center.id] = work_center.speed_factor
         if work_center.max_parallel <= 1:
             resource_by_wc[work_center.id] = (model.add_machine(name=work_center.code), False)
         else:
@@ -79,7 +78,7 @@ def solve_with_pyjobshop(
         task = task_by_op[op.id]
         for wc_id in op.eligible_wc_ids:
             resource, is_renewable = resource_by_wc[wc_id]
-            duration = duration_minutes(op.base_duration_min, speed_by_wc[wc_id])
+            duration = duration_minutes_for(op, wc_by_id[wc_id])
             if is_renewable:
                 model.add_mode(task, resource, duration, demands=1)
             else:

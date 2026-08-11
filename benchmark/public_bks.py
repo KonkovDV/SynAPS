@@ -16,23 +16,20 @@ Sources
 
 Mapping caveat (KEEP IN MIND for every consumer)
 ------------------------------------------------
-``benchmark/fjs_loader.py`` maps heterogeneous machine alternatives to
-``base_duration_min = min`` over the listed alternatives (the SynAPS core
-models duration per operation, not per (operation, machine) pair). The loaded
-instance is therefore a RELAXATION of the true instance:
+``benchmark/fjs_loader.py`` now populates
+``Operation.machine_duration_overrides`` with the exact listed ``p_{o,m}``
+(Wave 5 / T-30). ``base_duration_min`` remains ``min`` over alternatives as a
+fallback for callers that ignore overrides.
 
-    relaxed_optimum <= true_optimum <= BKS
+With overrides honored by solvers via ``duration_minutes_for``, a claimed
+``OPTIMAL`` makespan on Brandimarte is comparable to literature BKS:
 
-so the honest, machine-checkable invariants are ONE-SIDED:
+* claimed ``OPTIMAL`` must equal BKS for ``BRANDIMARTE_PROVEN_OPTIMAL`` stems
+  (two-sided; Wave 5 / KI-F16a);
+* any reported lower bound must still be ``<= BKS``.
 
-* a claimed ``OPTIMAL`` makespan must be <= BKS (violation = S4/S5-class
-  overstatement);
-* any reported lower bound must be <= BKS (violation = S1-class invalid
-  bound).
-
-Equality against BKS becomes assertable only once per-pair durations are
-modeled exactly; until then never present bundled-instance makespans as
-comparable to published per-pair-exact results.
+Historical note: before T-30 the loader was a min-alternative RELAXATION, so
+only one-sided ``OPTIMAL <= BKS`` was sound.
 """
 
 from __future__ import annotations

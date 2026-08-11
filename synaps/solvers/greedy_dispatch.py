@@ -27,7 +27,7 @@ from synaps.solvers._dispatch_support import (
     find_earliest_feasible_slot,
     recompute_assignment_setups,
 )
-from synaps.timegrain import physical_processing_minutes
+from synaps.timegrain import physical_processing_minutes_for
 
 
 def _virtualize_parallel_lanes(
@@ -324,10 +324,13 @@ class GreedyDispatch(BaseSolver):
                         continue
 
                     work_center = wc_by_id.get(wc_id)
-                    speed = work_center.speed_factor if work_center is not None else 1.0
+                    if work_center is None:
+                        from types import SimpleNamespace
+
+                        work_center = SimpleNamespace(id=wc_id, speed_factor=1.0)
                     # F11: ATCS priority uses the physical (fractional) processing
                     # time via timegrain — not the integer reservation grain.
-                    p_j = physical_processing_minutes(op.base_duration_min, speed)
+                    p_j = physical_processing_minutes_for(op, work_center)
 
                     candidate_records.append(
                         {
@@ -772,9 +775,12 @@ class BeamSearchDispatch(BaseSolver):
                             continue
 
                         work_center = wc_by_id.get(wc_id)
-                        speed = work_center.speed_factor if work_center is not None else 1.0
+                        if work_center is None:
+                            from types import SimpleNamespace
+
+                            work_center = SimpleNamespace(id=wc_id, speed_factor=1.0)
                         # F11: ATCS priority uses physical processing via timegrain.
-                        p_j = physical_processing_minutes(op.base_duration_min, speed)
+                        p_j = physical_processing_minutes_for(op, work_center)
 
                         candidate_records.append(
                             {
