@@ -2924,6 +2924,7 @@ class RhcSolver(BaseSolver):
 
         total_setup = 0.0
         total_material_loss = 0.0
+        total_energy = 0.0
         by_machine: dict[Any, list[Assignment]] = {}
         for a in assignments:
             by_machine.setdefault(a.work_center_id, []).append(a)
@@ -2934,6 +2935,7 @@ class RhcSolver(BaseSolver):
                 curr_state = ops_by_id[ma[i].operation_id].state_id
                 total_setup += sdst.get_setup(wc_id, prev_state, curr_state)
                 total_material_loss += sdst.get_material_loss(wc_id, prev_state, curr_state)
+                total_energy += sdst.get_energy(wc_id, prev_state, curr_state)
 
         order_completion: dict[Any, float] = {}
         for a in assignments:
@@ -2952,4 +2954,5 @@ class RhcSolver(BaseSolver):
             total_setup_minutes=total_setup,
             total_material_loss=total_material_loss,
             total_tardiness_minutes=total_tardiness,
+            total_energy_kwh=total_energy,
         )

@@ -46,6 +46,7 @@ from synaps.model import (
 from synaps.solvers import BaseSolver
 from synaps.solvers._lbbd_assembly import stamp_parallel_lane_ids
 from synaps.solvers._lbbd_cuts import (
+    compute_assignment_setup_lb_total,
     compute_machine_transition_floor,
     compute_machine_tsp_lower_bound,
     compute_sequence_independent_setup_lower_bound,
@@ -500,6 +501,9 @@ class LbbdHdSolver(BaseSolver):
                 "lower_bound_method": "master_relaxation_benders_hd",
                 "lower_bound_components": {
                     "master_relaxation_lb": reported_lb,
+                    "assignment_setup_lb": compute_assignment_setup_lb_total(
+                        problem, best_assignments
+                    ),
                 },
                 "iteration_log": iteration_log,
                 "lb_evolution": lb_evolution,

@@ -2278,6 +2278,168 @@ def _calibrate_sa_temperature(
     return calibrated_temperature, len(positive_deltas)
 
 
+def _reanchor_against_frozen(
+    assignments: list[Assignment],
+    *,
+    problem: ScheduleProblem,
+    frozen_assignments: list[Assignment],
+    ops_by_id: Mapping[Any, Any],
+    op_positions: Mapping[Any, int],
+    frozen_assignments_by_op: Mapping[Any, Assignment],
+    frozen_predecessor_end_offsets: Mapping[Any, float],
+    dispatch_context: Any,
+) -> tuple[list[Assignment], int]:
+    """Re-place free assignments against frozen timelines (Wave 9 extract)."""
+    if not assignments or not frozen_assignments:
+        return list(assignments), 0
+
+    original_by_op = {assignment.operation_id: assignment for assignment in assignments}
+    scheduled_assignments = [
+        assignment
+        for assignment in frozen_assignments
+        if assignment.operation_id in ops_by_id
+    ]
+    external_frozen_blockers = sorted(
+        [
+            (
+                assignment,
+                (assignment.start_time - problem.planning_horizon_start).total_seconds()
+                / 60.0,
+                (assignment.end_time - problem.planning_horizon_start).total_seconds()
+                / 60.0,
+                set(assignment.aux_resource_ids),
+            )
+            for assignment in frozen_assignments
+            if assignment.operation_id not in ops_by_id
+        ],
+        key=lambda blocker: blocker[1],
+    )
+    machine_index = MachineIndex(dispatch_context)
+    for assignment in scheduled_assignments:
+        machine_index.add(assignment)
+
+    anchored_by_op = dict(frozen_assignments_by_op)
+    pending_assignments = sorted(
+        assignments,
+        key=lambda assignment: (
+            assignment.start_time,
+            op_positions[assignment.operation_id],
+        ),
+    )
+    reanchored_assignments: list[Assignment] = []
+
+    for _ in range(len(pending_assignments) + 1):
+        if not pending_assignments:
+            break
+
+        progress_made = False
+        next_pending: list[Assignment] = []
+
+        for assignment in pending_assignments:
+            operation = ops_by_id[assignment.operation_id]
+            earliest_start = 0.0
+            required_resource_ids = {
+                requirement.aux_resource_id
+                for requirement in dispatch_context.requirements_by_op.get(
+                    operation.id,
+                    [],
+                )
+            }
+            if operation.predecessor_op_id is not None:
+                predecessor_assignment = anchored_by_op.get(operation.predecessor_op_id)
+                if predecessor_assignment is not None:
+                    predecessor_end = (
+                        predecessor_assignment.end_time - problem.planning_horizon_start
+                    ).total_seconds() / 60.0
+                    earliest_start = max(earliest_start, predecessor_end)
+                elif operation.predecessor_op_id in original_by_op:
+                    next_pending.append(assignment)
+                    continue
+                else:
+                    earliest_start = max(
+                        earliest_start,
+                        frozen_predecessor_end_offsets.get(operation.id, 0.0),
+                    )
+
+            slot = None
+            current_earliest_start = earliest_start
+            while True:
+                slot = find_earliest_feasible_slot(
+                    dispatch_context,
+                    scheduled_assignments,
+                    operation,
+                    assignment.work_center_id,
+                    current_earliest_start,
+                    machine_index=machine_index,
+                )
+                if slot is None:
+                    break
+
+                conflicting_blocker_end = next(
+                    (
+                        blocker_end
+                        for (
+                            blocker_assignment,
+                            blocker_start,
+                            blocker_end,
+                            blocker_resources,
+                        ) in external_frozen_blockers
+                        if (
+                            blocker_assignment.work_center_id == assignment.work_center_id
+                            or required_resource_ids & blocker_resources
+                        )
+                        and slot.start_offset < blocker_end
+                        and slot.end_offset > blocker_start
+                    ),
+                    None,
+                )
+                if conflicting_blocker_end is None:
+                    break
+                current_earliest_start = max(
+                    current_earliest_start,
+                    conflicting_blocker_end,
+                )
+            if slot is None:
+                next_pending.append(assignment)
+                continue
+
+            anchored_assignment = Assignment(
+                operation_id=operation.id,
+                work_center_id=assignment.work_center_id,
+                start_time=problem.planning_horizon_start
+                + timedelta(minutes=slot.start_offset),
+                end_time=problem.planning_horizon_start
+                + timedelta(minutes=slot.end_offset),
+                setup_minutes=slot.setup_minutes,
+                aux_resource_ids=slot.aux_resource_ids,
+            )
+            scheduled_assignments.append(anchored_assignment)
+            machine_index.add(anchored_assignment)
+            anchored_by_op[operation.id] = anchored_assignment
+            reanchored_assignments.append(anchored_assignment)
+            progress_made = True
+
+        if not progress_made:
+            return list(assignments), 0
+        pending_assignments = next_pending
+
+    if pending_assignments:
+        return list(assignments), 0
+
+    changed_assignment_count = sum(
+        1
+        for assignment in reanchored_assignments
+        if original_by_op[assignment.operation_id].start_time != assignment.start_time
+        or original_by_op[assignment.operation_id].end_time != assignment.end_time
+        or original_by_op[assignment.operation_id].work_center_id
+        != assignment.work_center_id
+    )
+    return sorted(
+        reanchored_assignments,
+        key=lambda assignment: assignment.start_time,
+    ), changed_assignment_count
+
+
 # ---------------------------------------------------------------------------
 # Main ALNS solver
 # ---------------------------------------------------------------------------
@@ -2338,6 +2500,9 @@ def _try_cpsat_repair_lane(
     }
     if len(destroyed_ids) > cpsat_max_destroy_ops:
         stats["cpsat_repair_skips_large_destroy"] = 1
+        return None, stats
+    # Wave 9 / D3: do not start a CP-SAT repair that already has no wall budget.
+    if remaining_s < 1.0:
         return None, stats
 
     stats["cpsat_repair_attempts"] = 1
@@ -2804,158 +2969,6 @@ class AlnsSolver(BaseSolver):
             metadata = result.metadata or {}
             return result.status == SolverStatus.TIMEOUT or bool(metadata.get("partial_schedule"))
 
-        def _reanchor_against_frozen(
-            assignments: list[Assignment],
-        ) -> tuple[list[Assignment], int]:
-            if not assignments or not frozen_assignments:
-                return list(assignments), 0
-
-            original_by_op = {assignment.operation_id: assignment for assignment in assignments}
-            scheduled_assignments = [
-                assignment
-                for assignment in frozen_assignments
-                if assignment.operation_id in ops_by_id
-            ]
-            external_frozen_blockers = sorted(
-                [
-                    (
-                        assignment,
-                        (assignment.start_time - problem.planning_horizon_start).total_seconds()
-                        / 60.0,
-                        (assignment.end_time - problem.planning_horizon_start).total_seconds()
-                        / 60.0,
-                        set(assignment.aux_resource_ids),
-                    )
-                    for assignment in frozen_assignments
-                    if assignment.operation_id not in ops_by_id
-                ],
-                key=lambda blocker: blocker[1],
-            )
-            machine_index = MachineIndex(dispatch_context)
-            for assignment in scheduled_assignments:
-                machine_index.add(assignment)
-
-            anchored_by_op = dict(frozen_assignments_by_op)
-            pending_assignments = sorted(
-                assignments,
-                key=lambda assignment: (
-                    assignment.start_time,
-                    op_positions[assignment.operation_id],
-                ),
-            )
-            reanchored_assignments: list[Assignment] = []
-
-            for _ in range(len(pending_assignments) + 1):
-                if not pending_assignments:
-                    break
-
-                progress_made = False
-                next_pending: list[Assignment] = []
-
-                for assignment in pending_assignments:
-                    operation = ops_by_id[assignment.operation_id]
-                    earliest_start = 0.0
-                    required_resource_ids = {
-                        requirement.aux_resource_id
-                        for requirement in dispatch_context.requirements_by_op.get(
-                            operation.id,
-                            [],
-                        )
-                    }
-                    if operation.predecessor_op_id is not None:
-                        predecessor_assignment = anchored_by_op.get(operation.predecessor_op_id)
-                        if predecessor_assignment is not None:
-                            predecessor_end = (
-                                predecessor_assignment.end_time - problem.planning_horizon_start
-                            ).total_seconds() / 60.0
-                            earliest_start = max(earliest_start, predecessor_end)
-                        elif operation.predecessor_op_id in original_by_op:
-                            next_pending.append(assignment)
-                            continue
-                        else:
-                            earliest_start = max(
-                                earliest_start,
-                                frozen_predecessor_end_offsets.get(operation.id, 0.0),
-                            )
-
-                    slot = None
-                    current_earliest_start = earliest_start
-                    while True:
-                        slot = find_earliest_feasible_slot(
-                            dispatch_context,
-                            scheduled_assignments,
-                            operation,
-                            assignment.work_center_id,
-                            current_earliest_start,
-                            machine_index=machine_index,
-                        )
-                        if slot is None:
-                            break
-
-                        conflicting_blocker_end = next(
-                            (
-                                blocker_end
-                                for (
-                                    blocker_assignment,
-                                    blocker_start,
-                                    blocker_end,
-                                    blocker_resources,
-                                ) in external_frozen_blockers
-                                if (
-                                    blocker_assignment.work_center_id == assignment.work_center_id
-                                    or required_resource_ids & blocker_resources
-                                )
-                                and slot.start_offset < blocker_end
-                                and slot.end_offset > blocker_start
-                            ),
-                            None,
-                        )
-                        if conflicting_blocker_end is None:
-                            break
-                        current_earliest_start = max(
-                            current_earliest_start,
-                            conflicting_blocker_end,
-                        )
-                    if slot is None:
-                        next_pending.append(assignment)
-                        continue
-
-                    anchored_assignment = Assignment(
-                        operation_id=operation.id,
-                        work_center_id=assignment.work_center_id,
-                        start_time=problem.planning_horizon_start
-                        + timedelta(minutes=slot.start_offset),
-                        end_time=problem.planning_horizon_start
-                        + timedelta(minutes=slot.end_offset),
-                        setup_minutes=slot.setup_minutes,
-                        aux_resource_ids=slot.aux_resource_ids,
-                    )
-                    scheduled_assignments.append(anchored_assignment)
-                    machine_index.add(anchored_assignment)
-                    anchored_by_op[operation.id] = anchored_assignment
-                    reanchored_assignments.append(anchored_assignment)
-                    progress_made = True
-
-                if not progress_made:
-                    return list(assignments), 0
-                pending_assignments = next_pending
-
-            if pending_assignments:
-                return list(assignments), 0
-
-            changed_assignment_count = sum(
-                1
-                for assignment in reanchored_assignments
-                if original_by_op[assignment.operation_id].start_time != assignment.start_time
-                or original_by_op[assignment.operation_id].end_time != assignment.end_time
-                or original_by_op[assignment.operation_id].work_center_id
-                != assignment.work_center_id
-            )
-            return sorted(
-                reanchored_assignments,
-                key=lambda assignment: assignment.start_time,
-            ), changed_assignment_count
-
         # ------- Phase 1: Initial solution -------
         from synaps.solvers.greedy_dispatch import BeamSearchDispatch, GreedyDispatch
 
@@ -3043,7 +3056,16 @@ class AlnsSolver(BaseSolver):
                     assignments=warm_candidate,
                 )
             elif frozen_assignments:
-                reanchored_warm_candidate, _ = _reanchor_against_frozen(warm_candidate)
+                reanchored_warm_candidate, _ = _reanchor_against_frozen(
+                    warm_candidate,
+                    problem=problem,
+                    frozen_assignments=frozen_assignments,
+                    ops_by_id=ops_by_id,
+                    op_positions=op_positions,
+                    frozen_assignments_by_op=frozen_assignments_by_op,
+                    frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
+                    dispatch_context=dispatch_context,
+                )
                 if _is_valid_complete_schedule(reanchored_warm_candidate):
                     recompute_assignment_setups(
                         reanchored_warm_candidate,
@@ -3252,7 +3274,14 @@ class AlnsSolver(BaseSolver):
 
         if initial_result is not None and frozen_assignments:
             reanchored_initial_assignments, _ = _reanchor_against_frozen(
-                list(initial_result.assignments)
+                list(initial_result.assignments),
+                problem=problem,
+                frozen_assignments=frozen_assignments,
+                ops_by_id=ops_by_id,
+                op_positions=op_positions,
+                frozen_assignments_by_op=frozen_assignments_by_op,
+                frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
+                dispatch_context=dispatch_context,
             )
             if _is_valid_complete_schedule(reanchored_initial_assignments):
                 recompute_assignment_setups(
@@ -3721,6 +3750,10 @@ class AlnsSolver(BaseSolver):
 
                 # Repair — primary depends on use_cpsat_repair flag (or MAB pair)
                 remaining_s = time_limit_s - (time.monotonic() - t0)
+                # Wave 9 / D3: stop the search loop before starting a repair with
+                # essentially no remaining wall budget (in-flight overrun guard).
+                if remaining_s < 1.0:
+                    break
                 repair_attempt = _attempt_alns_pair_repair(
                     problem=problem,
                     frozen=frozen,

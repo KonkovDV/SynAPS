@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Wave 9 (honesty / conformance / CI residuals):**
+  - M0 conformance row for `machine_duration_overrides` (+ SOLVER_FIELD_CONFORMANCE).
+  - GUARD-D3 soft cushion 1.5×; ALNS skips new repair when remaining wall < 1s.
+  - LBBD/HD metadata `assignment_setup_lb` via `compute_assignment_setup_lb_total` (no KI-S3 cuts).
+  - Extracted `_reanchor_against_frozen`; `_solve_core` ratchet 1681 → 1549.
+  - RHC `_evaluate_final` includes setup energy.
+  - Docs: `WAVE9_EXECUTION_PLAN.md`, `WAVES_1_9_REDTEAM_AUDIT_2026_08_11.md`.
+  - Tests: `tests/test_wave9_residuals.py`.
+
 - **Wave 8 (RT17 residuals + Red Team 1–8):**
   - `proven_hard_violations` + `verify_schedule_result` customer oracle (RT17-H2 / KI-F7 closed).
   - `_attach_canonical_objective` replaces full `ObjectiveValues` (RT17-M2).

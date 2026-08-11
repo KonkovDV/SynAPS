@@ -14,7 +14,7 @@ sufficient to guard the field contract.
 
 Guarded fields: release_date, max_parallel, speed_factor, predecessor_op_id,
 setup_minutes, pool_size, quantity_needed, planning_horizon_*, material_loss
-(objective accounting).
+(objective accounting), machine_duration_overrides (Wave 9 / T-30).
 
 Documented explicit gaps (no hard cross-solver invariant to assert):
 - ``priority`` is a soft ordering hint, not a constraint — no minimal instance
@@ -288,6 +288,35 @@ def _material_loss_instance() -> tuple[ScheduleProblem, str]:
     )
 
 
+def _machine_duration_overrides_instance() -> tuple[ScheduleProblem, str]:
+    """Two equal-speed machines; overrides differ — base/speed must not win."""
+    state = State(code="s")
+    wc_fast = WorkCenter(code="A", capability_group="G", speed_factor=1.0)
+    wc_slow = WorkCenter(code="B", capability_group="G", speed_factor=1.0)
+    order = Order(external_ref="O", due_date=HE)
+    # base/speed = 60 on either WC; overrides force 20 vs 90.
+    op = Operation(
+        order_id=order.id,
+        seq_in_order=1,
+        state_id=state.id,
+        base_duration_min=60,
+        eligible_wc_ids=[wc_fast.id, wc_slow.id],
+        machine_duration_overrides={wc_fast.id: 20, wc_slow.id: 90},
+    )
+    return (
+        ScheduleProblem(
+            states=[state],
+            orders=[order],
+            operations=[op],
+            work_centers=[wc_fast, wc_slow],
+            setup_matrix=[],
+            planning_horizon_start=H0,
+            planning_horizon_end=HE,
+        ),
+        "machine_duration_overrides",
+    )
+
+
 # (field, builder) pairs. Each builder returns (problem, field_name).
 FIELD_BUILDERS = [
     _release_date_instance,
@@ -299,6 +328,7 @@ FIELD_BUILDERS = [
     _quantity_needed_instance,
     _planning_horizon_instance,
     _material_loss_instance,
+    _machine_duration_overrides_instance,
 ]
 
 
@@ -379,6 +409,14 @@ def test_solver_field_conformance(solver_config: str, builder) -> None:
         assert result.objective.total_material_loss >= 5.0 - 1e-6, (
             f"{solver_config}: material_loss not accounted "
             f"(total_material_loss={result.objective.total_material_loss})"
+        )
+    elif field == "machine_duration_overrides":
+        a = result.assignments[0]
+        op = ops[a.operation_id]
+        expected = op.machine_duration_overrides[a.work_center_id]
+        assert abs(_minutes(a) - float(expected)) <= 1e-6, (
+            f"{solver_config}: ignored machine_duration_overrides "
+            f"(duration {_minutes(a)} != override {expected} on {a.work_center_id})"
         )
 
     # In every case the produced schedule must itself be feasible.

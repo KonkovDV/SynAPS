@@ -295,11 +295,41 @@ def compute_min_out_assignment_setup_lb(
     return float(sum(min_outs[: n - 1]))
 
 
+def compute_assignment_setup_lb_total(
+    problem: ScheduleProblem,
+    assignments: list[Assignment],
+) -> float:
+    """Sum per-machine min-out setup LBs on the fixed assigned set (Wave 9).
+
+    Metadata / diagnostics only — never used as a discountable Benders cut
+    (KI-S3). Recomputes on the concrete assignment; empty schedule → 0.
+    """
+    if not assignments:
+        return 0.0
+    ops_by_id = {op.id: op for op in problem.operations}
+    setup_lookup: dict[tuple[UUID, UUID, UUID], float] = {
+        (e.work_center_id, e.from_state_id, e.to_state_id): float(e.setup_minutes)
+        for e in problem.setup_matrix
+    }
+    by_machine: dict[UUID, list[UUID]] = {}
+    for assignment in assignments:
+        op = ops_by_id.get(assignment.operation_id)
+        if op is None:
+            continue
+        by_machine.setdefault(assignment.work_center_id, []).append(op.state_id)
+    total = 0.0
+    for wc_id, state_ids in by_machine.items():
+        total += compute_min_out_assignment_setup_lb(state_ids, wc_id, setup_lookup)
+    return total
+
+
 __all__ = [
     "BendersCutLike",
+    "compute_assignment_setup_lb_total",
     "compute_machine_transition_floor",
     "compute_machine_tsp_lower_bound",
     "compute_min_out_assignment_setup_lb",
     "compute_sequence_independent_setup_lower_bound",
     "cut_pool_fingerprint",
+    "reported_lower_bound",
 ]

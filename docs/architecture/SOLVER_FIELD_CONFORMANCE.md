@@ -14,7 +14,8 @@ cores): `GREED`, `BEAM-3`, `CPSAT-10`, `LBBD-5`, `ALNS-300`.
 |---|---|---|---|---|---|---|
 | `release_date` | ✅ | ✅ | ✅ | ✅ | ✅ | M1: `start >= release_offset`; `RELEASE_DATE_VIOLATION` in checker |
 | `max_parallel` | ✅ | ✅ | ✅ | ✅ | ✅ | M2: dispatch lane virtualization; CP-SAT native; LBBD via CP-SAT |
-| `speed_factor` | ✅ | ✅ | ✅ | ✅ | ✅ | duration = `base / speed` |
+| `speed_factor` | ✅ | ✅ | ✅ | ✅ | ✅ | duration = `base / speed` (when no override) |
+| `machine_duration_overrides` | ✅ | ✅ | ✅ | ✅ | ✅ | Wave 9 / T-30: `duration_minutes_for` per WC |
 | `predecessor_op_id` | ✅ | ✅ | ✅ | ✅ | ✅ | successor start ≥ predecessor end |
 | `setup_minutes` | ✅ | ✅ | ✅ | ✅ | ✅ | SDST separation on shared machine |
 | `priority` | ✅ | ✅ | ✅ | ✅ | ✅ | ATCS weight / tardiness objective (not in the fast matrix) |
@@ -23,8 +24,8 @@ cores): `GREED`, `BEAM-3`, `CPSAT-10`, `LBBD-5`, `ALNS-300`.
 | `planning_horizon_*` | ✅ | ✅ | ✅ | ✅ | ✅ | `HORIZON_BOUND_VIOLATION` in checker |
 | `pool_size` / `quantity_needed` | ✅ | ✅ | ✅ | ✅ | ✅ | auxiliary-resource capacity (aux cumulative) |
 
-The fast matrix in the test asserts the first five fields (each with a minimal
-instance where ignoring the field is demonstrably wrong) across all five
-representatives; the remaining fields are exercised by the dedicated aux /
-objective / horizon suites. A solver that cannot honor a field must reject the
+The fast matrix in the test asserts release/parallel/speed/predecessor/setup/
+aux/horizon/material_loss/`machine_duration_overrides` across all five
+representatives; remaining soft fields (priority, energy optimization) are
+exercised by dedicated suites. A solver that cannot honor a field must reject the
 instance explicitly rather than silently mis-schedule it (audit M0).

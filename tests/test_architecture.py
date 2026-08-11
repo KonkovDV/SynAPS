@@ -141,7 +141,7 @@ def test_no_dead_public_functions() -> None:
 # growing a length is an architecture regression.
 _LONG_FUNCTION_RATCHET: dict[str, int] = {
     "solvers/rhc/_solver.py::solve": 2601,
-    "solvers/alns_solver.py::_solve_core": 1681,
+    "solvers/alns_solver.py::_solve_core": 1549,
     "solvers/feasibility_checker.py::check": 234,
     "solvers/lbbd_hd_solver.py::solve": 433,
     "solvers/lbbd_solver.py::solve": 386,
