@@ -120,7 +120,11 @@ def _build_verification_snapshot(
     portfolio_metadata: dict[str, Any], result: ScheduleResult
 ) -> ReplayVerificationSnapshot:
     performed = isinstance(portfolio_metadata.get("verified_feasible"), bool)
-    feasible = bool(portfolio_metadata.get("verified_feasible", _result_is_feasible(result)))
+    # Wave 13 / H13-6: never pretend verified when verification was not performed.
+    if performed:
+        feasible = bool(portfolio_metadata["verified_feasible"])
+    else:
+        feasible = False
 
     violation_count_value = portfolio_metadata.get("violation_count", 0)
     violation_count = violation_count_value if isinstance(violation_count_value, int) else 0

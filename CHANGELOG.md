@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Wave 13 (architecture / chain / algebra Red Team):**
+  - RHC: build frozen pred offsets **before** clear; pass `frozen_context_*` + aux; `ceil`; greedy uses original preds (C13-1).
+  - ALNS refuses frozen×`max_parallel` virtualization (C13-2); native missing pred fail-closed (C13-3).
+  - Reanchor failure returns empty; RHC will not commit illegal schedule (H13-3).
+  - BaseSolver publishes `weighted_sum` with caller weights (H13-1); replay no longer pretends verified (H13-6).
+  - `MACHINE_OVERLAP` stays proven; `SolveOptions.num_workers` rejects OOB.
+  - Docs: `LIT_AUG2026_WAVE13_BRIEF.md`, `HYPER_REDTEAM_AUDIT_2026_08_11_W13.md`, `WAVE13_EXECUTION_PLAN.md`.
+  - Tests: `tests/test_wave13_arch_rt.py`.
+
 - **Wave 12 (Lit Aug 2026 + Hyper Red Team):**
   - CP-SAT frozen↔free SDST disjunctives + frozen aux cumulatives; refuse collapsed frozen / missing context (C12-1/2/4).
   - IncrementalRepair/ALNS: refuse missing frozen pred; `ceil` offsets (C12-3 / H12-3).

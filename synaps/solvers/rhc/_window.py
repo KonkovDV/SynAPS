@@ -231,8 +231,8 @@ def reanchor_inner_assignments(
     The procedure is monotone: each pass either anchors at least one
     pending assignment or aborts. If a full pass makes no progress, or
     any assignment is left unanchored after the bounded number of
-    passes, the original assignments are returned untouched and the
-    changed-count is reported as zero (atomic rollback).
+    passes, returns ``([], 0)`` so callers refuse the illegal schedule
+    (Wave 13 / H13-3) instead of committing the original fail-open plan.
 
     ``machine_index_factory`` is ``MachineIndex`` (the constructor; we
     cannot import it directly from this module without creating a
@@ -313,11 +313,11 @@ def reanchor_inner_assignments(
             progress_made = True
 
         if not progress_made:
-            return list(assignments), 0
+            return [], 0
         pending_assignments = next_pending
 
     if pending_assignments:
-        return list(assignments), 0
+        return [], 0
 
     changed_assignment_count = sum(
         1

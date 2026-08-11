@@ -1670,7 +1670,9 @@ def _try_native_greedy_repair(
 
             # Check frozen predecessor constraint
             if op.predecessor_op_id is not None and op.predecessor_op_id not in disrupted_local_idx:
-                pred_end = frozen_end_offsets.get(op.predecessor_op_id, 0.0)
+                if op.predecessor_op_id not in frozen_end_offsets:
+                    return None  # Wave 13 / C13-3: never default missing pred to 0.0
+                pred_end = frozen_end_offsets[op.predecessor_op_id]
                 min_start = max(min_start, pred_end)
 
             # Check local predecessor constraint (already handled by native, but
@@ -1911,7 +1913,9 @@ def _try_native_initial_seed(
 
             # Check frozen predecessor constraint
             if op.predecessor_op_id is not None and op.predecessor_op_id not in local_idx:
-                pred_end = frozen_end_offsets.get(op.predecessor_op_id, 0.0)
+                if op.predecessor_op_id not in frozen_end_offsets:
+                    return None  # Wave 13 / C13-3: never default missing pred to 0.0
+                pred_end = frozen_end_offsets[op.predecessor_op_id]
                 min_start = max(min_start, pred_end)
 
             # Check local predecessor constraint (already handled by native, but
@@ -2733,7 +2737,20 @@ class AlnsSolver(BaseSolver):
             _virtualize_parallel_lanes,
         )
 
+        frozen_raw = kwargs.get("frozen_assignments") or []
         virtual_problem, virtual_to_original = _virtualize_parallel_lanes(problem)
+        # Wave 13 / C13-2: match CP-SAT — refuse frozen × lane virtualization.
+        if frozen_raw and virtual_to_original:
+            return ScheduleResult(
+                solver_name=self.name,
+                status=SolverStatus.ERROR,
+                metadata={
+                    "error": (
+                        "frozen_assignments are not supported together with "
+                        "max_parallel>1 virtualization (Wave 13 / C13-2)"
+                    ),
+                },
+            )
         result = self._solve_core(virtual_problem, **kwargs)
         _unroll_lane_assignments(result, virtual_to_original)
         return result

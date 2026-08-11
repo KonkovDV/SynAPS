@@ -1419,6 +1419,26 @@ class RhcSolver(BaseSolver):
                 frozen_committed_op_ids,
             )
 
+            # Wave 13 / C13-1: build frozen predecessor offsets from ORIGINAL ops
+            # BEFORE clearing edges for ScheduleProblem validation. Clearing first
+            # made offset kwargs dead and nullified Wave 12 frozen algebra.
+            frozen_predecessor_end_offsets: dict[Any, int] = {}
+            missing_frozen_predecessor = False
+            for op_id in window_op_ids:
+                op = ops_by_id[op_id]
+                pred_id = op.predecessor_op_id
+                if pred_id is None or pred_id in window_op_ids:
+                    continue
+                frozen_pred = frozen_committed_assignment_by_op.get(pred_id)
+                if frozen_pred is None:
+                    missing_frozen_predecessor = True
+                    break
+                frozen_predecessor_end_offsets[op.id] = int(
+                    math.ceil(
+                        (frozen_pred.end_time - horizon_start).total_seconds() / 60.0
+                    )
+                )
+
             # Clear predecessor links that point to committed (frozen) operations
             # so the sub-problem passes Pydantic validation
             clean_window_ops = []
@@ -1529,6 +1549,11 @@ class RhcSolver(BaseSolver):
                     ),
                 )
 
+            if missing_frozen_predecessor:
+                # Wave 13 / C13-1: refuse exact inner path without a frozen pred.
+                inner_rejection_reason = "missing_frozen_predecessor"
+                selected_inner_solver_name = "greedy"
+
             if selected_inner_solver_name != "greedy":
                 try:
                     # Build a sub-problem for just this window's operations
@@ -1617,25 +1642,17 @@ class RhcSolver(BaseSolver):
                             effective_inner_kwargs["frozen_assignments"] = list(
                                 frozen_committed_assignments
                             )
-                            frozen_predecessor_end_offsets = {
-                                op.id: round(
-                                    (
-                                        frozen_committed_assignment_by_op[
-                                            op.predecessor_op_id
-                                        ].end_time
-                                        - horizon_start
-                                    ).total_seconds()
-                                    / 60.0
-                                )
-                                for op in clean_window_ops
-                                if op.predecessor_op_id is not None
-                                and op.predecessor_op_id not in window_op_ids
-                                and op.predecessor_op_id in frozen_committed_assignment_by_op
-                            }
+                            # Wave 13 / C13-1: offsets + full context (built before pred clear).
                             if frozen_predecessor_end_offsets:
-                                effective_inner_kwargs["frozen_predecessor_end_offsets"] = (
+                                effective_inner_kwargs["frozen_predecessor_end_offsets"] = dict(
                                     frozen_predecessor_end_offsets
                                 )
+                            effective_inner_kwargs["frozen_context_operations"] = list(
+                                problem.operations
+                            )
+                            effective_inner_kwargs["frozen_aux_requirements"] = list(
+                                problem.aux_requirements
+                            )
                         if selected_inner_solver_name == "cpsat":
                             effective_inner_kwargs["auto_greedy_warm_start"] = False
                         if selected_inner_solver_name == "alns":
@@ -1858,154 +1875,165 @@ class RhcSolver(BaseSolver):
                                 frozen_assignment_by_op=frozen_committed_assignment_by_op,
                             )
                         )
-                        if frozen_committed_assignments:
+                        if frozen_committed_assignments and not boundary_aware_assignments:
+                            # Wave 13 / H13-3: reanchor failed closed — do not commit.
+                            inner_rejection_reason = "reanchor_failed"
+                            inner_result = None
+                        elif frozen_committed_assignments:
                             boundary_reanchor_windows += 1
                             boundary_reanchor_ops_total += len(boundary_aware_assignments)
                             boundary_reanchor_changed_ops_total += boundary_reanchor_changed_ops
-                        # Map inner solver assignments into committed set
-                        commit_candidates = collect_commit_candidates(
-                            boundary_aware_assignments,
-                            commit_boundary=commit_boundary,
-                            commit_all=window_end_offset >= horizon_minutes,
-                            frozen_committed_ids=frozen_committed_op_ids,
-                        )
-                        committed_now = len(commit_candidates)
-                        committed_assignments = list(frozen_committed_assignments)
-                        committed_assignment_by_op = dict(frozen_committed_assignment_by_op)
-                        committed_op_ids = set(frozen_committed_op_ids)
-                        for op_id, assignment in sorted(
-                            commit_candidates.items(),
-                            key=lambda item: item[1].start_time,
-                        ):
-                            committed_assignments.append(assignment)
-                            committed_assignment_by_op[op_id] = assignment
-                            committed_op_ids.add(op_id)
-                        if cross_window_variable_fixing_enabled:
-                            cross_window_stable_ops = _detect_cross_window_stable_ops(
-                                prev_committed_by_op=prev_committed_by_op,
-                                curr_committed_by_op=committed_assignment_by_op,
+                        if inner_result is None:
+                            pass
+                        else:
+                            # Map inner solver assignments into committed set
+                            commit_candidates = collect_commit_candidates(
+                                boundary_aware_assignments,
+                                commit_boundary=commit_boundary,
+                                commit_all=window_end_offset >= horizon_minutes,
+                                frozen_committed_ids=frozen_committed_op_ids,
                             )
-                            prev_committed_by_op = dict(committed_assignment_by_op)
-                        previous_window_tail_assignments = sorted(
-                            [
-                                assignment
-                                for assignment in boundary_aware_assignments
-                                if assignment.operation_id not in commit_candidates
-                            ],
-                            key=lambda assignment: assignment.start_time,
-                        )
-                        window_start_offset += window_minutes
-                        window_solved_via_inner = True
+                            committed_now = len(commit_candidates)
+                            committed_assignments = list(frozen_committed_assignments)
+                            committed_assignment_by_op = dict(frozen_committed_assignment_by_op)
+                            committed_op_ids = set(frozen_committed_op_ids)
+                            for op_id, assignment in sorted(
+                                commit_candidates.items(),
+                                key=lambda item: item[1].start_time,
+                            ):
+                                committed_assignments.append(assignment)
+                                committed_assignment_by_op[op_id] = assignment
+                                committed_op_ids.add(op_id)
+                            if cross_window_variable_fixing_enabled:
+                                cross_window_stable_ops = _detect_cross_window_stable_ops(
+                                    prev_committed_by_op=prev_committed_by_op,
+                                    curr_committed_by_op=committed_assignment_by_op,
+                                )
+                                prev_committed_by_op = dict(committed_assignment_by_op)
+                            previous_window_tail_assignments = sorted(
+                                [
+                                    assignment
+                                    for assignment in boundary_aware_assignments
+                                    if assignment.operation_id not in commit_candidates
+                                ],
+                                key=lambda assignment: assignment.start_time,
+                            )
+                            window_start_offset += window_minutes
+                            window_solved_via_inner = True
 
-                        # P3.1: Update op→machine stability for variable fixing
-                        if variable_fixing_enabled:
-                            for assignment in boundary_aware_assignments:
-                                oid = assignment.operation_id
-                                wc = assignment.work_center_id
-                                prev = op_machine_stability.get(oid)
-                                if prev is not None and prev[0] == wc:
-                                    op_machine_stability[oid] = (wc, prev[1] + 1)
-                                else:
-                                    op_machine_stability[oid] = (wc, 1)
+                            # P3.1: Update op→machine stability for variable fixing
+                            if variable_fixing_enabled:
+                                for assignment in boundary_aware_assignments:
+                                    oid = assignment.operation_id
+                                    wc = assignment.work_center_id
+                                    prev = op_machine_stability.get(oid)
+                                    if prev is not None and prev[0] == wc:
+                                        op_machine_stability[oid] = (wc, prev[1] + 1)
+                                    else:
+                                        op_machine_stability[oid] = (wc, 1)
 
-                        # C3 (Task 3a.3): Compute and append cross-window
-                        # quality summary after each successful window solve.
-                        # window_start_offset was already advanced by
-                        # window_minutes, so actual span = end - start + step.
-                        _window_span = max(
-                            window_end_offset - window_start_offset + window_minutes,
-                            base_window_span_minutes,
-                        )
-                        quality_summary_buffer.append(
-                            compute_window_quality_summary(
-                                window_index=window_count,
-                                assignments=boundary_aware_assignments,
-                                window_span_minutes=_window_span,
-                                order_due_offsets=order_due_offsets,
-                                ops_by_id=ops_by_id,
-                                horizon_start=horizon_start,
+                            # C3 (Task 3a.3): Compute and append cross-window
+                            # quality summary after each successful window solve.
+                            # window_start_offset was already advanced by
+                            # window_minutes, so actual span = end - start + step.
+                            _window_span = max(
+                                window_end_offset - window_start_offset + window_minutes,
+                                base_window_span_minutes,
                             )
-                        )
+                            quality_summary_buffer.append(
+                                compute_window_quality_summary(
+                                    window_index=window_count,
+                                    assignments=boundary_aware_assignments,
+                                    window_span_minutes=_window_span,
+                                    order_due_offsets=order_due_offsets,
+                                    ops_by_id=ops_by_id,
+                                    horizon_start=horizon_start,
+                                )
+                            )
 
-                        append_inner_window_summary(
-                            window=window_count,
-                            ops_in_window=len(clean_window_ops),
-                            ops_committed=committed_now,
-                            resolution_mode="inner",
-                            inner_result=inner_result,
-                            lower_bound=window_lower_bound.value,
-                            inner_time_limit_s=per_window_limit,
-                            candidate_pressure=window_candidate_pressure,
-                            due_pressure=window_due_pressure,
-                            due_drift_minutes=window_due_drift_minutes,
-                            spillover_ops=window_spillover,
-                        )
-                        if warm_selection is not None and warm_selection.rejected_reason_counts:
-                            inner_window_summaries[-1]["warm_start_rejected_reason_counts"] = dict(
-                                warm_selection.rejected_reason_counts
+                            append_inner_window_summary(
+                                window=window_count,
+                                ops_in_window=len(clean_window_ops),
+                                ops_committed=committed_now,
+                                resolution_mode="inner",
+                                inner_result=inner_result,
+                                lower_bound=window_lower_bound.value,
+                                inner_time_limit_s=per_window_limit,
+                                candidate_pressure=window_candidate_pressure,
+                                due_pressure=window_due_pressure,
+                                due_drift_minutes=window_due_drift_minutes,
+                                spillover_ops=window_spillover,
                             )
-                        if window_admission_relaxed:
-                            inner_window_summaries[-1]["admission_relaxed"] = True
-                            inner_window_summaries[-1]["admission_relaxation_recovered_ops"] = (
-                                window_admission_relaxation_recovered_ops
+                            if warm_selection is not None and warm_selection.rejected_reason_counts:
+                                inner_window_summaries[-1]["warm_start_rejected_reason_counts"] = (
+                                    dict(warm_selection.rejected_reason_counts)
+                                )
+                            if window_admission_relaxed:
+                                inner_window_summaries[-1]["admission_relaxed"] = True
+                                inner_window_summaries[-1]["admission_relaxation_recovered_ops"] = (
+                                    window_admission_relaxation_recovered_ops
+                                )
+                            if window_full_scan_triggered:
+                                inner_window_summaries[-1]["full_scan_triggered"] = True
+                                inner_window_summaries[-1]["full_scan_added_ops"] = (
+                                    window_full_scan_added_ops
+                                )
+                                inner_window_summaries[-1]["full_scan_final_pool"] = (
+                                    window_full_scan_final_pool
+                                )
+                            inner_window_summaries[-1]["boundary_reanchor_ops"] = len(
+                                boundary_aware_assignments
                             )
-                        if window_full_scan_triggered:
-                            inner_window_summaries[-1]["full_scan_triggered"] = True
-                            inner_window_summaries[-1]["full_scan_added_ops"] = (
-                                window_full_scan_added_ops
+                            inner_window_summaries[-1]["boundary_reanchor_changed_ops"] = (
+                                boundary_reanchor_changed_ops
                             )
-                            inner_window_summaries[-1]["full_scan_final_pool"] = (
-                                window_full_scan_final_pool
-                            )
-                        inner_window_summaries[-1]["boundary_reanchor_ops"] = len(
-                            boundary_aware_assignments
-                        )
-                        inner_window_summaries[-1]["boundary_reanchor_changed_ops"] = (
-                            boundary_reanchor_changed_ops
-                        )
-                        if commit_precedence_gate_enabled:
-                            inner_window_summaries[-1]["commit_precedence_deferred_ops"] = (
-                                window_commit_precedence_deferred_last
-                            )
-                        if alns_budget_profile is not None:
-                            inner_window_summaries[-1]["alns_budget_auto_scaled"] = bool(
-                                alns_budget_profile["scaled"]
-                            )
-                            inner_window_summaries[-1]["alns_effective_max_iterations"] = int(
-                                alns_budget_profile["effective_max_iterations"]
-                            )
-                            inner_window_summaries[-1]["alns_effective_max_destroy"] = int(
-                                alns_budget_profile["effective_max_destroy"]
-                            )
-                            inner_window_summaries[-1][
-                                "alns_estimated_repair_s_per_destroyed_op"
-                            ] = round(
-                                float(alns_budget_profile["estimated_repair_s_per_destroyed_op"]),
-                                4,
-                            )
-                            inner_window_summaries[-1]["alns_effective_repair_time_limit_s"] = (
-                                round(
+                            if commit_precedence_gate_enabled:
+                                inner_window_summaries[-1]["commit_precedence_deferred_ops"] = (
+                                    window_commit_precedence_deferred_last
+                                )
+                            if alns_budget_profile is not None:
+                                inner_window_summaries[-1]["alns_budget_auto_scaled"] = bool(
+                                    alns_budget_profile["scaled"]
+                                )
+                                inner_window_summaries[-1]["alns_effective_max_iterations"] = int(
+                                    alns_budget_profile["effective_max_iterations"]
+                                )
+                                inner_window_summaries[-1]["alns_effective_max_destroy"] = int(
+                                    alns_budget_profile["effective_max_destroy"]
+                                )
+                                inner_window_summaries[-1][
+                                    "alns_estimated_repair_s_per_destroyed_op"
+                                ] = round(
+                                    float(
+                                        alns_budget_profile[
+                                            "estimated_repair_s_per_destroyed_op"
+                                        ]
+                                    ),
+                                    4,
+                                )
+                                inner_window_summaries[-1][
+                                    "alns_effective_repair_time_limit_s"
+                                ] = round(
                                     float(alns_budget_profile["effective_repair_time_limit_s"]),
                                     4,
                                 )
+                            if rewound_assignments:
+                                inner_window_summaries[-1]["backtracking_rewind_ops"] = len(
+                                    rewound_assignments
+                                )
+                            if hybrid_routing_reason is not None:
+                                inner_window_summaries[-1]["inner_solver_selected"] = (
+                                    selected_inner_solver_name
+                                )
+                                inner_window_summaries[-1]["hybrid_routing_reason"] = (
+                                    hybrid_routing_reason
+                                )
+                            logger.info(
+                                "RHC window %d solved by %s inner solver (%d ops committed)",
+                                window_count,
+                                selected_inner_solver_name,
+                                committed_now,
                             )
-                        if rewound_assignments:
-                            inner_window_summaries[-1]["backtracking_rewind_ops"] = len(
-                                rewound_assignments
-                            )
-                        if hybrid_routing_reason is not None:
-                            inner_window_summaries[-1]["inner_solver_selected"] = (
-                                selected_inner_solver_name
-                            )
-                            inner_window_summaries[-1]["hybrid_routing_reason"] = (
-                                hybrid_routing_reason
-                            )
-                        logger.info(
-                            "RHC window %d solved by %s inner solver (%d ops committed)",
-                            window_count,
-                            selected_inner_solver_name,
-                            committed_now,
-                        )
                     else:
                         if inner_result is None:
                             inner_rejection_reason = inner_rejection_reason or "inner_not_run"
@@ -2083,21 +2111,31 @@ class RhcSolver(BaseSolver):
                                 window_count,
                             )
                             break
+                        # Wave 13: use ORIGINAL predecessor (clean_window_ops may have cleared it).
+                        original_op = ops_by_id.get(op.id, op)
+                        pred_id = original_op.predecessor_op_id
                         # Check predecessor constraint
-                        if op.predecessor_op_id and (
-                            op.predecessor_op_id not in committed_op_ids
-                            and op.predecessor_op_id not in window_scheduled_ids
+                        if pred_id and (
+                            pred_id not in committed_op_ids
+                            and pred_id not in window_scheduled_ids
                         ):
                             continue  # predecessor not yet scheduled
 
                         # Find predecessor end time
                         pred_end = 0.0
-                        if op.predecessor_op_id:
-                            pred_assignment = scheduled_by_op.get(op.predecessor_op_id)
+                        if pred_id:
+                            pred_assignment = scheduled_by_op.get(pred_id)
                             if pred_assignment is not None:
                                 pred_end = (
                                     pred_assignment.end_time - horizon_start
                                 ).total_seconds() / 60.0
+                            elif pred_id in frozen_committed_assignment_by_op:
+                                pred_end = (
+                                    frozen_committed_assignment_by_op[pred_id].end_time
+                                    - horizon_start
+                                ).total_seconds() / 60.0
+                            else:
+                                continue  # missing frozen pred — refuse place
 
                         eligible = (
                             op.eligible_wc_ids

@@ -51,21 +51,36 @@ def _attach_coverage(result: ScheduleResult, problem: ScheduleProblem) -> None:
     objective.unscheduled_operations = max(0, total - scheduled)
 
 
-def _attach_canonical_objective(result: ScheduleResult, problem: ScheduleProblem) -> None:
+def _attach_canonical_objective(
+    result: ScheduleResult,
+    problem: ScheduleProblem,
+    weights: dict[str, float] | None = None,
+) -> None:
     """Replace published objective with ``evaluate`` + ``scalarize`` (F4 / Wave 8).
 
     Assigns a full canonical ``ObjectiveValues`` so new fields cannot silently
-    drop at the BaseSolver boundary (RT17-M2). Solver-internal scalars remain
-    available in ``metadata["objective_components"]`` where solvers record them.
+    drop at the BaseSolver boundary (RT17-M2). Caller ``objective_weights`` are
+    honored for ``weighted_sum`` (Wave 13 / H13-1); missing keys follow
+    :data:`DEFAULT_WEIGHTS` via material/energy aliases.
     """
-    from synaps.objective import evaluate, scalarize
+    from synaps.objective import DEFAULT_WEIGHTS, evaluate, scalarize
 
     if getattr(result, "objective", None) is None:
         return
     canonical = evaluate(problem, list(result.assignments))
+    publish_weights = dict(DEFAULT_WEIGHTS)
+    if weights:
+        publish_weights.update(weights)
+        if "material" not in weights and "material_loss" in weights:
+            publish_weights["material"] = float(weights["material_loss"])
+        if "energy" not in weights and "energy_kwh" in weights:
+            publish_weights["energy"] = float(weights["energy_kwh"])
     result.objective = canonical.model_copy(
-        update={"weighted_sum": scalarize(canonical)}
+        update={"weighted_sum": scalarize(canonical, publish_weights)}
     )
+    if result.metadata is None:
+        result.metadata = {}
+    result.metadata["published_objective_weights"] = dict(publish_weights)
 
 
 class BaseSolver(ABC):
@@ -90,7 +105,9 @@ class BaseSolver(ABC):
             result: ScheduleResult = original_solve(self, problem, **solve_kwargs)
             _attach_sdst_metric(result, problem)
             _attach_coverage(result, problem)
-            _attach_canonical_objective(result, problem)
+            raw_weights = solve_kwargs.get("objective_weights")
+            weights = dict(raw_weights) if isinstance(raw_weights, dict) else None
+            _attach_canonical_objective(result, problem, weights=weights)
             return result
 
         _solve_with_metricity._sdst_metric_wrapped = True  # type: ignore[attr-defined]

@@ -81,7 +81,12 @@ class SolveOptions(BaseModel):
         payload = self.model_dump(exclude_none=True)
         raw_workers = payload.get("num_workers")
         if isinstance(raw_workers, int):
-            payload["num_workers"] = max(1, min(raw_workers, 8))
+            # Wave 13 / M13-2: reject OOB workers (match BFF honesty).
+            if raw_workers < 1 or raw_workers > 8:
+                raise ValueError(
+                    f"SolveOptions.num_workers must be in [1, 8], got {raw_workers}"
+                )
+            payload["num_workers"] = raw_workers
         raw_limit = payload.get("time_limit_s")
         if isinstance(raw_limit, int):
             # Wave 11 / H5: reject out-of-range limits instead of silently clamping to 600.
