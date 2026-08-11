@@ -18,10 +18,10 @@ import math
 import random
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Mapping
 
 from synaps.model import (
     Assignment,
@@ -432,6 +432,7 @@ def _destroy_random(
     rng: random.Random,
     *,
     ops_by_id: dict[Any, Any] | None = None,
+    **_kwargs: Any,
 ) -> set[UUID]:
     """Remove a random subset of operations."""
     op_ids = [a.operation_id for a in assignments]
@@ -447,21 +448,24 @@ def _destroy_worst(
     rng: random.Random,
     *,
     ops_by_id: dict[Any, Any] | None = None,
+    energy_weight: float = 0.0,
+    **_kwargs: Any,
 ) -> set[UUID]:
     """Remove operations contributing the most to setup cost (worst removal).
 
     Picks operations whose machine-local setup contribution (predecessor→self
-    + self→successor) is highest.
-
-    When the native accelerator is available, delegates scoring to Rust for
-    parallel per-machine computation. Falls back to the Python reference loop
-    when native is unavailable.
+    + self→successor) is highest. When ``energy_weight > 0``, also charges
+    ``energy_weight * energy_kwh`` on the same transitions (Wave 7.1). The
+    native scorer is setup-only, so energy-weighted runs stay on the Python
+    reference path.
     """
     if ops_by_id is None:
         ops_by_id = {op.id: op for op in problem.operations}
 
-    # --- Try native scoring path ---
-    native_scores = _destroy_worst_native_scores(assignments, sdst, ops_by_id)
+    # --- Try native scoring path (setup-only; skip when energy is weighted) ---
+    native_scores = None
+    if float(energy_weight) == 0.0:
+        native_scores = _destroy_worst_native_scores(assignments, sdst, ops_by_id)
     op_cost_by_id: dict[UUID, float]
     if native_scores is not None:
         # native_scores is a dict[UUID, float] of per-operation costs
@@ -482,10 +486,16 @@ def _destroy_worst(
                     prev_op = ops_by_id[machine_assignments[i - 1].operation_id]
                     cost += sdst.get_setup(wc_id, prev_op.state_id, op.state_id)
                     cost += sdst.get_material_loss(wc_id, prev_op.state_id, op.state_id)
+                    cost += float(energy_weight) * sdst.get_energy(
+                        wc_id, prev_op.state_id, op.state_id
+                    )
                 if i < len(machine_assignments) - 1:
                     next_op = ops_by_id[machine_assignments[i + 1].operation_id]
                     cost += sdst.get_setup(wc_id, op.state_id, next_op.state_id)
                     cost += sdst.get_material_loss(wc_id, op.state_id, next_op.state_id)
+                    cost += float(energy_weight) * sdst.get_energy(
+                        wc_id, op.state_id, next_op.state_id
+                    )
                 op_cost_by_id[a.operation_id] = cost
 
     # Sort by cost descending, add randomness to avoid deterministic loops
@@ -589,6 +599,7 @@ def _destroy_related(
     rng: random.Random,
     *,
     ops_by_id: dict[Any, Any] | None = None,
+    **_kwargs: Any,
 ) -> set[UUID]:
     """Remove operations that are related to a seed operation (Shaw removal).
 
@@ -646,6 +657,7 @@ def _destroy_machine_segment(
     rng: random.Random,
     *,
     ops_by_id: dict[Any, Any] | None = None,
+    **_kwargs: Any,
 ) -> set[UUID]:
     """Remove a contiguous segment of operations from a random machine.
 
@@ -679,6 +691,7 @@ def _destroy_precedence_chain(
     rng: random.Random,
     *,
     ops_by_id: dict[Any, Any] | None = None,
+    **_kwargs: Any,
 ) -> set[UUID]:
     """Remove all operations of a randomly selected order (precedence-chain removal).
 
@@ -725,6 +738,7 @@ def _destroy_critical_path(
     rng: random.Random,
     *,
     ops_by_id: dict[Any, Any] | None = None,
+    **_kwargs: Any,
 ) -> set[UUID]:
     """Remove operations on the critical path of the current schedule.
 
@@ -929,6 +943,7 @@ def _destroy_due_pressure(
     rng: random.Random,
     *,
     ops_by_id: dict[Any, Any] | None = None,
+    **_kwargs: Any,
 ) -> set[UUID]:
     """Remove operations from orders with the highest weighted tardiness.
 
@@ -2247,6 +2262,209 @@ def _calibrate_sa_temperature(
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class _AlnsRepairAttemptResult:
+    """Outcome of one ALNS destroy→repair attempt (Wave 7 extract)."""
+
+    assignments: list[Assignment] | None
+    repair_used: str
+    abort_iteration: bool
+    cpsat_repair_attempts: int = 0
+    cpsat_repair_ms_total: int = 0
+    cpsat_repair_total_destroy_size: int = 0
+    cpsat_repair_timeouts: int = 0
+    cpsat_repairs: int = 0
+    cpsat_repair_skips_large_destroy: int = 0
+    greedy_repair_attempts: int = 0
+    greedy_repair_ms_total: int = 0
+    greedy_repair_total_destroy_size: int = 0
+    greedy_repair_timeouts: int = 0
+    greedy_repairs: int = 0
+    rejection_reasons: Mapping[str, int] = field(default_factory=dict)
+
+
+def _record_repair_reject(
+    rejection_reasons: dict[str, int], outcome: RepairOutcome
+) -> None:
+    if outcome.status == RepairStatus.FEASIBLE:
+        return
+    reason = outcome.reason or outcome.status.value
+    rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
+
+
+def _try_cpsat_repair_lane(
+    *,
+    problem: ScheduleProblem,
+    frozen: list[Assignment],
+    frozen_by_op: Mapping[Any, Assignment],
+    destroyed_ids: set[Any],
+    ops_by_id: Mapping[Any, Any],
+    op_positions: Mapping[Any, int],
+    cpsat_max_destroy_ops: int,
+    repair_time_limit_s: int,
+    repair_num_workers: int,
+    remaining_s: float,
+    rejection_reasons: dict[str, int],
+) -> tuple[list[Assignment] | None, dict[str, int]]:
+    """One CP-SAT micro-repair attempt; returns (assignments|None, counter deltas)."""
+    stats = {
+        "cpsat_repair_attempts": 0,
+        "cpsat_repair_ms_total": 0,
+        "cpsat_repair_total_destroy_size": 0,
+        "cpsat_repair_timeouts": 0,
+        "cpsat_repairs": 0,
+        "cpsat_repair_skips_large_destroy": 0,
+    }
+    if len(destroyed_ids) > cpsat_max_destroy_ops:
+        stats["cpsat_repair_skips_large_destroy"] = 1
+        return None, stats
+
+    stats["cpsat_repair_attempts"] = 1
+    t0 = time.monotonic()
+    outcome = _repair_cpsat_outcome(
+        problem,
+        frozen,
+        destroyed_ids,
+        time_limit_s=max(1, min(repair_time_limit_s, int(remaining_s))),
+        num_workers=repair_num_workers,
+        ops_by_id=ops_by_id,
+        op_positions=op_positions,
+    )
+    stats["cpsat_repair_ms_total"] = int((time.monotonic() - t0) * 1000)
+    stats["cpsat_repair_total_destroy_size"] = len(destroyed_ids)
+    if outcome.status == RepairStatus.TIMEOUT:
+        stats["cpsat_repair_timeouts"] = 1
+    if outcome.status != RepairStatus.FEASIBLE:
+        _record_repair_reject(rejection_reasons, outcome)
+        return None, stats
+
+    repaired = list(outcome.assignments)
+    if _has_machine_overlap(frozen + repaired) or _violates_frozen_precedence(
+        repaired, frozen_by_op, ops_by_id
+    ):
+        _record_repair_reject(
+            rejection_reasons,
+            RepairOutcome(
+                status=RepairStatus.INFEASIBLE,
+                assignments=(),
+                reason="cpsat_conflict_with_frozen",
+            ),
+        )
+        return None, stats
+    stats["cpsat_repairs"] = 1
+    return repaired, stats
+
+
+def _try_greedy_repair_lane(
+    *,
+    problem: ScheduleProblem,
+    frozen: list[Assignment],
+    frozen_by_op: Mapping[Any, Assignment],
+    destroyed_ids: set[Any],
+    ops_by_id: Mapping[Any, Any],
+    rejection_reasons: dict[str, int],
+) -> tuple[list[Assignment] | None, dict[str, int]]:
+    """One greedy repair attempt; returns (assignments|None, counter deltas)."""
+    stats = {
+        "greedy_repair_attempts": 1,
+        "greedy_repair_ms_total": 0,
+        "greedy_repair_total_destroy_size": len(destroyed_ids),
+        "greedy_repair_timeouts": 0,
+        "greedy_repairs": 0,
+    }
+    t0 = time.monotonic()
+    outcome = _repair_greedy_outcome(problem, frozen, destroyed_ids)
+    stats["greedy_repair_ms_total"] = int((time.monotonic() - t0) * 1000)
+    if outcome.status == RepairStatus.TIMEOUT:
+        stats["greedy_repair_timeouts"] = 1
+    if outcome.status != RepairStatus.FEASIBLE:
+        _record_repair_reject(rejection_reasons, outcome)
+        return None, stats
+
+    repaired = list(outcome.assignments)
+    if _has_machine_overlap(frozen + repaired) or _violates_frozen_precedence(
+        repaired, frozen_by_op, ops_by_id
+    ):
+        _record_repair_reject(
+            rejection_reasons,
+            RepairOutcome(
+                status=RepairStatus.INFEASIBLE,
+                assignments=(),
+                reason="greedy_conflict_with_frozen",
+            ),
+        )
+        return None, stats
+    stats["greedy_repairs"] = 1
+    return repaired, stats
+
+
+def _attempt_alns_pair_repair(
+    *,
+    problem: ScheduleProblem,
+    frozen: list[Assignment],
+    frozen_by_op: Mapping[Any, Assignment],
+    destroyed_ids: set[Any],
+    ops_by_id: Mapping[Any, Any],
+    op_positions: Mapping[Any, int],
+    use_cpsat_repair: bool,
+    forced_repair_mode: str | None,
+    cpsat_max_destroy_ops: int,
+    repair_time_limit_s: int,
+    repair_num_workers: int,
+    remaining_s: float,
+    pair_bandit_active: bool,
+) -> _AlnsRepairAttemptResult:
+    """CP-SAT then greedy repair for one ALNS iteration (extracted from ``_solve_core``)."""
+    rejection_reasons: dict[str, int] = {}
+    new_assignments: list[Assignment] | None = None
+    repair_used = "none"
+    cpsat_stats: dict[str, int] = {}
+    greedy_stats: dict[str, int] = {}
+    try_cpsat = use_cpsat_repair and forced_repair_mode in (None, "cpsat")
+    try_greedy = forced_repair_mode in (None, "greedy")
+
+    if try_cpsat:
+        new_assignments, cpsat_stats = _try_cpsat_repair_lane(
+            problem=problem, frozen=frozen, frozen_by_op=frozen_by_op,
+            destroyed_ids=destroyed_ids, ops_by_id=ops_by_id,
+            op_positions=op_positions, cpsat_max_destroy_ops=cpsat_max_destroy_ops,
+            repair_time_limit_s=repair_time_limit_s,
+            repair_num_workers=repair_num_workers, remaining_s=remaining_s,
+            rejection_reasons=rejection_reasons,
+        )
+        if new_assignments is not None:
+            repair_used = "cpsat"
+
+    abort = new_assignments is None and forced_repair_mode == "cpsat" and pair_bandit_active
+    if not abort and new_assignments is None and try_greedy:
+        new_assignments, greedy_stats = _try_greedy_repair_lane(
+            problem=problem, frozen=frozen, frozen_by_op=frozen_by_op,
+            destroyed_ids=destroyed_ids, ops_by_id=ops_by_id,
+            rejection_reasons=rejection_reasons,
+        )
+        if new_assignments is not None:
+            repair_used = "greedy"
+
+    c, g = cpsat_stats.get, greedy_stats.get
+    return _AlnsRepairAttemptResult(
+        assignments=None if abort else new_assignments,
+        repair_used="none" if abort else repair_used,
+        abort_iteration=abort,
+        rejection_reasons=rejection_reasons,
+        cpsat_repair_attempts=c("cpsat_repair_attempts", 0),
+        cpsat_repair_ms_total=c("cpsat_repair_ms_total", 0),
+        cpsat_repair_total_destroy_size=c("cpsat_repair_total_destroy_size", 0),
+        cpsat_repair_timeouts=c("cpsat_repair_timeouts", 0),
+        cpsat_repairs=c("cpsat_repairs", 0),
+        cpsat_repair_skips_large_destroy=c("cpsat_repair_skips_large_destroy", 0),
+        greedy_repair_attempts=g("greedy_repair_attempts", 0),
+        greedy_repair_ms_total=g("greedy_repair_ms_total", 0),
+        greedy_repair_total_destroy_size=g("greedy_repair_total_destroy_size", 0),
+        greedy_repair_timeouts=g("greedy_repair_timeouts", 0),
+        greedy_repairs=g("greedy_repairs", 0),
+    )
+
+
 class AlnsSolver(BaseSolver):
     """Adaptive Large Neighborhood Search with Micro-CP-SAT repair.
 
@@ -2508,6 +2726,7 @@ class AlnsSolver(BaseSolver):
                     "native_initial_seed_used": native_initial_seed_used,
                     "native_initial_seed_ms": native_initial_seed_ms,
                     "native_initial_seed_fallback_reason": native_initial_seed_fallback_reason,
+                    "native_greedy_repair_fallback_reason": native_greedy_repair_fallback_reason,
                     "time_limit_exhausted_before_search": (
                         bool(time_limit_exhausted_before_search)
                         if time_limit_exhausted_before_search is not None
@@ -2846,46 +3065,55 @@ class AlnsSolver(BaseSolver):
         native_initial_seed_used = False
         native_initial_seed_ms = 0
         native_initial_seed_fallback_reason: str | None = None
+        native_greedy_repair_fallback_reason: str | None = (
+            "machine_duration_overrides"
+            if _ops_have_machine_duration_overrides(list(ops_by_id.values()))
+            else None
+        )
 
         if native_initial_seed_enabled and initial_result is None:
             native_initial_seed_attempted = True
             t_native = time.monotonic()
 
-            native_seed_result = _try_native_initial_seed(
-                problem,
-                frozen_assignments=frozen_assignments,
-                ops_by_id=ops_by_id,
-                frozen_assignments_by_op=frozen_assignments_by_op,
-            )
-            native_initial_seed_ms = int((time.monotonic() - t_native) * 1000)
-
-            if native_seed_result is not None:
-                # Validate the native seed with a RELAXED check:
-                # Only require completeness (all ops assigned) and no internal
-                # machine overlap. Skip frozen-precedence and full feasibility
-                # checks — the native seed is a heuristic initial solution that
-                # ALNS will improve through destroy/repair iterations.
-                # This is the standard approach in ALNS literature (Ropke &
-                # Pisinger 2006): the initial solution need not be feasible,
-                # only complete.
-                native_seed_valid = (
-                    len(native_seed_result) == n_ops
-                    and len({a.operation_id for a in native_seed_result}) == n_ops
-                    and not _has_machine_overlap(native_seed_result)
-                )
-                if native_seed_valid:
-                    recompute_assignment_setups(native_seed_result, dispatch_context)
-                    initial_solver_name = "native_greedy"
-                    native_initial_seed_used = True
-                    initial_result = ScheduleResult(
-                        solver_name=self.name,
-                        status=SolverStatus.FEASIBLE,
-                        assignments=native_seed_result,
-                    )
-                else:
-                    native_initial_seed_fallback_reason = "native_seed_infeasible"
+            if _ops_have_machine_duration_overrides(list(ops_by_id.values())):
+                native_initial_seed_ms = 0
+                native_initial_seed_fallback_reason = "machine_duration_overrides"
             else:
-                native_initial_seed_fallback_reason = "native_unavailable_or_failed"
+                native_seed_result = _try_native_initial_seed(
+                    problem,
+                    frozen_assignments=frozen_assignments,
+                    ops_by_id=ops_by_id,
+                    frozen_assignments_by_op=frozen_assignments_by_op,
+                )
+                native_initial_seed_ms = int((time.monotonic() - t_native) * 1000)
+
+                if native_seed_result is not None:
+                    # Validate the native seed with a RELAXED check:
+                    # Only require completeness (all ops assigned) and no internal
+                    # machine overlap. Skip frozen-precedence and full feasibility
+                    # checks — the native seed is a heuristic initial solution that
+                    # ALNS will improve through destroy/repair iterations.
+                    # This is the standard approach in ALNS literature (Ropke &
+                    # Pisinger 2006): the initial solution need not be feasible,
+                    # only complete.
+                    native_seed_valid = (
+                        len(native_seed_result) == n_ops
+                        and len({a.operation_id for a in native_seed_result}) == n_ops
+                        and not _has_machine_overlap(native_seed_result)
+                    )
+                    if native_seed_valid:
+                        recompute_assignment_setups(native_seed_result, dispatch_context)
+                        initial_solver_name = "native_greedy"
+                        native_initial_seed_used = True
+                        initial_result = ScheduleResult(
+                            solver_name=self.name,
+                            status=SolverStatus.FEASIBLE,
+                            assignments=native_seed_result,
+                        )
+                    else:
+                        native_initial_seed_fallback_reason = "native_seed_infeasible"
+                else:
+                    native_initial_seed_fallback_reason = "native_unavailable_or_failed"
 
         if initial_result is None:
             if n_ops <= initial_beam_op_limit:
@@ -3146,6 +3374,7 @@ class AlnsSolver(BaseSolver):
                         "native_initial_seed_used": native_initial_seed_used,
                         "native_initial_seed_ms": native_initial_seed_ms,
                         "native_initial_seed_fallback_reason": native_initial_seed_fallback_reason,
+                        "native_greedy_repair_fallback_reason": native_greedy_repair_fallback_reason,
                         "time_limit_exhausted_before_search": False,
                         "max_iterations": max_iterations,
                         "max_no_improve_iters": max_no_improve_iters,
@@ -3421,6 +3650,11 @@ class AlnsSolver(BaseSolver):
                     effective_destroy_size,
                     rng,
                     ops_by_id=ops_by_id,
+                    energy_weight=float(
+                        objective_weights.get(
+                            "energy", objective_weights.get("energy_kwh", 0.0)
+                        )
+                    ),
                 )
 
                 # P3.1: exclude fixed ops from destroy set
@@ -3458,113 +3692,50 @@ class AlnsSolver(BaseSolver):
                 )
 
                 # Repair — primary depends on use_cpsat_repair flag (or MAB pair)
-                # CP-SAT repair (Laborie & Godard 2007) when enabled, greedy fallback otherwise
-                new_assignments: list[Assignment] | None = None
-                repair_used = "none"
-
-                def record_repair_outcome(outcome: RepairOutcome) -> None:
-                    if outcome.status == RepairStatus.FEASIBLE:
-                        return
-                    reason = outcome.reason or outcome.status.value
-                    repair_rejection_reasons[reason] = repair_rejection_reasons.get(reason, 0) + 1
-
-                try_cpsat = use_cpsat_repair and (
-                    forced_repair_mode is None or forced_repair_mode == "cpsat"
+                remaining_s = time_limit_s - (time.monotonic() - t0)
+                repair_attempt = _attempt_alns_pair_repair(
+                    problem=problem,
+                    frozen=frozen,
+                    frozen_by_op=frozen_by_op,
+                    destroyed_ids=destroyed_ids,
+                    ops_by_id=ops_by_id,
+                    op_positions=op_positions,
+                    use_cpsat_repair=use_cpsat_repair,
+                    forced_repair_mode=forced_repair_mode,
+                    cpsat_max_destroy_ops=cpsat_max_destroy_ops,
+                    repair_time_limit_s=repair_time_limit_s,
+                    repair_num_workers=repair_num_workers,
+                    remaining_s=remaining_s,
+                    pair_bandit_active=pair_bandit is not None and selected_pair_idx >= 0,
                 )
-                try_greedy = forced_repair_mode is None or forced_repair_mode == "greedy"
-
-                if try_cpsat and len(destroyed_ids) <= cpsat_max_destroy_ops:
-                    cpsat_repair_attempts += 1
-                    cpsat_repair_t0 = time.monotonic()
-                    # D3: clamp the micro-repair budget to the remaining
-                    # wall-clock budget so a single repair cannot blow the
-                    # solver deadline (floor of 1s keeps CP-SAT usable).
-                    remaining_s = time_limit_s - (time.monotonic() - t0)
-                    effective_repair_limit_s = max(1, min(repair_time_limit_s, int(remaining_s)))
-                    cpsat_outcome = _repair_cpsat_outcome(
-                        problem,
-                        frozen,
-                        destroyed_ids,
-                        time_limit_s=effective_repair_limit_s,
-                        num_workers=repair_num_workers,
-                        ops_by_id=ops_by_id,
-                        op_positions=op_positions,
+                cpsat_repair_attempts += repair_attempt.cpsat_repair_attempts
+                cpsat_repair_ms_total += repair_attempt.cpsat_repair_ms_total
+                cpsat_repair_total_destroy_size += (
+                    repair_attempt.cpsat_repair_total_destroy_size
+                )
+                cpsat_repair_timeouts += repair_attempt.cpsat_repair_timeouts
+                cpsat_repairs += repair_attempt.cpsat_repairs
+                cpsat_repair_skips_large_destroy += (
+                    repair_attempt.cpsat_repair_skips_large_destroy
+                )
+                greedy_repair_attempts += repair_attempt.greedy_repair_attempts
+                greedy_repair_ms_total += repair_attempt.greedy_repair_ms_total
+                greedy_repair_total_destroy_size += (
+                    repair_attempt.greedy_repair_total_destroy_size
+                )
+                greedy_repair_timeouts += repair_attempt.greedy_repair_timeouts
+                greedy_repairs += repair_attempt.greedy_repairs
+                for reason, count in repair_attempt.rejection_reasons.items():
+                    repair_rejection_reasons[reason] = (
+                        repair_rejection_reasons.get(reason, 0) + count
                     )
-                    cpsat_repair_ms_total += int((time.monotonic() - cpsat_repair_t0) * 1000)
-                    cpsat_repair_total_destroy_size += len(destroyed_ids)
-                    if cpsat_outcome.status == RepairStatus.TIMEOUT:
-                        cpsat_repair_timeouts += 1
-                    if cpsat_outcome.status == RepairStatus.FEASIBLE:
-                        cpsat_result = list(cpsat_outcome.assignments)
-                        # Quick machine-overlap check against frozen assignments:
-                        # CP-SAT sub-problem doesn't see frozen timelines, so verify
-                        # no returned assignment overlaps a frozen one on the same machine.
-                        test_candidate = frozen + cpsat_result
-                        if not _has_machine_overlap(
-                            test_candidate
-                        ) and not _violates_frozen_precedence(
-                            cpsat_result,
-                            frozen_by_op,
-                            ops_by_id,
-                        ):
-                            new_assignments = cpsat_result
-                            repair_used = "cpsat"
-                            cpsat_repairs += 1
-                        else:
-                            record_repair_outcome(
-                                RepairOutcome(
-                                    status=RepairStatus.INFEASIBLE,
-                                    assignments=(),
-                                    reason="cpsat_conflict_with_frozen",
-                                )
-                            )
-                    else:
-                        record_repair_outcome(cpsat_outcome)
-                elif try_cpsat:
-                    cpsat_repair_skips_large_destroy += 1
-
-                if (
-                    new_assignments is None
-                    and forced_repair_mode == "cpsat"
-                    and pair_bandit is not None
-                    and selected_pair_idx >= 0
-                ):
+                if repair_attempt.abort_iteration:
                     from synaps.solvers._alns_mab import charge_pair_reject
 
                     charge_pair_reject(pair_bandit, selected_pair_idx)
                     continue
-
-                if new_assignments is None and try_greedy and (
-                    forced_repair_mode == "greedy" or forced_repair_mode is None
-                ):
-                    greedy_repair_attempts += 1
-                    greedy_repair_t0 = time.monotonic()
-                    greedy_outcome = _repair_greedy_outcome(problem, frozen, destroyed_ids)
-                    greedy_repair_ms_total += int((time.monotonic() - greedy_repair_t0) * 1000)
-                    greedy_repair_total_destroy_size += len(destroyed_ids)
-                    if greedy_outcome.status == RepairStatus.TIMEOUT:
-                        greedy_repair_timeouts += 1
-                    if greedy_outcome.status == RepairStatus.FEASIBLE:
-                        greedy_repair_assignments = list(greedy_outcome.assignments)
-                        test_candidate = frozen + greedy_repair_assignments
-                        if not _has_machine_overlap(
-                            test_candidate
-                        ) and not _violates_frozen_precedence(
-                            greedy_repair_assignments, frozen_by_op, ops_by_id
-                        ):
-                            new_assignments = greedy_repair_assignments
-                            repair_used = "greedy"
-                            greedy_repairs += 1
-                        else:
-                            record_repair_outcome(
-                                RepairOutcome(
-                                    status=RepairStatus.INFEASIBLE,
-                                    assignments=(),
-                                    reason="greedy_conflict_with_frozen",
-                                )
-                            )
-                    else:
-                        record_repair_outcome(greedy_outcome)
+                new_assignments = repair_attempt.assignments
+                repair_used = repair_attempt.repair_used
 
                 if new_assignments is None:
                     from synaps.solvers._alns_mab import charge_pair_reject
@@ -3914,6 +4085,7 @@ class AlnsSolver(BaseSolver):
                 "native_initial_seed_used": native_initial_seed_used,
                 "native_initial_seed_ms": native_initial_seed_ms,
                 "native_initial_seed_fallback_reason": native_initial_seed_fallback_reason,
+                "native_greedy_repair_fallback_reason": native_greedy_repair_fallback_reason,
                 "time_limit_exhausted_before_search": time_limit_exhausted_before_search,
                 "max_no_improve_iters": max_no_improve_iters,
                 "max_no_improve_base_iters": max_no_improve_base_iters,

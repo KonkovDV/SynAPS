@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Wave 7 (Wave 6 accepted residuals):**
+  - `_destroy_worst` charges `energy_weight * energy_kwh` (native scorer skipped when weight > 0).
+  - ALNS metadata: `native_greedy_repair_fallback_reason` / seed reason `machine_duration_overrides`.
+  - Extracted `_attempt_alns_pair_repair` (+ CP-SAT/greedy lanes) from `_solve_core` (ratchet shrink).
+  - SDST license gate: dmorill pack is GPL-3.0 — do not vendor (`benchmark/instances/public/sdst/README.md`).
+  - Tests: `tests/test_wave7_residuals.py`.
+
 - **Wave 6 (Wave 5 Red Team residuals):**
   - ALNS native greedy skipped when `machine_duration_overrides` present (H2).
   - ALNS search aggregates setup energy into objective/cost (`get_energy`, weight `energy`).
