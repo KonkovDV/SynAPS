@@ -796,6 +796,11 @@ def _solve_precedence_aware_master(
                     np.array(lb_indices, dtype=np.int32),
                     np.ones(len(lb_indices)),
                 )
+        else:
+            raise ValueError(
+                f"Unknown LBBD-HD cut kind {cut.kind!r}; refusing silent no-op "
+                "(Wave 12 / M12-1)."
+            )
 
     # ---- Solve ----
     h.changeObjectiveSense(highspy.ObjSense.kMinimize)
