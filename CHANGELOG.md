@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Red Team Waves 1–7 audit** (`docs/rfc/WAVES_1_7_REDTEAM_AUDIT_2026_08_11.md`):
+  pass-with-residuals; fixed RT17-H1 native repair metadata pretension
+  (`native_greedy_repair_override_skips` observe-only); KI-F7 downgraded to
+  `closed (envelope)` with portfolio oracle residual (RT17-H2).
+
 - **Wave 7 (Wave 6 accepted residuals):**
   - `_destroy_worst` charges `energy_weight * energy_kwh` (native scorer skipped when weight > 0).
   - ALNS metadata: `native_greedy_repair_fallback_reason` / seed reason `machine_duration_overrides`.

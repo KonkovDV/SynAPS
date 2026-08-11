@@ -1325,6 +1325,7 @@ def _repair_greedy_outcome(
     destroyed_op_ids: set[UUID],
     *,
     use_native_greedy_repair: bool = True,
+    native_skip_reasons: list[str] | None = None,
 ) -> RepairOutcome:
     """Fallback greedy repair when CP-SAT is too slow for the sub-region.
 
@@ -1339,7 +1340,11 @@ def _repair_greedy_outcome(
     # --- Native fast path ---
     if use_native_greedy_repair and _HAS_NUMPY and len(disrupted_op_ids) > 0:
         native_result = _try_native_greedy_repair(
-            problem, frozen_assignments, disrupted_op_ids, op_positions
+            problem,
+            frozen_assignments,
+            disrupted_op_ids,
+            op_positions,
+            skip_reasons=native_skip_reasons,
         )
         if native_result is not None:
             return native_result
@@ -1409,6 +1414,18 @@ def _release_offset_by_op(problem: ScheduleProblem) -> dict[UUID, float]:
     return offsets
 
 
+def _native_repair_meta_from_skips(skip_reasons: list[str]) -> dict[str, Any]:
+    """ALNS metadata for observe-only native greedy override skips (Wave 7.2 / RT H1)."""
+    return {
+        "native_greedy_repair_fallback_reason": (
+            skip_reasons[-1] if skip_reasons else None
+        ),
+        "native_greedy_repair_override_skips": sum(
+            1 for reason in skip_reasons if reason == "machine_duration_overrides"
+        ),
+    }
+
+
 def _ops_have_machine_duration_overrides(operations: list[Any]) -> bool:
     """True when any op carries T-30 ``machine_duration_overrides``.
 
@@ -1424,6 +1441,8 @@ def _try_native_greedy_repair(
     frozen_assignments: list[Assignment],
     disrupted_op_ids: list[UUID],
     op_positions: dict[UUID, int],
+    *,
+    skip_reasons: list[str] | None = None,
 ) -> RepairOutcome | None:
     """Attempt native greedy repair. Returns RepairOutcome or None to fall through.
 
@@ -1444,6 +1463,8 @@ def _try_native_greedy_repair(
         if _ops_have_machine_duration_overrides(
             [ops_by_id[op_id] for op_id in disrupted_op_ids if op_id in ops_by_id]
         ):
+            if skip_reasons is not None:
+                skip_reasons.append("machine_duration_overrides")
             return None
         release_offsets = _release_offset_by_op(problem)
         wc_id_to_idx = {wc.id: idx for idx, wc in enumerate(problem.work_centers)}
@@ -2363,6 +2384,7 @@ def _try_greedy_repair_lane(
     destroyed_ids: set[Any],
     ops_by_id: Mapping[Any, Any],
     rejection_reasons: dict[str, int],
+    native_skip_reasons: list[str] | None = None,
 ) -> tuple[list[Assignment] | None, dict[str, int]]:
     """One greedy repair attempt; returns (assignments|None, counter deltas)."""
     stats = {
@@ -2373,7 +2395,12 @@ def _try_greedy_repair_lane(
         "greedy_repairs": 0,
     }
     t0 = time.monotonic()
-    outcome = _repair_greedy_outcome(problem, frozen, destroyed_ids)
+    outcome = _repair_greedy_outcome(
+        problem,
+        frozen,
+        destroyed_ids,
+        native_skip_reasons=native_skip_reasons,
+    )
     stats["greedy_repair_ms_total"] = int((time.monotonic() - t0) * 1000)
     if outcome.status == RepairStatus.TIMEOUT:
         stats["greedy_repair_timeouts"] = 1
@@ -2413,6 +2440,7 @@ def _attempt_alns_pair_repair(
     repair_num_workers: int,
     remaining_s: float,
     pair_bandit_active: bool,
+    native_skip_reasons: list[str] | None = None,
 ) -> _AlnsRepairAttemptResult:
     """CP-SAT then greedy repair for one ALNS iteration (extracted from ``_solve_core``)."""
     rejection_reasons: dict[str, int] = {}
@@ -2441,6 +2469,7 @@ def _attempt_alns_pair_repair(
             problem=problem, frozen=frozen, frozen_by_op=frozen_by_op,
             destroyed_ids=destroyed_ids, ops_by_id=ops_by_id,
             rejection_reasons=rejection_reasons,
+            native_skip_reasons=native_skip_reasons,
         )
         if new_assignments is not None:
             repair_used = "greedy"
@@ -2691,6 +2720,12 @@ class AlnsSolver(BaseSolver):
         checker = FeasibilityChecker()
         dispatch_context = build_dispatch_context(problem)
         lower_bound = compute_relaxed_makespan_lower_bound(problem)
+        # Native telemetry: init before any early ERROR return can publish metadata.
+        native_initial_seed_attempted = False
+        native_initial_seed_used = False
+        native_initial_seed_ms = 0
+        native_initial_seed_fallback_reason: str | None = None
+        native_greedy_repair_skip_reasons: list[str] = []
 
         def _initial_generation_error_result(
             error_message: str,
@@ -2726,7 +2761,7 @@ class AlnsSolver(BaseSolver):
                     "native_initial_seed_used": native_initial_seed_used,
                     "native_initial_seed_ms": native_initial_seed_ms,
                     "native_initial_seed_fallback_reason": native_initial_seed_fallback_reason,
-                    "native_greedy_repair_fallback_reason": native_greedy_repair_fallback_reason,
+                    **_native_repair_meta_from_skips(native_greedy_repair_skip_reasons),
                     "time_limit_exhausted_before_search": (
                         bool(time_limit_exhausted_before_search)
                         if time_limit_exhausted_before_search is not None
@@ -2987,6 +3022,7 @@ class AlnsSolver(BaseSolver):
                         problem,
                         warm_candidate,
                         warm_missing_ids,
+                        native_skip_reasons=native_greedy_repair_skip_reasons,
                     )
                     if warm_outcome.status == RepairStatus.FEASIBLE:
                         warm_candidate = sorted(
@@ -3040,6 +3076,7 @@ class AlnsSolver(BaseSolver):
                     problem,
                     frozen_assignments,
                     set(problem_op_ids),
+                    native_skip_reasons=native_greedy_repair_skip_reasons,
                 )
                 if frozen_seed_outcome.status == RepairStatus.FEASIBLE:
                     frozen_seed_candidate = list(frozen_seed_outcome.assignments)
@@ -3061,16 +3098,6 @@ class AlnsSolver(BaseSolver):
         # Task 24: Native initial seed — fast path using Rust greedy_repair_batch.
         # Dispatches ALL operations in topological order to earliest-available machines.
         # If valid → use as initial solution, skip Python GreedyDispatch entirely.
-        native_initial_seed_attempted = False
-        native_initial_seed_used = False
-        native_initial_seed_ms = 0
-        native_initial_seed_fallback_reason: str | None = None
-        native_greedy_repair_fallback_reason: str | None = (
-            "machine_duration_overrides"
-            if _ops_have_machine_duration_overrides(list(ops_by_id.values()))
-            else None
-        )
-
         if native_initial_seed_enabled and initial_result is None:
             native_initial_seed_attempted = True
             t_native = time.monotonic()
@@ -3255,6 +3282,7 @@ class AlnsSolver(BaseSolver):
                     problem,
                     list(initial_result.assignments),
                     missing_ids,
+                    native_skip_reasons=native_greedy_repair_skip_reasons,
                 )
                 if repair_outcome.status == RepairStatus.FEASIBLE:
                     completed = list(initial_result.assignments) + list(repair_outcome.assignments)
@@ -3374,7 +3402,7 @@ class AlnsSolver(BaseSolver):
                         "native_initial_seed_used": native_initial_seed_used,
                         "native_initial_seed_ms": native_initial_seed_ms,
                         "native_initial_seed_fallback_reason": native_initial_seed_fallback_reason,
-                        "native_greedy_repair_fallback_reason": native_greedy_repair_fallback_reason,
+                        **_native_repair_meta_from_skips(native_greedy_repair_skip_reasons),
                         "time_limit_exhausted_before_search": False,
                         "max_iterations": max_iterations,
                         "max_no_improve_iters": max_no_improve_iters,
@@ -3707,6 +3735,7 @@ class AlnsSolver(BaseSolver):
                     repair_num_workers=repair_num_workers,
                     remaining_s=remaining_s,
                     pair_bandit_active=pair_bandit is not None and selected_pair_idx >= 0,
+                    native_skip_reasons=native_greedy_repair_skip_reasons,
                 )
                 cpsat_repair_attempts += repair_attempt.cpsat_repair_attempts
                 cpsat_repair_ms_total += repair_attempt.cpsat_repair_ms_total
@@ -4085,7 +4114,7 @@ class AlnsSolver(BaseSolver):
                 "native_initial_seed_used": native_initial_seed_used,
                 "native_initial_seed_ms": native_initial_seed_ms,
                 "native_initial_seed_fallback_reason": native_initial_seed_fallback_reason,
-                "native_greedy_repair_fallback_reason": native_greedy_repair_fallback_reason,
+                **_native_repair_meta_from_skips(native_greedy_repair_skip_reasons),
                 "time_limit_exhausted_before_search": time_limit_exhausted_before_search,
                 "max_no_improve_iters": max_no_improve_iters,
                 "max_no_improve_base_iters": max_no_improve_base_iters,

@@ -9,7 +9,7 @@ Close Wave 6 accepted residuals per `WAVE7_EXECUTION_PLAN.md`.
 | ID | Claim | Verdict | Evidence |
 |---|---|---|---|
 | 7.1 | `_destroy_worst` includes energy when weighted; native skipped | PASS | Python path adds `energy_weight * get_energy`; native scores only if weight==0; `test_destroy_worst_prefers_high_energy_when_weighted` |
-| 7.2 | Native override skip honest in metadata | PASS | `native_initial_seed_fallback_reason` + `native_greedy_repair_fallback_reason` = `machine_duration_overrides`; `test_native_override_fallback_reasons_in_metadata` |
+| 7.2 | Native override skip honest in metadata | PASS (after RT17-H1) | Seed: problem-wide reason. Repair: observe-only via skip list + `native_greedy_repair_override_skips` (not pretensioned). |
 | 7.3 | `_solve_core` ratchet shrinks | PASS | 1727 → 1681; repair lanes extracted (`_attempt_alns_pair_repair` 65, `_try_cpsat_repair_lane` 61, `_try_greedy_repair_lane` 41) — all ≤80 |
 | 7.4 | dmorill GPL gate documented | PASS | `benchmark/instances/public/sdst/README.md` + `KNOWN_ISSUES.md` KI-F16: **do not vendor GPL-3.0** |
 
