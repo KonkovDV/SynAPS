@@ -26,6 +26,12 @@ from synaps.timegrain import duration_minutes
 # through ``sat_parameters`` — doing so silently defeats the timebox (D3).
 _TIMEBOX_PARAMETERS = frozenset({"max_time_in_seconds", "max_deterministic_time"})
 
+# F9 (audit v4): in strict determinism the single-worker invariant is what makes
+# a fixed seed reproducible; overriding the worker count via ``sat_parameters``
+# silently re-enables the multi-threaded portfolio race that N1 removed. Reject
+# worker-count overrides in strict mode, same as the timebox keys (N3).
+_STRICT_MODE_DENIED_PARAMETERS = frozenset({"num_workers", "num_search_workers"})
+
 # N1 (audit v3, ADR-0001): strict determinism runs CP-SAT single-threaded and
 # stops on MACHINE-INDEPENDENT deterministic time — the SOLE binding limit — so
 # a fixed seed yields a byte-identical schedule regardless of host speed or CPU
@@ -52,9 +58,144 @@ _STRICT_WALL_SAFETY_FACTOR = 2.0
 _SAFE_OBJECTIVE_MAX = 2**62
 
 
+def _objective_product_overflows(term_bound: int, multiplier_bound: int) -> bool:
+    """True if ``term * (multiplier_bound + 1)`` can exceed the safe int64 ceiling.
+
+    Unified guard (audit v4, F5): the same product shape appears in the default
+    big-M objective (``makespan * secondary_bound``, makespan ≤ horizon) and in
+    ``epsilon_primary`` with a non-makespan primary
+    (``primary * (horizon + 1)``, primary ≤ primary_bound).
+    """
+    return term_bound * (multiplier_bound + 1) > _SAFE_OBJECTIVE_MAX
+
+
 def _bigm_objective_overflows(horizon: int, secondary_bound: int) -> bool:
     """True if the big-M objective coefficient product exceeds the safe int64 ceiling."""
-    return (horizon + 1) * secondary_bound > _SAFE_OBJECTIVE_MAX
+    return _objective_product_overflows(secondary_bound, horizon)
+
+
+def _build_tardiness_terms(
+    model: cp_model.CpModel,
+    problem: ScheduleProblem,
+    horizon: int,
+    selected_ends: dict[Any, Any],
+) -> tuple[Any, int]:
+    """Per-order completion/tardiness vars and the total tardiness var."""
+    # F8 (audit v4): due offsets deliberately FLOOR to the integer-minute
+    # grid. Operation ends are integral on this grid, so floor is exact for
+    # the feasibility question: an integer end e is tardy vs a real due d
+    # iff e > floor(d). (Contrast with release offsets, which must CEIL —
+    # a floor there would admit starts before the release.)
+    due_offsets = {
+        order.id: int((order.due_date - problem.planning_horizon_start).total_seconds() / 60.0)
+        for order in problem.orders
+    }
+
+    tardiness_terms: list[Any] = []
+    tardiness_ub = 0
+    for order in problem.orders:
+        order_operations = [
+            operation for operation in problem.operations if operation.order_id == order.id
+        ]
+        completion = model.new_int_var(0, horizon, f"completion_{order.id}")
+        for operation in order_operations:
+            model.add(completion >= selected_ends[operation.id])
+
+        due_offset = due_offsets[order.id]
+        order_tardiness_ub = max(0, horizon + max(0, -due_offset))
+        tardiness = model.new_int_var(0, order_tardiness_ub, f"tardiness_{order.id}")
+        model.add(tardiness >= completion - due_offset)
+        tardiness_terms.append(tardiness)
+        tardiness_ub += order_tardiness_ub
+
+    total_tardiness = model.new_int_var(0, max(1, tardiness_ub), "total_tardiness_minutes")
+    if tardiness_terms:
+        model.add(total_tardiness == sum(tardiness_terms))
+    else:
+        model.add(total_tardiness == 0)
+    return total_tardiness, tardiness_ub
+
+
+def _minimize_scalarized_objective(
+    model: cp_model.CpModel,
+    *,
+    objective_mode: str,
+    epsilon_constraints: dict[str, int] | None,
+    primary_objective: str,
+    makespan: Any,
+    total_setup: Any,
+    total_material_scaled: Any,
+    total_tardiness: Any,
+    horizon: int,
+    setup_ub: int,
+    material_ub: int,
+    tardiness_ub: int,
+    weights: dict[str, int],
+    secondary_bound: int,
+) -> bool:
+    """Install the scalarized objective; returns True when overflow-degraded.
+
+    F5 (audit v4): BOTH scalarized objectives can overflow — the default big-M
+    branch and epsilon_primary with a non-makespan primary grow with the same
+    law — so the overflow guard is applied per-branch.
+    """
+    if objective_mode == "epsilon_primary":
+        objective_targets = {
+            "makespan": makespan,
+            "setup": total_setup,
+            "material_loss": total_material_scaled,
+            "tardiness": total_tardiness,
+        }
+        objective_bounds = {
+            "makespan": horizon,
+            "setup": setup_ub,
+            "material_loss": material_ub,
+            "tardiness": max(1, tardiness_ub),
+        }
+        try:
+            primary_target = objective_targets[primary_objective]
+        except KeyError as exc:
+            supported = ", ".join(sorted(objective_targets))
+            raise ValueError(
+                "Unsupported primary_objective "
+                f"'{primary_objective}'. Expected one of: {supported}"
+            ) from exc
+
+        if primary_objective == "makespan":
+            model.minimize(primary_target)
+        elif _objective_product_overflows(
+            objective_bounds[primary_objective], objective_bounds["makespan"]
+        ):
+            # F5: ``primary * (horizon + 1)`` would overflow the int64 objective
+            # domain at this scale — degrade to makespan, same policy as the
+            # big-M branch, instead of corrupting the solve silently.
+            model.minimize(makespan)
+            return True
+        # Lexicographic tie-break inside the selected Pareto slice: once the
+        # primary objective is minimized, prefer the shortest makespan still
+        # satisfying the epsilon caps.
+        makespan_bound = objective_bounds["makespan"] + 1
+        model.minimize(primary_target * makespan_bound + makespan)
+        return False
+
+    if epsilon_constraints:
+        model.minimize(makespan)
+        return False
+
+    # Default: hierarchical weighted-sum with makespan as primary. P1-1: guard
+    # the big-M against int64 overflow at the model's stated scale; when the
+    # coefficient product exceeds the safe ceiling, degrade to makespan-only
+    # rather than overflow the CP-SAT objective domain.
+    if _bigm_objective_overflows(horizon, secondary_bound):
+        model.minimize(makespan)
+        return True
+    model.minimize(
+        makespan * secondary_bound
+        + weights["setup"] * total_setup
+        + weights["material_loss"] * total_material_scaled
+        + weights["tardiness"] * total_tardiness
+    )
+    return False
 
 
 def _apply_sat_parameter_overrides(
@@ -127,6 +268,15 @@ def _apply_sat_parameter_overrides(
             raise ValueError(
                 f"Cannot override CP-SAT time limit {key!r} via sat_parameters; "
                 f"the search budget is controlled only by time_limit_s."
+            )
+        if determinism == "strict" and key in _STRICT_MODE_DENIED_PARAMETERS:
+            # F9 (audit v4): strict mode is reproducible BECAUSE it is
+            # single-threaded; a num_workers override would silently re-enable
+            # the racing portfolio. Use determinism="fast" to opt out.
+            raise ValueError(
+                f"Cannot override CP-SAT worker count {key!r} via sat_parameters "
+                f"in determinism='strict' (single-threading is the reproducibility "
+                f"invariant, see ADR-0001); use determinism='fast' to opt out."
             )
         if not hasattr(solver.parameters, key):
             raise ValueError(f"Unknown CP-SAT parameter override: {key}")
@@ -513,33 +663,9 @@ class CpSatSolver(BaseSolver):
         else:
             model.add(total_material_scaled == 0)
 
-        due_offsets = {
-            order.id: int((order.due_date - problem.planning_horizon_start).total_seconds() / 60.0)
-            for order in problem.orders
-        }
-
-        tardiness_terms: list[Any] = []
-        tardiness_ub = 0
-        for order in problem.orders:
-            order_operations = [
-                operation for operation in problem.operations if operation.order_id == order.id
-            ]
-            completion = model.new_int_var(0, horizon, f"completion_{order.id}")
-            for operation in order_operations:
-                model.add(completion >= selected_ends[operation.id])
-
-            due_offset = due_offsets[order.id]
-            order_tardiness_ub = max(0, horizon + max(0, -due_offset))
-            tardiness = model.new_int_var(0, order_tardiness_ub, f"tardiness_{order.id}")
-            model.add(tardiness >= completion - due_offset)
-            tardiness_terms.append(tardiness)
-            tardiness_ub += order_tardiness_ub
-
-        total_tardiness = model.new_int_var(0, max(1, tardiness_ub), "total_tardiness_minutes")
-        if tardiness_terms:
-            model.add(total_tardiness == sum(tardiness_terms))
-        else:
-            model.add(total_tardiness == 0)
+        total_tardiness, tardiness_ub = _build_tardiness_terms(
+            model, problem, horizon, selected_ends
+        )
 
         weights = {
             "setup": int(objective_weights.get("setup", 1)),
@@ -552,8 +678,6 @@ class CpSatSolver(BaseSolver):
             + weights["tardiness"] * max(1, tardiness_ub)
             + 1
         )
-        # P1-1: only the default big-M branch can overflow; other modes leave it False.
-        bigm_degraded = False
 
         if epsilon_constraints:
             # ε-constraint scalarization (Geoffrion 1968 / Haimes et al. 1971):
@@ -571,55 +695,22 @@ class CpSatSolver(BaseSolver):
                     total_material_scaled <= int(epsilon_constraints["max_material_loss_scaled"])
                 )
 
-        if objective_mode == "epsilon_primary":
-            objective_targets = {
-                "makespan": makespan,
-                "setup": total_setup,
-                "material_loss": total_material_scaled,
-                "tardiness": total_tardiness,
-            }
-            objective_bounds = {
-                "makespan": horizon,
-                "setup": setup_ub,
-                "material_loss": material_ub,
-                "tardiness": max(1, tardiness_ub),
-            }
-            try:
-                primary_target = objective_targets[primary_objective]
-            except KeyError as exc:
-                supported = ", ".join(sorted(objective_targets))
-                raise ValueError(
-                    "Unsupported primary_objective "
-                    f"'{primary_objective}'. Expected one of: {supported}"
-                ) from exc
-
-            if primary_objective == "makespan":
-                model.minimize(primary_target)
-            else:
-                # Lexicographic tie-break inside the selected Pareto slice:
-                # once the primary objective is minimized, prefer the shortest
-                # makespan still satisfying the epsilon caps.
-                makespan_bound = objective_bounds["makespan"] + 1
-                model.minimize(primary_target * makespan_bound + makespan)
-        elif epsilon_constraints:
-            model.minimize(makespan)
-        else:
-            # Default: hierarchical weighted-sum with makespan as primary.
-            # P1-1: guard the big-M against int64 overflow at the model's stated
-            # scale. When the coefficient product would exceed the safe ceiling,
-            # degrade to a pure lexicographic objective (makespan only) rather
-            # than overflow the CP-SAT objective domain.
-            if _bigm_objective_overflows(horizon, secondary_bound):
-                bigm_degraded = True
-                model.minimize(makespan)
-            else:
-                bigm_degraded = False
-                model.minimize(
-                    makespan * secondary_bound
-                    + weights["setup"] * total_setup
-                    + weights["material_loss"] * total_material_scaled
-                    + weights["tardiness"] * total_tardiness
-                )
+        bigm_degraded = _minimize_scalarized_objective(
+            model,
+            objective_mode=objective_mode,
+            epsilon_constraints=epsilon_constraints,
+            primary_objective=primary_objective,
+            makespan=makespan,
+            total_setup=total_setup,
+            total_material_scaled=total_material_scaled,
+            total_tardiness=total_tardiness,
+            horizon=horizon,
+            setup_ub=setup_ub,
+            material_ub=material_ub,
+            tardiness_ub=tardiness_ub,
+            weights=weights,
+            secondary_bound=secondary_bound,
+        )
 
         return (
             total_setup,
@@ -796,6 +887,10 @@ class CpSatSolver(BaseSolver):
                 "instance or omit frozen_assignments (P1-4)."
             )
 
+        # F8 (audit v4): floor here is the CONSERVATIVE direction — all
+        # start/end vars are bounded by `horizon`, so a sub-minute remainder is
+        # simply lost as schedulable space; extracted datetimes therefore never
+        # exceed planning_horizon_end (the checker's HORIZON_BOUND is safe).
         horizon = int(
             (
                 solve_problem.planning_horizon_end - solve_problem.planning_horizon_start
@@ -866,13 +961,19 @@ class CpSatSolver(BaseSolver):
 
         # M1: release_date lower bound on the start time. An operation may not
         # start before its order becomes available (material release).
+        # F8 (audit v4): the offset must CEIL, not truncate — the model works on
+        # an integer-minute grid while the FeasibilityChecker compares exact
+        # datetimes. int() admitted starts up to 59.999s before the release
+        # (release at H0+1.5min -> offset 1 -> start at H0+1:00, a
+        # RELEASE_DATE_VIOLATION). ceil lands on the first grid point that is
+        # not before the release.
         orders_by_id = {order.id: order for order in solve_problem.orders}
         release_offset_by_op: dict[Any, int] = {}
         for operation in solve_problem.operations:
             order = orders_by_id.get(operation.order_id)
             release = getattr(order, "release_date", None) if order is not None else None
             if release is not None:
-                offset = int(
+                offset = math.ceil(
                     (release - solve_problem.planning_horizon_start).total_seconds() / 60.0
                 )
                 if offset > 0:

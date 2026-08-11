@@ -56,6 +56,10 @@ twine check dist/*
 
 If you change solver behavior, also include benchmark evidence or a clear explanation of why no benchmark delta is expected.
 
+### Lower-bound helpers (Rule 6)
+
+Any **public** function in `synaps/solvers/` whose name matches `*lower_bound*`, `*_lb`, or `*bound` MUST ship with a property or validity test under `tests/` that references it by name. Precedent: S3/F6 — BHK cuts over-claimed because the bound had no subset-monotonicity test until GUARD-S3. Prefer Hypothesis against a brute-force oracle on small instances. Private (`_…`) helpers are exempt.
+
 ### Quality Gate Policy
 
 All pull requests must pass:

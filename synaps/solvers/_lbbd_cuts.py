@@ -186,28 +186,32 @@ def compute_machine_tsp_lower_bound(
     *,
     max_states: int = 12,
 ) -> float:
-    """Sequence-aware setup lower bound on a single machine.
+    """Sequence-aware setup lower bound on a FIXED set of distinct states (F6).
 
     Solves the asymmetric Hamiltonian-path problem on the realised distinct
-    state types via Bellman-Held-Karp dynamic programming. The result is the
-    minimum cumulative setup time for any visit order of those state types
-    under the work-center-local sdst matrix and is therefore a valid lower
-    bound on the actual sequence-dependent setup contribution to the
-    machine's makespan, dominating the sequence-independent floor used by
-    `compute_sequence_independent_setup_lower_bound`.
+    state types via Bellman-Held-Karp dynamic programming. For a FIXED op set
+    the BHK optimum is a valid lower bound on the sequence-dependent setup
+    contribution of any visit order of those distinct types — dominating the
+    sequence-independent floor and the cheap assignment relaxation
+    (:func:`compute_min_out_assignment_setup_lb`).
 
-    Falls back to 0.0 when the distinct state count exceeds `max_states`
+    Falls back to 0.0 when the distinct state count exceeds ``max_states``
     (12 by default; BHK cost is O(n^2 * 2^n)) or when fewer than two state
     types are present.
 
-    Metricity (M3): the Hamiltonian-path value itself is valid on ANY sdst
-    matrix (metric or not) as a lower bound on the setup contribution of a
-    FIXED op set. It is only unsafe to *discount* it per removed op (the S3
-    over-claim), which is why the machine_tsp optimality cut was removed. On a
-    non-metric matrix (`problem_profile.sdst_metric is False`,
-    `synaps.validation.validate_setup_matrix_metricity`) the dominance claim
-    over the sequence-independent floor still holds because this takes the BHK
-    optimum; callers needing metricity should check `sdst_metric` first.
+    Contract (F6 / GUARD-S3, audit v4):
+
+    * Valid as a lower bound on the setup cost of a FIXED set on ANY sdst
+      matrix (metric or not): the Hamiltonian-path optimum cannot exceed the
+      cost of any particular path.
+    * NOT safe to *discount* per removed op. ``L(S) - L(S\\\\{j})`` can be
+      strictly positive even when the cut only subtracts ``p_j`` (GUARD-S3
+      counterexample). That is why the ``machine_tsp`` optimality cut was
+      removed from both LBBD solvers; do not reintroduce discounting without
+      a covering residual.
+    * For a bound that stays valid under set shrinkage on non-metric matrices
+      without recomputing BHK, prefer
+      :func:`compute_min_out_assignment_setup_lb`.
 
     Reference: Naderi & Roshanaei (2021), "Critical-Path-Search Logic-Based
     Benders Decomposition Approaches for Flexible Job Shop Scheduling",
@@ -257,10 +261,43 @@ def compute_machine_tsp_lower_bound(
     return 0.0 if best == inf else best
 
 
+def compute_min_out_assignment_setup_lb(
+    state_ids: list[UUID],
+    work_center_id: UUID,
+    setup_lookup: Mapping[tuple[UUID, UUID, UUID], float],
+) -> float:
+    """Cheap assignment-relaxation setup LB, valid on ANY sdst matrix (F6).
+
+    For each distinct state take the cheapest outgoing setup to a different
+    state; a Hamiltonian path on ``n`` nodes uses ``n - 1`` arcs, so summing
+    the ``n - 1`` smallest min-outs is a valid lower bound (one node may be
+    the path end and contribute no outgoing arc). Dominated by BHK
+    (:func:`compute_machine_tsp_lower_bound`) but O(n^2), safe under set
+    shrinkage without a discount residual, and never over-claims on
+    non-metric matrices.
+    """
+    distinct = list(dict.fromkeys(state_ids))
+    n = len(distinct)
+    if n < 2:
+        return 0.0
+
+    min_outs: list[float] = []
+    for i, from_state in enumerate(distinct):
+        best = min(
+            float(setup_lookup.get((work_center_id, from_state, to_state), 0.0))
+            for j, to_state in enumerate(distinct)
+            if i != j
+        )
+        min_outs.append(best)
+    min_outs.sort()
+    return float(sum(min_outs[: n - 1]))
+
+
 __all__ = [
     "BendersCutLike",
     "compute_machine_transition_floor",
     "compute_machine_tsp_lower_bound",
+    "compute_min_out_assignment_setup_lb",
     "compute_sequence_independent_setup_lower_bound",
     "cut_pool_fingerprint",
 ]

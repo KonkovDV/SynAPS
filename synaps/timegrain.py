@@ -28,3 +28,16 @@ def duration_minutes(base_duration_min: float, speed_factor: float) -> int:
     """
     speed = speed_factor if speed_factor > 0 else 1.0
     return max(1, math.ceil(base_duration_min / speed))
+
+
+def physical_processing_minutes(base_duration_min: float, speed_factor: float) -> float:
+    """Return the exact real-valued processing time ``base / speed`` (minutes).
+
+    The FEASIBILITY floor (audit v4, F2): a schedule span shorter than this is
+    physically impossible. Distinct from :func:`duration_minutes` — the integer
+    RESERVATION grain (P0-4): solvers reserve the grain, the FeasibilityChecker
+    certifies against this floor. A non-positive speed factor is treated as 1.0
+    (no speed-up), matching :func:`duration_minutes`.
+    """
+    speed = speed_factor if speed_factor > 0 else 1.0
+    return base_duration_min / speed

@@ -50,6 +50,7 @@ from synaps.solvers._lbbd_cuts import (
     reported_lower_bound,
 )
 from synaps.solvers.cpsat_solver import CpSatSolver
+from synaps.solvers._lbbd_assembly import LaneGroupResolver, enforce_lane_gaps
 from synaps.timegrain import duration_minutes
 
 if TYPE_CHECKING:
@@ -170,22 +171,17 @@ class LbbdSolver(BaseSolver):
         # --- Greedy warm start: use GreedyDispatch to seed initial UB ---
         greedy_warm_start_used = False
         if use_greedy_warm_start:
-            from synaps.solvers.greedy_dispatch import GreedyDispatch
-
-            greedy = GreedyDispatch()
-            greedy_result = greedy.solve(problem)
-            if greedy_result.status == SolverStatus.FEASIBLE and greedy_result.assignments:
-                greedy_makespan = greedy_result.objective.makespan_minutes
-                if greedy_makespan < best_ub:
-                    best_ub = greedy_makespan
-                    ub_evolution.append(best_ub)
-                    best_assignments = list(greedy_result.assignments)
-                    best_objective = greedy_result.objective
-                    greedy_warm_start_used = True
-                # Seed the master warm start from greedy assignment
-                prev_assignment_map = {
-                    a.operation_id: a.work_center_id for a in greedy_result.assignments
-                }
+            warm_ub, warm_assignments, warm_objective, warm_map = _greedy_warm_start(
+                problem, best_ub
+            )
+            if warm_map is not None:
+                prev_assignment_map = warm_map
+            if warm_assignments is not None and warm_ub is not None:
+                best_ub = warm_ub
+                ub_evolution.append(best_ub)
+                best_assignments = warm_assignments
+                best_objective = warm_objective  # type: ignore[assignment]
+                greedy_warm_start_used = True
 
         for iteration in range(1, max_iterations + 1):
             elapsed = time.monotonic() - t0
@@ -198,7 +194,7 @@ class LbbdSolver(BaseSolver):
             # --- Master Problem ---
             if prev_assignment_map is not None:
                 master_warm_start_iterations += 1
-            master_result = _solve_master(
+            master_result, master_proven_infeasible = _solve_master(
                 problem,
                 eligible_by_op,
                 wc_by_id,
@@ -210,21 +206,12 @@ class LbbdSolver(BaseSolver):
                 ),
             )
             if master_result is None:
-                # Master infeasible. With the S2 no-good cuts this usually means
-                # the assignment space is EXHAUSTED (every assignment has been
-                # explored and excluded), not that the problem is infeasible.
-                # If a feasible schedule was already found, the search is
-                # complete over the explored space — return the best incumbent
-                # rather than a spurious INFEASIBLE. Only a first-iteration
-                # master infeasibility (no incumbent) is a true infeasibility.
-                if best_assignments:
-                    break
-                return ScheduleResult(
-                    solver_name=self.name,
-                    status=SolverStatus.INFEASIBLE,
-                    duration_ms=int((time.monotonic() - t0) * 1000),
-                    metadata={"iterations": iteration, "reason": "master_infeasible"},
+                failed = _master_failed_result(
+                    self.name, t0, iteration, master_proven_infeasible, bool(best_assignments)
                 )
+                if failed is not None:
+                    return failed
+                break
 
             assignment_map, master_bound = master_result
             lb_delta = master_bound - prev_master_bound
@@ -234,32 +221,19 @@ class LbbdSolver(BaseSolver):
             prev_master_bound = master_bound
 
             # --- Subproblems (one CP-SAT per machine cluster) ---
-            clusters = _cluster_machines(assignment_map, aux_links)
-            if parallel_subproblems and len(clusters) > 3:
-                sub_result = _solve_subproblems_parallel(
-                    problem,
-                    assignment_map,
-                    clusters,
-                    wc_by_id,
-                    ops_by_id,
-                    orders_by_id,
-                    sub_time_limit_s,
-                    random_seed,
-                    num_workers=num_workers,
-                    deadline=deadline,
-                )
-            else:
-                sub_result = _solve_subproblems(
-                    problem,
-                    assignment_map,
-                    aux_links,
-                    wc_by_id,
-                    ops_by_id,
-                    orders_by_id,
-                    sub_time_limit_s,
-                    random_seed,
-                    deadline=deadline,
-                )
+            sub_result = _dispatch_subproblems(
+                problem,
+                assignment_map,
+                aux_links,
+                wc_by_id,
+                ops_by_id,
+                orders_by_id,
+                sub_time_limit_s,
+                random_seed,
+                parallel_subproblems=parallel_subproblems,
+                num_workers=num_workers,
+                deadline=deadline,
+            )
             sub_assignments, sub_makespan, sub_proven_optimal, sub_infeasible_proven = sub_result
 
             if sub_assignments is None:
@@ -551,7 +525,7 @@ def _solve_master(
     min_setup_by_wc: dict[UUID, float] | None = None,
     prev_solution: dict[UUID, UUID] | None = None,
     master_time_limit_s: float | None = None,
-) -> tuple[dict[UUID, UUID], float] | None:
+) -> tuple[tuple[dict[UUID, UUID], float] | None, bool]:
     """Solve the assignment master problem via HiGHS MIP.
 
     Decision variables:
@@ -564,6 +538,13 @@ def _solve_master(
         Benders cuts from previous iterations
 
     Objective: min C_max
+
+    Returns ``(solution, proven_infeasible)`` where ``solution`` is
+    ``(assignment_map, master_bound)`` or None. F12 (audit v4): a None with
+    ``proven_infeasible=False`` means the master was INCONCLUSIVE (time limit
+    with no incumbent, solver interruption) — the caller must not surface it
+    as SolverStatus.INFEASIBLE. Only HiGHS' ``kInfeasible`` model status is a
+    proof of infeasibility.
     """
     h = highspy.Highs()
     h.silent()
@@ -654,62 +635,7 @@ def _solve_master(
         )
 
     # Constraint 3: Benders cuts from previous iterations
-    for cut in cuts:
-        if cut.kind == "nogood":
-            # Exclude exact assignment: ∑ y[i, assignment[i]] ≤ |ops| - 1
-            indices = []
-            coeffs = []
-            for op_id, wc_id in cut.assignment_map.items():
-                key = (op_id, wc_id)
-                if key in var_index:
-                    indices.append(var_index[key])
-                    coeffs.append(1.0)
-            if indices:
-                h.addRow(
-                    -highspy.kHighsInf,
-                    len(indices) - 1.0,
-                    len(indices),
-                    np.array(indices, dtype=np.int32),
-                    np.array(coeffs),
-                )
-        elif cut.kind in ("setup_cost", "machine_tsp"):
-            # Conditional no-good optimality cut (S3 validity fix, 2026-07).
-            #
-            # rhs = Sum_i p_i + L(S) is an ANALYTIC lower bound on machine m's
-            # busy time whenever the whole set S runs on m (L = BHK setup-path
-            # bound for machine_tsp, sequence-independent floor for
-            # setup_cost); it stays valid if more ops join m. The former row
-            # discounted only p_i per removed op, which does not cover the
-            # drop in L(S) (removing a node shortens the Hamiltonian path), so
-            # the bound over-claimed by L(S) - L(S\{j}) (audit S3). The former
-            # `capacity` and `critical_path` rows had deeper flaws (see the
-            # generation site) and are no longer emitted.
-            #
-            # Valid form: bind only while ALL of S stays on m, fully
-            # deactivate otherwise — coefficient rhs per op:
-            #   C_max - Sum_i rhs*y_i >= rhs*(1 - |S|)
-            #   <=> C_max >= rhs*(1 - Sum_i (1 - y_i))
-            # All y_i = 1 -> C_max >= rhs; any y_i = 0 -> row is slack.
-            ng_indices = [cmax_idx]
-            ng_coeffs = [1.0]
-            for op_id in cut.bottleneck_ops:
-                ng_wc_id = cut.assignment_map.get(op_id)
-                if ng_wc_id is None:
-                    continue
-                key = (op_id, ng_wc_id)
-                if key not in var_index:
-                    continue
-                ng_indices.append(var_index[key])
-                ng_coeffs.append(-cut.rhs)
-            member_count = len(ng_indices) - 1
-            if member_count > 0:
-                h.addRow(
-                    cut.rhs * (1 - member_count),
-                    highspy.kHighsInf,
-                    len(ng_indices),
-                    np.array(ng_indices, dtype=np.int32),
-                    np.array(ng_coeffs),
-                )
+    _add_benders_cut_rows(h, cuts, var_index, cmax_idx)
 
     # Solve
     h.changeObjectiveSense(highspy.ObjSense.kMinimize)
@@ -731,7 +657,11 @@ def _solve_master(
 
     status = h.getInfoValue("primal_solution_status")[1]
     if status != 2:  # 2 = feasible
-        return None
+        # F12 (audit v4): only HiGHS kInfeasible is a PROOF; a time-limited
+        # master without an incumbent is inconclusive and must not be reported
+        # as SolverStatus.INFEASIBLE upstream.
+        proven_infeasible = h.getModelStatus() == highspy.HighsModelStatus.kInfeasible
+        return None, proven_infeasible
 
     solution = h.getSolution()
     col_values = solution.col_value
@@ -762,7 +692,7 @@ def _solve_master(
         dual_bound = master_bound
     if math.isfinite(dual_bound):
         master_bound = min(master_bound, dual_bound)
-    return assignment_map, master_bound
+    return (assignment_map, master_bound), False
 
 
 # ---------------------------------------------------------------------------
@@ -947,11 +877,17 @@ def _solve_subproblems(
     if assigned_ops != all_ops:
         return None, 0.0, False, False
 
-    all_assignments, overall_makespan = _post_assemble_assignments(
+    all_assignments, overall_makespan, horizon_ok = _post_assemble_assignments(
         problem,
         all_assignments,
         ops_by_id,
     )
+    if not horizon_ok:
+        # F3-followup: post-assembly re-enforcement pushed work past the
+        # horizon — the merged schedule is physically invalid for this master
+        # assignment. Not a PROVEN infeasibility (a different merge could
+        # succeed), so no cut; treat as an unproven subproblem failure (S2).
+        return None, 0.0, False, False
 
     return all_assignments, overall_makespan, all_proven_optimal, False
 
@@ -1090,53 +1026,19 @@ def _compute_objective(
     ops_by_id: dict[UUID, Operation],
     orders_by_id: dict[UUID, Order],
 ) -> ObjectiveValues:
-    """Compute multi-objective values from assignments."""
-    horizon_start = problem.planning_horizon_start
-    setup_lookup = {
-        (e.work_center_id, e.from_state_id, e.to_state_id): (e.setup_minutes, e.material_loss)
-        for e in problem.setup_matrix
-    }
+    """Canonical objective for a merged LBBD incumbent (F3/F4, audit v4).
 
-    # Group by machine and sort
-    by_machine: dict[UUID, list[Assignment]] = defaultdict(list)
-    for a in assignments:
-        by_machine[a.work_center_id].append(a)
+    Delegates to ``synaps.objective.evaluate`` — the single definition (P0-6).
+    Pre-v4 this re-derived the vector inline: it grouped by MACHINE (phantom
+    cross-lane setups on parallel work centers, F3), understated tardiness for
+    unscheduled orders (F10), and left ``weighted_sum`` at 0.0 (F4). The
+    ``makespan`` argument is retained for signature compatibility; the
+    canonical evaluator recomputes it from the assignments.
+    """
+    del makespan, wc_by_id, ops_by_id, orders_by_id  # canonical path recomputes
+    from synaps.objective import evaluate
 
-    total_setup = 0.0
-    total_material = 0.0
-    for wc_id, machine_assignments in by_machine.items():
-        sorted_a = sorted(machine_assignments, key=lambda x: x.start_time)
-        for i in range(1, len(sorted_a)):
-            prev_op = ops_by_id.get(sorted_a[i - 1].operation_id)
-            curr_op = ops_by_id.get(sorted_a[i].operation_id)
-            if prev_op and curr_op:
-                key = (wc_id, prev_op.state_id, curr_op.state_id)
-                setup_min, mat_loss = setup_lookup.get(key, (0, 0.0))
-                total_setup += setup_min
-                total_material += mat_loss
-
-    # Per-order tardiness
-    order_completion: dict[UUID, float] = {}
-    for a in assignments:
-        op = ops_by_id.get(a.operation_id)
-        if op is None:
-            continue
-        end = (a.end_time - horizon_start).total_seconds() / 60.0
-        if op.order_id not in order_completion or end > order_completion[op.order_id]:
-            order_completion[op.order_id] = end
-
-    total_tardiness = 0.0
-    for order in problem.orders:
-        completion = order_completion.get(order.id, 0.0)
-        due_offset = (order.due_date - horizon_start).total_seconds() / 60.0
-        total_tardiness += max(completion - due_offset, 0.0)
-
-    return ObjectiveValues(
-        makespan_minutes=makespan,
-        total_setup_minutes=total_setup,
-        total_material_loss=total_material,
-        total_tardiness_minutes=total_tardiness,
-    )
+    return evaluate(problem, list(assignments))
 
 
 # ---------------------------------------------------------------------------
@@ -1291,25 +1193,223 @@ def _solve_subproblems_parallel(
     if assigned_ops != all_ops:
         return None, 0.0, False, False
 
-    all_assignments, overall_makespan = _post_assemble_assignments(
+    all_assignments, overall_makespan, horizon_ok = _post_assemble_assignments(
         problem,
         all_assignments,
         ops_by_id,
     )
+    if not horizon_ok:
+        # Post-assembly horizon overflow: unproven failure, no cut (S2).
+        return None, 0.0, False, False
 
     return all_assignments, overall_makespan, all_proven_optimal, False
+
+
+def _greedy_warm_start(
+    problem: ScheduleProblem, best_ub: float
+) -> tuple[
+    float | None,
+    list[Assignment] | None,
+    ObjectiveValues | None,
+    dict[UUID, UUID] | None,
+]:
+    """GreedyDispatch seed: (ub, assignments, objective, master_map).
+
+    ``master_map`` is returned whenever greedy finds a feasible schedule (even
+    if it does not improve ``best_ub``), so the master can warm-start from it.
+    Improved incumbent fields are non-None only when greedy beats ``best_ub``.
+    """
+    from synaps.solvers.greedy_dispatch import GreedyDispatch
+
+    greedy_result = GreedyDispatch().solve(problem)
+    if greedy_result.status != SolverStatus.FEASIBLE or not greedy_result.assignments:
+        return None, None, None, None
+    warm_map = {
+        a.operation_id: a.work_center_id for a in greedy_result.assignments
+    }
+    greedy_makespan = greedy_result.objective.makespan_minutes
+    if greedy_makespan < best_ub:
+        return (
+            greedy_makespan,
+            list(greedy_result.assignments),
+            greedy_result.objective,
+            warm_map,
+        )
+    return None, None, None, warm_map
+
+
+def _dispatch_subproblems(
+    problem: ScheduleProblem,
+    assignment_map: dict[UUID, UUID],
+    aux_links: Any,
+    wc_by_id: dict[UUID, WorkCenter],
+    ops_by_id: dict[UUID, Operation],
+    orders_by_id: dict[UUID, Order],
+    sub_time_limit_s: int,
+    random_seed: int,
+    *,
+    parallel_subproblems: bool,
+    num_workers: int,
+    deadline: float,
+) -> tuple[list[Assignment] | None, float, bool, bool]:
+    """Route to serial or parallel cluster subproblem solves."""
+    clusters = _cluster_machines(assignment_map, aux_links)
+    if parallel_subproblems and len(clusters) > 3:
+        return _solve_subproblems_parallel(
+            problem,
+            assignment_map,
+            clusters,
+            wc_by_id,
+            ops_by_id,
+            orders_by_id,
+            sub_time_limit_s,
+            random_seed,
+            num_workers=num_workers,
+            deadline=deadline,
+        )
+    return _solve_subproblems(
+        problem,
+        assignment_map,
+        aux_links,
+        wc_by_id,
+        ops_by_id,
+        orders_by_id,
+        sub_time_limit_s,
+        random_seed,
+        deadline=deadline,
+    )
+
+
+def _master_failed_result(
+    solver_name: str,
+    t0: float,
+    iteration: int,
+    proven_infeasible: bool,
+    has_incumbent: bool,
+) -> ScheduleResult | None:
+    """Result to return on a failed master, or None to break with the incumbent.
+
+    With the S2 no-good cuts, a PROVEN-infeasible master usually means the
+    assignment space is EXHAUSTED (every assignment has been explored and
+    excluded), not that the problem is infeasible. If a feasible schedule was
+    already found, the search is complete over the explored space — return the
+    best incumbent rather than a spurious INFEASIBLE.
+    """
+    if has_incumbent:
+        return None
+    if not proven_infeasible:
+        # F12 (audit v4): a time-limited master that found no incumbent is
+        # INCONCLUSIVE. Reporting INFEASIBLE here was spurious — the
+        # assignment space was not exhausted, the budget was.
+        return ScheduleResult(
+            solver_name=solver_name,
+            status=SolverStatus.TIMEOUT,
+            duration_ms=int((time.monotonic() - t0) * 1000),
+            metadata={
+                "iterations": iteration,
+                "reason": "master_no_incumbent_within_budget",
+            },
+        )
+    return ScheduleResult(
+        solver_name=solver_name,
+        status=SolverStatus.INFEASIBLE,
+        duration_ms=int((time.monotonic() - t0) * 1000),
+        metadata={"iterations": iteration, "reason": "master_infeasible"},
+    )
+
+
+def _add_benders_cut_rows(
+    h: Any,
+    cuts: list[Any],
+    var_index: dict[tuple[UUID, UUID], int],
+    cmax_idx: int,
+) -> None:
+    """Append all Benders-cut rows to the HiGHS master model."""
+    for cut in cuts:
+        if cut.kind == "nogood":
+            # Exclude exact assignment: ∑ y[i, assignment[i]] ≤ |ops| - 1
+            indices = []
+            coeffs = []
+            for op_id, wc_id in cut.assignment_map.items():
+                key = (op_id, wc_id)
+                if key in var_index:
+                    indices.append(var_index[key])
+                    coeffs.append(1.0)
+            if indices:
+                h.addRow(
+                    -highspy.kHighsInf,
+                    len(indices) - 1.0,
+                    len(indices),
+                    np.array(indices, dtype=np.int32),
+                    np.array(coeffs),
+                )
+        elif cut.kind in ("setup_cost", "machine_tsp"):
+            # Conditional no-good optimality cut (S3 validity fix, 2026-07).
+            #
+            # rhs = Sum_i p_i + L(S) is an ANALYTIC lower bound on machine m's
+            # busy time whenever the whole set S runs on m (L = BHK setup-path
+            # bound for machine_tsp, sequence-independent floor for
+            # setup_cost); it stays valid if more ops join m. The former row
+            # discounted only p_i per removed op, which does not cover the
+            # drop in L(S) (removing a node shortens the Hamiltonian path), so
+            # the bound over-claimed by L(S) - L(S\{j}) (audit S3). The former
+            # `capacity` and `critical_path` rows had deeper flaws (see the
+            # generation site) and are no longer emitted.
+            #
+            # Valid form: bind only while ALL of S stays on m, fully
+            # deactivate otherwise — coefficient rhs per op:
+            #   C_max - Sum_i rhs*y_i >= rhs*(1 - |S|)
+            #   <=> C_max >= rhs*(1 - Sum_i (1 - y_i))
+            # All y_i = 1 -> C_max >= rhs; any y_i = 0 -> row is slack.
+            ng_indices = [cmax_idx]
+            ng_coeffs = [1.0]
+            for op_id in cut.bottleneck_ops:
+                ng_wc_id = cut.assignment_map.get(op_id)
+                if ng_wc_id is None:
+                    continue
+                key = (op_id, ng_wc_id)
+                if key not in var_index:
+                    continue
+                ng_indices.append(var_index[key])
+                ng_coeffs.append(-cut.rhs)
+            member_count = len(ng_indices) - 1
+            if member_count > 0:
+                h.addRow(
+                    cut.rhs * (1 - member_count),
+                    highspy.kHighsInf,
+                    len(ng_indices),
+                    np.array(ng_indices, dtype=np.int32),
+                    np.array(ng_coeffs),
+                )
+
 
 
 def _post_assemble_assignments(
     problem: ScheduleProblem,
     assignments: list[Assignment],
     ops_by_id: dict[UUID, Operation],
-) -> tuple[list[Assignment], float]:
-    """Enforce cross-cluster precedence and setup gaps after subproblem merge."""
+) -> tuple[list[Assignment], float, bool]:
+    """Enforce cross-cluster precedence and setup gaps after subproblem merge.
+
+    F3 (audit v4): parallel machines are grouped PER LANE, not serialized into
+    a single sequence. Pre-v4 the gap walk treated a max_parallel > 1
+    machine as one serial resource, which degraded quality, charged phantom
+    cross-lane setups, and could report makespans for illegal schedules.
+
+    Returns (assignments, makespan, horizon_ok). horizon_ok is False when the
+    re-enforcement pushed any assignment past planning_horizon_end.
+    """
     setup_lookup = {
         (e.work_center_id, e.from_state_id, e.to_state_id): timedelta(minutes=e.setup_minutes)
         for e in problem.setup_matrix
     }
+    resolver = LaneGroupResolver(
+        wc_by_id={wc.id: wc for wc in problem.work_centers},
+        ops_by_id=ops_by_id,
+        setup_minutes_lookup={
+            key: value.total_seconds() / 60.0 for key, value in setup_lookup.items()
+        },
+    )
     assignment_by_op = {assignment.operation_id: assignment for assignment in assignments}
 
     changed = True
@@ -1337,27 +1437,16 @@ def _post_assemble_assignments(
             by_machine[assignment.work_center_id].append(assignment)
 
         for work_center_id, machine_assignments in by_machine.items():
-            machine_assignments.sort(key=lambda assignment: assignment.start_time)
-            for idx in range(len(machine_assignments) - 1):
-                current_assignment = machine_assignments[idx]
-                next_assignment = machine_assignments[idx + 1]
-                current_state = ops_by_id[current_assignment.operation_id].state_id
-                next_state = ops_by_id[next_assignment.operation_id].state_id
-                required_setup = setup_lookup.get(
-                    (work_center_id, current_state, next_state),
-                    timedelta(0),
-                )
-                earliest_next_start = current_assignment.end_time + required_setup
-                if next_assignment.start_time < earliest_next_start:
-                    shift = earliest_next_start - next_assignment.start_time
-                    next_assignment.start_time = next_assignment.start_time + shift
-                    next_assignment.end_time = next_assignment.end_time + shift
+            for lane in resolver.groups(work_center_id, machine_assignments):
+                if enforce_lane_gaps(work_center_id, lane, ops_by_id, setup_lookup):
                     changed = True
 
     horizon_start = problem.planning_horizon_start
+    horizon_end = problem.planning_horizon_end
     makespan = (
         max((a.end_time - horizon_start).total_seconds() / 60.0 for a in assignments)
         if assignments
         else 0.0
     )
-    return assignments, makespan
+    horizon_ok = all(a.end_time <= horizon_end for a in assignments)
+    return assignments, makespan, horizon_ok

@@ -28,20 +28,9 @@ SYNAPS_ROOT = Path(__file__).resolve().parent.parent / "synaps"
 # --- Rule 1 ratchet: raw base/speed divisions awaiting Phase 3 removal -------
 # Format: (posix-relative path, count of allowed raw divisions).
 # This list may only SHRINK. Adding an entry is a P0-4 regression.
-_RAW_DURATION_DIVISION_RATCHET: dict[str, int] = {
-    # ATCS scoring uses fractional processing time for priority, not placement;
-    # unify through timegrain in Phase 3.
-    "solvers/greedy_dispatch.py": 2,
-    # Window sizing estimate; unify in Phase 3.
-    "solvers/rhc/_solver.py": 1,
-    # DURATION_MISMATCH now compares against the canonical timegrain grain; the
-    # single remaining hit is the violation message text quoting the formula
-    # ``ceil(base_duration_min/speed_factor)`` (P0-4 unified the checker onto
-    # timegrain.duration_minutes).
-    "solvers/feasibility_checker.py": 1,
-    # Synthetic-instance generator sizing heuristic (not a solver).
-    "benchmarks/instance_generator.py": 1,
-}
+# Cleared by T-26 (F11): ATCS / RHC window sizing / instance generator all
+# route through synaps.timegrain.physical_processing_minutes.
+_RAW_DURATION_DIVISION_RATCHET: dict[str, int] = {}
 
 _DURATION_DIVISION = re.compile(
     r"base_duration_min\s*/|/\s*speed_factor\b|/\s*wc_speed|/\s*max_speed_factor\b"
@@ -153,16 +142,16 @@ def test_no_dead_public_functions() -> None:
 _LONG_FUNCTION_RATCHET: dict[str, int] = {
     "solvers/rhc/_solver.py::solve": 2601,
     "solvers/alns_solver.py::_solve_core": 1652,
-    "solvers/feasibility_checker.py::check": 443,
-    "solvers/lbbd_hd_solver.py::solve": 432,
-    "solvers/lbbd_solver.py::solve": 413,
+    "solvers/feasibility_checker.py::check": 234,
+    "solvers/lbbd_hd_solver.py::solve": 433,
+    "solvers/lbbd_solver.py::solve": 386,
     "solvers/cpsat_solver.py::solve": 387,
     "solvers/greedy_dispatch.py::_solve_core": 362,
     "solvers/router.py::route_solver_config": 318,
     "solvers/lbbd_hd_solver.py::_solve_precedence_aware_master": 297,
     "solvers/alns_solver.py::_try_native_greedy_repair": 268,
     "solvers/incremental_repair.py::solve": 247,
-    "solvers/lbbd_solver.py::_solve_master": 220,
+    "solvers/lbbd_solver.py::_solve_master": 176,
     "solvers/alns_solver.py::_try_native_initial_seed": 217,
     "solvers/alns_solver.py::_destroy_critical_path": 202,
     "benchmarks/instance_generator.py::generate_large_instance": 194,
@@ -173,7 +162,7 @@ _LONG_FUNCTION_RATCHET: dict[str, int] = {
     "solvers/rhc/_window.py::stabilize_temporal_consistency": 149,
     "solvers/pareto_slice_solver.py::solve": 148,
     "solvers/alns_solver.py::_repair_cpsat_outcome": 144,
-    "solvers/cpsat_solver.py::_build_weighted_objective": 152,
+    "solvers/cpsat_solver.py::_build_weighted_objective": 93,
     "solvers/alns_solver.py::_destroy_due_pressure": 135,
     "cli.py::main": 130,
     "solvers/instance_generator.py::generate_large_instance": 128,
@@ -240,4 +229,97 @@ def test_function_length_ratchet() -> None:
     assert not stale, (
         "ratchet is stale (functions were decomposed - remove them from the "
         f"list): {stale}"
+    )
+
+
+# --- Rule 5 (T-40 / F4 follow-up): direct ObjectiveValues( in solvers --------
+# After T-20 the boundary weighted_sum is canonical via evaluate()+scalarize.
+# Direct constructions remain for internal search telemetry; this ratchet may
+# only SHRINK as call sites migrate to synaps.objective.evaluate.
+_OBJECTIVE_VALUES_CTOR_RATCHET: dict[str, int] = {
+    "solvers/alns_solver.py": 3,
+    "solvers/cpsat_solver.py": 2,
+    "solvers/greedy_dispatch.py": 5,
+    "solvers/incremental_repair.py": 1,
+    "solvers/lbbd_hd_solver.py": 2,
+    "solvers/lbbd_solver.py": 1,
+    "solvers/rhc/_solver.py": 2,
+}
+
+_OBJECTIVE_VALUES_CTOR = re.compile(r"ObjectiveValues\s*\(")
+
+
+def test_objective_values_ctor_ratchet() -> None:
+    """Rule 5: no new direct ObjectiveValues( constructions in solvers."""
+    found: dict[str, int] = {}
+    for path in _python_files():
+        rel = path.relative_to(SYNAPS_ROOT).as_posix()
+        if not (rel.startswith("solvers/") or rel == "portfolio.py"):
+            continue
+        count = 0
+        for line in path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            if _OBJECTIVE_VALUES_CTOR.search(stripped):
+                count += 1
+        if count:
+            found[rel] = count
+    new_offenders = {
+        rel: n
+        for rel, n in found.items()
+        if n > _OBJECTIVE_VALUES_CTOR_RATCHET.get(rel, 0)
+    }
+    assert not new_offenders, (
+        f"new ObjectiveValues( constructions outside the ratchet: {new_offenders}; "
+        f"prefer synaps.objective.evaluate at the solver boundary (T-20/T-40)"
+    )
+    stale = {
+        rel: allowed
+        for rel, allowed in _OBJECTIVE_VALUES_CTOR_RATCHET.items()
+        if found.get(rel, 0) < allowed
+    }
+    assert not stale, (
+        f"ObjectiveValues ctor ratchet is stale (shrink the allowed counts): {stale}"
+    )
+
+
+# --- Rule 6 (T-40 / F6): public lower-bound helpers need a validity test -----
+_LB_NAME = re.compile(r"(lower_bound|_lb$|bound$)")
+
+
+def test_public_lower_bound_helpers_have_validity_tests() -> None:
+    """Rule 6: every public *lb/*bound helper is referenced from tests/.
+
+    Private helpers (leading underscore) are exempt. Precedent: S3/F6 — a
+    bound without a property/validity test is how over-claim cuts shipped.
+    See CONTRIBUTING.md «Lower-bound helpers».
+    """
+    public_lbs: list[tuple[str, str]] = []
+    for path in _python_files():
+        rel = path.relative_to(SYNAPS_ROOT).as_posix()
+        if not rel.startswith("solvers/"):
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in tree.body:
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            if node.name.startswith("_"):
+                continue
+            if _LB_NAME.search(node.name):
+                public_lbs.append((rel, node.name))
+
+    tests_root = Path(__file__).resolve().parent
+    corpus = "\n".join(
+        p.read_text(encoding="utf-8", errors="ignore")
+        for p in tests_root.rglob("test_*.py")
+    )
+    missing = [
+        f"{rel}::{name}"
+        for rel, name in public_lbs
+        if name not in corpus
+    ]
+    assert not missing, (
+        "public lower-bound helper(s) lack a test reference "
+        f"(add a property/validity test): {missing}"
     )

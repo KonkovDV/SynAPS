@@ -75,6 +75,43 @@ def test_checker_flags_release_date_violation() -> None:
     )
 
 
+def test_cpsat_honors_subminute_release_date() -> None:
+    """F8 (audit v4): a release at a sub-minute offset must not be truncated.
+
+    Before the fix the release offset was computed with ``int(seconds/60)``
+    (floor), so a release at H0+90s became offset 1 and the op could start at
+    H0+1:00 — 30s before release, a RELEASE_DATE_VIOLATION the checker rightly
+    flags. The offset must ceil to the first integer minute not before release.
+    """
+    state = State(code="s")
+    wc = WorkCenter(code="M", capability_group="G")
+    release = H0 + timedelta(seconds=90)
+    order = Order(
+        external_ref="O1",
+        due_date=H0 + timedelta(days=9),
+        release_date=release,
+    )
+    op = Operation(
+        order_id=order.id,
+        seq_in_order=1,
+        state_id=state.id,
+        base_duration_min=60,
+        eligible_wc_ids=[wc.id],
+    )
+    problem = ScheduleProblem(
+        states=[state], orders=[order], operations=[op], work_centers=[wc],
+        setup_matrix=[], planning_horizon_start=H0, planning_horizon_end=HE,
+    )
+    result = CpSatSolver().solve(
+        problem, time_limit_s=5, num_workers=1, auto_greedy_warm_start=False
+    )
+    assert result.assignments, "expected a feasible schedule"
+    start = result.assignments[0].start_time
+    assert start >= release, f"started at {start}, before release {release}"
+    violations = FeasibilityChecker().check(problem, result.assignments, exhaustive=True)
+    assert not violations, f"checker must stay clean: {[v.kind for v in violations]}"
+
+
 def test_cpsat_honors_release_date() -> None:
     """M1: CP-SAT must not start an operation before its order release_date."""
     problem = _released_problem()

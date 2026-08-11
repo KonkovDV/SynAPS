@@ -44,6 +44,7 @@ from synaps.model import (
     WorkCenter,
 )
 from synaps.solvers import BaseSolver
+from synaps.solvers._lbbd_assembly import stamp_parallel_lane_ids
 from synaps.solvers._lbbd_cuts import (
     compute_machine_transition_floor,
     compute_machine_tsp_lower_bound,
@@ -234,7 +235,7 @@ class LbbdHdSolver(BaseSolver):
             if prev_assignment_map is not None:
                 master_warm_starts += 1
 
-            master_result = _solve_precedence_aware_master(
+            master_result, master_proven_infeasible = _solve_precedence_aware_master(
                 problem,
                 eligible_by_op,
                 wc_by_id,
@@ -248,21 +249,16 @@ class LbbdHdSolver(BaseSolver):
                 ),
             )
             if master_result is None:
-                # Master infeasible: with S2 no-good cuts this is usually an
-                # exhausted assignment space, not problem infeasibility. Return
-                # the best incumbent if one was found; only a first-iteration
-                # failure (no incumbent) is a true infeasibility.
-                if best_assignments:
-                    break
-                return ScheduleResult(
-                    solver_name=self.name,
-                    status=SolverStatus.INFEASIBLE,
-                    duration_ms=int((time.monotonic() - t0) * 1000),
-                    metadata={
-                        "iterations": iteration,
-                        "reason": "master_infeasible",
-                    },
+                failed = _hd_master_failed_result(
+                    self.name,
+                    t0,
+                    iteration,
+                    master_proven_infeasible,
+                    bool(best_assignments),
                 )
+                if failed is not None:
+                    return failed
+                break
 
             assignment_map, master_bound = master_result
             lb_delta = master_bound - prev_master_bound
@@ -329,19 +325,32 @@ class LbbdHdSolver(BaseSolver):
             sub_assignments, sub_makespan, sub_proven_optimal, _ = sub_result
             assert sub_assignments is not None  # narrowed by the `sub_result[0] is None` guard
 
-            # ---- Measure 5: Accelerated post-assembly ----
-            assembled = _topological_post_assembly(problem, sub_assignments, ops_by_id)
-            if assembled is not None:
-                sub_assignments = assembled
-                # Recompute makespan after assembly
-                horizon_start = problem.planning_horizon_start
-                sub_makespan = (
-                    max(
-                        (a.end_time - horizon_start).total_seconds() / 60.0 for a in sub_assignments
-                    )
-                    if sub_assignments
-                    else 0.0
+            # ---- Measure 5: Accelerated post-assembly (F3 lane-aware) ----
+            assembled, horizon_ok = _topological_post_assembly(
+                problem, sub_assignments, ops_by_id
+            )
+            if assembled is None or not horizon_ok:
+                # Horizon overflow / assembly failure is unproven (S2) — do not
+                # emit a cut and do not track as an incumbent.
+                cuts_skipped_unproven_subproblem += 1
+                iteration_log.append(
+                    {
+                        "iteration": iteration,
+                        "master_bound": master_bound,
+                        "status": "post_assembly_horizon_or_failure",
+                    }
                 )
+                prev_iteration_cut_kinds = [
+                    cut.kind for cut in benders_cuts[cuts_before_iteration:]
+                ]
+                continue
+            sub_assignments = assembled
+            horizon_start = problem.planning_horizon_start
+            sub_makespan = (
+                max((a.end_time - horizon_start).total_seconds() / 60.0 for a in sub_assignments)
+                if sub_assignments
+                else 0.0
+            )
 
             ub = sub_makespan
 
@@ -350,14 +359,7 @@ class LbbdHdSolver(BaseSolver):
                 best_ub = ub
                 ub_evolution.append(best_ub)
                 best_assignments = sub_assignments
-                best_objective = _compute_objective(
-                    problem,
-                    sub_assignments,
-                    sub_makespan,
-                    wc_by_id,
-                    ops_by_id,
-                    orders_by_id,
-                )
+                best_objective = _compute_objective(problem, sub_assignments)
 
             iteration_log.append(
                 {
@@ -593,29 +595,12 @@ def _solve_precedence_aware_master(
     min_setup_by_wc: dict[UUID, float] | None = None,
     prev_solution: dict[UUID, UUID] | None = None,
     master_time_limit_s: float | None = None,
-) -> tuple[dict[UUID, UUID], float] | None:
+) -> tuple[tuple[dict[UUID, UUID], float] | None, bool]:
     """Solve the precedence-aware assignment master problem via HiGHS MIP.
 
-    This extends the original master with continuous timing variables:
-
-    Decision variables:
-        y[i, k] ∈ {0, 1}  — operation i assigned to work center k
-        start[i] ≥ 0      — relaxed start time of operation i
-        end[i] ≥ 0         — relaxed end time of operation i
-        C_max ≥ 0          — relaxed makespan lower bound
-
-    Constraints:
-        ∑_k y[i,k] = 1                         ∀ i ∈ ops      (unique assignment)
-        end[i] = start[i] + ∑_k (P[i,k]·y[i,k]) ∀ i ∈ ops    (timing linkage)
-        start[j] ≥ end[i]                       ∀ (i,j) ∈ DAG (precedence)
-        ∑_i P[i,k]·y[i,k] ≤ C_max              ∀ k ∈ machines (relaxed capacity)
-        C_max ≥ end[i]                           ∀ i ∈ ops     (makespan bound)
-        Benders cuts from previous iterations
-
-    Objective: min C_max
-
-    Scaling: For 10 000 ops x 100 machines → ~1M binary + 20K continuous +
-    ~8K precedence constraints. HiGHS solves this in 1-5 s typically.
+    Returns ``((assignment_map, master_bound), proven_infeasible)``. When the
+    master yields no incumbent, ``proven_infeasible`` is True only for a HiGHS
+    ``kInfeasible`` status (F12); a time-limit miss is ``(None, False)``.
     """
     h = highspy.Highs()
     h.silent()
@@ -850,7 +835,8 @@ def _solve_precedence_aware_master(
 
     status = h.getInfoValue("primal_solution_status")[1]
     if status != 2:  # 2 = feasible
-        return None
+        proven_infeasible = h.getModelStatus() == highspy.HighsModelStatus.kInfeasible
+        return None, proven_infeasible
 
     solution = h.getSolution()
     col_values = solution.col_value
@@ -879,7 +865,7 @@ def _solve_precedence_aware_master(
         dual_bound = master_bound
     if math.isfinite(dual_bound):
         master_bound = min(master_bound, dual_bound)
-    return assignment_map, master_bound
+    return (assignment_map, master_bound), False
 
 
 # ---------------------------------------------------------------------------
@@ -1139,8 +1125,37 @@ def _solve_subproblems_sequential(
     return all_assignments, overall_makespan, all_proven_optimal, False
 
 
+def _hd_master_failed_result(
+    solver_name: str,
+    t0: float,
+    iteration: int,
+    proven_infeasible: bool,
+    has_incumbent: bool,
+) -> ScheduleResult | None:
+    """Result to return on a failed HD master, or None to break with incumbent."""
+    if has_incumbent:
+        return None
+    if not proven_infeasible:
+        return ScheduleResult(
+            solver_name=solver_name,
+            status=SolverStatus.TIMEOUT,
+            duration_ms=int((time.monotonic() - t0) * 1000),
+            metadata={
+                "iterations": iteration,
+                "reason": "master_no_incumbent_within_budget",
+            },
+        )
+    return ScheduleResult(
+        solver_name=solver_name,
+        status=SolverStatus.INFEASIBLE,
+        duration_ms=int((time.monotonic() - t0) * 1000),
+        metadata={"iterations": iteration, "reason": "master_infeasible"},
+    )
+
+
 def _assignment_sequence_key(assignment: Assignment) -> tuple[UUID, UUID | None]:
     return assignment.work_center_id, assignment.lane_id
+
 
 
 def _find_earliest_machine_slot(
@@ -1213,17 +1228,22 @@ def _topological_post_assembly(
     problem: ScheduleProblem,
     assignments: list[Assignment],
     ops_by_id: dict[UUID, Operation],
-) -> list[Assignment] | None:
-    """Fix cross-cluster timing via topological traversal + per-machine heaps.
+) -> tuple[list[Assignment] | None, bool]:
+    """Fix cross-cluster timing via topological traversal + per-lane heaps.
 
-    Replaces the O(N³) iterative while-changed loop with a single-pass
-    topological traversal that cascades shifts forward through the DAG.
+    F3 (audit v4): before building timelines, stamp ``lane_id`` on parallel
+    machines via the shared exact lane inference so ops are not serialized
+    onto a single ``(wc, None)`` pseudo-lane. Returns
+    ``(assignments, horizon_ok)``.
 
     Complexity: O(|O| log |O| + |DAG|) — dominated by per-machine sorting.
-    For 10 000 ops: ~130 000 operations vs. 10¹² in the naive approach.
     """
     if not assignments:
-        return assignments
+        return assignments, True
+
+    stamp_parallel_lane_ids(
+        problem, assignments, ops_by_id, lane_tag_prefix="lbbd-hd-lane"
+    )
 
     setup_lookup: dict[tuple[UUID, UUID, UUID], timedelta] = {
         (e.work_center_id, e.from_state_id, e.to_state_id): timedelta(minutes=e.setup_minutes)
@@ -1253,8 +1273,7 @@ def _topological_post_assembly(
             if in_degree[succ] == 0:
                 queue.append(succ)
 
-    # Build per-machine timeline (sorted by start time)
-    # Track which ops have been "placed" with their final times
+    # Build per-lane timeline (sorted by start time)
     # machine/lane → sorted list of (start_offset, end_offset, state_id, op_id)
     machine_timeline: dict[
         tuple[UUID, UUID | None],
@@ -1283,7 +1302,7 @@ def _topological_post_assembly(
             if pred_a is not None and pred_a.end_time > earliest_start:
                 earliest_start = pred_a.end_time
 
-        # Machine constraint: must start after previous op + setup
+        # Machine constraint: must start after previous op + setup ON THE SAME LANE
         timeline = machine_timeline[_assignment_sequence_key(a)]
         earliest_start, insert_index = _find_earliest_machine_slot(
             timeline,
@@ -1303,7 +1322,8 @@ def _topological_post_assembly(
         end_offset = (a.end_time - horizon_start).total_seconds() / 60.0
         timeline.insert(insert_index, (start_offset, end_offset, operation.state_id, op_id))
 
-    return assignments
+    horizon_ok = all(a.end_time <= problem.planning_horizon_end for a in assignments)
+    return assignments, horizon_ok
 
 
 def topological_post_assembly(
@@ -1313,7 +1333,11 @@ def topological_post_assembly(
 ) -> list[Assignment] | None:
     """Public wrapper for post-assembly timing repair."""
 
-    return _topological_post_assembly(problem, assignments, ops_by_id)
+    assembled, horizon_ok = _topological_post_assembly(problem, assignments, ops_by_id)
+    if assembled is None or not horizon_ok:
+        return None
+    return assembled
+
 
 
 # ---------------------------------------------------------------------------
@@ -1631,56 +1655,8 @@ def find_critical_path(
 def _compute_objective(
     problem: ScheduleProblem,
     assignments: list[Assignment],
-    makespan: float,
-    wc_by_id: dict[UUID, WorkCenter],
-    ops_by_id: dict[UUID, Operation],
-    orders_by_id: dict[UUID, Order],
 ) -> ObjectiveValues:
-    """Compute multi-objective values from assignments."""
-    horizon_start = problem.planning_horizon_start
-    setup_lookup = {
-        (e.work_center_id, e.from_state_id, e.to_state_id): (
-            e.setup_minutes,
-            e.material_loss,
-        )
-        for e in problem.setup_matrix
-    }
+    """Canonical multi-objective values via ``synaps.objective.evaluate`` (F3/F10)."""
+    from synaps.objective import evaluate
 
-    by_machine: dict[tuple[UUID, UUID | None], list[Assignment]] = defaultdict(list)
-    for a in assignments:
-        by_machine[_assignment_sequence_key(a)].append(a)
-
-    total_setup = 0.0
-    total_material = 0.0
-    for (wc_id, _lane_id), m_a in by_machine.items():
-        sorted_a = sorted(m_a, key=lambda x: x.start_time)
-        for i in range(1, len(sorted_a)):
-            prev_op = ops_by_id.get(sorted_a[i - 1].operation_id)
-            curr_op = ops_by_id.get(sorted_a[i].operation_id)
-            if prev_op and curr_op:
-                key = (wc_id, prev_op.state_id, curr_op.state_id)
-                s, m = setup_lookup.get(key, (0, 0.0))
-                total_setup += s
-                total_material += m
-
-    order_completion: dict[UUID, float] = {}
-    for a in assignments:
-        op = ops_by_id.get(a.operation_id)
-        if op is None:
-            continue
-        end = (a.end_time - horizon_start).total_seconds() / 60.0
-        if op.order_id not in order_completion or end > order_completion[op.order_id]:
-            order_completion[op.order_id] = end
-
-    total_tardiness = 0.0
-    for order in problem.orders:
-        completion = order_completion.get(order.id, 0.0)
-        due_offset = (order.due_date - horizon_start).total_seconds() / 60.0
-        total_tardiness += max(completion - due_offset, 0.0)
-
-    return ObjectiveValues(
-        makespan_minutes=makespan,
-        total_setup_minutes=total_setup,
-        total_material_loss=total_material,
-        total_tardiness_minutes=total_tardiness,
-    )
+    return evaluate(problem, assignments)

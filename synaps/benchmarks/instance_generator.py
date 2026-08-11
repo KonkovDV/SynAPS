@@ -23,6 +23,7 @@ from synaps.model import (
     State,
     WorkCenter,
 )
+from synaps.timegrain import physical_processing_minutes
 
 
 def generate_large_instance(
@@ -154,7 +155,9 @@ def generate_large_instance(
                 min(n_eligible, n_machines),
             )
             base_duration_min = rng.randint(*duration_range)
-            order_min_duration_minutes += base_duration_min / max_speed_factor
+            order_min_duration_minutes += physical_processing_minutes(
+                base_duration_min, max_speed_factor
+            )
 
             operations.append(
                 Operation(

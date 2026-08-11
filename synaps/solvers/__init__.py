@@ -51,6 +51,34 @@ def _attach_coverage(result: ScheduleResult, problem: ScheduleProblem) -> None:
     objective.unscheduled_operations = max(0, total - scheduled)
 
 
+def _attach_canonical_objective(result: ScheduleResult, problem: ScheduleProblem) -> None:
+    """Replace published objective components with ``evaluate`` + ``scalarize`` (F4).
+
+    Pre-v4 divergence (audit v4): CP-SAT published its internal big-M int64
+    scalar as ``weighted_sum`` while ALNS/LBBD/Greedy left it at the 0.0
+    default — silently inverting level-2 tie-breaks in
+    ``objective.objective_sort_key`` AGAINST CP-SAT. After the first Wave-2
+    pass only ``weighted_sum`` was rewritten, leaving understated
+    ``total_tardiness_minutes`` (and sibling fields) on HD/greedy results.
+    The boundary now replaces the full vector from the canonical evaluator
+    and sets ``weighted_sum := scalarize(...)``. Solver-internal scalars remain
+    available in ``metadata["objective_components"]`` where solvers record them.
+    """
+    from synaps.objective import evaluate, scalarize
+
+    objective = getattr(result, "objective", None)
+    if objective is None:
+        return
+    canonical = evaluate(problem, list(result.assignments))
+    objective.makespan_minutes = canonical.makespan_minutes
+    objective.total_setup_minutes = canonical.total_setup_minutes
+    objective.total_material_loss = canonical.total_material_loss
+    objective.total_tardiness_minutes = canonical.total_tardiness_minutes
+    objective.coverage = canonical.coverage
+    objective.unscheduled_operations = canonical.unscheduled_operations
+    objective.weighted_sum = scalarize(canonical)
+
+
 class BaseSolver(ABC):
     """Common interface for the entire solver portfolio."""
 
@@ -73,6 +101,7 @@ class BaseSolver(ABC):
             result: ScheduleResult = original_solve(self, problem, **solve_kwargs)
             _attach_sdst_metric(result, problem)
             _attach_coverage(result, problem)
+            _attach_canonical_objective(result, problem)
             return result
 
         _solve_with_metricity._sdst_metric_wrapped = True  # type: ignore[attr-defined]

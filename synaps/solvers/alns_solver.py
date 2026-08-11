@@ -47,6 +47,7 @@ except ImportError:  # pragma: no cover
     _HAS_NUMPY = False
 from synaps.solvers.lower_bounds import compute_relaxed_makespan_lower_bound
 from synaps.solvers.sdst_matrix import SdstMatrix
+from synaps.timegrain import duration_minutes
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -117,10 +118,24 @@ def _evaluate_objective(
     ops_by_id: dict[Any, Any] | None = None,
 ) -> ObjectiveValues:
     """Compute multi-objective values from a set of assignments."""
-    if not assignments:
-        return ObjectiveValues()
-
     horizon_start = problem.planning_horizon_start
+    horizon_span = (
+        problem.planning_horizon_end - horizon_start
+    ).total_seconds() / 60.0
+    if not assignments:
+        # F10: with nothing scheduled, every order completes at the horizon
+        # end (maximally late) — not for free at t=0.
+        return ObjectiveValues(
+            total_tardiness_minutes=sum(
+                max(
+                    horizon_span
+                    - (order.due_date - horizon_start).total_seconds() / 60.0,
+                    0.0,
+                )
+                for order in problem.orders
+            )
+        )
+
     if ops_by_id is None:
         ops_by_id = {op.id: op for op in problem.operations}
 
@@ -141,7 +156,8 @@ def _evaluate_objective(
             total_setup += sdst.get_setup(wc_id, prev_state, curr_state)
             total_material_loss += sdst.get_material_loss(wc_id, prev_state, curr_state)
 
-    # Tardiness
+    # Tardiness (F10: unscheduled orders complete at the horizon end, so ALNS
+    # cannot "improve" the objective by dropping a late order).
     order_completion: dict[Any, float] = {}
     for a in assignments:
         op = ops_by_id[a.operation_id]
@@ -150,7 +166,7 @@ def _evaluate_objective(
             order_completion[op.order_id] = end
     total_tardiness = 0.0
     for order in problem.orders:
-        completion = order_completion.get(order.id, 0.0)
+        completion = order_completion.get(order.id, horizon_span)
         due_offset = (order.due_date - horizon_start).total_seconds() / 60.0
         total_tardiness += max(completion - due_offset, 0.0)
 
@@ -246,9 +262,13 @@ def _build_machine_objective_cache(
             for order in problem.orders
         }
 
+    # F10: an order with no scheduled ops completes at the horizon end.
+    horizon_span = (
+        problem.planning_horizon_end - horizon_start
+    ).total_seconds() / 60.0
     total_tardiness = 0.0
     for order in problem.orders:
-        completion = order_completion.get(order.id, 0.0)
+        completion = order_completion.get(order.id, horizon_span)
         total_tardiness += max(completion - order_due_offsets[order.id], 0.0)
 
     return _MachineObjectiveCache(
@@ -323,9 +343,11 @@ def _evaluate_objective_incremental(
             op = ops_by_id[a.operation_id]
             affected_order_ids.add(op.order_id)
 
-    # Re-derive completion for affected orders from all assignments
+    # Re-derive completion for affected orders from all assignments. POP the
+    # stale entries (not reset to 0.0): an affected order may end up with no
+    # assignments, and F10 requires it to complete at the horizon END.
     for oid in affected_order_ids:
-        new_order_completion[oid] = 0.0
+        new_order_completion.pop(oid, None)
     for a in candidate:
         op = ops_by_id[a.operation_id]
         if op.order_id in affected_order_ids:
@@ -333,10 +355,13 @@ def _evaluate_objective_incremental(
             if end > new_order_completion.get(op.order_id, 0.0):
                 new_order_completion[op.order_id] = end
 
+    horizon_span = (
+        problem.planning_horizon_end - horizon_start
+    ).total_seconds() / 60.0
     total_tardiness = 0.0
     order_due_offsets = base_cache.order_due_offsets
     for order in problem.orders:
-        completion = new_order_completion.get(order.id, 0.0)
+        completion = new_order_completion.get(order.id, horizon_span)
         total_tardiness += max(completion - order_due_offsets[order.id], 0.0)
 
     obj = ObjectiveValues(
@@ -1562,7 +1587,13 @@ def _try_native_greedy_repair(
                 ]
 
             actual_start = max(float(start_offsets[i]), min_start + setup)
-            duration = float(end_offsets[i] - start_offsets[i])
+            # F2 (audit v4): the native kernel returns raw ``base/speed`` float
+            # spans; snap to the canonical integer ceil grain (P0-4) so ALNS
+            # reserves the same duration as every other solver. The old 1-min
+            # checker tolerance existed only to absorb this divergence.
+            duration = float(
+                duration_minutes(op.base_duration_min, float(speed_factors[m]))
+            )
             actual_end = actual_start + duration
 
             start_offsets[i] = actual_start
@@ -1797,7 +1828,11 @@ def _try_native_initial_seed(
                 ]
 
             actual_start = max(float(start_offsets[i]), min_start + setup)
-            duration = float(end_offsets[i] - start_offsets[i])
+            # F2 (audit v4): snap the native raw ``base/speed`` span to the
+            # canonical integer ceil grain (P0-4) — same as the repair path.
+            duration = float(
+                duration_minutes(op.base_duration_min, float(speed_factors[m]))
+            )
             actual_end = actual_start + duration
 
             start_offsets[i] = actual_start
