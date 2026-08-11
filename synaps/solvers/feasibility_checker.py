@@ -129,8 +129,29 @@ class FeasibilityViolation:
 def hard_violations(
     violations: list[FeasibilityViolation],
 ) -> list[FeasibilityViolation]:
-    """Return violations that prove a constraint fault (exclude advisory kinds)."""
+    """Return violations that are not pure advisories (exclude ``LANE_INFERENCE_UNPROVEN``).
+
+    Conservative filter used by BKS / diagnostic callers. When lane inference is
+    unproven, greedy-trigger kinds may still be false positives — use
+    :func:`proven_hard_violations` for the customer ``verified_feasible`` oracle.
+    """
     return [v for v in violations if v.kind not in ADVISORY_VIOLATION_KINDS]
+
+
+def proven_hard_violations(
+    violations: list[FeasibilityViolation],
+) -> list[FeasibilityViolation]:
+    """Return violations that prove a constraint fault for customer feasibility.
+
+    When ``LANE_INFERENCE_UNPROVEN`` is present, also demotes greedy-fallback
+    trigger kinds (``SETUP_GAP_VIOLATION``, capacity/overlap/missing-setup) that
+    may be false positives of the incomplete lane heuristic (Wave 8 / RT17-H2).
+    """
+    kinds = {v.kind for v in violations}
+    exclude = set(ADVISORY_VIOLATION_KINDS)
+    if "LANE_INFERENCE_UNPROVEN" in kinds:
+        exclude |= _GREEDY_UNPROVEN_TRIGGER_KINDS
+    return [v for v in violations if v.kind not in exclude]
 
 
 class FeasibilityChecker:

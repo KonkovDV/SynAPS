@@ -116,7 +116,7 @@ def test_explicit_lane_metadata_path_unchanged() -> None:
 def test_greedy_fallback_emits_lane_inference_unproven(monkeypatch) -> None:
     """KI-F7: size/budget greedy path that claims a hard fault must flag UNPROVEN."""
     import synaps.solvers.feasibility_checker as checker_mod
-    from synaps.solvers.feasibility_checker import hard_violations
+    from synaps.solvers.feasibility_checker import hard_violations, proven_hard_violations
 
     monkeypatch.setattr(checker_mod, "_LANE_EXACT_MAX_OPS", 0)
     problem, assignments = _greedy_trap_problem()
@@ -126,3 +126,23 @@ def test_greedy_fallback_emits_lane_inference_unproven(monkeypatch) -> None:
     assert "LANE_INFERENCE_UNPROVEN" in kinds
     assert any(v.kind == "LANE_INFERENCE_UNPROVEN" for v in violations)
     assert hard_violations(violations), "hard faults must remain after filtering advisory"
+    # Wave 8 / RT17-H2: customer oracle demotes unproven greedy triggers.
+    assert not proven_hard_violations(violations)
+
+
+def test_verify_schedule_result_feasible_when_lane_unproven(monkeypatch) -> None:
+    """Portfolio verified_feasible must not false-fail the greedy-trap under fallback."""
+    import synaps.solvers.feasibility_checker as checker_mod
+    from synaps.model import ScheduleResult, SolverStatus
+    from synaps.validation import verify_schedule_result
+
+    monkeypatch.setattr(checker_mod, "_LANE_EXACT_MAX_OPS", 0)
+    problem, assignments = _greedy_trap_problem()
+    result = ScheduleResult(
+        solver_name="test",
+        status=SolverStatus.FEASIBLE,
+        assignments=assignments,
+    )
+    verification = verify_schedule_result(problem, result)
+    assert verification.feasible is True
+    assert "LANE_INFERENCE_UNPROVEN" in verification.violation_kinds

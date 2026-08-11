@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Wave 8 (RT17 residuals + Red Team 1–8):**
+  - `proven_hard_violations` + `verify_schedule_result` customer oracle (RT17-H2 / KI-F7 closed).
+  - `_attach_canonical_objective` replaces full `ObjectiveValues` (RT17-M2).
+  - Stronger energy ranking test; `docs/rfc/WAVE8_EXECUTION_PLAN.md`,
+    `docs/rfc/WAVES_1_8_REDTEAM_AUDIT_2026_08_11.md`.
+  - Tests: `tests/test_wave8_residuals.py`, exact-lane verify oracle.
+
 - **Red Team Waves 1–7 audit** (`docs/rfc/WAVES_1_7_REDTEAM_AUDIT_2026_08_11.md`):
   pass-with-residuals; fixed RT17-H1 native repair metadata pretension
   (`native_greedy_repair_override_skips` observe-only); KI-F7 downgraded to

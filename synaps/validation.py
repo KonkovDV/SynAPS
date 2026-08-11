@@ -7,7 +7,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from synaps.model import ScheduleProblem, ScheduleResult, SolverStatus
-from synaps.solvers.feasibility_checker import FeasibilityChecker, FeasibilityViolation
+from synaps.solvers.feasibility_checker import (
+    FeasibilityChecker,
+    FeasibilityViolation,
+    proven_hard_violations,
+)
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -103,6 +107,10 @@ def verify_schedule_result(
     Always checks against the submitted ``planning_horizon_end``. Solver-side
     placement-horizon extension (RHC coverage mode) must not rewrite the
     customer contract for ``verified_feasible``.
+
+    ``feasible`` uses :func:`proven_hard_violations` so unproven greedy lane
+    false-positives do not flip the customer oracle (Wave 8 / RT17-H2). All
+    raw violations remain in ``violations`` for diagnostics.
     """
 
     if result.status not in {SolverStatus.FEASIBLE, SolverStatus.OPTIMAL}:
@@ -116,8 +124,9 @@ def verify_schedule_result(
 
     violations = FeasibilityChecker().check(problem, result.assignments, exhaustive=True)
     violation_kind_counts = Counter(violation.kind for violation in violations)
+    proven = proven_hard_violations(violations)
     return SolutionVerification(
-        feasible=not violations,
+        feasible=not proven,
         violation_count=len(violations),
         violation_kinds=sorted(violation_kind_counts.keys()),
         violation_kind_counts=dict(sorted(violation_kind_counts.items())),
