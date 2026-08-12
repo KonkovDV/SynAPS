@@ -331,6 +331,31 @@ def solve_schedule(
     )
 
 
+def _repair_merged_kwargs(
+    *,
+    base_assignments: Sequence[Assignment],
+    disrupted_op_ids: Sequence[Any],
+    radius: int,
+    solve_kwargs: Mapping[str, object] | None,
+) -> dict[str, object]:
+    # RT-20 F2: identity args are authoritative — reject silent substitution.
+    if solve_kwargs:
+        for identity_key in ("base_assignments", "disrupted_op_ids", "radius"):
+            if identity_key in solve_kwargs:
+                raise ValueError(
+                    "solve_kwargs must not override repair identity arg "
+                    f"{identity_key!r}; pass it as an explicit parameter"
+                )
+    return _merge_kwargs(
+        {
+            "base_assignments": list(base_assignments),
+            "disrupted_op_ids": list(disrupted_op_ids),
+            "radius": radius,
+        },
+        solve_kwargs,
+    )
+
+
 def repair_schedule(
     problem: ScheduleProblem,
     *,
@@ -361,23 +386,11 @@ def repair_schedule(
         op_count=profile.operation_count,
     )
 
-    # RT-20 F2: repair identity args are authoritative — a caller passing
-    # base_assignments/disrupted_op_ids/radius via solve_kwargs would silently
-    # substitute the input being repaired. Reject instead of merging over.
-    if solve_kwargs:
-        for identity_key in ("base_assignments", "disrupted_op_ids", "radius"):
-            if identity_key in solve_kwargs:
-                raise ValueError(
-                    "solve_kwargs must not override repair identity arg "
-                    f"{identity_key!r}; pass it as an explicit parameter"
-                )
-    merged_kwargs = _merge_kwargs(
-        {
-            "base_assignments": list(base_assignments),
-            "disrupted_op_ids": list(disrupted_op_ids),
-            "radius": applied_radius,
-        },
-        solve_kwargs,
+    merged_kwargs = _repair_merged_kwargs(
+        base_assignments=base_assignments,
+        disrupted_op_ids=disrupted_op_ids,
+        radius=applied_radius,
+        solve_kwargs=solve_kwargs,
     )
     limits = resolve_portfolio_resource_limits(solve_kwargs=merged_kwargs)
     result = _run_guarded_solve(
