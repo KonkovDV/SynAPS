@@ -23,7 +23,20 @@ from synaps.solvers._dispatch_support import (
 )
 
 if TYPE_CHECKING:
+    from datetime import datetime
     from uuid import UUID
+
+    from synaps.model import Order
+
+
+def _release_floor(order: "Order", horizon_start: "datetime") -> float:
+    """M1 hard rule (FeasibilityChecker): an operation may not start before its
+    order's release_date. Repair must respect the same bound as GreedyDispatch,
+    otherwise the repaired plan is rejected by the downstream validator."""
+    release = getattr(order, "release_date", None)
+    if release is None:
+        return 0.0
+    return max(0.0, (release - horizon_start).total_seconds() / 60.0)
 
 
 class IncrementalRepair(BaseSolver):
@@ -272,6 +285,11 @@ class IncrementalRepair(BaseSolver):
                             predecessor_assignment.end_time - horizon_start
                         ).total_seconds() / 60.0
 
+                earliest_start = max(
+                    predecessor_end,
+                    _release_floor(orders_by_id[operation.order_id], horizon_start),
+                )
+
                 eligible = (
                     operation.eligible_wc_ids
                     if operation.eligible_wc_ids
@@ -283,7 +301,7 @@ class IncrementalRepair(BaseSolver):
                         scheduled_assignments,
                         operation,
                         work_center_id,
-                        predecessor_end,
+                        earliest_start,
                         machine_index=machine_idx,
                     )
                     if slot is None:

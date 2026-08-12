@@ -112,6 +112,45 @@ class TestIncrementalRepair:
 
         assert result.duration_ms < 2000, f"Repair took {result.duration_ms}ms, budget is 2000ms"
 
+    def test_repair_respects_order_release_date(self) -> None:
+        """M1: repair must never place an op before its order's release_date.
+
+        Regression (full-stack audit 2026-08-12): the repair loop lower-bounded
+        slots by predecessor_end only, so a disrupted op of a future-released
+        order was re-inserted at t=0 and the portfolio validator / checker
+        (RELEASE_DATE_VIOLATION) rejected the repaired plan downstream.
+        """
+        from tests.conftest import make_simple_problem
+
+        problem = make_simple_problem(n_orders=2, ops_per_order=2)
+        release = HORIZON_START + timedelta(minutes=500)
+        order0 = problem.orders[0]
+        problem.orders[0] = order0.model_copy(update={"release_date": release})
+
+        greedy = GreedyDispatch()
+        base_result = greedy.solve(problem)
+        assert base_result.status == SolverStatus.FEASIBLE
+
+        disrupted_id = problem.operations[0].id  # first op of the released order
+        repair = IncrementalRepair()
+        result = repair.solve(
+            problem,
+            base_assignments=base_result.assignments,
+            disrupted_op_ids=[disrupted_id],
+            radius=3,
+        )
+
+        assert result.status == SolverStatus.FEASIBLE
+        order0_op_ids = {op.id for op in problem.operations if op.order_id == order0.id}
+        for assignment in result.assignments:
+            if assignment.operation_id in order0_op_ids:
+                assert assignment.start_time >= release, (
+                    f"op {assignment.operation_id} starts at {assignment.start_time} "
+                    f"before release {release}"
+                )
+        checker = FeasibilityChecker()
+        assert checker.check(problem, result.assignments) == []
+
     def test_error_without_base_assignments(self, simple_problem: ScheduleProblem) -> None:
         repair = IncrementalRepair()
         result = repair.solve(simple_problem)
@@ -355,18 +394,48 @@ class TestIncrementalRepair:
         simple_problem: ScheduleProblem,
     ) -> None:
         repair = IncrementalRepair()
-        remaining_op_ids = {simple_problem.operations[-1].id}
+        last_op = simple_problem.operations[-1]
+        pred_op = simple_problem.operations[-2]
+        remaining_op_ids = {last_op.id}
+        # Wave 12 / C12-3 contract: a predecessor outside the free set must be
+        # frozen, otherwise the fallback refuses (fail-closed, returns None).
+        frozen = [
+            Assignment(
+                operation_id=pred_op.id,
+                work_center_id=pred_op.eligible_wc_ids[0],
+                start_time=simple_problem.planning_horizon_start,
+                end_time=simple_problem.planning_horizon_start + timedelta(minutes=30),
+                setup_minutes=0,
+            )
+        ]
 
         fallback_fn = repair._cpsat_fallback
         fallback_assignments = fallback_fn(
+            simple_problem,
+            frozen,
+            remaining_op_ids,
+            {pred_op.id},
+        )
+
+        assert fallback_assignments is not None
+        assert {assignment.operation_id for assignment in fallback_assignments} == remaining_op_ids
+
+    def test_cpsat_fallback_fail_closed_without_frozen_predecessor(
+        self,
+        simple_problem: ScheduleProblem,
+    ) -> None:
+        """Wave 12 / C12-3: never clear a cross-edge without a frozen offset."""
+        repair = IncrementalRepair()
+        remaining_op_ids = {simple_problem.operations[-1].id}
+
+        fallback_assignments = repair._cpsat_fallback(
             simple_problem,
             [],
             remaining_op_ids,
             set(),
         )
 
-        assert fallback_assignments is not None
-        assert {assignment.operation_id for assignment in fallback_assignments} == remaining_op_ids
+        assert fallback_assignments is None
 
     def test_cpsat_fallback_disables_auto_greedy_warm_start_and_forwards_workers(
         self,
@@ -374,7 +443,18 @@ class TestIncrementalRepair:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         repair = IncrementalRepair()
-        remaining_op_ids = {simple_problem.operations[-1].id}
+        last_op = simple_problem.operations[-1]
+        pred_op = simple_problem.operations[-2]
+        remaining_op_ids = {last_op.id}
+        frozen = [
+            Assignment(
+                operation_id=pred_op.id,
+                work_center_id=pred_op.eligible_wc_ids[0],
+                start_time=simple_problem.planning_horizon_start - timedelta(minutes=30),
+                end_time=simple_problem.planning_horizon_start,
+                setup_minutes=0,
+            )
+        ]
         captured_kwargs: dict[str, object] = {}
 
         def fake_cpsat_solve(self, sub_problem, **kwargs):
@@ -401,9 +481,9 @@ class TestIncrementalRepair:
 
         fallback_assignments = repair._cpsat_fallback(
             simple_problem,
-            [],
+            frozen,
             remaining_op_ids,
-            set(),
+            {pred_op.id},
             num_workers=2,
         )
 
