@@ -284,6 +284,10 @@ def solve_schedule(
     verification_details: dict[str, object] = {
         "problem_profile": profile.as_dict(),
         "resource_guards_active": limits is not None,
+        # RT-20 F4: the solver's own time-box (config default or kwarg) is what
+        # actually bounds search; the resource-guard timeout is a separate wall.
+        # Publishing both keeps "time limit" claims honest.
+        "solver_time_limit_s": merged_kwargs.get("time_limit_s"),
     }
     if limits is not None:
         verification_details["resource_limits"] = {
@@ -357,6 +361,16 @@ def repair_schedule(
         op_count=profile.operation_count,
     )
 
+    # RT-20 F2: repair identity args are authoritative — a caller passing
+    # base_assignments/disrupted_op_ids/radius via solve_kwargs would silently
+    # substitute the input being repaired. Reject instead of merging over.
+    if solve_kwargs:
+        for identity_key in ("base_assignments", "disrupted_op_ids", "radius"):
+            if identity_key in solve_kwargs:
+                raise ValueError(
+                    "solve_kwargs must not override repair identity arg "
+                    f"{identity_key!r}; pass it as an explicit parameter"
+                )
     merged_kwargs = _merge_kwargs(
         {
             "base_assignments": list(base_assignments),
@@ -377,6 +391,7 @@ def repair_schedule(
         "disrupted_operation_count": len(set(disrupted_op_ids)),
         "problem_profile": profile.as_dict(),
         "resource_guards_active": limits is not None,
+        "solver_time_limit_s": merged_kwargs.get("time_limit_s"),
     }
     if verify_feasibility:
         verification = verify_schedule_result(problem, result)

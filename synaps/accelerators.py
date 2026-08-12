@@ -336,11 +336,13 @@ def resource_capacity_window_is_feasible(
 
     active_demand = 0
     events: list[tuple[float, int]] = []
+    # RT-20 F11: strict zip — silently truncating to the shortest list would
+    # under-count demand and admit capacity violations.
     for other_start, other_end, quantity in zip(
         window_starts,
         window_ends,
         window_quantities,
-        strict=False,
+        strict=True,
     ):
         if other_start >= candidate_end or other_end <= candidate_start:
             continue

@@ -2148,13 +2148,18 @@ class RhcSolver(BaseSolver):
 
                         best_slot = None
                         best_wc = None
+                        # RT-20 F1: floor by release-propagated earliest start,
+                        # not just the predecessor's committed end — otherwise a
+                        # rescheduled op can land before its order's release_date
+                        # and the final verification fails the window.
+                        op_floor = max(pred_end, op_earliest.get(op.id, 0.0))
                         for wc_id in eligible:
                             slot = find_earliest_feasible_slot(
                                 dispatch_context,
                                 scheduled_so_far,
                                 op,
                                 wc_id,
-                                pred_end,
+                                op_floor,
                                 machine_index=machine_idx,
                             )
                             if slot is None:
@@ -2385,13 +2390,14 @@ class RhcSolver(BaseSolver):
                         )
                         best_slot = None
                         best_wc = None
+                        op_floor = max(pred_end, op_earliest.get(op.id, 0.0))
                         for wc_id in eligible:
                             slot = find_earliest_feasible_slot(
                                 dispatch_context,
                                 committed_assignments,
                                 op,
                                 wc_id,
-                                pred_end,
+                                op_floor,
                                 machine_index=repair_machine_idx,
                             )
                             if slot is None:

@@ -39,6 +39,36 @@ def _release_floor(order: "Order", horizon_start: "datetime") -> float:
     return max(0.0, (release - horizon_start).total_seconds() / 60.0)
 
 
+def _total_tardiness(
+    problem: "ScheduleProblem",
+    assignments: list[Assignment],
+    ops_by_id: dict[Any, Operation],
+    horizon_start: "datetime",
+) -> float:
+    """Per-order tardiness; F10-consistent with ``objective.evaluate``: an
+    order with no scheduled operations completes at the horizon END."""
+    order_completion: dict[Any, float] = {}
+    for assignment in assignments:
+        operation = ops_by_id.get(assignment.operation_id)
+        if operation is None:
+            continue
+        end = (assignment.end_time - horizon_start).total_seconds() / 60.0
+        order_completion[operation.order_id] = max(
+            order_completion.get(operation.order_id, 0.0), end
+        )
+    horizon_span = (
+        problem.planning_horizon_end - horizon_start
+    ).total_seconds() / 60.0
+    return sum(
+        max(
+            order_completion.get(order.id, horizon_span)
+            - (order.due_date - horizon_start).total_seconds() / 60.0,
+            0.0,
+        )
+        for order in problem.orders
+    )
+
+
 class IncrementalRepair(BaseSolver):
     """Repair a disrupted schedule by re-dispatching operations within a
     configurable neighbourhood radius, keeping all other assignments frozen.
@@ -397,24 +427,8 @@ class IncrementalRepair(BaseSolver):
             else 0.0
         )
 
-        # Per-order tardiness
-        order_completion: dict[Any, float] = {}
-        for a in all_assignments:
-            assigned_operation = ops_by_id.get(a.operation_id)
-            if assigned_operation is None:
-                continue
-            end = (a.end_time - horizon_start).total_seconds() / 60.0
-            if (
-                assigned_operation.order_id not in order_completion
-                or end > order_completion[assigned_operation.order_id]
-            ):
-                order_completion[assigned_operation.order_id] = end
-
-        total_tardiness = 0.0
-        for order in problem.orders:
-            completion = order_completion.get(order.id, 0.0)
-            due_offset = (order.due_date - horizon_start).total_seconds() / 60.0
-            total_tardiness += max(completion - due_offset, 0.0)
+        # Per-order tardiness (F10-consistent with objective.evaluate)
+        total_tardiness = _total_tardiness(problem, all_assignments, ops_by_id, horizon_start)
 
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         unrepaired_ids = [operation.id for operation in remaining_repair]

@@ -713,6 +713,10 @@ class FeasibilityChecker:
                     )
                 )
 
+        # 1b. Referential integrity of the RESULT itself (RT-20): phantom
+        # operation / work-center references must not be certified.
+        self._check_referential_integrity(assignments, ops_by_id, work_centers_by_id, violations)
+
         # 2. Eligible machine
         for a in assignments:
             assigned_op = ops_by_id.get(a.operation_id)
@@ -902,6 +906,38 @@ class FeasibilityChecker:
         )
 
         return violations
+
+    @staticmethod
+    def _check_referential_integrity(
+        assignments: list[Assignment],
+        ops_by_id: dict[Any, Any],
+        work_centers_by_id: dict[Any, Any],
+        violations: list[FeasibilityViolation],
+    ) -> None:
+        """Every assignment must reference entities that exist in the problem
+        (RT-20). Phantom rows previously skipped the eligibility / release /
+        duration checks silently and were only caught if they happened to
+        overlap on a real machine — a notary must reject them outright."""
+        for a in assignments:
+            if a.operation_id not in ops_by_id:
+                violations.append(
+                    FeasibilityViolation(
+                        "UNKNOWN_OPERATION",
+                        f"Assignment references operation {a.operation_id} "
+                        "that is not part of the problem.",
+                        operation_id=a.operation_id,
+                    )
+                )
+            if a.work_center_id not in work_centers_by_id:
+                violations.append(
+                    FeasibilityViolation(
+                        "UNKNOWN_WORK_CENTER",
+                        f"Assignment references work center {a.work_center_id} "
+                        "that is not part of the problem.",
+                        operation_id=a.operation_id,
+                        work_center_id=a.work_center_id,
+                    )
+                )
 
     @staticmethod
     def _check_durations(
