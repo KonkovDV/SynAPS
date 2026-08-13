@@ -140,7 +140,7 @@ def test_no_dead_public_functions() -> None:
 # This list may only SHRINK except when a verified Red Team fail-open fix
 # necessarily grows a hot path (Wave 12/13 frozen algebra). Prefer extract next.
 _LONG_FUNCTION_RATCHET: dict[str, int] = {
-    "solvers/rhc/_solver.py::solve": 2645,
+    "solvers/rhc/_solver.py::solve": 2661,
     "solvers/alns_solver.py::_solve_core": 1549,
     "solvers/feasibility_checker.py::check": 234,
     "solvers/lbbd_hd_solver.py::solve": 433,

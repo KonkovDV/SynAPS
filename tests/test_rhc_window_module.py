@@ -294,7 +294,12 @@ class TestStabilizeTemporalConsistency:
             ops_by_id={},
             setup_minutes={},
         )
-        assert stats == {"passes": 0, "precedence_shifts": 0, "machine_shifts": 0}
+        assert stats == {
+            "passes": 0,
+            "precedence_shifts": 0,
+            "machine_shifts": 0,
+            "converged": 1,
+        }
 
     def test_no_conflicts_converges_in_one_pass(self) -> None:
         op = _OpStub(id=uuid4())
@@ -355,6 +360,35 @@ class TestStabilizeTemporalConsistency:
             max_passes=3,
         )
         assert stats["passes"] <= 3
+
+    def test_cap_with_residual_shift_is_not_converged(self) -> None:
+        wc_id = uuid4()
+        op_a = _OpStub(id=uuid4())
+        op_b = _OpStub(id=uuid4(), seq_in_order=1)
+        a = _make_assignment(op_a.id, work_center_id=wc_id, start_minutes=0.0, end_minutes=20.0)
+        b = _make_assignment(op_b.id, work_center_id=wc_id, start_minutes=10.0, end_minutes=25.0)
+        stats = stabilize_temporal_consistency(
+            [a, b],
+            ops_by_id={op_a.id: op_a, op_b.id: op_b},
+            setup_minutes={},
+            max_passes=1,
+        )
+        assert stats["machine_shifts"] >= 1
+        assert stats["converged"] == 0
+        stats_open = stabilize_temporal_consistency(
+            [
+                _make_assignment(
+                    op_a.id, work_center_id=wc_id, start_minutes=0.0, end_minutes=20.0
+                ),
+                _make_assignment(
+                    op_b.id, work_center_id=wc_id, start_minutes=10.0, end_minutes=25.0
+                ),
+            ],
+            ops_by_id={op_a.id: op_a, op_b.id: op_b},
+            setup_minutes={},
+            max_passes=8,
+        )
+        assert stats_open["converged"] == 1
 
 
 # =============================================================================

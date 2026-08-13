@@ -71,6 +71,7 @@ from synaps.solvers.rhc._window import (
     collect_commit_candidates as _collect_commit_candidates,
     detect_cross_window_stable_ops as _detect_cross_window_stable_ops,
     filter_commit_candidates_by_precedence as _filter_commit_candidates_by_precedence,
+    finalize_rhc_claim_status as _finalize_rhc_claim_status,
     reanchor_inner_assignments as _reanchor_inner_assignments,
     select_backtracking_assignments as _select_backtracking_assignments,
     stabilize_temporal_consistency as _stabilize_temporal_consistency,
@@ -2467,8 +2468,14 @@ class RhcSolver(BaseSolver):
         final_obj = self._evaluate_final(problem, committed_assignments, sdst)
         scheduled_count = len(committed_op_ids)
         total_ops = len(problem.operations)
-        status = SolverStatus.FEASIBLE if scheduled_count == total_ops else SolverStatus.ERROR
-        bounds_comparable = scheduled_count == total_ops
+        status, notary_meta = _finalize_rhc_claim_status(
+            problem=problem,
+            assignments=committed_assignments,
+            scheduled_count=scheduled_count,
+            total_ops=total_ops,
+            stabilization=temporal_stabilization,
+        )
+        bounds_comparable = status == SolverStatus.FEASIBLE
         gap_ratio = (
             round(
                 max(final_obj.makespan_minutes - global_lower_bound.value, 0.0)
@@ -2738,6 +2745,7 @@ class RhcSolver(BaseSolver):
                 else 0.0,
                 "horizon_clipped_assignments": horizon_clipped_assignments,
                 "temporal_stabilization": temporal_stabilization,
+                **notary_meta,
                 "time_limit_reached": time_limit_reached,
                 "time_limit_s": time_limit_s,
                 "window_time_limit_s": window_time_limit_s,

@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Wave 15 (algebra status theorem, partial):**
+  - **A15-P0-1** RHC no longer claims `FEASIBLE` from coverage alone; final
+    `FeasibilityChecker` + `proven_hard_violations` required.
+  - **A15-P0-4** `stabilize_temporal_consistency` publishes `converged`; RHC
+    refuses FEASIBLE when the pass cap left residual shifts.
+  - **A15-P0-5** `repair_schedule` refuses empty `disrupted_op_ids` (would
+    legalize a forged base plan).
+  - Docs: `WAVE15_ALGEBRA_REDTEAM_PLAN_2026_08_12.md`,
+    `WAVE15_REDTEAM_DELTA.md`.
+  - Tests: `tests/test_algebra_rt15_probes.py`.
+  - Left open: A15-P0-2/3 (ALNS frozen precedence / setup-vs-frozen gap),
+    P1 router/replay items.
+
 - **Wave 14 (RHC→ALNS composition + crash fix):**
   - RHC: always init `per_window_limit` (early-greedy UnboundLocal fix).
   - ALNS: thread op-id `frozen_predecessor_end_offsets` into CP-SAT repair; reanchor fail-closed; skip virtualization under frozen (not ERROR).

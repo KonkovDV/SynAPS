@@ -346,6 +346,11 @@ def _repair_merged_kwargs(
                     "solve_kwargs must not override repair identity arg "
                     f"{identity_key!r}; pass it as an explicit parameter"
                 )
+    if not list(disrupted_op_ids):
+        raise ValueError(
+            "disrupted_op_ids must be non-empty; an empty disruption would "
+            "legalize base_assignments without a repair"
+        )
     return _merge_kwargs(
         {
             "base_assignments": list(base_assignments),

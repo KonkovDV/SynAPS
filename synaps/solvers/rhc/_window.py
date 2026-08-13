@@ -47,7 +47,7 @@ from collections import defaultdict, deque
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from synaps.model import Assignment
+from synaps.model import Assignment, ScheduleProblem, SolverStatus
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -470,7 +470,10 @@ def stabilize_temporal_consistency(
     horizon, but we cap the number of passes at ``max_passes`` for
     defense in depth.
 
-    Returns ``{"passes", "precedence_shifts", "machine_shifts"}``.
+    Returns ``{"passes", "precedence_shifts", "machine_shifts", "converged"}``.
+    ``converged`` is ``1`` when a pass made no shifts (or the list is empty),
+    ``0`` when the pass cap was hit while shifts were still occurring
+    (A15-P0-4: caller must not claim FEASIBLE).
 
     This function mutates ``Assignment`` objects in ``assignments``
     in place; that is intentional and is the function's sole side
@@ -481,6 +484,7 @@ def stabilize_temporal_consistency(
             "passes": 0,
             "precedence_shifts": 0,
             "machine_shifts": 0,
+            "converged": 1,
         }
 
     assignment_by_op: dict[UUID, Assignment] = {
@@ -503,7 +507,7 @@ def stabilize_temporal_consistency(
     topo_queue = deque(
         sorted(
             [op_id for op_id, deg in indegree.items() if deg == 0],
-            key=lambda op_id: (ops_by_id[op_id].seq_in_order if op_id in ops_by_id else 0),
+            key=lambda op_id: ops_by_id[op_id].seq_in_order if op_id in ops_by_id else 0,
         )
     )
     topo_order: list[UUID] = []
@@ -523,13 +527,14 @@ def stabilize_temporal_consistency(
         topo_order.extend(
             sorted(
                 remaining_ids,
-                key=lambda op_id: (ops_by_id[op_id].seq_in_order if op_id in ops_by_id else 0),
+                key=lambda op_id: ops_by_id[op_id].seq_in_order if op_id in ops_by_id else 0,
             )
         )
 
     precedence_shifts = 0
     machine_shifts = 0
     passes = 0
+    converged = True
 
     for pass_index in range(max_passes):
         changed = False
@@ -589,9 +594,41 @@ def stabilize_temporal_consistency(
 
         if not changed:
             break
+    else:
+        # Hit max_passes while still shifting — residual conflict remains.
+        converged = False
 
     return {
         "passes": passes,
         "precedence_shifts": precedence_shifts,
         "machine_shifts": machine_shifts,
+        "converged": 1 if converged else 0,
     }
+
+
+def finalize_rhc_claim_status(
+    *,
+    problem: ScheduleProblem,
+    assignments: list[Assignment],
+    scheduled_count: int,
+    total_ops: int,
+    stabilization: dict[str, int],
+) -> tuple[SolverStatus, dict[str, Any]]:
+    """A15-P0-1 / P0-4: full coverage is not feasibility.
+
+    RHC may only claim FEASIBLE when every op is scheduled, the independent
+    notary reports no proven hard violations, and temporal stabilization
+    converged inside its pass cap.
+    """
+
+    from synaps.solvers.feasibility_checker import FeasibilityChecker, proven_hard_violations
+
+    hard = proven_hard_violations(FeasibilityChecker().check(problem, assignments))
+    converged = int(stabilization.get("converged", 1)) == 1
+    feasible = scheduled_count == total_ops and not hard and converged
+    extra = {
+        "notary_hard_violation_count": len(hard),
+        "notary_hard_violation_kinds": sorted({v.kind for v in hard}),
+        "temporal_stabilization_converged": converged,
+    }
+    return (SolverStatus.FEASIBLE if feasible else SolverStatus.ERROR), extra
