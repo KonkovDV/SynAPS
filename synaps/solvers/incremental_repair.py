@@ -261,8 +261,7 @@ class IncrementalRepair(BaseSolver):
             assignment.operation_id: assignment for assignment in frozen
         }
         machine_idx = MachineIndex(dispatch_context)
-        for assignment in frozen:
-            machine_idx.add(assignment)
+        machine_idx.extend(frozen)
         # Sort by descending priority first (higher priority = more urgent),
         # then by sequence within order for stable tie-breaking.
         remaining_repair = sorted(
@@ -299,7 +298,7 @@ class IncrementalRepair(BaseSolver):
                 ]
                 | None
             ) = None
-            scheduled_assignments = frozen + repaired
+            scheduled_assignments = machine_idx.all_assignments
 
             for operation in ready:
                 predecessor_end = 0.0

@@ -14,6 +14,7 @@ from synaps.model import (
     OperationAuxRequirement,
     Order,
     ScheduleProblem,
+    SetupEntry,
     SolverStatus,
     State,
     WorkCenter,
@@ -442,4 +443,107 @@ def test_native_list_schedule_cover_solves_small_instance_when_forced(
     assert len(result.assignments) == 2
     assert result.status == SolverStatus.FEASIBLE
     assert result.metadata.get("notary_hard_violation_kinds") == []
+
+
+def test_cover_atcs_prefers_zero_setup_same_state() -> None:
+    """ATCS among ready ops should continue the loaded SKU; FIFO uses seq."""
+
+    state_a = State(id=uuid4(), code="A", label="A")
+    state_b = State(id=uuid4(), code="B", label="B")
+    wc = WorkCenter(id=uuid4(), code="M1", capability_group="g", speed_factor=1.0)
+    order_seed = Order(
+        id=uuid4(),
+        external_ref="SEED",
+        due_date=HORIZON_START + timedelta(days=1),
+        priority=1,
+    )
+    order_other = Order(
+        id=uuid4(),
+        external_ref="OTHER",
+        due_date=HORIZON_START + timedelta(days=1),
+        priority=1,
+    )
+    order_same = Order(
+        id=uuid4(),
+        external_ref="SAME",
+        due_date=HORIZON_START + timedelta(days=1),
+        priority=1,
+    )
+    seeded = Operation(
+        id=uuid4(),
+        order_id=order_seed.id,
+        seq_in_order=1,
+        state_id=state_a.id,
+        base_duration_min=10,
+        eligible_wc_ids=[wc.id],
+    )
+    other = Operation(
+        id=uuid4(),
+        order_id=order_other.id,
+        seq_in_order=1,
+        state_id=state_b.id,
+        base_duration_min=10,
+        eligible_wc_ids=[wc.id],
+    )
+    same = Operation(
+        id=uuid4(),
+        order_id=order_same.id,
+        seq_in_order=2,
+        state_id=state_a.id,
+        base_duration_min=10,
+        eligible_wc_ids=[wc.id],
+    )
+    problem = ScheduleProblem(
+        states=[state_a, state_b],
+        orders=[order_seed, order_other, order_same],
+        operations=[seeded, other, same],
+        work_centers=[wc],
+        setup_matrix=[
+            SetupEntry(
+                work_center_id=wc.id,
+                from_state_id=state_a.id,
+                to_state_id=state_b.id,
+                setup_minutes=100,
+            ),
+            SetupEntry(
+                work_center_id=wc.id,
+                from_state_id=state_b.id,
+                to_state_id=state_a.id,
+                setup_minutes=100,
+            ),
+        ],
+        planning_horizon_start=HORIZON_START,
+        planning_horizon_end=HORIZON_START + timedelta(hours=8),
+    )
+    seeded_asg = Assignment(
+        operation_id=seeded.id,
+        work_center_id=wc.id,
+        start_time=HORIZON_START,
+        end_time=HORIZON_START + timedelta(minutes=10),
+    )
+
+    def _run(rule: str) -> dict:
+        context = build_dispatch_context(problem)
+        assignments = [seeded_asg.model_copy()]
+        by_op = {seeded.id: assignments[0]}
+        scheduled = {seeded.id}
+        place_operations_list_schedule(
+            operations=problem.operations,
+            dispatch_context=context,
+            assignments=assignments,
+            assignment_by_op=by_op,
+            scheduled_ids=scheduled,
+            horizon_start=HORIZON_START,
+            horizon_minutes=480.0,
+            op_earliest={op.id: 0.0 for op in problem.operations},
+            default_wc_ids=[wc.id],
+            cover_ready_rule=rule,
+        )
+        return {row.operation_id: row for row in assignments}
+
+    fifo = _run("fifo")
+    atcs = _run("atcs")
+    assert fifo[other.id].start_time <= fifo[same.id].start_time
+    assert atcs[same.id].start_time <= atcs[other.id].start_time
+    assert atcs[same.id].setup_minutes == 0
 

@@ -71,7 +71,7 @@ class MachineIndex:
         if self._setup_window_starts is not None:
             self._refresh_machine_setup_windows(assignment.work_center_id)
         if self._context.requirements_by_op.get(assignment.operation_id):
-            self._resource_windows_cache.clear()
+            self._append_assignment_resource_windows(assignment)
 
     def extend(self, assignments: list[Assignment]) -> None:
         """Bulk-load assignments with one sort per machine (residual cover)."""
@@ -155,6 +155,35 @@ class MachineIndex:
         self._setup_window_starts.update(
             self._setup_windows_for_assignments(self._by_machine.get(work_center_id, []))
         )
+
+    def _append_assignment_resource_windows(self, assignment: Assignment) -> None:
+        """Keep cached aux occupancy current without rebuilding 20k frozen rows."""
+
+        if not self._resource_windows_cache:
+            return
+        requirements = self._context.requirements_by_op.get(assignment.operation_id, [])
+        if not requirements:
+            return
+        start_offset = self.get_setup_window_starts().get(
+            assignment.operation_id,
+            _offset_minutes(self._context, assignment, end=False),
+        )
+        end_offset = _offset_minutes(self._context, assignment, end=True)
+        for required_ids, series_by_resource in self._resource_windows_cache.items():
+            for requirement in requirements:
+                resource_id = requirement.aux_resource_id
+                if resource_id not in required_ids:
+                    continue
+                previous = series_by_resource.get(resource_id)
+                windows = list(previous.windows) if previous is not None else []
+                windows.append((start_offset, end_offset, int(requirement.quantity_needed)))
+                series_by_resource[resource_id] = ResourceWindowSeries(
+                    windows=windows,
+                    start_offsets=[window[0] for window in windows],
+                    end_offsets=[window[1] for window in windows],
+                    quantities=[window[2] for window in windows],
+                    ends_sorted=sorted(window[1] for window in windows),
+                )
 
 
 @dataclass(frozen=True)

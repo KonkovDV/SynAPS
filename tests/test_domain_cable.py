@@ -6,9 +6,11 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from synaps.domains.cable import (
+    CABLE_PVC_CPSAT_WEIGHTS,
     CABLE_PVC_WEIGHTS,
     NERVOUS_STAGES,
     CableSku,
+    add_rush_orders,
     assignment_hamming,
     cable_kpis,
     duration_minutes_from_length,
@@ -31,7 +33,9 @@ from synaps.model import (
     State,
     WorkCenter,
 )
-from synaps.objective import scalarize
+from synaps.objective import evaluate, scalarize
+from synaps.portfolio import solve_schedule
+from synaps.solvers.cpsat_solver import CpSatSolver
 from synaps.solvers.feasibility_checker import FeasibilityChecker, proven_hard_violations
 from synaps.solvers.greedy_dispatch import GreedyDispatch
 from synaps.solvers.incremental_repair import IncrementalRepair
@@ -219,6 +223,123 @@ def test_freeze_blocks_rush_from_stealing_issued_slot() -> None:
     assert unconstrained_by_op[second.id].start_time <= unconstrained_by_op[first.id].start_time
 
 
+def test_family_dedicated_lines_split_pvc_xlpe() -> None:
+    problem = generate_cable_instance(
+        n_orders=4,
+        seed=1,
+        machines_per_stage=2,
+        family_dedicated_lines=True,
+        skus=(
+            CableSku("Cu", "PVC", "BK", 16),
+            CableSku("Cu", "XLPE", "BK", 16),
+        ),
+    )
+    pvc_ids: set = set()
+    xlpe_ids: set = set()
+    states = {state.id: state for state in problem.states}
+    for operation in problem.operations:
+        insulation = str(states[operation.state_id].domain_attributes.get("insulation"))
+        if insulation == "PVC":
+            pvc_ids.update(operation.eligible_wc_ids)
+        else:
+            xlpe_ids.update(operation.eligible_wc_ids)
+    assert pvc_ids
+    assert xlpe_ids
+    assert pvc_ids.isdisjoint(xlpe_ids)
+
+
+def test_colour_phase_does_not_pass_due() -> None:
+    problem = generate_cable_instance(
+        n_orders=12,
+        seed=1,
+        horizon_hours=720,
+        rush_fraction=0.15,
+        scatter_releases=True,
+        shuffle_skus=True,
+        colour_phase=True,
+    )
+    orders = {order.id: order for order in problem.orders}
+    for operation in problem.operations:
+        if operation.seq_in_order != 1 or operation.earliest_start is None:
+            continue
+        assert operation.earliest_start < orders[operation.order_id].due_date
+
+
+def test_add_rush_orders_grows_and_repairs() -> None:
+    problem = generate_cable_instance(n_orders=2, seed=1, horizon_hours=240)
+    base = GreedyDispatch().solve(problem)
+    assert base.status is SolverStatus.FEASIBLE
+    release = problem.planning_horizon_start + timedelta(days=1)
+    mutated = add_rush_orders(
+        problem,
+        n_orders=1,
+        release=release,
+        due=release + timedelta(hours=48),
+        seed=7,
+    )
+    assert len(mutated.operations) > len(problem.operations)
+    new_ids = {op.id for op in mutated.operations} - {op.id for op in problem.operations}
+    repaired = IncrementalRepair().solve(
+        mutated,
+        base_assignments=base.assignments,
+        disrupted_op_ids=list(new_ids),
+        radius=4,
+        freeze_horizon_end=release,
+        allow_freeze_break=False,
+        regime=SolveRegime.RUSH_ORDER,
+    )
+    assert repaired.status is SolverStatus.FEASIBLE
+    hard = proven_hard_violations(
+        FeasibilityChecker().check(mutated, repaired.assignments, exhaustive=True)
+    )
+    assert hard == []
+
+
+def test_pin_issued_plan_blocks_rush_on_first_solve() -> None:
+    problem, base, first, _second = _rush_pair_problem()
+    freeze_end = _H0 + timedelta(hours=3)
+    result = solve_schedule(
+        problem,
+        solver_config="GREED",
+        solve_kwargs={
+            "issued_assignments": base,
+            "freeze_horizon_end": freeze_end,
+        },
+        verify_feasibility=True,
+    )
+    by_op = {row.operation_id: row for row in result.assignments}
+    assert by_op[first.id].start_time == _H0
+    assert by_op[first.id].work_center_id == base[0].work_center_id
+    assert by_op[first.id].end_time <= freeze_end or by_op[first.id].start_time < freeze_end
+
+
+def test_cpsat_cable_weights_do_not_increase_material() -> None:
+    problem = generate_cable_instance(
+        n_orders=3, seed=1, machines_per_stage=1, horizon_hours=240
+    )
+    makespan_only = CpSatSolver().solve(
+        problem,
+        time_limit_s=8,
+        objective_weights={
+            "makespan": 100,
+            "setup": 0,
+            "material": 0,
+            "tardiness": 0,
+            "energy": 0,
+        },
+    )
+    weighted = CpSatSolver().solve(
+        problem,
+        time_limit_s=8,
+        objective_weights=CABLE_PVC_CPSAT_WEIGHTS,
+    )
+    assert makespan_only.status in {SolverStatus.FEASIBLE, SolverStatus.OPTIMAL}
+    assert weighted.status in {SolverStatus.FEASIBLE, SolverStatus.OPTIMAL}
+    makespan_obj = evaluate(problem, makespan_only.assignments)
+    weighted_obj = evaluate(problem, weighted.assignments)
+    assert weighted_obj.total_material_loss <= makespan_obj.total_material_loss
+
+
 def test_nervous_sku_catalog_and_tiny_month_feasible() -> None:
     assert len(nervous_sku_catalog()) == 36
     assert len(NERVOUS_STAGES) == 6
@@ -243,4 +364,8 @@ def test_nervous_sku_catalog_and_tiny_month_feasible() -> None:
     assert report["notary_hard_violations"] == 0
     assert report["n_operations"] == len(problem.operations)
     assert report["solver_config"] == "GREED"
+    assert report["temporal_stabilization_converged"] is None
+    assert report["temporal_stabilization_note"] == "n/a (GREED)"
     assert report["waves"]
+    assert report["new_rush"]["kind"] == "new_parent_insert"
+    assert report["new_rush"]["n_new_parents"] == 2

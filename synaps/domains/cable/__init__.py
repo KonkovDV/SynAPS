@@ -9,7 +9,7 @@ from synaps.domains.cable.adapter import (
     state_code,
 )
 from synaps.domains.cable.campaign import apply_campaign_windows
-from synaps.domains.cable.instance import generate_cable_instance
+from synaps.domains.cable.instance import add_rush_orders, generate_cable_instance
 from synaps.domains.cable.kpis import assignment_hamming, cable_kpis, peak_wip_drums
 from synaps.domains.cable.nervous_month import (
     NERVOUS_STAGES,
@@ -17,13 +17,15 @@ from synaps.domains.cable.nervous_month import (
     nervous_sku_catalog,
     run_nervous_month,
 )
-from synaps.domains.cable.weights import CABLE_PVC_WEIGHTS
+from synaps.domains.cable.weights import CABLE_PVC_CPSAT_WEIGHTS, CABLE_PVC_WEIGHTS
 
 __all__ = [
+    "CABLE_PVC_CPSAT_WEIGHTS",
     "CABLE_PVC_WEIGHTS",
     "NERVOUS_STAGES",
     "STAGES",
     "CableSku",
+    "add_rush_orders",
     "apply_campaign_windows",
     "assignment_hamming",
     "cable_kpis",

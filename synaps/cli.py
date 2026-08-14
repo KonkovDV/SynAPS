@@ -204,7 +204,12 @@ def _add_cable_demo_parser(subparsers: Any) -> None:
 
 
 def _run_cable_demo(args: argparse.Namespace) -> int:
-    from synaps.domains.cable import CABLE_PVC_WEIGHTS, cable_kpis, generate_cable_instance
+    from synaps.domains.cable import (
+        CABLE_PVC_CPSAT_WEIGHTS,
+        CABLE_PVC_WEIGHTS,
+        cable_kpis,
+        generate_cable_instance,
+    )
     from synaps.objective import evaluate, scalarize
     from synaps.solvers.feasibility_checker import FeasibilityChecker, proven_hard_violations
     from synaps.solvers.greedy_dispatch import GreedyDispatch
@@ -223,6 +228,7 @@ def _run_cable_demo(args: argparse.Namespace) -> int:
         "kpis": cable_kpis(problem, result.assignments),
         "scalar_default": scalarize(objective),
         "scalar_cable_pvc": scalarize(objective, CABLE_PVC_WEIGHTS),
+        "cpsat_weight_vector": CABLE_PVC_CPSAT_WEIGHTS,
         "claim": "synthetic encode-first cable demo; not Moskabelmet MES data",
     }
     _write_json_output(payload, args.output_file)
@@ -240,6 +246,30 @@ def _add_cable_nervous_parser(subparsers: Any) -> None:
     parser.add_argument("--disruptions", type=int, default=20)
     parser.add_argument("--machines-per-stage", type=int, default=16)
     parser.add_argument("--drum-pool", type=int, default=96)
+    parser.add_argument(
+        "--cover-ready-rule",
+        choices=("fifo", "atcs"),
+        default="fifo",
+        help="COVER ready pop: fifo (default; measured feasible) or atcs "
+        "(experimental: collapses coverage on the nervous month, 2026-08-14)",
+    )
+    parser.add_argument(
+        "--family-lines",
+        action="store_true",
+        help="Dedicate machine subsets per family (PVC vs XLPE); opt-in: "
+        "halves per-family capacity, infeasible at 16 machines/stage",
+    )
+    parser.add_argument(
+        "--no-colour-phase",
+        action="store_true",
+        help="Disable colour/insulation campaign slot phase",
+    )
+    parser.add_argument(
+        "--new-rush",
+        type=int,
+        default=2,
+        help="New parent orders inserted after cover (0 disables N-R3 wave)",
+    )
     parser.add_argument("--output-file", type=Path, help="Write JSON report here")
 
 
@@ -253,6 +283,10 @@ def _run_cable_nervous(args: argparse.Namespace) -> int:
         disruptions_per_wave=args.disruptions,
         machines_per_stage=args.machines_per_stage,
         drum_pool_size=args.drum_pool,
+        family_dedicated_lines=args.family_lines,
+        colour_phase=not args.no_colour_phase,
+        cover_ready_rule=args.cover_ready_rule,
+        new_rush_orders=args.new_rush,
     )
     _write_json_output(report, args.output_file)
     return 0 if report["status"] == "feasible" and report["notary_hard_violations"] == 0 else 1

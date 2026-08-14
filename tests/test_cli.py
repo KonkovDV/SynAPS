@@ -152,7 +152,10 @@ def test_cli_cable_nervous_month_tiny(capsys: pytest.CaptureFixture[str]) -> Non
     assert payload["status"] == "feasible"
     assert payload["notary_hard_violations"] == 0
     assert payload["solver_config"] == "GREED"
+    assert payload["temporal_stabilization_converged"] is None
+    assert payload["temporal_stabilization_note"] == "n/a (GREED)"
     assert payload["waves"]
+    assert payload["new_rush"]["kind"] == "new_parent_insert"
 
 
 def test_cli_list_solver_configs_emits_manifest(capsys: pytest.CaptureFixture[str]) -> None:

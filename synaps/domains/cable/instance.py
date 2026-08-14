@@ -113,6 +113,7 @@ def _append_reel_chain(
     orders: list[Order],
     operations: list[Operation],
     aux_requirements: list[OperationAuxRequirement],
+    family_dedicated: bool = False,
 ) -> None:
     order = Order(
         id=uuid4(),
@@ -133,7 +134,9 @@ def _append_reel_chain(
     orders.append(order)
     predecessor_id = None
     for seq, (stage_code, group, speed) in enumerate(stages, start=1):
-        eligible = [center.id for center in centers_by_group[group]]
+        eligible = _eligible_ids_for_sku(
+            sku, group, centers_by_group, family_dedicated=family_dedicated
+        )
         operation = Operation(
             id=uuid4(),
             order_id=order.id,
@@ -158,6 +161,23 @@ def _append_reel_chain(
             )
         )
         predecessor_id = operation.id
+
+
+def _eligible_ids_for_sku(
+    sku: CableSku,
+    group: str,
+    centers_by_group: dict[str, list[WorkCenter]],
+    *,
+    family_dedicated: bool,
+) -> list:
+    centers = centers_by_group[group]
+    if not family_dedicated or len(centers) < 2:
+        return [center.id for center in centers]
+    split = (len(centers) + 1) // 2
+    chosen = centers[:split] if sku.insulation == "PVC" else centers[split:]
+    if not chosen:
+        chosen = centers
+    return [center.id for center in chosen]
 
 
 def _parent_jobs(
@@ -217,6 +237,8 @@ def generate_cable_instance(
     rush_fraction: float = 0.0,
     scatter_releases: bool = False,
     shuffle_skus: bool = False,
+    family_dedicated_lines: bool = False,
+    colour_phase: bool = False,
 ) -> ScheduleProblem:
     """Make-to-order cable instance. Child orders are pre-split reels, not lots."""
 
@@ -240,6 +262,63 @@ def generate_cable_instance(
     orders: list[Order] = []
     operations: list[Operation] = []
     aux_requirements: list[OperationAuxRequirement] = []
+    _fill_reel_orders(
+        rng,
+        n_orders=n_orders,
+        chosen_skus=chosen_skus,
+        chosen_stages=chosen_stages,
+        horizon_start=horizon_start,
+        horizon_hours=horizon_hours,
+        length_range_m=length_range_m,
+        rush_fraction=rush_fraction,
+        scatter_releases=scatter_releases,
+        shuffle_skus=shuffle_skus,
+        reel_capacity_m=reel_capacity_m,
+        states=states,
+        by_group=by_group,
+        drum=drum,
+        family_dedicated_lines=family_dedicated_lines,
+        orders=orders,
+        operations=operations,
+        aux_requirements=aux_requirements,
+    )
+    problem = ScheduleProblem(
+        states=list(states.values()),
+        orders=orders,
+        operations=operations,
+        work_centers=work_centers,
+        setup_matrix=_setup_matrix(states, work_centers),
+        auxiliary_resources=[drum],
+        aux_requirements=aux_requirements,
+        planning_horizon_start=horizon_start,
+        planning_horizon_end=horizon_end,
+    )
+    return apply_campaign_windows(
+        problem, slot_hours=campaign_slot_hours, colour_phase=colour_phase
+    )
+
+
+def _fill_reel_orders(
+    rng: random.Random,
+    *,
+    n_orders: int,
+    chosen_skus: tuple[CableSku, ...],
+    chosen_stages: tuple[tuple[str, str, float], ...],
+    horizon_start: datetime,
+    horizon_hours: int,
+    length_range_m: tuple[float, float],
+    rush_fraction: float,
+    scatter_releases: bool,
+    shuffle_skus: bool,
+    reel_capacity_m: float,
+    states: dict[CableSku, State],
+    by_group: dict[str, list[WorkCenter]],
+    drum: AuxiliaryResource,
+    family_dedicated_lines: bool,
+    orders: list[Order],
+    operations: list[Operation],
+    aux_requirements: list[OperationAuxRequirement],
+) -> None:
     for sku, length_m, release, due, priority, parent_ref in _parent_jobs(
         rng,
         n_orders=n_orders,
@@ -268,16 +347,95 @@ def generate_cable_instance(
                 orders=orders,
                 operations=operations,
                 aux_requirements=aux_requirements,
+                family_dedicated=family_dedicated_lines,
             )
-    problem = ScheduleProblem(
-        states=list(states.values()),
-        orders=orders,
-        operations=operations,
-        work_centers=work_centers,
-        setup_matrix=_setup_matrix(states, work_centers),
-        auxiliary_resources=[drum],
-        aux_requirements=aux_requirements,
-        planning_horizon_start=horizon_start,
-        planning_horizon_end=horizon_end,
+
+
+def _states_by_sku(problem: ScheduleProblem) -> dict[CableSku, State]:
+    mapping: dict[CableSku, State] = {}
+    for state in problem.states:
+        if state.domain_attributes.get("domain") != "cable":
+            continue
+        mapping[
+            CableSku(
+                str(state.domain_attributes.get("conductor", "Cu")),
+                str(state.domain_attributes.get("insulation", "PVC")),
+                str(state.domain_attributes.get("color", "BK")),
+                int(state.domain_attributes.get("section_mm2", 16)),
+            )
+        ] = state
+    return mapping
+
+
+def _stages_from_problem(problem: ScheduleProblem) -> tuple[tuple[str, str, float], ...]:
+    seen_stages: list[tuple[str, str, float]] = []
+    seen_codes: set[str] = set()
+    fallback = problem.work_centers[0].capability_group if problem.work_centers else ""
+    for operation in problem.operations:
+        stage = str(operation.domain_attributes.get("stage", ""))
+        if not stage or stage in seen_codes:
+            continue
+        group = next(
+            (
+                center.capability_group
+                for center in problem.work_centers
+                if center.id in operation.eligible_wc_ids
+            ),
+            fallback,
+        )
+        speed = float(operation.domain_attributes.get("line_speed_m_per_min", 25.0))
+        seen_stages.append((stage, group, speed))
+        seen_codes.add(stage)
+    return tuple(seen_stages)
+
+
+def add_rush_orders(
+    problem: ScheduleProblem,
+    *,
+    n_orders: int,
+    release: datetime,
+    due: datetime,
+    seed: int,
+    priority: int = 980,
+    family_dedicated: bool = False,
+) -> ScheduleProblem:
+    """Append new parent reels onto an existing shop (mid-month rush dump)."""
+
+    rng = random.Random(seed)
+    states_by_sku = _states_by_sku(problem)
+    stages = _stages_from_problem(problem)
+    if not states_by_sku or not stages or not problem.auxiliary_resources:
+        return problem
+    skus = tuple(states_by_sku)
+    by_group: dict[str, list[WorkCenter]] = {}
+    for center in problem.work_centers:
+        by_group.setdefault(center.capability_group, []).append(center)
+    orders = list(problem.orders)
+    operations = list(problem.operations)
+    aux_requirements = list(problem.aux_requirements)
+    for index in range(n_orders):
+        sku = skus[rng.randrange(len(skus))]
+        _append_reel_chain(
+            sku=sku,
+            length_m=round(rng.uniform(500.0, 900.0), 1),
+            reel_id=f"RUSH-{seed}-{index + 1}-R1",
+            parent_ref=f"RUSH-{seed}-{index + 1}",
+            due=due,
+            release=release,
+            priority=priority,
+            state=states_by_sku[sku],
+            centers_by_group=by_group,
+            drum=problem.auxiliary_resources[0],
+            stages=stages,
+            orders=orders,
+            operations=operations,
+            aux_requirements=aux_requirements,
+            family_dedicated=family_dedicated,
+        )
+    return problem.model_copy(
+        update={
+            "orders": orders,
+            "operations": operations,
+            "aux_requirements": aux_requirements,
+        }
     )
-    return apply_campaign_windows(problem, slot_hours=campaign_slot_hours)

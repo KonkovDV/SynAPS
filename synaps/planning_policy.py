@@ -51,3 +51,28 @@ def frozen_ids_for_repair(
         disrupted = {item for item in kwargs.get("disrupted_op_ids", [])}
         return locked - disrupted
     return locked
+
+
+def pin_issued_plan(
+    problem: Any,
+    assignments: list[Assignment],
+    freeze_horizon_end: datetime,
+) -> Any:
+    """Tighten freeze-window ops to their issued machine and interval.
+
+    Encode-first pin for a subsequent constructive solve: eligible WC and
+    ``earliest_start``/``latest_finish`` collapse to the issued slot so a rush
+    cannot legally occupy that machine-time. Repair freeze remains
+    ``frozen_ids_for_repair``.
+    """
+
+    locked = _frozen_operation_ids(assignments, freeze_horizon_end)
+    by_op = {assignment.operation_id: assignment for assignment in assignments}
+    for operation in problem.operations:
+        assignment = by_op.get(operation.id)
+        if assignment is None or operation.id not in locked:
+            continue
+        operation.earliest_start = assignment.start_time
+        operation.latest_finish = assignment.end_time
+        operation.eligible_wc_ids = [assignment.work_center_id]
+    return problem

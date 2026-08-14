@@ -923,12 +923,30 @@ def list_schedule_cover_native(
     aux_resource_indices: np.ndarray,
     aux_quantities: np.ndarray,
     aux_pool_sizes: np.ndarray,
+    ready_rule: int = 0,
+    weights: np.ndarray | None = None,
+    material_loss: np.ndarray | None = None,
+    k1: float = 2.0,
+    k2: float = 0.5,
+    k3: float = 0.5,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
     """Try native parallel SGS cover. Returns None if native unavailable."""
 
     if _native_list_schedule_cover is None or not _HAS_NUMPY:
         return None
     try:
+        extra: dict[str, Any] = {}
+        if int(ready_rule) != 0:
+            extra["ready_rule"] = int(ready_rule)
+            extra["k1"] = float(k1)
+            extra["k2"] = float(k2)
+            extra["k3"] = float(k3)
+            if weights is not None:
+                extra["weights"] = np.ascontiguousarray(weights, dtype=np.float64)
+            if material_loss is not None:
+                extra["material_loss"] = np.ascontiguousarray(
+                    material_loss, dtype=np.float64
+                )
         starts, ends, machines, setups = _native_list_schedule_cover(
             np.ascontiguousarray(base_durations, dtype=np.float64),
             np.ascontiguousarray(predecessor_indices, dtype=np.int64),
@@ -948,6 +966,7 @@ def list_schedule_cover_native(
             np.ascontiguousarray(aux_resource_indices, dtype=np.int64),
             np.ascontiguousarray(aux_quantities, dtype=np.int32),
             np.ascontiguousarray(aux_pool_sizes, dtype=np.int32),
+            **extra,
         )
         return (
             np.asarray(starts, dtype=np.float64),

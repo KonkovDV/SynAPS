@@ -21,7 +21,7 @@ from datetime import timedelta
 from heapq import heappop, heappush
 from typing import TYPE_CHECKING, Any
 
-from synaps.accelerators import resource_capacity_window_is_feasible
+from synaps.accelerators import compute_atcs_log_score, resource_capacity_window_is_feasible
 from synaps.model import Assignment
 from synaps.solvers._dispatch_support import MachineIndex, find_earliest_feasible_slot
 from synaps.solvers._time_windows import operation_latest_finish_offset_minutes
@@ -41,6 +41,9 @@ _MAX_LIST_SCHEDULE_GAP_INSERTS = 64
 # Above this, in-pass insertion fragments the calendar; residual one-shot
 # gap-fill on an append-only timeline is cheaper (measured 100k hang).
 _MAX_LIST_SCHEDULE_GAP_OPS = 80_000
+_COVER_ATCS_K1 = 2.0
+_COVER_ATCS_K2 = 0.5
+_COVER_ATCS_K3 = 0.5
 
 
 @dataclass(frozen=True)
@@ -302,6 +305,8 @@ def place_operations_list_schedule(
     op_earliest: Mapping[UUID, float],
     default_wc_ids: Sequence[UUID],
     deadline_exceeded: Callable[[], bool] | None = None,
+    cover_ready_rule: str = "fifo",
+    order_priority_by_id: Mapping[UUID, int] | None = None,
 ) -> GreedyCoverStats:
     """Ready-queue non-delay append; insertion SGS on a failed tail (capped)."""
 
@@ -315,6 +320,8 @@ def place_operations_list_schedule(
         horizon_minutes=horizon_minutes,
         op_earliest=op_earliest,
         default_wc_ids=default_wc_ids,
+        cover_ready_rule=cover_ready_rule,
+        order_priority_by_id=order_priority_by_id,
     )
     if native_stats is not None:
         return native_stats
@@ -329,6 +336,8 @@ def place_operations_list_schedule(
         op_earliest=op_earliest,
         default_wc_ids=default_wc_ids,
         deadline_exceeded=deadline_exceeded,
+        cover_ready_rule=cover_ready_rule,
+        order_priority_by_id=order_priority_by_id,
     )
 
 
@@ -344,14 +353,54 @@ def _place_operations_list_schedule_python(
     op_earliest: Mapping[UUID, float],
     default_wc_ids: Sequence[UUID],
     deadline_exceeded: Callable[[], bool] | None = None,
+    cover_ready_rule: str = "fifo",
+    order_priority_by_id: Mapping[UUID, int] | None = None,
 ) -> GreedyCoverStats:
     """Python parallel SGS with capped insertion into idle gaps."""
 
-    heap, successors = _ready_heap(operations, op_earliest)
-    tails: dict[UUID, tuple[float, UUID | None]] = {
-        wc_id: (0.0, None) for wc_id in default_wc_ids
-    }
-    aux_windows: dict[UUID, list[tuple[float, float, int]]] = {}
+    heap, successors = _ready_heap(operations, op_earliest, scheduled_ids)
+    tails, aux_windows = _seed_list_schedule_state(
+        assignments, dispatch_context, default_wc_ids, horizon_start
+    )
+    return _run_python_cover_loop(
+        heap=heap,
+        successors=successors,
+        tails=tails,
+        aux_windows=aux_windows,
+        operations=operations,
+        dispatch_context=dispatch_context,
+        assignments=assignments,
+        assignment_by_op=assignment_by_op,
+        scheduled_ids=scheduled_ids,
+        horizon_start=horizon_start,
+        horizon_minutes=horizon_minutes,
+        op_earliest=op_earliest,
+        default_wc_ids=default_wc_ids,
+        deadline_exceeded=deadline_exceeded,
+        cover_ready_rule=cover_ready_rule,
+        order_priority_by_id=order_priority_by_id,
+    )
+
+
+def _run_python_cover_loop(
+    *,
+    heap: list[tuple[float, int, str, UUID]],
+    successors: dict[UUID, list[Operation]],
+    tails: dict[UUID, tuple[float, UUID | None]],
+    aux_windows: dict[UUID, list[tuple[float, float, int]]],
+    operations: Sequence[Operation],
+    dispatch_context: DispatchContext,
+    assignments: list[Assignment],
+    assignment_by_op: dict[UUID, Assignment],
+    scheduled_ids: set[UUID],
+    horizon_start: datetime,
+    horizon_minutes: float,
+    op_earliest: Mapping[UUID, float],
+    default_wc_ids: Sequence[UUID],
+    deadline_exceeded: Callable[[], bool] | None,
+    cover_ready_rule: str,
+    order_priority_by_id: Mapping[UUID, int] | None,
+) -> GreedyCoverStats:
     clipped = 0
     placed = 0
     gap_inserted = 0
@@ -362,7 +411,16 @@ def _place_operations_list_schedule_python(
         if deadline_exceeded is not None and deadline_exceeded():
             time_limited = True
             break
-        _floor, _seq, _sid, op_id = heappop(heap)
+        _floor, _seq, _sid, op_id = _pop_cover_ready(
+            heap,
+            cover_ready_rule=cover_ready_rule,
+            tails=tails,
+            dispatch_context=dispatch_context,
+            ops_by_id=ops_by_id,
+            horizon_start=horizon_start,
+            horizon_minutes=horizon_minutes,
+            order_priority_by_id=order_priority_by_id,
+        )
         op = ops_by_id[op_id]
         pred_end = 0.0
         if op.predecessor_op_id:
@@ -396,16 +454,30 @@ def _place_operations_list_schedule_python(
             clipped += 1
             continue
         placed += 1
-        for succ in successors[op.id]:
-            succ_floor = max(end, op_earliest.get(succ.id, 0.0))
-            heappush(heap, (succ_floor, succ.seq_in_order, str(succ.id), succ.id))
+        _enqueue_cover_successors(
+            heap, successors[op.id], end=end, op_earliest=op_earliest,
+            as_list=cover_ready_rule == "atcs",
+        )
     return GreedyCoverStats(
-        placed=placed,
-        clipped=clipped,
-        passes=1,
-        time_limited=time_limited,
+        placed=placed, clipped=clipped, passes=1, time_limited=time_limited,
         gap_inserted=gap_inserted,
     )
+
+
+def _enqueue_cover_successors(
+    heap: list[tuple[float, int, str, UUID]],
+    successors: Sequence[Operation],
+    *,
+    end: float,
+    op_earliest: Mapping[UUID, float],
+    as_list: bool,
+) -> None:
+    for succ in successors:
+        item = (max(end, op_earliest.get(succ.id, 0.0)), succ.seq_in_order, str(succ.id), succ.id)
+        if as_list:
+            heap.append(item)
+        else:
+            heappush(heap, item)
 
 
 def _ensure_list_schedule_index(
@@ -513,18 +585,175 @@ def _place_ready_list_operation(
 def _ready_heap(
     operations: Sequence[Operation],
     op_earliest: Mapping[UUID, float],
+    scheduled_ids: set[UUID] | None = None,
 ) -> tuple[list[tuple[float, int, str, UUID]], dict[UUID, list[Operation]]]:
+    locked = scheduled_ids or set()
     successors: dict[UUID, list[Operation]] = defaultdict(list)
     heap: list[tuple[float, int, str, UUID]] = []
     for op in operations:
         if op.predecessor_op_id:
             successors[op.predecessor_op_id].append(op)
-        else:
-            heappush(
-                heap,
-                (op_earliest.get(op.id, 0.0), op.seq_in_order, str(op.id), op.id),
-            )
+    for op in operations:
+        if op.id in locked:
+            continue
+        pred = op.predecessor_op_id
+        if pred is not None and pred not in locked:
+            continue
+        heappush(
+            heap,
+            (op_earliest.get(op.id, 0.0), op.seq_in_order, str(op.id), op.id),
+        )
     return heap, successors
+
+
+def _seed_list_schedule_state(
+    assignments: Sequence[Assignment],
+    dispatch_context: DispatchContext,
+    default_wc_ids: Sequence[UUID],
+    horizon_start: datetime,
+) -> tuple[dict[UUID, tuple[float, UUID | None]], dict[UUID, list[tuple[float, float, int]]]]:
+    tails: dict[UUID, tuple[float, UUID | None]] = {
+        wc_id: (0.0, None) for wc_id in default_wc_ids
+    }
+    aux_windows: dict[UUID, list[tuple[float, float, int]]] = {}
+    for assignment in assignments:
+        end = (assignment.end_time - horizon_start).total_seconds() / 60.0
+        start = (assignment.start_time - horizon_start).total_seconds() / 60.0
+        last_end, _state = tails.get(assignment.work_center_id, (0.0, None))
+        operation = dispatch_context.ops_by_id.get(assignment.operation_id)
+        if end + 1e-9 >= last_end:
+            tails[assignment.work_center_id] = (
+                end,
+                operation.state_id if operation is not None else None,
+            )
+        aux_start = start - float(assignment.setup_minutes)
+        for requirement in dispatch_context.requirements_by_op.get(assignment.operation_id, []):
+            aux_windows.setdefault(requirement.aux_resource_id, []).append(
+                (aux_start, end, int(requirement.quantity_needed))
+            )
+    return tails, aux_windows
+
+
+def _pop_cover_ready(
+    heap: list[tuple[float, int, str, UUID]],
+    *,
+    cover_ready_rule: str,
+    tails: dict[UUID, tuple[float, UUID | None]],
+    dispatch_context: DispatchContext,
+    ops_by_id: Mapping[UUID, Operation],
+    horizon_start: datetime,
+    horizon_minutes: float,
+    order_priority_by_id: Mapping[UUID, int] | None,
+) -> tuple[float, int, str, UUID]:
+    if cover_ready_rule != "atcs":
+        return heappop(heap)
+    if len(heap) <= 1:
+        return heap.pop()
+    return heap.pop(
+        _atcs_pick_index(
+            heap,
+            tails=tails,
+            dispatch_context=dispatch_context,
+            ops_by_id=ops_by_id,
+            horizon_start=horizon_start,
+            horizon_minutes=horizon_minutes,
+            order_priority_by_id=order_priority_by_id,
+        )
+    )
+
+
+def _min_cover_setup_and_p(
+    operation: Operation,
+    tails: dict[UUID, tuple[float, UUID | None]],
+    dispatch_context: DispatchContext,
+) -> tuple[float, float, float]:
+    eligible = operation.eligible_wc_ids or list(tails)
+    min_setup = float("inf")
+    p_min = float(operation.base_duration_min)
+    material = 0.0
+    for wc_id in eligible:
+        work_center = dispatch_context.wc_by_id.get(wc_id)
+        if work_center is None:
+            continue
+        _last_end, last_state = tails.get(wc_id, (0.0, None))
+        setup = 0
+        scrap = 0.0
+        if last_state is not None:
+            setup = int(
+                dispatch_context.setup_minutes.get(
+                    (wc_id, last_state, operation.state_id), 0
+                )
+            )
+            scrap = float(
+                dispatch_context.material_loss.get(
+                    (wc_id, last_state, operation.state_id), 0.0
+                )
+            )
+        duration = float(duration_minutes_for(operation, work_center))
+        if setup < min_setup:
+            min_setup = float(setup)
+            p_min = duration
+            material = scrap
+    if min_setup == float("inf"):
+        return 0.0, p_min, 0.0
+    return min_setup, p_min, material
+
+
+def _atcs_pick_index(
+    heap: list[tuple[float, int, str, UUID]],
+    *,
+    tails: dict[UUID, tuple[float, UUID | None]],
+    dispatch_context: DispatchContext,
+    ops_by_id: Mapping[UUID, Operation],
+    horizon_start: datetime,
+    horizon_minutes: float,
+    order_priority_by_id: Mapping[UUID, int] | None,
+) -> int:
+    p_sum = setup_sum = setup_n = mat_sum = mat_n = 0.0
+    stats: list[tuple[float, float, float, float]] = []
+    for item in heap:
+        operation = ops_by_id[item[3]]
+        setup, processing, material = _min_cover_setup_and_p(
+            operation, tails, dispatch_context
+        )
+        p_sum += processing
+        if setup > 0:
+            setup_sum += setup
+            setup_n += 1
+        if material > 0:
+            mat_sum += material
+            mat_n += 1
+        stats.append((item[0], setup, processing, material))
+    p_bar = max(p_sum / len(heap), 0.1)
+    s_bar = max(setup_sum / setup_n, 1.0) if setup_n else 1.0
+    m_bar = max(mat_sum / mat_n, 1.0) if mat_n else 1.0
+    best_i = 0
+    best_numeric = (float("-inf"), float("inf"), 0)
+    best_sid = ""
+    for index, item in enumerate(heap):
+        operation = ops_by_id[item[3]]
+        floor, setup, processing, material = stats[index]
+        latest = operation_latest_finish_offset_minutes(operation, horizon_start)
+        cap = horizon_minutes if latest is None else min(horizon_minutes, latest)
+        score = compute_atcs_log_score(
+            weight=max(float((order_priority_by_id or {}).get(operation.order_id, 1)), 1e-9),
+            processing_minutes=processing,
+            slack=max(cap - processing - floor, 0.0),
+            ready_p_bar=p_bar,
+            setup_minutes=setup,
+            setup_scale=s_bar,
+            k1=_COVER_ATCS_K1,
+            k2=_COVER_ATCS_K2,
+            material_loss=material,
+            material_scale=m_bar,
+            k3=_COVER_ATCS_K3,
+        )
+        numeric = (score, -floor, -item[1])
+        if numeric > best_numeric or (numeric == best_numeric and item[2] < best_sid):
+            best_numeric = numeric
+            best_sid = item[2]
+            best_i = index
+    return best_i
 
 
 def _commit_list_schedule_assignment(
@@ -627,6 +856,8 @@ def _try_native_list_schedule(
     horizon_minutes: float,
     op_earliest: Mapping[UUID, float],
     default_wc_ids: Sequence[UUID],
+    cover_ready_rule: str = "fifo",
+    order_priority_by_id: Mapping[UUID, int] | None = None,
 ) -> GreedyCoverStats | None:
     """SoA parallel SGS via Rust. None means use the Python cover."""
 
@@ -648,6 +879,8 @@ def _try_native_list_schedule(
         op_earliest=op_earliest,
         default_wc_ids=default_wc_ids,
         horizon_minutes=horizon_minutes,
+        cover_ready_rule=cover_ready_rule,
+        order_priority_by_id=order_priority_by_id,
     )
     if packed is None:
         return None
@@ -685,6 +918,8 @@ def _pack_list_schedule_native(
     op_earliest: Mapping[UUID, float],
     default_wc_ids: Sequence[UUID],
     horizon_minutes: float,
+    cover_ready_rule: str = "fifo",
+    order_priority_by_id: Mapping[UUID, int] | None = None,
 ) -> tuple[dict[str, Any], list[Any]] | None:
     """Pack SoA arrays for ``list_schedule_cover``. Returns None on skip."""
 
@@ -724,6 +959,22 @@ def _pack_list_schedule_native(
     arrays = _native_cover_array_dict(
         rows, uuid_rank, speeds, pools, n_wc, n_states, horizon_minutes, sdst
     )
+    if cover_ready_rule == "atcs":
+        arrays["ready_rule"] = 1
+        arrays["weights"] = np.array(
+            [
+                float((order_priority_by_id or {}).get(op.order_id, 1))
+                for op in operations
+            ],
+            dtype=np.float64,
+        )
+        arrays["material_loss"] = np.array(
+            [
+                float(getattr(op, "material_loss", 0.0) or 0.0)
+                for op in operations
+            ],
+            dtype=np.float64,
+        )
     return arrays, idx_to_wc
 
 

@@ -24,7 +24,7 @@ Moskabelmet public facts (CFO Russia 08.10.2025; Ruscable 2022; INFIMUM 2.0 / GI
 | Material loss | Start-up length, colour-transition scrap, regulated purge metres |
 | Energy penalty | Extruder heat-up, crosslinking, idle hold |
 
-Parametric defaults in `synaps/domains/cable/adapter.py` are **the same order of magnitude** as published SMED (MAPRE clean hundreds of minutes). They are not Moskabelmet stopwatch data.
+Parametric defaults in `synaps/domains/cable/adapter.py` are **the same order of magnitude** as published SMED (MAPRE clean hundreds of minutes: colour ~240, section ~360, compound/family ~400). They are a **parametric order**, not Moskabelmet stopwatch data and not a calibrated factory SMED study. Change the numbers in the adapter; do not treat 240/360/400 as plant truth.
 
 ## 3. State Dictionary
 
@@ -140,10 +140,13 @@ Encoded:
 - \(p_o = \max(1,\lceil L_{\text{reel}}/v_{\text{stage}}\rceil)\) written to `base_duration_min`
 - SDST \(\sigma\) from SKU deltas + `material_loss` scrap metres
 - Drum Cumulative on processing window
-- Campaign: `earliest_start` snapped to the earliest **release** in a family×due slot (not to the due date)
-- Freeze: `start_time < freeze_horizon_end` subtracted from repair neighbourhood (rush cannot steal; breakdown of that op still can)
+- Campaign: `earliest_start` snapped to the earliest **release** in a family×due slot (not to the due date). Optional `colour_phase` shifts that gate by a deterministic colour/insulation slot (0–2) without passing the due date.
+- Freeze: `start_time < freeze_horizon_end` subtracted from repair neighbourhood (rush cannot steal; breakdown of that op still can). `allow_freeze_break` is a **boolean policy flag**, not an ACL: any caller can set it true. First-solve pin: `solve_schedule(..., issued_assignments=..., freeze_horizon_end=...)` collapses freeze-window ops to the issued machine and interval (`pin_issued_plan`).
+- Family-dedicated lines: optional `family_dedicated_lines` splits PVC vs XLPE `eligible_wc_ids` when a stage has ≥2 machines. Opt-in only: an even split halves per-family capacity and is measured infeasible at 16 machines/stage on the nervous mix.
+- COVER ready rule: FIFO is the default everywhere (`cover_ready_rule="fifo"`). ATCS among ready ops exists as an opt-in (`"atcs"`, native + Python parity) but is **measured to collapse month-scale coverage** (2026-08-14 probe matrix in `docs/rfc/CABLE_NERVOUS_MONTH_ACCEL_2026_08.md`) — do not enable for production cover.
 - \(D_{\max}\) and Hamming \(R\) as **functionals**, not CP-SAT terms
+- CP-SAT/ALNS search may take `CABLE_PVC_CPSAT_WEIGHTS` (integer scale of `CABLE_PVC_WEIGHTS`). GREEDY default is unchanged.
 
-Gated (C5, separate RFC): hold-until-successor aux, blocking/no-wait, reel-split as a *decision*, cross-order material tokens.
+Gated (C5, separate RFC): hold-until-successor aux, blocking/no-wait, reel-split as a *decision*, cross-order material tokens. Blocking/no-wait/AMR/RFID stay out of the kernel; PyJobShop is the constraint-class reference.
 
 Hard FEASIBLE contract unchanged. Grain unchanged. No AVX-512.

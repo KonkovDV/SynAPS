@@ -12,3 +12,8 @@ CABLE_PVC_WEIGHTS: dict[str, float] = {
     "tardiness": 1.0,
     "energy": 0.1,
 }
+
+# CP-SAT terms are integers. 0.05 would truncate to 0 if passed raw.
+CABLE_PVC_CPSAT_WEIGHTS: dict[str, int] = {
+    key: max(0, round(value * 100)) for key, value in CABLE_PVC_WEIGHTS.items()
+}

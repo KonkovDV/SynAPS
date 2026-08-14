@@ -19,6 +19,7 @@ use crate::cpu::{prefetch_f64_at, prefetch_i64_at, PREFETCH_DISTANCE};
 
 const AUX_BUMP_ITERS: usize = 256;
 const EPS: f64 = 1e-9;
+const READY_ATCS: i32 = 1;
 
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 struct ReadyKey {
@@ -168,6 +169,12 @@ struct CoverArrays<'a> {
     n_wc: usize,
     n_states: usize,
     horizon: f64,
+    ready_rule: i32,
+    weights: &'a [f64],
+    material: &'a [f64],
+    k1: f64,
+    k2: f64,
+    k3: f64,
 }
 
 fn run_list_schedule(a: CoverArrays<'_>) -> (Vec<f64>, Vec<f64>, Vec<i64>, Vec<i64>) {
@@ -212,6 +219,25 @@ fn run_list_schedule(a: CoverArrays<'_>) -> (Vec<f64>, Vec<f64>, Vec<i64>, Vec<i
     let mut machine_tail = vec![0.0f64; a.n_wc];
     let mut machine_last_state = vec![-1i64; a.n_wc];
     let mut aux_cands: Vec<(f64, f64, f64, usize)> = Vec::new();
+    let has_aux = a.aux_off.len() == n + 1 && a.aux_off[n] > 0;
+
+    if a.ready_rule == READY_ATCS {
+        run_atcs_cover(
+            &a,
+            &succ_off,
+            &succ_idx,
+            &mut occupancy,
+            &mut machine_tail,
+            &mut machine_last_state,
+            &mut aux_cands,
+            has_aux,
+            &mut starts,
+            &mut ends,
+            &mut machines,
+            &mut setups,
+        );
+        return (starts, ends, machines, setups);
+    }
 
     let mut heap: BinaryHeap<Reverse<ReadyKey>> = BinaryHeap::new();
     for i in 0..n {
@@ -438,7 +464,314 @@ fn place_with_aux_delay(
     best.map(|(end, start, setup, machine)| (start, end, setup, machine))
 }
 
+fn op_weight(a: &CoverArrays<'_>, i: usize) -> f64 {
+    if i < a.weights.len() {
+        a.weights[i].max(1e-9)
+    } else {
+        1.0
+    }
+}
+
+fn op_material(a: &CoverArrays<'_>, i: usize) -> f64 {
+    if i < a.material.len() {
+        a.material[i].max(0.0)
+    } else {
+        0.0
+    }
+}
+
+fn min_setup_and_p(a: &CoverArrays<'_>, i: usize, machine_last_state: &[i64]) -> (f64, f64) {
+    let row_start = a.elig_off[i] as usize;
+    let row_end = a.elig_off[i + 1] as usize;
+    let mut best_setup = f64::INFINITY;
+    let mut best_p = grain_duration(a.durations[i], 1.0);
+    for k in row_start..row_end {
+        let m = a.elig_idx[k];
+        if m < 0 {
+            continue;
+        }
+        let machine = m as usize;
+        if machine >= a.n_wc {
+            continue;
+        }
+        let setup = setup_on_machine(a, i, machine, machine_last_state[machine]);
+        if setup < best_setup {
+            best_setup = setup;
+            best_p = grain_duration(a.durations[i], a.speeds[machine]);
+        }
+    }
+    if best_setup.is_finite() {
+        (best_setup, best_p)
+    } else {
+        (0.0, best_p)
+    }
+}
+
+fn pick_atcs_ready(
+    ready: &[u32],
+    a: &CoverArrays<'_>,
+    ends: &[f64],
+    machine_last_state: &[i64],
+) -> Option<usize> {
+    if ready.is_empty() {
+        return None;
+    }
+    let n = a.durations.len();
+    let mut p_sum = 0.0;
+    let mut setup_sum = 0.0;
+    let mut setup_n = 0.0;
+    let mut mat_sum = 0.0;
+    let mut mat_n = 0.0;
+    let mut stats = Vec::with_capacity(ready.len());
+    for &idx in ready {
+        let i = idx as usize;
+        let pred_end = if a.preds[i] >= 0 {
+            let p = a.preds[i] as usize;
+            if p < n {
+                ends[p]
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+        let floor = pred_end.max(a.earliest[i]);
+        let (setup, p) = min_setup_and_p(a, i, machine_last_state);
+        p_sum += p;
+        if setup > 0.0 {
+            setup_sum += setup;
+            setup_n += 1.0;
+        }
+        let material = op_material(a, i);
+        if material > 0.0 {
+            mat_sum += material;
+            mat_n += 1.0;
+        }
+        stats.push((floor, setup, p, material));
+    }
+    let p_bar = (p_sum / ready.len() as f64).max(0.1);
+    let s_bar = if setup_n > 0.0 {
+        (setup_sum / setup_n).max(1.0)
+    } else {
+        1.0
+    };
+    let m_bar = if mat_n > 0.0 {
+        (mat_sum / mat_n).max(1.0)
+    } else {
+        1.0
+    };
+    let mut best_i = 0usize;
+    let mut best_score = f64::NEG_INFINITY;
+    let mut best_floor = f64::INFINITY;
+    let mut best_seq = i32::MAX;
+    let mut best_rank = i32::MAX;
+    for (slot, &idx) in ready.iter().enumerate() {
+        let i = idx as usize;
+        let (floor, setup, p, material) = stats[slot];
+        let cap = a.horizon.min(a.latest[i]);
+        let slack = (cap - p - floor).max(0.0);
+        let mut score = op_weight(a, i).ln() - p.max(0.1).ln() - slack / (a.k1 * p_bar);
+        if setup > 0.0 {
+            score -= setup / (a.k2 * s_bar);
+        }
+        if material > 0.0 {
+            score -= material / (a.k3 * m_bar);
+        }
+        let better = score > best_score + 1e-15
+            || ((score - best_score).abs() <= 1e-15
+                && (floor < best_floor
+                    || (floor == best_floor
+                        && (a.seq[i] < best_seq
+                            || (a.seq[i] == best_seq && a.uuid_rank[i] < best_rank)))));
+        if better {
+            best_score = score;
+            best_floor = floor;
+            best_seq = a.seq[i];
+            best_rank = a.uuid_rank[i];
+            best_i = slot;
+        }
+    }
+    Some(best_i)
+}
+
+fn place_ready_op(
+    a: &CoverArrays<'_>,
+    i: usize,
+    ends: &[f64],
+    machine_tail: &[f64],
+    machine_last_state: &[i64],
+    occupancy: &[Vec<(f64, f64, i32)>],
+    aux_cands: &mut Vec<(f64, f64, f64, usize)>,
+    has_aux: bool,
+) -> Option<(f64, f64, f64, usize)> {
+    let n = a.durations.len();
+    let pred_end = if a.preds[i] >= 0 {
+        let p = a.preds[i] as usize;
+        if p < n {
+            ends[p]
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    };
+    let floor = pred_end.max(a.earliest[i]);
+    let cap = a.horizon.min(a.latest[i]);
+    let row_start = a.elig_off[i] as usize;
+    let row_end = a.elig_off[i + 1] as usize;
+    let aux_s = if has_aux { a.aux_off[i] as usize } else { 0 };
+    let aux_e = if has_aux { a.aux_off[i + 1] as usize } else { 0 };
+    if aux_e > aux_s {
+        place_with_aux_delay(
+            a,
+            i,
+            floor,
+            cap,
+            row_start,
+            row_end,
+            aux_s,
+            aux_e,
+            machine_tail,
+            machine_last_state,
+            occupancy,
+            aux_cands,
+        )
+    } else {
+        place_append_only(
+            a,
+            i,
+            floor,
+            cap,
+            row_start,
+            row_end,
+            machine_tail,
+            machine_last_state,
+        )
+    }
+}
+
+fn commit_cover_placement(
+    a: &CoverArrays<'_>,
+    i: usize,
+    start: f64,
+    end: f64,
+    setup: f64,
+    machine: usize,
+    has_aux: bool,
+    starts: &mut [f64],
+    ends: &mut [f64],
+    machines: &mut [i64],
+    setups: &mut [i64],
+    machine_tail: &mut [f64],
+    machine_last_state: &mut [i64],
+    occupancy: &mut [Vec<(f64, f64, i32)>],
+) {
+    starts[i] = start;
+    ends[i] = end;
+    machines[i] = machine as i64;
+    setups[i] = setup.round() as i64;
+    machine_tail[machine] = end;
+    machine_last_state[machine] = a.states[i];
+    let aux_s = if has_aux { a.aux_off[i] as usize } else { 0 };
+    let aux_e = if has_aux { a.aux_off[i + 1] as usize } else { 0 };
+    if aux_e > aux_s {
+        let aux_start = start - setup;
+        for k in aux_s..aux_e {
+            let res = a.aux_res[k];
+            if res < 0 {
+                continue;
+            }
+            let r = res as usize;
+            if r < occupancy.len() {
+                occupancy[r].push((aux_start, end, a.aux_qty[k]));
+            }
+        }
+    }
+}
+
+fn run_atcs_cover(
+    a: &CoverArrays<'_>,
+    succ_off: &[i64],
+    succ_idx: &[u32],
+    occupancy: &mut [Vec<(f64, f64, i32)>],
+    machine_tail: &mut [f64],
+    machine_last_state: &mut [i64],
+    aux_cands: &mut Vec<(f64, f64, f64, usize)>,
+    has_aux: bool,
+    starts: &mut [f64],
+    ends: &mut [f64],
+    machines: &mut [i64],
+    setups: &mut [i64],
+) {
+    let n = a.durations.len();
+    let mut ready: Vec<u32> = (0..n as u32)
+        .filter(|&i| a.preds[i as usize] < 0)
+        .collect();
+    while let Some(slot) = pick_atcs_ready(&ready, a, ends, machine_last_state) {
+        let i = ready.swap_remove(slot) as usize;
+        let Some((start, end, setup, machine)) = place_ready_op(
+            a,
+            i,
+            ends,
+            machine_tail,
+            machine_last_state,
+            occupancy,
+            aux_cands,
+            has_aux,
+        ) else {
+            continue;
+        };
+        commit_cover_placement(
+            a,
+            i,
+            start,
+            end,
+            setup,
+            machine,
+            has_aux,
+            starts,
+            ends,
+            machines,
+            setups,
+            machine_tail,
+            machine_last_state,
+            occupancy,
+        );
+        let s0 = succ_off[i] as usize;
+        let s1 = succ_off[i + 1] as usize;
+        for pos in s0..s1 {
+            ready.push(succ_idx[pos]);
+        }
+    }
+}
+
 #[pyfunction]
+#[pyo3(signature = (
+    base_durations,
+    predecessor_indices,
+    seq_in_order,
+    uuid_rank,
+    earliest,
+    latest_finish,
+    eligible_offsets,
+    eligible_indices,
+    state_ids,
+    sdst_setup_flat,
+    n_wc,
+    n_states,
+    speed_factors,
+    horizon_minutes,
+    aux_offsets,
+    aux_resource_indices,
+    aux_quantities,
+    aux_pool_sizes,
+    ready_rule=0,
+    weights=None,
+    material_loss=None,
+    k1=2.0,
+    k2=0.5,
+    k3=0.5
+))]
 pub fn list_schedule_cover<'py>(
     py: Python<'py>,
     base_durations: PyReadonlyArray1<'py, f64>,
@@ -459,6 +792,12 @@ pub fn list_schedule_cover<'py>(
     aux_resource_indices: PyReadonlyArray1<'py, i64>,
     aux_quantities: PyReadonlyArray1<'py, i32>,
     aux_pool_sizes: PyReadonlyArray1<'py, i32>,
+    ready_rule: i32,
+    weights: Option<PyReadonlyArray1<'py, f64>>,
+    material_loss: Option<PyReadonlyArray1<'py, f64>>,
+    k1: f64,
+    k2: f64,
+    k3: f64,
 ) -> PyResult<(
     Py<PyArray1<f64>>,
     Py<PyArray1<f64>>,
@@ -520,6 +859,26 @@ pub fn list_schedule_cover<'py>(
         ));
     }
 
+    let empty_f64: [f64; 0] = [];
+    let weights_use: &[f64] = match &weights {
+        Some(array) => array.as_slice()?,
+        None => &empty_f64,
+    };
+    let material_use: &[f64] = match &material_loss {
+        Some(array) => array.as_slice()?,
+        None => &empty_f64,
+    };
+    if !weights_use.is_empty() && weights_use.len() != n {
+        return Err(PyValueError::new_err(
+            "list_schedule_cover: weights must be empty or length N",
+        ));
+    }
+    if !material_use.is_empty() && material_use.len() != n {
+        return Err(PyValueError::new_err(
+            "list_schedule_cover: material_loss must be empty or length N",
+        ));
+    }
+
     let empty_off: [i64; 0] = [];
     let aux_off_use: &[i64] = if aux_off.is_empty() { &empty_off } else { aux_off };
 
@@ -557,6 +916,12 @@ pub fn list_schedule_cover<'py>(
             n_wc,
             n_states,
             horizon: horizon_minutes,
+            ready_rule,
+            weights: weights_use,
+            material: material_use,
+            k1,
+            k2,
+            k3,
         });
         starts_slice.copy_from_slice(&starts_v);
         ends_slice.copy_from_slice(&ends_v);

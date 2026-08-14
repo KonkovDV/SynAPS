@@ -279,6 +279,12 @@ def solve_schedule(
     )
 
     merged_kwargs = _merge_kwargs(default_kwargs, solve_kwargs)
+    issued = merged_kwargs.get("issued_assignments")
+    freeze_end = merged_kwargs.get("freeze_horizon_end")
+    if issued and freeze_end:
+        from synaps.planning_policy import pin_issued_plan
+
+        problem = pin_issued_plan(problem, list(issued), freeze_end)  # type: ignore[arg-type]
     limits = resolve_portfolio_resource_limits(
         preferred_max_latency_s=ctx.preferred_max_latency_s,
         solve_kwargs=merged_kwargs,

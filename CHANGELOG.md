@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **COVER ATCS ready rule (opt-in):** native + Python list-schedule can pop the
+  ready set by Pinedo ATCS log-score (`cover_ready_rule="atcs"`) then still
+  place by earliest-end machine. **Measured and falsified as the month cover
+  rule (2026-08-14):** coverage collapses 100% → 62–70% at every k tested
+  (append-only SGS timeline fragments under out-of-floor-order picks), so FIFO
+  stays the default in the registry, `run_nervous_month`, and the CLI; ATCS is
+  an experimental opt-in with Python/native parity tests. Family-dedicated
+  PVC/XLPE lines (opt-in `--family-lines`; infeasible at 16 machines/stage),
+  colour-phase campaign (default on: tardiness 134 224 → 40 580 min, peak WIP
+  265 → 183 drums on the 1 600-order month), mid-month `add_rush_orders`
+  (repair 3.9 s vs full re-solve 10.7 s on the mutated instance), and
+  `pin_issued_plan` on `solve_schedule` (issued freeze on the first
+  constructive solve). IncrementalRepair appends aux windows on
+  `MachineIndex.add` instead of dropping the 20k frozen cache. Delta notary
+  is **not** shipped: one drum pool means a slice is the full set; cover and
+  repair still use exhaustive `full_notary`. C5a hold-until-successor remains
+  gated. Not Moskabelmet MES, not INFIMUM, not a 500k cable proof.
+
 - **Nervous-month cable benchmark:** `python -m synaps cable-nervous-month`.
   Synthetic 30-day high-mix MTO (1 600 parents, 36 SKUs, 15% rush, 6 stages).
   Seed=1, 16 machines/stage, 96 drums: 20 316 ops, `RHC-GREEDY-COVER`
