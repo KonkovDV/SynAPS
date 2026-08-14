@@ -35,8 +35,10 @@ from synaps.solvers._dispatch_support import (
     MachineIndex,
     build_dispatch_context,
     find_earliest_feasible_slot,
+    has_aux_capacity_violation,
     recompute_assignment_setups,
 )
+from synaps.solvers._time_windows import operation_earliest_offset_minutes
 from synaps.solvers.feasibility_checker import FeasibilityChecker
 
 try:
@@ -226,6 +228,58 @@ def _objective_cost(obj: ObjectiveValues, weights: dict[str, float] | None) -> f
     from synaps.objective import scalarize
 
     return scalarize(obj, _normalize_objective_weights(weights))
+
+
+def _constructive_seed_cost(
+    problem: ScheduleProblem,
+    assignments: list[Assignment],
+    sdst: SdstMatrix,
+    ops_by_id: dict[Any, Any],
+    objective_weights: dict[str, float],
+) -> float:
+    return _objective_cost(
+        _evaluate_objective(problem, assignments, sdst, ops_by_id=ops_by_id),
+        objective_weights,
+    )
+
+
+def _maybe_prefer_python_seed(
+    problem: ScheduleProblem,
+    native_assignments: list[Assignment],
+    *,
+    n_ops: int,
+    initial_beam_op_limit: int,
+    seed_budget_s: float,
+    sdst: SdstMatrix,
+    ops_by_id: dict[Any, Any],
+    objective_weights: dict[str, float],
+    is_valid: Any,
+) -> tuple[str, list[Assignment]]:
+    """Keep native seed unless a small-n Python constructive is strictly cheaper.
+
+    Native ``greedy_repair`` is a fast complete packing, not a quality
+    constructive. On instances small enough for beam/greedy, tournament so
+    ALNS does not start from a worse-than-greedy incumbent. Large *n* keeps
+    native-only to protect the long-horizon path.
+    """
+    if n_ops > initial_beam_op_limit:
+        return "native_greedy", native_assignments
+
+    from synaps.solvers.greedy_dispatch import GreedyDispatch
+
+    greedy = GreedyDispatch().solve(problem, time_limit_s=seed_budget_s)
+    greedy_assignments = list(greedy.assignments)
+    if not is_valid(greedy_assignments):
+        return "native_greedy", native_assignments
+    native_cost = _constructive_seed_cost(
+        problem, native_assignments, sdst, ops_by_id, objective_weights
+    )
+    greedy_cost = _constructive_seed_cost(
+        problem, greedy_assignments, sdst, ops_by_id, objective_weights
+    )
+    if greedy_cost < native_cost - 1e-9:
+        return "greedy", greedy_assignments
+    return "native_greedy", native_assignments
 
 
 # ---------------------------------------------------------------------------
@@ -1448,18 +1502,91 @@ def _repair_greedy_outcome(
 
 
 def _release_offset_by_op(problem: ScheduleProblem) -> dict[UUID, float]:
-    """M1: minutes-from-horizon start floor per op from its order's release_date."""
+    """M1 / G11: floor per op from order release_date and op.earliest_start."""
     horizon_start = problem.planning_horizon_start
     orders_by_id = {order.id: order for order in problem.orders}
     offsets: dict[UUID, float] = {}
     for op in problem.operations:
         order = orders_by_id.get(op.order_id)
-        release = getattr(order, "release_date", None) if order is not None else None
-        if release is not None:
-            offset = (release - horizon_start).total_seconds() / 60.0
-            if offset > 0:
-                offsets[op.id] = offset
+        offset = operation_earliest_offset_minutes(op, order, horizon_start)
+        if offset > 0:
+            offsets[op.id] = offset
     return offsets
+
+
+def _window_notary_violations(
+    problem: ScheduleProblem,
+    assignments: list[Assignment],
+) -> list[Any]:
+    """Notary view that keeps frozen extra-ops as occupancy, not UNKNOWN faults.
+
+    Violations whose ``operation_id`` is outside the window problem (committed
+    extras from prior RHC windows) are occupancy context, not a window claim
+    fault. ``MACHINE_OVERLAP`` is kept: that kind is stamped on the machine,
+    not on the foreign op id.
+    """
+    known_op_ids = {operation.id for operation in problem.operations}
+    kept: list[Any] = []
+    for violation in FeasibilityChecker().check(problem, assignments):
+        kind = getattr(violation, "kind", None)
+        if kind == "UNKNOWN_OPERATION":
+            continue
+        operation_id = getattr(violation, "operation_id", None)
+        if (
+            operation_id is not None
+            and operation_id not in known_op_ids
+            and kind == "HORIZON_BOUND_VIOLATION"
+        ):
+            continue
+        kept.append(violation)
+    return kept
+
+
+def _native_repair_skip_reason(problem: ScheduleProblem) -> str | None:
+    """Native greedy is serial and aux-blind; skip rather than inject faults."""
+    if problem.aux_requirements:
+        return "aux_requirements"
+    if any(int(getattr(wc, "max_parallel", 1) or 1) > 1 for wc in problem.work_centers):
+        return "parallel_machines"
+    return None
+
+
+def _native_repair_blocking_violations(
+    problem: ScheduleProblem,
+    frozen_assignments: list[Assignment],
+    repaired_assignments: list[Assignment],
+    disrupted_op_ids: list[UUID],
+) -> list[Any]:
+    """Filter window-subproblem notary noise from frozen extra-ops.
+
+    Frozen committed ops from prior RHC windows are not in the window
+    ``problem.operations``, so a naive ``check(problem, frozen+repaired)``
+    emits UNKNOWN_OPERATION for every frozen row and silently disables
+    native repair. Keep only faults that touch repaired/disrupted ops.
+    """
+    from synaps.solvers.feasibility_checker import ADVISORY_VIOLATION_KINDS
+
+    violations = FeasibilityChecker().check(
+        problem, list(frozen_assignments) + list(repaired_assignments)
+    )
+    disrupted = set(disrupted_op_ids)
+    problem_op_ids = {operation.id for operation in problem.operations}
+    blocking = []
+    for violation in violations:
+        if getattr(violation, "kind", None) in ADVISORY_VIOLATION_KINDS:
+            continue
+        if getattr(violation, "kind", None) == "UNKNOWN_OPERATION":
+            continue
+        operation_id = getattr(violation, "operation_id", None)
+        if operation_id is not None and operation_id not in problem_op_ids:
+            continue
+        if (
+            getattr(violation, "kind", None) == "MISSING_ASSIGNMENT"
+            and operation_id not in disrupted
+        ):
+            continue
+        blocking.append(violation)
+    return blocking
 
 
 def _native_repair_meta_from_skips(skip_reasons: list[str]) -> dict[str, Any]:
@@ -1484,6 +1611,46 @@ def _ops_have_machine_duration_overrides(operations: list[Any]) -> bool:
     return any(getattr(op, "machine_duration_overrides", None) for op in operations)
 
 
+def _native_eligible_machine_indices(
+    op: Any,
+    wc_id_to_idx: Mapping[Any, int],
+    all_wc_ids: list[Any],
+) -> list[int]:
+    """Pack one CSR row. Empty ``eligible_wc_ids`` means all work centers."""
+    source = op.eligible_wc_ids if op.eligible_wc_ids else all_wc_ids
+    indices: list[int] = []
+    for wc_id in source:
+        wc_idx = wc_id_to_idx.get(wc_id)
+        if wc_idx is not None:
+            indices.append(wc_idx)
+    return indices
+
+
+def _alns_wall_clock_honesty_meta(
+    determinism: str,
+    time_limit_exhausted_before_search: bool,
+    iterations_completed: int,
+    max_iterations: int,
+    elapsed_s: float,
+    time_limit_s: float,
+) -> dict[str, Any]:
+    """ALNS search path depends on remaining wall budget (repair clamp, SA stop)."""
+    if time_limit_exhausted_before_search:
+        stop = "wall_clock_before_search"
+    elif elapsed_s >= time_limit_s and iterations_completed < max_iterations:
+        stop = "wall_clock"
+    elif iterations_completed >= max_iterations:
+        stop = "max_iterations"
+    else:
+        stop = "completed"
+    return {
+        "determinism": determinism,
+        "determinism_violated": determinism == "strict" and stop.startswith("wall_clock"),
+        "wall_clock_path_dependent": True,
+        "search_stop_reason": stop,
+    }
+
+
 def _try_native_greedy_repair(
     problem: ScheduleProblem,
     frozen_assignments: list[Assignment],
@@ -1504,6 +1671,11 @@ def _try_native_greedy_repair(
     # Early exit: if native function is not available, don't waste time building arrays
     if _native_greedy_repair_batch is None:
         return None
+    skip = _native_repair_skip_reason(problem)
+    if skip is not None:
+        if skip_reasons is not None:
+            skip_reasons.append(skip)
+        return None
 
     try:
         # Build index mappings
@@ -1521,6 +1693,7 @@ def _try_native_greedy_repair(
         n_wc = len(problem.work_centers)
         n_states = len(problem.states)
         horizon_start = problem.planning_horizon_start
+        all_wc_ids = [wc.id for wc in problem.work_centers]
 
         # Build per-operation arrays for the disrupted ops only (in topological order)
         n = len(disrupted_op_ids)
@@ -1587,12 +1760,13 @@ def _try_native_greedy_repair(
                     # This is a simplification — we'll validate the result afterward.
                     pass
 
-            # Eligible machines
-            eligible_wc_indices = []
-            for wc_id in op.eligible_wc_ids:
-                wc_idx = wc_id_to_idx.get(wc_id)
-                if wc_idx is not None:
-                    eligible_wc_indices.append(wc_idx)
+            eligible_wc_indices = _native_eligible_machine_indices(
+                op, wc_id_to_idx, all_wc_ids
+            )
+            if not eligible_wc_indices:
+                if skip_reasons is not None:
+                    skip_reasons.append("empty_eligible_machines")
+                return None
             eligible_flat.extend(eligible_wc_indices)
             eligible_offsets[i + 1] = len(eligible_flat)
 
@@ -1611,40 +1785,7 @@ def _try_native_greedy_repair(
 
         speed_factors = np.array([wc.speed_factor for wc in problem.work_centers], dtype=np.float64)
 
-        # The native function dispatches operations sequentially in the given order
-        # (topological). However, it doesn't know about frozen predecessor constraints
-        # or frozen machine state. We need to incorporate frozen state into the input.
-        #
-        # Strategy: We modify the native call to account for frozen state by:
-        # 1. Pre-setting machine_available_at (done above)
-        # 2. Pre-setting machine_last_state (done above)
-        # 3. For ops with frozen predecessors, we inject a "virtual predecessor end"
-        #    by adjusting base_durations or using a wrapper.
-        #
-        # Since the native function doesn't accept machine_available_at directly,
-        # we handle this by inserting "virtual" predecessor constraints. For each
-        # disrupted op whose predecessor is frozen, we ensure it starts after the
-        # frozen predecessor's end. We do this by:
-        # - Adding the frozen predecessor end offset as a minimum start constraint.
-        #
-        # The native function respects predecessor_indices for ordering. For frozen
-        # predecessors, we can't use that mechanism. Instead, we'll call the native
-        # function and then validate/adjust the result.
-        #
-        # Actually, the simplest correct approach: the native function starts all
-        # machines at time 0. We need to offset the results by machine availability.
-        # But the native function doesn't support per-machine initial availability.
-        #
-        # Better approach: We'll build a combined problem where:
-        # - We add "phantom" operations at the start for each machine's frozen tail
-        #   OR we simply accept that the native result is approximate and validate.
-        #
-        # For ALNS inner repair, the native result is a heuristic seed anyway.
-        # We'll call native with the disrupted ops, then shift results to respect
-        # frozen constraints, and validate.
-
-        # Call native — it dispatches from time 0 with no initial machine state.
-        # We'll post-process to account for frozen state.
+        # Native dispatches from t=0; post-process for frozen machine/pred floors.
         native_result = greedy_repair_batch_native(
             base_durations=base_durations,
             predecessor_indices=predecessor_indices,
@@ -1745,13 +1886,13 @@ def _try_native_greedy_repair(
                 )
             )
 
-        # Quick feasibility validation: check no machine overlaps and precedence
-        # constraints are satisfied among the repaired assignments + frozen.
-        all_assignments = frozen_assignments + repaired_assignments
-        checker = FeasibilityChecker()
-        violations = checker.check(problem, all_assignments)
-        if violations:
-            # Native result failed validation — fall through to Python path
+        # Quick feasibility validation: ignore UNKNOWN_OPERATION on frozen
+        # ops that live outside the window sub-problem (W16 / RT coverage #6).
+        if _native_repair_blocking_violations(
+            problem, frozen_assignments, repaired_assignments, disrupted_op_ids
+        ):
+            if skip_reasons is not None:
+                skip_reasons.append("validation_failed")
             return None
 
         # Sort by original operation position for deterministic output
@@ -1785,6 +1926,8 @@ def _try_native_initial_seed(
     # Early exit: if native function is not available, don't waste time building arrays
     if _native_greedy_repair_batch is None:
         return None
+    if _native_repair_skip_reason(problem) is not None:
+        return None
     if _ops_have_machine_duration_overrides(list(ops_by_id.values())):
         return None
 
@@ -1797,6 +1940,7 @@ def _try_native_initial_seed(
         n_states = len(problem.states)
         horizon_start = problem.planning_horizon_start
         release_offsets = _release_offset_by_op(problem)
+        all_wc_ids = [wc.id for wc in problem.work_centers]
 
         # Build topological order of ALL operations in the problem.
         # Operations are already in topological order in problem.operations
@@ -1860,15 +2004,11 @@ def _try_native_initial_seed(
                     predecessor_indices[i] = local_pred
                 # else: predecessor is in frozen set — handled in post-processing
 
-            # Eligible machines (empty list = all machines eligible)
-            eligible_wc_ids = (
-                op.eligible_wc_ids if op.eligible_wc_ids else [wc.id for wc in problem.work_centers]
+            eligible_wc_indices = _native_eligible_machine_indices(
+                op, wc_id_to_idx, all_wc_ids
             )
-            eligible_wc_indices = []
-            for wc_id in eligible_wc_ids:
-                wc_idx = wc_id_to_idx.get(wc_id)
-                if wc_idx is not None:
-                    eligible_wc_indices.append(wc_idx)
+            if not eligible_wc_indices:
+                return None
             eligible_flat.extend(eligible_wc_indices)
             eligible_offsets[i + 1] = len(eligible_flat)
 
@@ -2011,17 +2151,57 @@ def _repair_greedy(
 # ---------------------------------------------------------------------------
 
 
-def _has_machine_overlap(assignments: list[Assignment]) -> bool:
-    """Return True if any two assignments overlap on the same machine."""
+def _has_machine_overlap(
+    assignments: list[Assignment],
+    *,
+    ops_by_id: Mapping[Any, Any] | None = None,
+    setup_minutes: Mapping[tuple[Any, Any, Any], int] | None = None,
+) -> bool:
+    """Return True if any two assignments overlap on the same machine.
+
+    When ``ops_by_id`` and ``setup_minutes`` are provided, consecutive jobs on
+    the same work center must also leave the SDST gap (A15-P0-3). Default
+    remains processing-only overlap so calibration callers stay cheap.
+    """
     by_machine: dict[Any, list[Assignment]] = {}
     for a in assignments:
         by_machine.setdefault(a.work_center_id, []).append(a)
-    for mc_assigns in by_machine.values():
+    for wc_id, mc_assigns in by_machine.items():
         mc_assigns.sort(key=lambda x: x.start_time)
         for i in range(1, len(mc_assigns)):
-            if mc_assigns[i].start_time < mc_assigns[i - 1].end_time:
+            previous, current = mc_assigns[i - 1], mc_assigns[i]
+            gap = timedelta(0)
+            if ops_by_id is not None and setup_minutes is not None:
+                previous_op = ops_by_id.get(previous.operation_id)
+                current_op = ops_by_id.get(current.operation_id)
+                if previous_op is not None and current_op is not None:
+                    setup = setup_minutes.get(
+                        (wc_id, previous_op.state_id, current_op.state_id),
+                        0,
+                    )
+                    gap = timedelta(minutes=int(setup))
+            if current.start_time < previous.end_time + gap:
                 return True
     return False
+
+
+def _occupancy_conflict_violations(
+    assignments: list[Assignment],
+    dispatch_context: Any,
+) -> list[Any]:
+    """Checker-blind frozen extra-ops still occupy machines/aux (W16-P0-2)."""
+    from synaps.solvers.feasibility_checker import FeasibilityViolation
+
+    if _has_machine_overlap(assignments) or has_aux_capacity_violation(
+        dispatch_context, assignments
+    ):
+        return [
+            FeasibilityViolation(
+                "MACHINE_OVERLAP",
+                "frozen extra-op occupancy overlaps the incumbent",
+            )
+        ]
+    return []
 
 
 def _violates_frozen_precedence(
@@ -2347,6 +2527,40 @@ def _calibrate_sa_temperature(
     return calibrated_temperature, len(positive_deltas)
 
 
+def _earliest_after_frozen_blockers(
+    *,
+    slot_start: float,
+    slot_end: float,
+    work_center_id: Any,
+    required_resource_ids: set[Any],
+    blockers: list[tuple[Assignment, float, float, set[Any]]],
+) -> float | None:
+    """Latest end among frozen extra-ops that overlap ``slot``, else None.
+
+    Taking ``max`` (not the first hit) is required: a short blocker in front
+    of a long one must not pin ``earliest_start`` so the same slot is
+    re-emitted forever (float dust on datetime→minutes).
+    """
+    overlapping_ends = [
+        blocker_end
+        for (
+            blocker_assignment,
+            blocker_start,
+            blocker_end,
+            blocker_resources,
+        ) in blockers
+        if (
+            blocker_assignment.work_center_id == work_center_id
+            or required_resource_ids & blocker_resources
+        )
+        and slot_start < blocker_end
+        and slot_end > blocker_start
+    ]
+    if not overlapping_ends:
+        return None
+    return max(overlapping_ends)
+
+
 def _reanchor_against_frozen(
     assignments: list[Assignment],
     *,
@@ -2441,7 +2655,7 @@ def _reanchor_against_frozen(
 
             slot = None
             current_earliest_start = earliest_start
-            while True:
+            for _ in range(max(1, len(external_frozen_blockers) + 2)):
                 slot = find_earliest_feasible_slot(
                     dispatch_context,
                     scheduled_assignments,
@@ -2452,31 +2666,22 @@ def _reanchor_against_frozen(
                 )
                 if slot is None:
                     break
-
-                conflicting_blocker_end = next(
-                    (
-                        blocker_end
-                        for (
-                            blocker_assignment,
-                            blocker_start,
-                            blocker_end,
-                            blocker_resources,
-                        ) in external_frozen_blockers
-                        if (
-                            blocker_assignment.work_center_id == assignment.work_center_id
-                            or required_resource_ids & blocker_resources
-                        )
-                        and slot.start_offset < blocker_end
-                        and slot.end_offset > blocker_start
-                    ),
-                    None,
+                conflict_end = _earliest_after_frozen_blockers(
+                    slot_start=slot.start_offset,
+                    slot_end=slot.end_offset,
+                    work_center_id=assignment.work_center_id,
+                    required_resource_ids=required_resource_ids,
+                    blockers=external_frozen_blockers,
                 )
-                if conflicting_blocker_end is None:
+                if conflict_end is None:
                     break
-                current_earliest_start = max(
-                    current_earliest_start,
-                    conflicting_blocker_end,
-                )
+                nxt = max(current_earliest_start, conflict_end)
+                if nxt <= current_earliest_start + 1e-9:
+                    slot = None
+                    break
+                current_earliest_start = nxt
+            else:
+                slot = None
             if slot is None:
                 next_pending.append(assignment)
                 continue
@@ -2568,6 +2773,7 @@ def _try_cpsat_repair_lane(
     rejection_reasons: dict[str, int],
     frozen_predecessor_end_offsets: Mapping[Any, float] | None = None,
     frozen_context_operations: list[Any] | None = None,
+    setup_minutes: Mapping[tuple[Any, Any, Any], int] | None = None,
 ) -> tuple[list[Assignment] | None, dict[str, int]]:
     """One CP-SAT micro-repair attempt; returns (assignments|None, counter deltas)."""
     stats = {
@@ -2607,11 +2813,16 @@ def _try_cpsat_repair_lane(
         return None, stats
 
     repaired = list(outcome.assignments)
-    if _has_machine_overlap(frozen + repaired) or _violates_frozen_precedence(
+    if _has_machine_overlap(
+        frozen + repaired,
+        ops_by_id=ops_by_id,
+        setup_minutes=setup_minutes,
+    ) or _violates_frozen_precedence(
         repaired,
         frozen_by_op,
         ops_by_id,
         frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
+        horizon_start=problem.planning_horizon_start,
     ):
         _record_repair_reject(
             rejection_reasons,
@@ -2635,6 +2846,8 @@ def _try_greedy_repair_lane(
     ops_by_id: Mapping[Any, Any],
     rejection_reasons: dict[str, int],
     native_skip_reasons: list[str] | None = None,
+    frozen_predecessor_end_offsets: Mapping[Any, float] | None = None,
+    setup_minutes: Mapping[tuple[Any, Any, Any], int] | None = None,
 ) -> tuple[list[Assignment] | None, dict[str, int]]:
     """One greedy repair attempt; returns (assignments|None, counter deltas)."""
     stats = {
@@ -2659,8 +2872,16 @@ def _try_greedy_repair_lane(
         return None, stats
 
     repaired = list(outcome.assignments)
-    if _has_machine_overlap(frozen + repaired) or _violates_frozen_precedence(
-        repaired, frozen_by_op, ops_by_id
+    if _has_machine_overlap(
+        frozen + repaired,
+        ops_by_id=ops_by_id,
+        setup_minutes=setup_minutes,
+    ) or _violates_frozen_precedence(
+        repaired,
+        frozen_by_op,
+        ops_by_id,
+        frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
+        horizon_start=problem.planning_horizon_start,
     ):
         _record_repair_reject(
             rejection_reasons,
@@ -2693,6 +2914,7 @@ def _attempt_alns_pair_repair(
     native_skip_reasons: list[str] | None = None,
     frozen_predecessor_end_offsets: Mapping[Any, float] | None = None,
     frozen_context_operations: list[Any] | None = None,
+    setup_minutes: Mapping[tuple[Any, Any, Any], int] | None = None,
 ) -> _AlnsRepairAttemptResult:
     """CP-SAT then greedy repair for one ALNS iteration (extracted from ``_solve_core``)."""
     rejection_reasons: dict[str, int] = {}
@@ -2713,6 +2935,7 @@ def _attempt_alns_pair_repair(
             rejection_reasons=rejection_reasons,
             frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
             frozen_context_operations=frozen_context_operations,
+            setup_minutes=setup_minutes,
         )
         if new_assignments is not None:
             repair_used = "cpsat"
@@ -2724,6 +2947,8 @@ def _attempt_alns_pair_repair(
             destroyed_ids=destroyed_ids, ops_by_id=ops_by_id,
             rejection_reasons=rejection_reasons,
             native_skip_reasons=native_skip_reasons,
+            frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
+            setup_minutes=setup_minutes,
         )
         if new_assignments is not None:
             repair_used = "greedy"
@@ -2803,6 +3028,82 @@ class AlnsSolver(BaseSolver):
         _unroll_lane_assignments(result, virtual_to_original)
         return result
 
+    def _final_validate(
+        self,
+        problem: ScheduleProblem,
+        best_assignments: list[Assignment],
+        initial_assignments: list[Assignment],
+        frozen_assignments: list[Assignment],
+        frozen_prec_bad: Any,
+        dispatch_context: Any,
+        checker: Any,
+        sdst: Any,
+        ops_by_id: Any,
+        objective_weights: Any,
+    ) -> tuple[list[Assignment], Any, float, list[Any], bool, bool, str | None]:
+        """Final feasibility validation + recovery (extracted from _solve_core)."""
+        recompute_assignment_setups(best_assignments, dispatch_context)
+        final_obj = _evaluate_objective(problem, best_assignments, sdst, ops_by_id=ops_by_id)
+        final_cost = _objective_cost(final_obj, objective_weights)
+
+        # W16-P0-2: final claim must include frozen context. Otherwise an
+        # incumbent that double-books frozen machine time is returned FEASIBLE
+        # and RHC commits it, poisoning every later window.
+        frozen_precedence_bad = bool(frozen_assignments) and frozen_prec_bad(best_assignments)
+        final_check_assignments = (
+            frozen_assignments + best_assignments if frozen_assignments else best_assignments
+        )
+        violations = _window_notary_violations(
+            problem, final_check_assignments
+        ) + _occupancy_conflict_violations(final_check_assignments, dispatch_context)
+        violations_before_recovery = list(violations)
+        recovery_attempted = len(violations_before_recovery) > 0
+        recovered = False
+        recovery_source: str | None = None
+
+        if recovery_attempted:
+            recovered_assignments = list(initial_assignments)
+            recompute_assignment_setups(recovered_assignments, dispatch_context)
+            recovered_check = (
+                frozen_assignments + recovered_assignments
+                if frozen_assignments
+                else recovered_assignments
+            )
+            recovered_violations = _window_notary_violations(
+                problem, recovered_check
+            ) + _occupancy_conflict_violations(recovered_check, dispatch_context)
+            if not recovered_violations and not (
+                frozen_assignments and frozen_prec_bad(recovered_assignments)
+            ):
+                logger.warning(
+                    "ALNS final incumbent had %d violations; recovering to initial solution",
+                    len(violations_before_recovery),
+                )
+                best_assignments = recovered_assignments
+                final_obj = _evaluate_objective(problem, best_assignments, sdst, ops_by_id=ops_by_id)
+                final_cost = _objective_cost(final_obj, objective_weights)
+                violations = recovered_violations
+                recovered = True
+                recovery_source = "initial_solution"
+            else:
+                logger.warning(
+                    "ALNS final incumbent had %d violations; "
+                    "initial-solution recovery still has %d violations",
+                    len(violations_before_recovery),
+                    len(recovered_violations),
+                )
+
+        return (
+            best_assignments,
+            final_obj,
+            final_cost,
+            violations,
+            violations_before_recovery,
+            frozen_precedence_bad,
+            recovered,
+            recovery_source,
+        )
+
     def _solve_core(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
         t0 = time.monotonic()
 
@@ -2812,6 +3113,7 @@ class AlnsSolver(BaseSolver):
         # wall-clock deadline; time_limit_s always wins.
         _ = kwargs.get("min_iterations")
         time_limit_s: float = float(kwargs.get("time_limit_s", 300))
+        determinism = str(kwargs.get("determinism", "strict"))
         destroy_fraction: float = float(kwargs.get("destroy_fraction", 0.05))
         min_destroy: int = int(kwargs.get("min_destroy", 20))
         max_destroy: int = int(kwargs.get("max_destroy", 300))
@@ -2973,8 +3275,8 @@ class AlnsSolver(BaseSolver):
 
         rng = random.Random(seed)
         n_ops = len(problem.operations)
-        ops_by_id = {op.id: op for op in problem.operations}
-        problem_op_ids = set(ops_by_id.keys())
+        ops_by_id = {op.id: op for op in (*frozen_context_operations, *problem.operations)}
+        problem_op_ids = {op.id for op in problem.operations}
         op_positions = {op.id: index for index, op in enumerate(problem.operations)}
         successors_by_op: dict[UUID, list[UUID]] = {}
         for op in problem.operations:
@@ -3098,6 +3400,20 @@ class AlnsSolver(BaseSolver):
                 seen_warm_start_ids.add(op_id)
             warm_start_supplied_assignments = len(warm_start_assignments)
 
+        def _overlap(asns: list[Assignment]) -> bool:
+            return _has_machine_overlap(
+                asns, ops_by_id=ops_by_id, setup_minutes=dispatch_context.setup_minutes
+            ) or has_aux_capacity_violation(dispatch_context, asns)
+
+        def _frozen_prec_bad(asns: list[Assignment]) -> bool:
+            return _violates_frozen_precedence(
+                asns,
+                frozen_assignments_by_op,
+                ops_by_id,
+                frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
+                horizon_start=problem.planning_horizon_start,
+            )
+
         def _is_valid_complete_schedule(assignments: list[Assignment]) -> bool:
             combined_assignments = (
                 frozen_assignments + assignments if frozen_assignments else assignments
@@ -3105,13 +3421,9 @@ class AlnsSolver(BaseSolver):
             return (
                 len(assignments) == n_ops
                 and len({assignment.operation_id for assignment in assignments}) == n_ops
-                and not _has_machine_overlap(combined_assignments)
+                and not _overlap(combined_assignments)
                 and not _has_precedence_violation(assignments, ops_by_id)
-                and not _violates_frozen_precedence(
-                    assignments,
-                    frozen_assignments_by_op,
-                    ops_by_id,
-                )
+                and not _frozen_prec_bad(assignments)
                 and not checker.check(problem, assignments)
             )
 
@@ -3216,9 +3528,9 @@ class AlnsSolver(BaseSolver):
             elif warm_start_rejected_reason is None:
                 warm_start_rejected_reason = "frozen_greedy_seed_skipped_budget_or_size"
 
-        # Task 24: Native initial seed — fast path using Rust greedy_repair_batch.
-        # Dispatches ALL operations in topological order to earliest-available machines.
-        # If valid → use as initial solution, skip Python GreedyDispatch entirely.
+        # Task 24: Native initial seed — fast complete packing via Rust
+        # greedy_repair_batch. Small-n still tournaments against Python greedy
+        # so ALNS does not start from a worse-than-greedy incumbent.
         if native_initial_seed_enabled and initial_result is None:
             native_initial_seed_attempted = True
             t_native = time.monotonic()
@@ -3251,12 +3563,22 @@ class AlnsSolver(BaseSolver):
                     )
                     if native_seed_valid:
                         recompute_assignment_setups(native_seed_result, dispatch_context)
-                        initial_solver_name = "native_greedy"
-                        native_initial_seed_used = True
+                        initial_solver_name, seed_assignments = _maybe_prefer_python_seed(
+                            problem,
+                            native_seed_result,
+                            n_ops=n_ops,
+                            initial_beam_op_limit=initial_beam_op_limit,
+                            seed_budget_s=_initial_seed_budget_s(),
+                            sdst=sdst,
+                            ops_by_id=ops_by_id,
+                            objective_weights=objective_weights,
+                            is_valid=_is_valid_complete_schedule,
+                        )
+                        native_initial_seed_used = initial_solver_name == "native_greedy"
                         initial_result = ScheduleResult(
                             solver_name=self.name,
                             status=SolverStatus.FEASIBLE,
-                            assignments=native_seed_result,
+                            assignments=seed_assignments,
                         )
                     else:
                         native_initial_seed_fallback_reason = "native_seed_infeasible"
@@ -3870,6 +4192,7 @@ class AlnsSolver(BaseSolver):
                     native_skip_reasons=native_greedy_repair_skip_reasons,
                     frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
                     frozen_context_operations=frozen_context_operations,
+                    setup_minutes=dispatch_context.setup_minutes,
                 )
                 cpsat_repair_attempts += repair_attempt.cpsat_repair_attempts
                 cpsat_repair_ms_total += repair_attempt.cpsat_repair_ms_total
@@ -3923,17 +4246,13 @@ class AlnsSolver(BaseSolver):
                     charge_pair_reject(pair_bandit, selected_pair_idx)
                     feasibility_failures += 1
                     continue
-                if _violates_frozen_precedence(
-                    candidate,
-                    frozen_assignments_by_op,
-                    ops_by_id,
-                ):
+                if _frozen_prec_bad(candidate):
                     from synaps.solvers._alns_mab import charge_pair_reject
 
                     charge_pair_reject(pair_bandit, selected_pair_idx)
                     feasibility_failures += 1
                     continue
-                if _has_machine_overlap(frozen_assignments + candidate):
+                if _overlap(frozen_assignments + candidate):
                     from synaps.solvers._alns_mab import charge_pair_reject
 
                     charge_pair_reject(pair_bandit, selected_pair_idx)
@@ -4100,50 +4419,31 @@ class AlnsSolver(BaseSolver):
                     break
 
         # ------- Phase 4: Final validation -------
-        # Recompute setups from final sequence
-        recompute_assignment_setups(best_assignments, dispatch_context)
-        final_obj = _evaluate_objective(problem, best_assignments, sdst, ops_by_id=ops_by_id)
-        final_cost = _objective_cost(final_obj, objective_weights)
-
-        # Full feasibility check
-        violations = checker.check(problem, best_assignments)
-        final_violations_before_recovery = len(violations)
+        (
+            best_assignments,
+            final_obj,
+            final_cost,
+            violations,
+            violations_before_recovery,
+            frozen_precedence_bad,
+            final_violation_recovered,
+            final_violation_recovery_source,
+        ) = self._final_validate(
+            problem,
+            best_assignments,
+            list(initial_result.assignments),
+            frozen_assignments,
+            _frozen_prec_bad,
+            dispatch_context,
+            checker,
+            sdst,
+            ops_by_id,
+            objective_weights,
+        )
+        final_violations_before_recovery = len(violations_before_recovery)
         final_violation_recovery_attempted = final_violations_before_recovery > 0
-        final_violation_recovered = False
-        final_violation_recovery_source: str | None = None
 
-        if final_violation_recovery_attempted:
-            # Recover to the initial full schedule if the ALNS incumbent is invalid.
-            # This keeps downstream RHC windows from failing due to a rare
-            # end-of-search violation in an otherwise schedulable window.
-            recovered_assignments = list(initial_result.assignments)
-            recompute_assignment_setups(recovered_assignments, dispatch_context)
-            recovered_violations = checker.check(problem, recovered_assignments)
-            if not recovered_violations:
-                logger.warning(
-                    "ALNS final incumbent had %d violations; recovering to initial solution",
-                    final_violations_before_recovery,
-                )
-                best_assignments = recovered_assignments
-                final_obj = _evaluate_objective(
-                    problem,
-                    best_assignments,
-                    sdst,
-                    ops_by_id=ops_by_id,
-                )
-                final_cost = _objective_cost(final_obj, objective_weights)
-                violations = recovered_violations
-                final_violation_recovered = True
-                final_violation_recovery_source = "initial_solution"
-            else:
-                logger.warning(
-                    "ALNS final incumbent had %d violations; "
-                    "initial-solution recovery still has %d violations",
-                    final_violations_before_recovery,
-                    len(recovered_violations),
-                )
-
-        status = SolverStatus.FEASIBLE if not violations else SolverStatus.ERROR
+        status = SolverStatus.FEASIBLE if not violations and not frozen_precedence_bad else SolverStatus.ERROR
 
         elapsed_ms = int((time.monotonic() - t0) * 1000)
 
@@ -4249,6 +4549,11 @@ class AlnsSolver(BaseSolver):
                 "native_initial_seed_ms": native_initial_seed_ms,
                 "native_initial_seed_fallback_reason": native_initial_seed_fallback_reason,
                 **_native_repair_meta_from_skips(native_greedy_repair_skip_reasons),
+                **_alns_wall_clock_honesty_meta(
+                    determinism, bool(time_limit_exhausted_before_search),
+                    iterations_completed, max_iterations,
+                    time.monotonic() - t0, time_limit_s,
+                ),
                 "time_limit_exhausted_before_search": time_limit_exhausted_before_search,
                 "max_no_improve_iters": max_no_improve_iters,
                 "max_no_improve_base_iters": max_no_improve_base_iters,

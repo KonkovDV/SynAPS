@@ -56,6 +56,143 @@ class SolverRoutingDecision:
     reason: str
 
 
+# Long-horizon FJSP practice (L-RHO, ICLR 2025; Graph-RHO, 2026) uses rolling
+# horizon, not monolithic LBBD or ALNS. LBBD-HD is unvalidated at 50k.
+_LONG_HORIZON_OPS = 10_000
+_INDUSTRIAL_OPS = 50_000
+
+
+def _cover_reason(op_count: int, *, feasibility_first: bool) -> str:
+    prefix = "feasibility-first " if feasibility_first else ""
+    return (
+        f"{prefix}long-horizon instance ({op_count} ops) uses coverage-complete "
+        "rolling-horizon greedy; LBBD-HD is unvalidated at this scale and "
+        "monolithic ALNS exceeds the window budget"
+    )
+
+
+def _route_feasibility_first_nominal(
+    op_count: int,
+    latency: int | None,
+) -> SolverRoutingDecision:
+    if latency is not None:
+        if op_count > _LONG_HORIZON_OPS and latency > 300:
+            return SolverRoutingDecision(
+                solver_config="RHC-GREEDY-COVER",
+                reason=_cover_reason(op_count, feasibility_first=True),
+            )
+        if op_count <= _INDUSTRIAL_OPS and latency > 300:
+            return SolverRoutingDecision(
+                solver_config="ALNS-500",
+                reason=(
+                    "feasibility-first runtime policy promotes extended ALNS for large "
+                    f"nominal instances ({op_count} ops) under a 5+ minute budget"
+                ),
+            )
+        if op_count <= _LONG_HORIZON_OPS and latency > 120:
+            return SolverRoutingDecision(
+                solver_config="ALNS-300",
+                reason=(
+                    "feasibility-first runtime policy prefers ALNS over exact nominal "
+                    f"routing for {op_count} ops when latency budget exceeds {latency}s"
+                ),
+            )
+        if op_count >= 100_000 and latency > 600:
+            return SolverRoutingDecision(
+                solver_config="RHC-GREEDY-COVER",
+                reason=(
+                    "feasibility-first runtime policy uses coverage-complete RHC for "
+                    f"{op_count} ops when the latency budget exceeds {latency}s "
+                    "(ALNS refine is deferred until after full coverage)"
+                ),
+            )
+        if op_count > _INDUSTRIAL_OPS and latency > 600:
+            return SolverRoutingDecision(
+                solver_config="RHC-GREEDY-COVER",
+                reason=(
+                    "feasibility-first runtime policy prefers coverage-complete "
+                    f"RHC-GREEDY-COVER for ultra-large nominal instances ({op_count} ops) "
+                    f"under a {latency}s+ latency budget"
+                ),
+            )
+    if op_count > _LONG_HORIZON_OPS:
+        return SolverRoutingDecision(
+            solver_config="RHC-GREEDY",
+            reason=(
+                "feasibility-first runtime policy uses the cheapest "
+                "horizon-decomposed coverage path for "
+                f"{op_count} nominal operations when no generous "
+                "latency hint is present"
+            ),
+        )
+    return SolverRoutingDecision(
+        solver_config="GREED",
+        reason=(
+            "feasibility-first runtime policy trades objective optimality for the "
+            f"fastest nominal feasible coverage path at {op_count} operations"
+        ),
+    )
+
+
+def _route_long_horizon_balanced(
+    op_count: int,
+    latency: int | None,
+) -> SolverRoutingDecision:
+    if latency is not None:
+        if _LONG_HORIZON_OPS < op_count <= _INDUSTRIAL_OPS and latency > 300:
+            return SolverRoutingDecision(
+                solver_config="RHC-GREEDY-COVER",
+                reason=_cover_reason(op_count, feasibility_first=False),
+            )
+        if op_count <= _INDUSTRIAL_OPS and latency > 300:
+            return SolverRoutingDecision(
+                solver_config="ALNS-500",
+                reason=(
+                    f"large nominal instance ({op_count} ops) with 5+ minute budget "
+                    "benefits from extended ALNS (500 iterations, micro-CP-SAT repair)"
+                ),
+            )
+        if op_count <= _LONG_HORIZON_OPS and latency > 120:
+            return SolverRoutingDecision(
+                solver_config="ALNS-300",
+                reason=(
+                    f"nominal instance ({op_count} ops) with generous latency budget "
+                    f"(>{latency}s) benefits from ALNS metaheuristic with "
+                    "adaptive destroy/repair over rigid decomposition"
+                ),
+            )
+        if op_count >= 100_000 and latency > 600:
+            return SolverRoutingDecision(
+                solver_config="RHC-ALNS-100K",
+                reason=(
+                    f"ultra-large nominal instance ({op_count} ops) with 10+ minute budget "
+                    "benefits from the named 100K RHC-ALNS profile "
+                    "(300/90 geometry, bounded search-entry settings)"
+                ),
+            )
+        if op_count > _INDUSTRIAL_OPS and latency > 600:
+            return SolverRoutingDecision(
+                solver_config="RHC-ALNS",
+                reason=(
+                    f"ultra-large nominal instance ({op_count} ops) with 10+ minute budget "
+                    "benefits from Receding Horizon Control with ALNS inner solver "
+                    "(temporal decomposition into ≤5000 ops/window)"
+                ),
+            )
+    if op_count > _LONG_HORIZON_OPS:
+        return SolverRoutingDecision(
+            solver_config="RHC-GREEDY-COVER",
+            reason=_cover_reason(op_count, feasibility_first=False),
+        )
+    return SolverRoutingDecision(
+        solver_config="LBBD-10-HD",
+        reason=(
+            "industrial-scale nominal instance (>500 ops) routed to hierarchical LBBD "
+            "with balanced partitioning, greedy warm-start, and parallel subproblems"
+        ),
+    )
+
+
 def route_solver_config(
     problem: ScheduleProblem,
     *,
@@ -77,6 +214,44 @@ def route_solver_config(
     setup_density = profile.nonzero_setup_density
     resource_contention = profile.resource_contention
     precedence_depth = profile.precedence_depth
+
+    if ctx.exact_required:
+        if op_count <= 40:
+            return SolverRoutingDecision(
+                solver_config="CPSAT-10",
+                reason="exact solve explicitly required and the instance remains small",
+            )
+        if op_count <= 120:
+            return SolverRoutingDecision(
+                solver_config="CPSAT-30",
+                reason=(
+                    "exact solve explicitly required and the instance remains within "
+                    "the CP-SAT comfort zone"
+                ),
+            )
+        if op_count <= 500:
+            return SolverRoutingDecision(
+                solver_config="LBBD-10",
+                reason=(
+                    "exactness requested on a larger instance, so decomposition is the "
+                    "smallest sound path"
+                ),
+            )
+        if op_count <= 50_000:
+            return SolverRoutingDecision(
+                solver_config="LBBD-10-HD",
+                reason=(
+                    "industrial-scale exact solve via hierarchical LBBD with balanced "
+                    "partitioning (≤200 ops/cluster)"
+                ),
+            )
+        return SolverRoutingDecision(
+            solver_config="LBBD-20-HD",
+            reason=(
+                "ultra-large exact solve (50k+ ops) via extended hierarchical LBBD "
+                "with tighter convergence and smaller clusters"
+            ),
+        )
 
     if ctx.preferred_max_latency_s is not None and ctx.preferred_max_latency_s <= 1:
         # Beam search produces better SDST solutions within the latency budget
@@ -168,44 +343,6 @@ def route_solver_config(
             ),
         )
 
-    if ctx.exact_required:
-        if op_count <= 40:
-            return SolverRoutingDecision(
-                solver_config="CPSAT-10",
-                reason="exact solve explicitly required and the instance remains small",
-            )
-        if op_count <= 120:
-            return SolverRoutingDecision(
-                solver_config="CPSAT-30",
-                reason=(
-                    "exact solve explicitly required and the instance remains within "
-                    "the CP-SAT comfort zone"
-                ),
-            )
-        if op_count <= 500:
-            return SolverRoutingDecision(
-                solver_config="LBBD-10",
-                reason=(
-                    "exactness requested on a larger instance, so decomposition is the "
-                    "smallest sound path"
-                ),
-            )
-        if op_count <= 50_000:
-            return SolverRoutingDecision(
-                solver_config="LBBD-10-HD",
-                reason=(
-                    "industrial-scale exact solve via hierarchical LBBD with balanced "
-                    "partitioning (≤200 ops/cluster)"
-                ),
-            )
-        return SolverRoutingDecision(
-            solver_config="LBBD-20-HD",
-            reason=(
-                "ultra-large exact solve (50k+ ops) via extended hierarchical LBBD "
-                "with tighter convergence and smaller clusters"
-            ),
-        )
-
     latency = ctx.preferred_max_latency_s
 
     if (
@@ -213,60 +350,7 @@ def route_solver_config(
         and ctx.regime is SolveRegime.NOMINAL
         and op_count > 120
     ):
-        if latency is not None:
-            if op_count <= 10_000 and latency > 120:
-                return SolverRoutingDecision(
-                    solver_config="ALNS-300",
-                    reason=(
-                        "feasibility-first runtime policy prefers ALNS over exact nominal "
-                        f"routing for {op_count} ops when latency budget exceeds {latency}s"
-                    ),
-                )
-            if op_count <= 50_000 and latency > 300:
-                return SolverRoutingDecision(
-                    solver_config="ALNS-500",
-                    reason=(
-                        "feasibility-first runtime policy promotes extended ALNS for large "
-                        f"nominal instances ({op_count} ops) under a 5+ minute budget"
-                    ),
-                )
-            if op_count >= 100_000 and latency > 600:
-                return SolverRoutingDecision(
-                    solver_config="RHC-GREEDY-COVER",
-                    reason=(
-                        "feasibility-first runtime policy uses coverage-complete RHC for "
-                        f"{op_count} ops when the latency budget exceeds {latency}s "
-                        "(ALNS refine is deferred until after full coverage)"
-                    ),
-                )
-            if op_count > 50_000 and latency > 600:
-                return SolverRoutingDecision(
-                    solver_config="RHC-GREEDY-COVER",
-                    reason=(
-                        "feasibility-first runtime policy prefers coverage-complete "
-                        f"RHC-GREEDY-COVER for ultra-large nominal instances ({op_count} ops) "
-                        f"under a {latency}s+ latency budget"
-                    ),
-                )
-
-        if op_count > 50_000:
-            return SolverRoutingDecision(
-                solver_config="RHC-GREEDY",
-                reason=(
-                    "feasibility-first runtime policy uses the cheapest "
-                    "horizon-decomposed coverage path for "
-                    f"{op_count} nominal operations when no generous "
-                    "latency hint is present"
-                ),
-            )
-
-        return SolverRoutingDecision(
-            solver_config="GREED",
-            reason=(
-                "feasibility-first runtime policy trades objective optimality for the "
-                f"fastest nominal feasible coverage path at {op_count} operations"
-            ),
-        )
+        return _route_feasibility_first_nominal(op_count, latency)
 
     if op_count <= 20 and wc_count <= 5 and not has_aux_constraints:
         return SolverRoutingDecision(
@@ -318,62 +402,8 @@ def route_solver_config(
             ),
         )
 
-    # ---- ALNS / RHC routing for large NOMINAL instances ----
-    # When the latency budget is generous, ALNS/RHC offer better anytime
-    # behavior than LBBD-HD for non-exact solves.
-    if not ctx.exact_required and latency is not None:
-        if op_count <= 10_000 and latency > 120:
-            return SolverRoutingDecision(
-                solver_config="ALNS-300",
-                reason=(
-                    f"nominal instance ({op_count} ops) with generous latency budget "
-                    f"(>{latency}s) benefits from ALNS metaheuristic with "
-                    "adaptive destroy/repair over rigid decomposition"
-                ),
-            )
-        if op_count <= 50_000 and latency > 300:
-            return SolverRoutingDecision(
-                solver_config="ALNS-500",
-                reason=(
-                    f"large nominal instance ({op_count} ops) with 5+ minute budget "
-                    "benefits from extended ALNS (500 iterations, micro-CP-SAT repair)"
-                ),
-            )
-        if op_count >= 100_000 and latency > 600:
-            return SolverRoutingDecision(
-                solver_config="RHC-ALNS-100K",
-                reason=(
-                    f"ultra-large nominal instance ({op_count} ops) with 10+ minute budget "
-                    "benefits from the named 100K RHC-ALNS profile "
-                    "(300/90 geometry, bounded search-entry settings)"
-                ),
-            )
-        if op_count > 50_000 and latency > 600:
-            return SolverRoutingDecision(
-                solver_config="RHC-ALNS",
-                reason=(
-                    f"ultra-large nominal instance ({op_count} ops) with 10+ minute budget "
-                    "benefits from Receding Horizon Control with ALNS inner solver "
-                    "(temporal decomposition into ≤5000 ops/window)"
-                ),
-            )
-
-    if op_count <= 50_000:
-        return SolverRoutingDecision(
-            solver_config="LBBD-10-HD",
-            reason=(
-                "industrial-scale nominal instance (>500 ops) routed to hierarchical LBBD "
-                "with balanced partitioning, greedy warm-start, and parallel subproblems"
-            ),
-        )
-
-    return SolverRoutingDecision(
-        solver_config="LBBD-20-HD",
-        reason=(
-            "ultra-large nominal instance (50k+ ops) routed to extended hierarchical LBBD "
-            "with tighter convergence, smaller clusters, and 20-iteration budget"
-        ),
-    )
+    # Long-horizon NOMINAL: rolling-horizon coverage above 10k ops.
+    return _route_long_horizon_balanced(op_count, latency)
 
 
 def select_solver(
@@ -421,8 +451,14 @@ def select_solver(
                                 ),
                             ),
                         )
-                    except (KeyError, ValueError):
-                        pass  # advisory recommended unknown config — fall through
+                    except (KeyError, ValueError) as exc:
+                        deterministic = SolverRoutingDecision(
+                            solver_config=deterministic.solver_config,
+                            reason=(
+                                f"{deterministic.reason}; ML advisory rejected "
+                                f"({type(exc).__name__})"
+                            ),
+                        )
         except ImportError:
             pass  # ml_advisory module not available — use deterministic
 

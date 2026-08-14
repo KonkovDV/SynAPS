@@ -10,6 +10,34 @@ import pytest
 
 from synaps import accelerators
 
+# Capture the real extension before any test replaces sys.modules["synaps_native"]
+# with a SimpleNamespace. C-extensions cannot be reliably re-inited after that.
+try:
+    _REAL_SYNAPS_NATIVE = importlib.import_module("synaps_native")
+except Exception:
+    _REAL_SYNAPS_NATIVE = None
+
+
+def _restore_real_native_accelerators() -> None:
+    """Put the real native module back and rebind accelerator kernels.
+
+    Reload tests that inject a fake ``synaps_native`` must not leave
+    ``accelerators._native_greedy_repair_batch is None`` for later files
+    (ALNS native seed/repair, grain tests).
+    """
+    if _REAL_SYNAPS_NATIVE is not None:
+        sys.modules["synaps_native"] = _REAL_SYNAPS_NATIVE
+    else:
+        sys.modules.pop("synaps_native", None)
+    importlib.reload(accelerators)
+
+
+@pytest.fixture(autouse=True)
+def _restore_native_after_each_test() -> None:
+    yield
+    if accelerators._native_greedy_repair_batch is None and _REAL_SYNAPS_NATIVE is not None:
+        _restore_real_native_accelerators()
+
 
 def _rhc_pressure_tolerance() -> dict[str, float]:
     """Allow native fast_exp approximation while keeping Python exact."""
@@ -499,8 +527,7 @@ def test_reload_discovers_native_rhc_candidate_backend(
         assert slacks == [1.0]
         assert pressures == [2.0]
     finally:
-        monkeypatch.delitem(sys.modules, "synaps_native", raising=False)
-        importlib.reload(accelerators)
+        _restore_real_native_accelerators()
 
 
 def test_disable_native_acceleration_env_wins_over_available_module(
@@ -528,8 +555,61 @@ def test_disable_native_acceleration_env_wins_over_available_module(
         assert status["native_module"] is None
     finally:
         monkeypatch.delenv("SYNAPS_DISABLE_NATIVE_ACCELERATION", raising=False)
-        monkeypatch.delitem(sys.modules, "synaps_native", raising=False)
-        importlib.reload(accelerators)
+        _restore_real_native_accelerators()
+
+
+_ALL_NATIVE_KERNEL_ATTRS = (
+    "_native_compute_atcs_log_score",
+    "_native_compute_atcs_log_scores_batch",
+    "_native_resource_capacity_window_is_feasible",
+    "_native_compute_rhc_candidate_metrics_batch",
+    "_native_compute_rhc_candidate_metrics_batch_np",
+    "_native_compute_rhc_candidate_metrics_batch_np_jagged",
+    "_native_evaluate_objective_batch",
+    "_native_stabilize_temporal_batch",
+    "_native_sdst_batch_lookup_cls",
+    "_native_compute_destroy_worst_scores",
+    "_native_greedy_repair_batch",
+)
+
+
+def test_native_available_matches_native_module_and_includes_greedy() -> None:
+    """A15-P2: native_available and native_module share the full-kernel OR."""
+    status = accelerators.get_acceleration_status()
+    assert status["native_available"] is (status["native_module"] is not None)
+    assert "greedy_repair_batch" in status["native_kernels"]
+    assert status["native_kernels"]["greedy_repair_batch"] is (
+        status["greedy_repair_batch_backend"] == "native"
+    )
+
+
+def test_native_available_true_when_only_greedy_repair_loaded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in _ALL_NATIVE_KERNEL_ATTRS:
+        monkeypatch.setattr(accelerators, name, None)
+    monkeypatch.setattr(accelerators, "_native_greedy_repair_batch", object())
+    status = accelerators.get_acceleration_status()
+    assert status["native_available"] is True
+    assert status["native_module"] == "synaps_native"
+    assert status["greedy_repair_batch_backend"] == "native"
+
+
+def test_native_greedy_empty_csr_fails_closed() -> None:
+    """Empty eligible CSR must not invent machine 0 with a 1e6 penalty."""
+    pytest.importorskip("synaps_native", reason="native module not built")
+    result = accelerators.greedy_repair_batch_native(
+        base_durations=np.array([10.0]),
+        predecessor_indices=np.array([-1], dtype=np.int64),
+        eligible_offsets=np.array([0, 0], dtype=np.int64),
+        eligible_indices=np.array([], dtype=np.int64),
+        state_ids=np.array([0], dtype=np.int64),
+        sdst_setup_flat=np.zeros(2, dtype=np.float64),
+        n_wc=2,
+        n_states=1,
+        speed_factors=np.array([1.0, 10.0]),
+    )
+    assert result is None
 
 
 def test_synaps_engine_load_graph_builds_successor_index() -> None:

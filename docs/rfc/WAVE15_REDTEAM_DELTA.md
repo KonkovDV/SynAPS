@@ -7,8 +7,31 @@
 | ID | Sev | Hole | Close |
 |----|-----|------|-------|
 | **A15-P0-1** | P0 | RHC claimed `FEASIBLE` when `scheduled_count == total_ops`, without a final `FeasibilityChecker` | `finalize_rhc_claim_status`: proven hard violations ⇒ `ERROR`; metadata `notary_hard_violation_*` |
+| **A15-P0-2** | P0 | ALNS cleared pred + offset path dead without `horizon_start` | Pass `horizon_start` + offsets at every `_violates_frozen_precedence` site; merge frozen context ops into `ops_by_id` |
+| **A15-P0-3** | P0 | ALNS `_has_machine_overlap` vs frozen ignored SDST | Optional setup-aware gap; wired on accept / repair lanes |
 | **A15-P0-4** | P0 | Stabilize hit `max_passes` with residual shifts and RHC still said `FEASIBLE` | `stabilize_temporal_consistency` returns `converged`; RHC requires `converged==1` |
 | **A15-P0-5** | P0 | `repair_schedule(..., disrupted_op_ids=[])` would legalize a forged base | `_repair_merged_kwargs` refuses empty disruption (after the RT-20 identity-kwargs guard) |
+| **A15-P1-1** | P1 | `exact_required` lost to INTERACTIVE / latency≤1 | Exact branch runs first |
+| **A15-P1-2** | P1 | CPSAT-30 name vs clamp | `effective_time_limit_s` next to `solver_time_limit_s`; config name unchanged |
+| **A15-P1-3** | P1 | ALNS-300 shadowed ALNS-500 at 5k@400s | Check the 300s/ALNS-500 tier first |
+| **A15-P1-4** | P1 | Replay top-level `feasible` followed solver status | `feasible == verification.feasible` (False when not performed) |
+| **A15-P1-5** | P1 | Replay missing seed / kwargs fingerprint | `random_seed` + `config_fingerprint` on runtime/benchmark artifacts |
+| **A15-P1-6** | P1 | Final RHC stabilize moved earlier windows | `immutable_op_ids` = ops committed before the last window |
+| **A15-P1-7** | P1 | Commit precedence gate off outside SEARCH_COVER | Covered by P0-1 final notary |
+| **A15-P1-8** | P1 | Offset path dead without horizon | Same close as P0-2 |
+| **A15-P1-9** | P1 | Soft resource wall vs search box | `search_time_limit_is_solver_box`; resource `timeout_s` is a separate wall |
+| **A15-P1-10** | P1 | SynAPS Operation is a chain | GridPlan fan-in already fail-closed in the notary; no ingest reject (would break legal multi-pred jobs) |
+| **A15-P2** | P2 | Wall-clock ALNS/RHC; native greedy `eligible=[]` vs all; accel OR-mask; advisory swallow | Native CSR expands empty eligible to all WCs; empty CSR fail-closed (no machine-0 + 1e6). `native_available` / `native_module` share the full-kernel OR (includes greedy_repair). ALNS/RHC publish `wall_clock_path_dependent` + `determinism_violated` when wall stops a strict run. Unknown ML solver name is stamped on the routing reason. |
+| **W16b-1** | P0 | `proven_hard_violations` demoted setup gaps on unproven lanes → false-FEASIBLE | Demotion removed; `LANE_INFERENCE_UNPROVEN` now surfaces as a hard violation making the claim UNKNOWN. |
+| **W16b-3** | P1 | RHC `_evaluate_final` was lane-blind and undercounted tardiness for unscheduled orders | Delegates to `synaps.objective.evaluate` (lane-aware setup, horizon-anchored tardiness). |
+| **W16-C6** | P0 | Native `greedy_repair` silently rejected after window 1 (`UNKNOWN_OPERATION` on frozen extras) and was aux-blind | Skip aux/parallel; filter UNKNOWN on extra-ops; record `validation_failed`. |
+| **W16-C2/3** | P0 | Stabilize created aux/horizon violations | Ceiling guard + aux relocate; chain-depth pass budget. |
+| **W16-C4** | P0 | Reanchor aux-blind vs committed reservations | Fail closed when merged schedule is aux-dirty. |
+| **W16-C5** | P1 | ALNS accept ignored aux | `_overlap` includes aux sweep; native seed skipped when aux/parallel. |
+| **W16-C7** | P1 | IncrementalRepair ERROR on `max_parallel>1` | Lane virtualization + unroll. |
+| **W16-C8/10** | P1 | Horizon extension claimed FEASIBLE; notary vs oracle skew | Placement may extend; claim uses original horizon + `exhaustive=True`. |
+| **W16-C11** | P0 | ALNS `_reanchor_against_frozen` `while True` on stacked frozen extra-ops (float dust / first-hit blocker) hung full pytest ~37% | Bounded loop; jump by `max` overlapping end; abort if earliest-start does not increase |
+| **W16-C13** | P1 | `test_accelerators` fake-`synaps_native` left kernels None for later files | Restore real extension + reload accelerators after each poison test |
 
 Probes: `tests/test_algebra_rt15_probes.py`. Prior RT-20 probes remain green.
 
@@ -18,19 +41,12 @@ and temporal stabilization converged. Coverage alone is not feasibility.
 
 Portfolio `solve_schedule(..., verify_feasibility=True)` already raised `PortfolioValidationError` on a dirty notary; this closes the **direct** `RhcSolver().solve` path that GridPlan does not always wrap.
 
-## Left honest (do not claim closed)
+ALNS already demotes to `ERROR` when its own final `FeasibilityChecker` is nonempty.
 
-| ID | Why it stays open |
-|----|-------------------|
-| **A15-P0-2** | ALNS/RHC predecessor-clear vs frozen succ-before-pred. Needs restored-graph check or never clearing those edges. Separate composition patch. |
-| **A15-P0-3** | ALNS `_has_machine_overlap` vs frozen is not setup-aware (`end_frozen == start_free` with setup>0). |
-| **A15-P1-1…10** | Router `exact_required`, CPSAT-30 name vs clamp, ALNS tier shadowing, replay fields, stabilize of committed windows, fan-in DAG. |
-| **P2** | Wall-clock ALNS/RHC nondeterminism; native greedy `eligible=[]` vs all; accel OR-mask. |
-
-ALNS already demotes to `ERROR` when its own final `FeasibilityChecker` is nonempty (unlike RHC before this pass).
+Do not claim bitwise-identical ALNS/RHC under a wall-clock timeout: remaining repair budget still depends on `time.monotonic()`. The P2 close makes that visible (`wall_clock_path_dependent`) instead of leaving it as an implicit seed contract.
 
 ## GridPlan pairing
 
-GridPlan 0.1.12 pins this SynAPS commit. Domain-layer RT-21 (G7–G15) lives in the GridPlan repo: notary `release_date` / `eligible_crew_ids` / `SHORT_DURATION`, FIFO freeze pin, `job.priority`, replan job-set identity. G11 last-window-wins remains residual.
+GridPlan pairs this SynAPS tree: G11 per-op outage windows (`Operation.earliest_start` / `latest_finish`, Order = union), notary for `shift_calendar` / `availability` / `safety_constraints` / `service_area`, travel default 30 removed (empty matrix = 0; partial matrix fail-closed).
 
 Not N-1. Not SAIDI. Heuristics never `OPTIMAL`.

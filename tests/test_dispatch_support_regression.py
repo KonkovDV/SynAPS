@@ -47,6 +47,40 @@ def test_machine_index_setup_windows_tolerate_missing_predecessor_operation(
     assert setup_windows[known_operation.id] == 30.0
 
 
+def test_machine_index_incremental_setup_windows_match_full_recompute(
+    simple_problem: ScheduleProblem,
+) -> None:
+    """Adding after a cache hit must match a cold full recompute."""
+    context = build_dispatch_context(simple_problem)
+    machine_id = simple_problem.work_centers[0].id
+    ops = simple_problem.operations[:3]
+    incremental = MachineIndex(context)
+    for index, operation in enumerate(ops):
+        incremental.add(
+            Assignment(
+                operation_id=operation.id,
+                work_center_id=machine_id,
+                start_time=HORIZON_START + timedelta(minutes=index * 40),
+                end_time=HORIZON_START + timedelta(minutes=index * 40 + 20),
+                setup_minutes=0,
+            )
+        )
+        incremental.get_setup_window_starts()
+
+    cold = MachineIndex(context)
+    for index, operation in enumerate(ops):
+        cold.add(
+            Assignment(
+                operation_id=operation.id,
+                work_center_id=machine_id,
+                start_time=HORIZON_START + timedelta(minutes=index * 40),
+                end_time=HORIZON_START + timedelta(minutes=index * 40 + 20),
+                setup_minutes=0,
+            )
+        )
+    assert incremental.get_setup_window_starts() == cold.get_setup_window_starts()
+
+
 def test_recompute_assignment_setups_tolerates_missing_previous_operation(
     simple_problem: ScheduleProblem,
 ) -> None:

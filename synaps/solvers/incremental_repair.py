@@ -21,22 +21,12 @@ from synaps.solvers._dispatch_support import (
     find_earliest_feasible_slot,
     recompute_assignment_setups,
 )
+from synaps.solvers._time_windows import operation_earliest_offset_minutes
+from synaps.solvers.feasibility_checker import FeasibilityChecker, proven_hard_violations
 
 if TYPE_CHECKING:
     from datetime import datetime
     from uuid import UUID
-
-    from synaps.model import Order
-
-
-def _release_floor(order: "Order", horizon_start: "datetime") -> float:
-    """M1 hard rule (FeasibilityChecker): an operation may not start before its
-    order's release_date. Repair must respect the same bound as GreedyDispatch,
-    otherwise the repaired plan is rejected by the downstream validator."""
-    release = getattr(order, "release_date", None)
-    if release is None:
-        return 0.0
-    return max(0.0, (release - horizon_start).total_seconds() / 60.0)
 
 
 def _total_tardiness(
@@ -197,6 +187,28 @@ class IncrementalRepair(BaseSolver):
         return "incremental_repair"
 
     def solve(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
+        from synaps.solvers.greedy_dispatch import (
+            _map_assignments_onto_virtual_lanes,
+            _unroll_lane_assignments,
+            _virtualize_parallel_lanes,
+        )
+
+        virtual_problem, virtual_to_original = _virtualize_parallel_lanes(problem)
+        if not virtual_to_original:
+            return self._solve_core(problem, **kwargs)
+        mapped_kwargs = dict(kwargs)
+        mapped_kwargs["base_assignments"] = _map_assignments_onto_virtual_lanes(
+            list(kwargs.get("base_assignments") or []),
+            virtual_to_original,
+        )
+        result = self._solve_core(virtual_problem, **mapped_kwargs)
+        _unroll_lane_assignments(result, virtual_to_original)
+        if result.metadata is None:
+            result.metadata = {}
+        result.metadata["parallel_virtualization"] = True
+        return result
+
+    def _solve_core(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
         t0 = time.monotonic()
 
         # Required kwargs
@@ -213,25 +225,6 @@ class IncrementalRepair(BaseSolver):
                 solver_name=self.name,
                 status=SolverStatus.ERROR,
                 metadata={"error": "base_assignments required"},
-            )
-
-        parallel_wcs = [
-            work_center.code
-            for work_center in problem.work_centers
-            if int(getattr(work_center, "max_parallel", 1) or 1) > 1
-        ]
-        if parallel_wcs:
-            return ScheduleResult(
-                solver_name=self.name,
-                status=SolverStatus.ERROR,
-                metadata={
-                    "error": (
-                        "IncrementalRepair does not virtualize max_parallel>1 "
-                        f"(work centers: {', '.join(parallel_wcs)}); refuse loudly "
-                        "(Wave 11 / H2)."
-                    ),
-                    "unsupported_max_parallel_work_centers": parallel_wcs,
-                },
             )
 
         orders_by_id = {o.id: o for o in problem.orders}
@@ -317,7 +310,11 @@ class IncrementalRepair(BaseSolver):
 
                 earliest_start = max(
                     predecessor_end,
-                    _release_floor(orders_by_id[operation.order_id], horizon_start),
+                    operation_earliest_offset_minutes(
+                        operation,
+                        orders_by_id[operation.order_id],
+                        horizon_start,
+                    ),
                 )
 
                 eligible = (
@@ -433,8 +430,21 @@ class IncrementalRepair(BaseSolver):
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         unrepaired_ids = [operation.id for operation in remaining_repair]
         # Wave 11 / C2: never claim FEASIBLE while neighbourhood ops remain unrepaired.
+        # W16-P1: never claim FEASIBLE without a final notary pass — a timed-out
+        # CP-SAT fallback incumbent can overlap greedy-placed ops.
+        final_violations = proven_hard_violations(
+            [
+                violation
+                for violation in FeasibilityChecker().check(
+                    problem, all_assignments, exhaustive=True
+                )
+                if violation.kind != "UNKNOWN_OPERATION"
+            ]
+        )
         status = (
-            SolverStatus.INFEASIBLE if unrepaired_ids else SolverStatus.FEASIBLE
+            SolverStatus.FEASIBLE
+            if not unrepaired_ids and not final_violations
+            else SolverStatus.INFEASIBLE
         )
 
         return ScheduleResult(

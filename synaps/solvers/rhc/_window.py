@@ -319,6 +319,11 @@ def reanchor_inner_assignments(
     if pending_assignments:
         return [], 0
 
+    from synaps.solvers._dispatch_support import has_aux_capacity_violation
+
+    if has_aux_capacity_violation(dispatch_context, scheduled_assignments):
+        return [], 0
+
     changed_assignment_count = sum(
         1
         for assignment in reanchored_assignments
@@ -446,52 +451,263 @@ def detect_cross_window_stable_ops(
 # ---------------------------------------------------------------------------
 
 
-def stabilize_temporal_consistency(
-    assignments: list[Assignment],
+def _ceiling_end_for_op(operation: Any, horizon_end: datetime | None) -> datetime | None:
+    latest = getattr(operation, "latest_finish", None) if operation is not None else None
+    if latest is None:
+        return horizon_end
+    if horizon_end is None:
+        return latest
+    return min(latest, horizon_end)
+
+
+def _apply_later_shift(
+    assignment: Assignment,
+    required_start: datetime,
+    ceiling_end: datetime | None,
+) -> int:
+    """Shift later to ``required_start``. 0=no-op, 1=shifted, -1=ceiling block."""
+    if assignment.start_time >= required_start:
+        return 0
+    new_end = required_start + (assignment.end_time - assignment.start_time)
+    if ceiling_end is not None and new_end > ceiling_end:
+        return -1
+    delta = required_start - assignment.start_time
+    assignment.start_time += delta
+    assignment.end_time += delta
+    return 1
+
+
+def _shift_later_for_precedence(
+    topo_order: list[UUID],
+    *,
+    ops_by_id: Mapping[UUID, Operation],
+    assignment_by_op: dict[UUID, Assignment],
+    immutable_op_ids: set[UUID],
+    horizon_end: datetime | None = None,
+) -> tuple[int, int]:
+    shifts = 0
+    blocks = 0
+    for op_id in topo_order:
+        if op_id in immutable_op_ids:
+            continue
+        operation = ops_by_id.get(op_id)
+        if operation is None or operation.predecessor_op_id is None:
+            continue
+        predecessor_assignment = assignment_by_op.get(operation.predecessor_op_id)
+        current_assignment = assignment_by_op.get(op_id)
+        if predecessor_assignment is None or current_assignment is None:
+            continue
+        outcome = _apply_later_shift(
+            current_assignment,
+            predecessor_assignment.end_time,
+            None,
+        )
+        if outcome > 0:
+            shifts += 1
+        elif outcome < 0:
+            blocks += 1
+    return shifts, blocks
+
+
+def _shift_later_for_machine_setup(
+    assignment_by_op: dict[UUID, Assignment],
     *,
     ops_by_id: Mapping[UUID, Operation],
     setup_minutes: Mapping[tuple[UUID, UUID, UUID], int],
-    max_passes: int = 8,
-) -> dict[str, int]:
-    """Repair residual precedence and machine/setup conflicts in-place.
+    immutable_op_ids: set[UUID],
+    horizon_end: datetime | None = None,
+) -> tuple[int, int]:
+    shifts = 0
+    blocks = 0
+    assignments_by_machine: dict[UUID, list[Assignment]] = defaultdict(list)
+    for assignment in assignment_by_op.values():
+        assignments_by_machine[assignment.work_center_id].append(assignment)
 
-    Forward-only and bounded: each pass walks the topologically ordered
-    operations and shifts later, never earlier. Two kinds of shifts are
-    accounted for:
+    for work_center_id, machine_assignments in assignments_by_machine.items():
+        machine_assignments.sort(key=lambda assignment: assignment.start_time)
+        previous_assignment: Assignment | None = None
+        for current_assignment in machine_assignments:
+            if previous_assignment is None:
+                previous_assignment = current_assignment
+                continue
+            if current_assignment.operation_id in immutable_op_ids:
+                previous_assignment = current_assignment
+                continue
 
-    * ``precedence_shifts`` — current op starts before its predecessor
-      ends; shift forward by the deficit.
-    * ``machine_shifts`` — within the same work center, current op
-      starts before the previous op's end + required setup; shift
-      forward by the deficit.
+            previous_operation = ops_by_id.get(previous_assignment.operation_id)
+            current_operation = ops_by_id.get(current_assignment.operation_id)
+            required_setup = 0
+            if previous_operation is not None and current_operation is not None:
+                required_setup = setup_minutes.get(
+                    (
+                        work_center_id,
+                        previous_operation.state_id,
+                        current_operation.state_id,
+                    ),
+                    0,
+                )
 
-    The pass converges when neither shift type fires. Termination is
-    guaranteed because shifts are monotone forward and bounded by the
-    horizon, but we cap the number of passes at ``max_passes`` for
-    defense in depth.
+            required_start = previous_assignment.end_time + timedelta(minutes=required_setup)
+            outcome = _apply_later_shift(
+                current_assignment,
+                required_start,
+                _ceiling_end_for_op(current_operation, horizon_end),
+            )
+            if outcome > 0:
+                shifts += 1
+            elif outcome < 0:
+                blocks += 1
+            previous_assignment = current_assignment
+    return shifts, blocks
 
-    Returns ``{"passes", "precedence_shifts", "machine_shifts", "converged"}``.
-    ``converged`` is ``1`` when a pass made no shifts (or the list is empty),
-    ``0`` when the pass cap was hit while shifts were still occurring
-    (A15-P0-4: caller must not claim FEASIBLE).
 
-    This function mutates ``Assignment`` objects in ``assignments``
-    in place; that is intentional and is the function's sole side
-    effect.
-    """
-    if not assignments:
-        return {
-            "passes": 0,
-            "precedence_shifts": 0,
-            "machine_shifts": 0,
-            "converged": 1,
-        }
+def _relocate_one_aux_assignment(
+    assignment: Assignment,
+    *,
+    assignments: list[Assignment],
+    dispatch_context: Any,
+    ops_by_id: Mapping[UUID, Operation],
+    horizon_end: datetime | None,
+    helpers: Any,
+) -> int:
+    """0=already feasible, 1=shifted, -1=blocked."""
+    (
+        assignment_setup_window_starts,
+        candidate_starts,
+        offset_minutes,
+        resource_is_feasible,
+        resource_windows_by_resource,
+    ) = helpers
+    others = [item for item in assignments if item.operation_id != assignment.operation_id]
+    requirements = dispatch_context.requirements_by_op.get(assignment.operation_id, [])
+    required_ids = {requirement.aux_resource_id for requirement in requirements}
+    setup_starts = assignment_setup_window_starts(dispatch_context, others)
+    windows = resource_windows_by_resource(dispatch_context, others, setup_starts, required_ids)
+    start_offset = offset_minutes(dispatch_context, assignment, end=False)
+    end_offset = offset_minutes(dispatch_context, assignment, end=True)
+    duration = end_offset - start_offset
+    setup_minutes = int(assignment.setup_minutes or 0)
+    if resource_is_feasible(
+        dispatch_context, windows, assignment.operation_id, start_offset, end_offset, setup_minutes
+    ):
+        return 0
+    ceiling = _ceiling_end_for_op(ops_by_id.get(assignment.operation_id), horizon_end)
+    latest = float("inf")
+    if ceiling is not None:
+        latest = ((ceiling - dispatch_context.horizon_start).total_seconds() / 60.0) - duration
+    for candidate in candidate_starts(
+        dispatch_context,
+        others,
+        assignment.operation_id,
+        start_offset,
+        latest,
+        setup_minutes,
+        resource_windows_by_resource=windows,
+    ):
+        if candidate < start_offset - 1e-9:
+            continue
+        if not resource_is_feasible(
+            dispatch_context,
+            windows,
+            assignment.operation_id,
+            candidate,
+            candidate + duration,
+            setup_minutes,
+        ):
+            continue
+        required_start = dispatch_context.horizon_start + timedelta(minutes=candidate)
+        outcome = _apply_later_shift(assignment, required_start, ceiling)
+        if outcome != 0:
+            return outcome
+    return -1
 
-    assignment_by_op: dict[UUID, Assignment] = {
-        assignment.operation_id: assignment for assignment in assignments
-    }
-    assigned_op_ids = set(assignment_by_op.keys())
 
+def _shift_later_for_aux(
+    assignment_by_op: dict[UUID, Assignment],
+    *,
+    dispatch_context: Any,
+    immutable_op_ids: set[UUID],
+    ops_by_id: Mapping[UUID, Operation],
+    horizon_end: datetime | None,
+) -> tuple[int, int]:
+    """Push aux-infeasible ops to the next feasible gap, or block at the ceiling."""
+    if dispatch_context is None or not getattr(dispatch_context, "requirements_by_op", None):
+        return 0, 0
+
+    from synaps.solvers._dispatch_support import (
+        _assignment_setup_window_starts,
+        _candidate_starts,
+        _offset_minutes,
+        _resource_is_feasible,
+        _resource_windows_by_resource,
+        has_aux_capacity_violation,
+    )
+
+    assignments = list(assignment_by_op.values())
+    if not has_aux_capacity_violation(dispatch_context, assignments):
+        return 0, 0
+
+    helpers = (
+        _assignment_setup_window_starts,
+        _candidate_starts,
+        _offset_minutes,
+        _resource_is_feasible,
+        _resource_windows_by_resource,
+    )
+    shifts = 0
+    blocks = 0
+    for assignment in assignments:
+        if assignment.operation_id in immutable_op_ids:
+            continue
+        if not dispatch_context.requirements_by_op.get(assignment.operation_id):
+            continue
+        outcome = _relocate_one_aux_assignment(
+            assignment,
+            assignments=assignments,
+            dispatch_context=dispatch_context,
+            ops_by_id=ops_by_id,
+            horizon_end=horizon_end,
+            helpers=helpers,
+        )
+        if outcome > 0:
+            shifts += 1
+        elif outcome < 0:
+            blocks += 1
+    return shifts, blocks
+
+
+def stabilization_pass_budget(
+    *,
+    ops_by_id: Mapping[UUID, Operation],
+    assigned_op_ids: set[UUID],
+) -> int:
+    """Pass cap from precedence-chain depth, not a shrinking function of n."""
+    depth: dict[UUID, int] = {}
+    for op_id in assigned_op_ids:
+        if op_id in depth:
+            continue
+        chain: list[UUID] = []
+        current: UUID | None = op_id
+        while current is not None and current not in depth:
+            if current in chain:
+                break
+            chain.append(current)
+            operation = ops_by_id.get(current)
+            pred = operation.predecessor_op_id if operation is not None else None
+            current = pred if pred in assigned_op_ids else None
+        running = depth.get(current, 0) if current is not None else 0
+        for node in reversed(chain):
+            if node not in depth:
+                running += 1
+                depth[node] = running
+    max_depth = max(depth.values(), default=1)
+    return max(8, min(64, max_depth + 2))
+
+
+def _topo_order_assigned_ops(
+    assigned_op_ids: set[UUID],
+    ops_by_id: Mapping[UUID, Operation],
+) -> list[UUID]:
     indegree: dict[UUID, int] = dict.fromkeys(assigned_op_ids, 0)
     successors: dict[UUID, list[UUID]] = defaultdict(list)
     for op_id in assigned_op_ids:
@@ -504,12 +720,10 @@ def stabilize_temporal_consistency(
         successors[predecessor_op_id].append(op_id)
         indegree[op_id] = indegree.get(op_id, 0) + 1
 
-    topo_queue = deque(
-        sorted(
-            [op_id for op_id, deg in indegree.items() if deg == 0],
-            key=lambda op_id: ops_by_id[op_id].seq_in_order if op_id in ops_by_id else 0,
-        )
-    )
+    def seq(op_id: UUID) -> int:
+        return ops_by_id[op_id].seq_in_order if op_id in ops_by_id else 0
+
+    topo_queue = deque(sorted([op_id for op_id, deg in indegree.items() if deg == 0], key=seq))
     topo_order: list[UUID] = []
     while topo_queue:
         op_id = topo_queue.popleft()
@@ -518,90 +732,97 @@ def stabilize_temporal_consistency(
             indegree[succ_id] -= 1
             if indegree[succ_id] == 0:
                 topo_queue.append(succ_id)
-
     if len(topo_order) < len(assigned_op_ids):
-        # Cycle detected in the precedence DAG (or an op missing from
-        # ops_by_id). Append the rest in stable order so the pass still
-        # makes progress on the well-formed prefix.
-        remaining_ids = assigned_op_ids - set(topo_order)
-        topo_order.extend(
-            sorted(
-                remaining_ids,
-                key=lambda op_id: ops_by_id[op_id].seq_in_order if op_id in ops_by_id else 0,
-            )
-        )
+        topo_order.extend(sorted(assigned_op_ids - set(topo_order), key=seq))
+    return topo_order
+
+
+def stabilize_temporal_consistency(
+    assignments: list[Assignment],
+    *,
+    ops_by_id: Mapping[UUID, Operation],
+    setup_minutes: Mapping[tuple[UUID, UUID, UUID], int],
+    max_passes: int = 8,
+    immutable_op_ids: set[UUID] | None = None,
+    horizon_end: datetime | None = None,
+    dispatch_context: Any = None,
+) -> dict[str, int]:
+    """Repair residual precedence, machine/setup, and aux conflicts in-place.
+
+    Forward-only and bounded. Shifts that would exceed ``latest_finish`` or
+    ``horizon_end`` are refused (ceiling block) and count as non-convergence.
+    ``immutable_op_ids`` (A15-P1-6) are never moved.
+
+    Returns passes/shift counters plus ``converged`` (1/0).
+    """
+    sealed = set(immutable_op_ids or ())
+    empty = {
+        "passes": 0,
+        "precedence_shifts": 0,
+        "machine_shifts": 0,
+        "aux_shifts": 0,
+        "ceiling_blocks": 0,
+        "converged": 1,
+    }
+    if not assignments:
+        return empty
+
+    assignment_by_op: dict[UUID, Assignment] = {
+        assignment.operation_id: assignment for assignment in assignments
+    }
+    assigned_op_ids = set(assignment_by_op.keys())
+    topo_order = _topo_order_assigned_ops(assigned_op_ids, ops_by_id)
 
     precedence_shifts = 0
     machine_shifts = 0
+    aux_shifts = 0
+    ceiling_blocks = 0
     passes = 0
     converged = True
 
     for pass_index in range(max_passes):
-        changed = False
         passes = pass_index + 1
-
-        for op_id in topo_order:
-            operation = ops_by_id.get(op_id)
-            if operation is None or operation.predecessor_op_id is None:
-                continue
-            predecessor_assignment = assignment_by_op.get(operation.predecessor_op_id)
-            current_assignment = assignment_by_op.get(op_id)
-            if predecessor_assignment is None or current_assignment is None:
-                continue
-            if current_assignment.start_time < predecessor_assignment.end_time:
-                delta = predecessor_assignment.end_time - current_assignment.start_time
-                current_assignment.start_time += delta
-                current_assignment.end_time += delta
-                precedence_shifts += 1
-                changed = True
-
-        assignments_by_machine: dict[UUID, list[Assignment]] = defaultdict(list)
-        for assignment in assignment_by_op.values():
-            assignments_by_machine[assignment.work_center_id].append(assignment)
-
-        for work_center_id, machine_assignments in assignments_by_machine.items():
-            machine_assignments.sort(key=lambda assignment: assignment.start_time)
-            previous_assignment: Assignment | None = None
-            for current_assignment in machine_assignments:
-                if previous_assignment is None:
-                    previous_assignment = current_assignment
-                    continue
-
-                previous_operation = ops_by_id.get(previous_assignment.operation_id)
-                current_operation = ops_by_id.get(current_assignment.operation_id)
-                required_setup = 0
-                if previous_operation is not None and current_operation is not None:
-                    required_setup = setup_minutes.get(
-                        (
-                            work_center_id,
-                            previous_operation.state_id,
-                            current_operation.state_id,
-                        ),
-                        0,
-                    )
-
-                required_start = previous_assignment.end_time + timedelta(
-                    minutes=required_setup,
-                )
-                if current_assignment.start_time < required_start:
-                    delta = required_start - current_assignment.start_time
-                    current_assignment.start_time += delta
-                    current_assignment.end_time += delta
-                    machine_shifts += 1
-                    changed = True
-
-                previous_assignment = current_assignment
-
-        if not changed:
+        pred_shift, pred_block = _shift_later_for_precedence(
+            topo_order,
+            ops_by_id=ops_by_id,
+            assignment_by_op=assignment_by_op,
+            immutable_op_ids=sealed,
+            horizon_end=horizon_end,
+        )
+        mach_shift, mach_block = _shift_later_for_machine_setup(
+            assignment_by_op,
+            ops_by_id=ops_by_id,
+            setup_minutes=setup_minutes,
+            immutable_op_ids=sealed,
+            horizon_end=horizon_end,
+        )
+        aux_shift, aux_block = _shift_later_for_aux(
+            assignment_by_op,
+            dispatch_context=dispatch_context,
+            immutable_op_ids=sealed,
+            ops_by_id=ops_by_id,
+            horizon_end=horizon_end,
+        )
+        precedence_shifts += pred_shift
+        machine_shifts += mach_shift
+        aux_shifts += aux_shift
+        ceiling_blocks += pred_block + mach_block + aux_block
+        if pred_shift == 0 and mach_shift == 0 and aux_shift == 0:
+            if pred_block or mach_block or aux_block:
+                converged = False
             break
     else:
-        # Hit max_passes while still shifting — residual conflict remains.
+        converged = False
+
+    if ceiling_blocks:
         converged = False
 
     return {
         "passes": passes,
         "precedence_shifts": precedence_shifts,
         "machine_shifts": machine_shifts,
+        "aux_shifts": aux_shifts,
+        "ceiling_blocks": ceiling_blocks,
         "converged": 1 if converged else 0,
     }
 
@@ -623,7 +844,9 @@ def finalize_rhc_claim_status(
 
     from synaps.solvers.feasibility_checker import FeasibilityChecker, proven_hard_violations
 
-    hard = proven_hard_violations(FeasibilityChecker().check(problem, assignments))
+    hard = proven_hard_violations(
+        FeasibilityChecker().check(problem, assignments, exhaustive=True)
+    )
     converged = int(stabilization.get("converged", 1)) == 1
     feasible = scheduled_count == total_ops and not hard and converged
     extra = {

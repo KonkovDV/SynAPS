@@ -1290,6 +1290,8 @@ def _topological_post_assembly(
 
         # Precedence constraint: must start after predecessor ends
         earliest_start = a.start_time
+        if operation.earliest_start is not None and operation.earliest_start > earliest_start:
+            earliest_start = operation.earliest_start
         if operation.predecessor_op_id is not None:
             pred_a = assignment_by_op.get(operation.predecessor_op_id)
             if pred_a is not None and pred_a.end_time > earliest_start:
@@ -1380,17 +1382,18 @@ def _build_subproblem(
             eligible = [assigned_wc]
 
         sub_operations.append(
-            Operation(
-                id=op.id,
-                order_id=op.order_id,
-                seq_in_order=op.seq_in_order,
-                state_id=op.state_id,
-                base_duration_min=op.base_duration_min,
-                eligible_wc_ids=eligible,
-                predecessor_op_id=(
-                    op.predecessor_op_id if op.predecessor_op_id in all_op_ids else None
-                ),
-                domain_attributes=op.domain_attributes,
+            op.model_copy(
+                update={
+                    "eligible_wc_ids": eligible,
+                    "predecessor_op_id": (
+                        op.predecessor_op_id if op.predecessor_op_id in all_op_ids else None
+                    ),
+                    "machine_duration_overrides": {
+                        wc_id: minutes
+                        for wc_id, minutes in op.machine_duration_overrides.items()
+                        if wc_id in set(eligible)
+                    },
+                }
             )
         )
 

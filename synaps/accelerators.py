@@ -168,66 +168,56 @@ def compute_atcs_log_score(
     )
 
 
+def _native_kernel_flags() -> dict[str, bool]:
+    """Per-kernel load map. ``native_available`` is the OR of this full set."""
+    return {
+        "atcs_log_score": _native_compute_atcs_log_score is not None,
+        "atcs_log_score_batch": _native_compute_atcs_log_scores_batch is not None,
+        "resource_capacity": _native_resource_capacity_window_is_feasible is not None,
+        "rhc_candidate_metrics": _native_compute_rhc_candidate_metrics_batch is not None,
+        "rhc_candidate_metrics_np": _native_compute_rhc_candidate_metrics_batch_np is not None,
+        "rhc_candidate_metrics_np_jagged": (
+            _native_compute_rhc_candidate_metrics_batch_np_jagged is not None
+        ),
+        "objective_batch": _native_evaluate_objective_batch is not None,
+        "stabilize_temporal_batch": _native_stabilize_temporal_batch is not None,
+        "sdst_batch_lookup": _native_sdst_batch_lookup_cls is not None,
+        "destroy_worst_scores": _native_compute_destroy_worst_scores is not None,
+        "greedy_repair_batch": _native_greedy_repair_batch is not None,
+    }
+
+
 def get_acceleration_status() -> dict[str, Any]:
     """Describe which acceleration backend is currently active."""
 
+    kernels = _native_kernel_flags()
+    any_native = any(kernels.values())
     return {
-        "native_available": any(
-            backend is not None
-            for backend in (
-                _native_compute_atcs_log_score,
-                _native_compute_atcs_log_scores_batch,
-                _native_resource_capacity_window_is_feasible,
-                _native_compute_rhc_candidate_metrics_batch,
-            )
-        ),
-        "atcs_log_score_backend": "native"
-        if _native_compute_atcs_log_score is not None
-        else "python",
-        "atcs_log_score_batch_backend": "native"
-        if _native_compute_atcs_log_scores_batch is not None
-        else "python",
-        "resource_capacity_backend": "native"
-        if _native_resource_capacity_window_is_feasible is not None
-        else "python",
+        "native_available": any_native,
+        "native_module": "synaps_native" if any_native else None,
+        "native_module_imported": _synaps_native is not None,
+        "native_kernels": kernels,
+        "atcs_log_score_backend": "native" if kernels["atcs_log_score"] else "python",
+        "atcs_log_score_batch_backend": "native" if kernels["atcs_log_score_batch"] else "python",
+        "resource_capacity_backend": "native" if kernels["resource_capacity"] else "python",
         "rhc_candidate_metrics_backend": "native"
-        if _native_compute_rhc_candidate_metrics_batch is not None
+        if kernels["rhc_candidate_metrics"]
         else "python",
         "rhc_candidate_metrics_np_backend": "native"
-        if _native_compute_rhc_candidate_metrics_batch_np is not None
+        if kernels["rhc_candidate_metrics_np"]
         else "python",
         "rhc_candidate_metrics_np_jagged_backend": "native"
-        if _native_compute_rhc_candidate_metrics_batch_np_jagged is not None
+        if kernels["rhc_candidate_metrics_np_jagged"]
         else "python",
-        "objective_batch_backend": "native"
-        if _native_evaluate_objective_batch is not None
-        else "python",
+        "objective_batch_backend": "native" if kernels["objective_batch"] else "python",
         "stabilize_temporal_batch_backend": "native"
-        if _native_stabilize_temporal_batch is not None
+        if kernels["stabilize_temporal_batch"]
         else "python",
-        "sdst_batch_lookup_backend": "native"
-        if _native_sdst_batch_lookup_cls is not None
-        else "python",
+        "sdst_batch_lookup_backend": "native" if kernels["sdst_batch_lookup"] else "python",
         "destroy_worst_scores_backend": "native"
-        if _native_compute_destroy_worst_scores is not None
+        if kernels["destroy_worst_scores"]
         else "python",
-        "greedy_repair_batch_backend": "native"
-        if _native_greedy_repair_batch is not None
-        else "python",
-        "native_module": "synaps_native"
-        if any(
-            backend is not None
-            for backend in (
-                _native_compute_atcs_log_score,
-                _native_compute_atcs_log_scores_batch,
-                _native_resource_capacity_window_is_feasible,
-                _native_compute_rhc_candidate_metrics_batch,
-                _native_evaluate_objective_batch,
-                _native_stabilize_temporal_batch,
-                _native_sdst_batch_lookup_cls,
-            )
-        )
-        else None,
+        "greedy_repair_batch_backend": "native" if kernels["greedy_repair_batch"] else "python",
     }
 
 
@@ -875,11 +865,19 @@ def greedy_repair_batch_native(
     if _native_greedy_repair_batch is None or not _HAS_NUMPY:
         return None
 
+    offsets = np.ascontiguousarray(eligible_offsets, dtype=np.int64)
+    n = int(np.ascontiguousarray(base_durations, dtype=np.float64).shape[0])
+    if offsets.shape[0] != n + 1:
+        return None
+    # Empty CSR row: fail closed even if an older wheel still emits machine-0+1e6.
+    if n > 0 and bool(np.any(offsets[1:] == offsets[:-1])):
+        return None
+
     try:
         starts, ends, machines = _native_greedy_repair_batch(
             np.ascontiguousarray(base_durations, dtype=np.float64),
             np.ascontiguousarray(predecessor_indices, dtype=np.int64),
-            np.ascontiguousarray(eligible_offsets, dtype=np.int64),
+            offsets,
             np.ascontiguousarray(eligible_indices, dtype=np.int64),
             np.ascontiguousarray(state_ids, dtype=np.int64),
             np.ascontiguousarray(sdst_setup_flat, dtype=np.float64),

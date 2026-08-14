@@ -17,6 +17,7 @@ cores): `GREED`, `BEAM-3`, `CPSAT-10`, `LBBD-5`, `ALNS-300`.
 | `speed_factor` | ✅ | ✅ | ✅ | ✅ | ✅ | duration = `base / speed` (when no override) |
 | `machine_duration_overrides` | ✅ | ✅ | ✅ | ✅ | ✅ | Wave 9 / T-30: `duration_minutes_for` per WC |
 | `predecessor_op_id` | ✅ | ✅ | ✅ | ✅ | ✅ | successor start ≥ predecessor end |
+| `earliest_start` / `latest_finish` | ✅ | ✅ | ✅ | ✅ | ✅ | Wave 15 / G11: per-op hard window; `RELEASE_DATE_VIOLATION` / `HORIZON_BOUND_VIOLATION` |
 | `setup_minutes` | ✅ | ✅ | ✅ | ✅ | ✅ | SDST separation on shared machine |
 | `priority` | ✅ | ✅ | ✅ | ✅ | ✅ | ATCS weight / tardiness objective (not in the fast matrix) |
 | `material_loss` | ✅ | ✅ | ✅ | ✅ | ✅ | secondary objective term (not in the fast matrix) |
@@ -25,7 +26,7 @@ cores): `GREED`, `BEAM-3`, `CPSAT-10`, `LBBD-5`, `ALNS-300`.
 | `pool_size` / `quantity_needed` | ✅ | ✅ | ✅ | ✅ | ✅ | auxiliary-resource capacity (aux cumulative) |
 
 The fast matrix in the test asserts release/parallel/speed/predecessor/setup/
-aux/horizon/material_loss/`machine_duration_overrides` across all five
+aux/horizon/material_loss/`machine_duration_overrides`/`earliest_start` across all five
 representatives; remaining soft fields (priority, energy optimization) are
 exercised by dedicated suites. A solver that cannot honor a field must reject the
 instance explicitly rather than silently mis-schedule it (audit M0).

@@ -92,6 +92,40 @@ def test_replay_verification_not_pretended() -> None:
     assert snap.feasible is False
 
 
+def test_replay_top_level_feasible_follows_verification() -> None:
+    """A15-P1-4 / P1-5: top-level feasible is the notary, and seed is fingerprinted."""
+    from synaps.replay import build_runtime_replay_artifact
+
+    result = ScheduleResult(
+        solver_name="t",
+        status=SolverStatus.FEASIBLE,
+        assignments=[],
+        metadata={"portfolio": {"solver_config": "GREED", "random_seed": 7}},
+    )
+    problem = ScheduleProblem(
+        states=[State(code="s")],
+        orders=[Order(external_ref="O", due_date=_HE)],
+        operations=[],
+        work_centers=[WorkCenter(code="M", capability_group="G")],
+        setup_matrix=[],
+        planning_horizon_start=_H0,
+        planning_horizon_end=_HE,
+    )
+    artifact = build_runtime_replay_artifact(
+        artifact_kind="runtime-solve",
+        artifact_source="tests.wave15",
+        problem=problem,
+        result=result,
+        request_summary={"random_seed": 7, "time_limit_s": 30},
+        request_id="rt15",
+        solver_config="GREED",
+    )
+    assert artifact.verification.performed is False
+    assert artifact.feasible is False
+    assert artifact.random_seed == 7
+    assert artifact.config_fingerprint
+
+
 def test_alns_skips_virtualization_when_frozen_parallel() -> None:
     """C14-2: frozen ∧ max_parallel>1 → skip virtualization (not silent ERROR/greedy)."""
     s = State(code="s")

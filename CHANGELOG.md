@@ -7,7 +7,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **50k GREEDY_COVER global list-schedule:** `RHC-GREEDY-COVER` at ≥10k
+  ops places the full instance with one non-delay list-schedule (append
+  after each machine's ready time) instead of quadratic gap insertion
+  across ~90 rolling windows. Leftovers still use residual gap-fill.
+  Horizon overflow is still `ERROR`. This is a coverage path, not a SOTA
+  claim.
+- **Long-horizon routing (RHO practice transfer):** instances with **>10k ops**
+  now default to `RHC-GREEDY-COVER` instead of unvalidated `LBBD-HD` or
+  monolithic `ALNS-500`. `5k@400s` stays `ALNS-500`; `60k@900s` stays
+  `RHC-ALNS`; exact_required still uses LBBD-HD. Transfer from L-RHO
+  (ICLR 2025, arXiv:2502.15791) and Graph-RHO (2026, arXiv:2604.10073) —
+  rolling horizon, not a 50k `FEASIBLE` or SOTA claim.
+- **Native CPU prefetch (HPC §3.1):** `synaps_native` issues `PREFETCHT0` at
+  distance 8 on RHC SoA/CSR gathers and `greedy_repair` SDST scans. AVX2/FMA3
+  only (Raptor Lake; no AVX-512). Expected gain is at 500k+ L3 overflow, not
+  a 50k wall-clock miracle.
+
+### Fixed
+
+- **Wave 16 (Red Team atomicity close):**
+  - **W16-P0-1** RHC `sealed_window_op_ids` no longer retains rewound ops;
+    a rewound-and-not-recommitted op is no longer frozen at a stale position
+    for the final stabilize pass.
+  - **W16-P0-2** ALNS final claim now checks `frozen_assignments + incumbent`
+    (plus `_violates_frozen_precedence`); a frozen-overlap incumbent is no
+    longer returned FEASIBLE and committed by RHC.
+  - **W16-P1** `IncrementalRepair.solve` runs a final `FeasibilityChecker`
+    pass; a timed-out CP-SAT fallback that overlaps greedy placements no
+    longer returns FEASIBLE.
+  - **W16b-1** `proven_hard_violations` no longer demotes setup-gap
+    violations on work centers verified under greedy lane inference; the
+    claim is now `UNKNOWN`, not `FEASIBLE`, when `LANE_INFERENCE_UNPROVEN`
+    is present.
+  - **W16b-3** RHC `_evaluate_final` delegates to the canonical
+    `synaps.objective.evaluate` (lane-aware setup, horizon-anchored
+    tardiness for unscheduled orders).
+  - **W16 / coverage notary:**
+    - Native greedy repair skips aux/parallel kernels (aux-blind) and
+      ignores `UNKNOWN_OPERATION` on frozen extra-ops so RHC windows
+      after the first can use the native path.
+    - `stabilize_temporal_consistency` refuses shifts past
+      `latest_finish` / declared horizon, repairs aux occupancy, and
+      sizes its pass budget from precedence-chain depth.
+    - Reanchor fails closed on aux-dirty merged schedules.
+    - ALNS acceptance/`_overlap` rejects aux-infeasible incumbents;
+      final notary keeps frozen extra-ops as occupancy, not UNKNOWN.
+    - IncrementalRepair virtualizes `max_parallel>1` into lanes.
+    - Horizon extension remains a coverage tool: overflow past the
+      declared `planning_horizon_end` is `ERROR`, not `FEASIBLE`.
+    - RHC finalize notary uses `exhaustive=True` to match the customer
+      oracle.
+    - ALNS native initial seed tournaments against Python greedy when
+      `n_ops <= initial_beam_op_limit` (native packing is complete, not
+      quality; it was locking `test_alns_improves_over_initial` onto a
+      worse-than-greedy incumbent).
+    - ALNS `_reanchor_against_frozen` no longer `while True`s on stacked
+      frozen extra-ops: jump by `max` overlapping end and abort if the
+      earliest-start does not strictly increase (float dust on
+      datetime→minutes). This is the hang that stalled a full pytest
+      run around 37% with no failing names.
+    - Accelerator tests that inject a fake `synaps_native` restore the
+      real extension afterwards so later ALNS native tests are not
+      poisoned (`_native_greedy_repair_batch is None`).
+    - `greedy_repair_batch_native` fail-closes on an empty CSR row in
+      Python even when an older wheel still emits machine-0 + 1e6.
+    - ALNS window notary ignores `HORIZON_BOUND` on frozen extra-ops
+      (prior-window occupancy past this subproblem's horizon) and still
+      rejects real frozen/incumbent machine overlap via occupancy sweep.
+
 ### Added
+
+- **Wave 15 close (algebra + portfolio honesty):**
+  - **A15-P0-2 / P1-8** ALNS frozen precedence after pred-clear: `horizon_start`
+    + offsets on every `_violates_frozen_precedence` site.
+  - **A15-P0-3** setup-aware machine gap vs frozen on ALNS accept/repair.
+  - **A15-P1-1…5** router `exact_required` first; ALNS-500 before ALNS-300;
+    replay `feasible` = notary; seed + kwargs fingerprint;
+    `effective_time_limit_s`.
+  - **A15-P1-6** RHC stabilize does not move earlier windows
+    (`immutable_op_ids`).
+  - **A15-P2** native greedy `eligible=[]` expands to all WCs (empty CSR
+    fail-closed); accel `native_available`/`native_module` share the full
+    kernel OR; ALNS/RHC publish `wall_clock_path_dependent` (no bitwise
+    identity claim under wall timeout); unknown ML advisory is stamped.
+  - **G11** `Operation.earliest_start` / `latest_finish` honored by GREED,
+    ALNS, CP-SAT, repair, RHC, checker, and LBBD cluster copies.
 
 - **Wave 15 (algebra status theorem, partial):**
   - **A15-P0-1** RHC no longer claims `FEASIBLE` from coverage alone; final
@@ -19,8 +106,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Docs: `WAVE15_ALGEBRA_REDTEAM_PLAN_2026_08_12.md`,
     `WAVE15_REDTEAM_DELTA.md`.
   - Tests: `tests/test_algebra_rt15_probes.py`.
-  - Left open: A15-P0-2/3 (ALNS frozen precedence / setup-vs-frozen gap),
-    P1 router/replay items.
+  - Closed in the follow-up close pass: A15-P0-2/3 and P1-1…10 (see above).
 
 - **Wave 14 (RHC→ALNS composition + crash fix):**
   - RHC: always init `per_window_limit` (early-greedy UnboundLocal fix).

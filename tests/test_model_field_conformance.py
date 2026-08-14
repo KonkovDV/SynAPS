@@ -14,7 +14,8 @@ sufficient to guard the field contract.
 
 Guarded fields: release_date, max_parallel, speed_factor, predecessor_op_id,
 setup_minutes, pool_size, quantity_needed, planning_horizon_*, material_loss
-(objective accounting), machine_duration_overrides (Wave 9 / T-30).
+(objective accounting), machine_duration_overrides (Wave 9 / T-30),
+earliest_start (Wave 15 / G11).
 
 Documented explicit gaps (no hard cross-solver invariant to assert):
 - ``priority`` is a soft ordering hint, not a constraint — no minimal instance
@@ -317,6 +318,28 @@ def _machine_duration_overrides_instance() -> tuple[ScheduleProblem, str]:
     )
 
 
+def _earliest_start_instance() -> tuple[ScheduleProblem, str]:
+    """Per-op window later than order release — ignoring it starts at horizon."""
+    state = State(code="s")
+    wc = WorkCenter(code="M", capability_group="G")
+    order = Order(external_ref="O", due_date=HE, release_date=H0)
+    op = Operation(
+        order_id=order.id,
+        seq_in_order=1,
+        state_id=state.id,
+        base_duration_min=60,
+        eligible_wc_ids=[wc.id],
+        earliest_start=H0 + timedelta(minutes=500),
+    )
+    return (
+        ScheduleProblem(
+            states=[state], orders=[order], operations=[op], work_centers=[wc],
+            setup_matrix=[], planning_horizon_start=H0, planning_horizon_end=HE,
+        ),
+        "earliest_start",
+    )
+
+
 # (field, builder) pairs. Each builder returns (problem, field_name).
 FIELD_BUILDERS = [
     _release_date_instance,
@@ -329,6 +352,7 @@ FIELD_BUILDERS = [
     _planning_horizon_instance,
     _material_loss_instance,
     _machine_duration_overrides_instance,
+    _earliest_start_instance,
 ]
 
 
@@ -418,6 +442,14 @@ def test_solver_field_conformance(solver_config: str, builder) -> None:
             f"{solver_config}: ignored machine_duration_overrides "
             f"(duration {_minutes(a)} != override {expected} on {a.work_center_id})"
         )
+    elif field == "earliest_start":
+        for a in result.assignments:
+            earliest = ops[a.operation_id].earliest_start
+            assert earliest is not None and a.start_time >= earliest, (
+                f"{solver_config}: started before operation.earliest_start"
+            )
+    else:
+        raise AssertionError(f"unhandled field {field}")
 
     # In every case the produced schedule must itself be feasible.
     assert not FeasibilityChecker().check(problem, result.assignments, exhaustive=True), (

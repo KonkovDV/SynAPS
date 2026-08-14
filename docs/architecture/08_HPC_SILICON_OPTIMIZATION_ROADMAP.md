@@ -71,28 +71,19 @@ let pressure = pressure * (1.0 + overdue * (due_pressure_overdue_boost - 1.0));
 
 ## 3. Near-Term Roadmap
 
-### 3.1 Software Prefetch Hints (_mm_prefetch)
+### 3.1 Software Prefetch Hints (_mm_prefetch) — implemented
 
-**Analysis**: The 7-stream SoA access pattern (`peo`, `d_off`, `rpt`, `ow`, `ptm` + CSR `offsets`/`indices`) exceeds the hardware prefetcher's typical 4–8 stream tracking limit. At DDR5 CL30 (EXPO active), each cache miss costs ~50 CPU cycles.
+**Analysis**: The 7-stream SoA access pattern (`peo`, `d_off`, `rpt`, `ow`, `ptm` + CSR `offsets`/`indices`) exceeds the hardware prefetcher's typical 4–8 stream tracking limit. At DDR5 CL30 (EXPO active), each cache miss costs ~50 CPU cycles. CSR `mao[indices[k]]` and SDST gathers are irregular — the stride prefetcher cannot track them.
 
-**Proposed implementation**:
-```rust
-#[cfg(target_arch = "x86_64")]
-unsafe {
-    use core::arch::x86_64::{_mm_prefetch, _MM_HINT_T0};
-    // Prefetch element i+8 while computing element i.
-    // Distance 8: 8 × 8 bytes = 64 bytes = 1 cache line.
-    if i + 8 < n {
-        _mm_prefetch(peo_raw.as_ptr().add(i + 8) as *const i8, _MM_HINT_T0);
-        _mm_prefetch(d_off_raw.as_ptr().add(i + 8) as *const i8, _MM_HINT_T0);
-        _mm_prefetch(ow_raw.as_ptr().add(i + 8) as *const i8, _MM_HINT_T0);
-    }
-}
-```
+**Implementation** (`native/synaps_native/src/cpu.rs`): `PREFETCHT0` / `_MM_HINT_T0` at distance 8 (one 64-byte cache line of `f64`). Applied to:
 
-**Expected impact**: 5–10% at 500k+ scale where working set exceeds L3. Negligible at 50k (4.4 MB fits in L3).
+- sequential RHC SoA streams in `score_rhc_element` (`i+8`);
+- CSR `mao[]` gather in `rhc_element_csr`;
+- `greedy_repair_batch` next-op SoA + CSR row, and SDST/speed gather at `k+8`.
 
-**Dependency**: Rust `_mm_prefetch` API changed to const generics in Rust 1.78. Implementation gated on confirmed toolchain version.
+Const-generic `_mm_prefetch` (Rust 1.78+). Scalar no-op on non-x86_64. Empty CSR rows stay fail-closed.
+
+**Expected impact**: 5–10% at 500k+ scale where working set exceeds L3. Negligible at 50k (4.4 MB fits in L3). Not a 50k-feasibility claim.
 
 ### 3.2 Explicit AVX2+FMA3 SIMD Kernel
 

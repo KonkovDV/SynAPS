@@ -260,8 +260,8 @@ def test_route_solver_alns_300_for_5k_ops_with_latency_budget() -> None:
     assert "ALNS" in decision.reason
 
 
-def test_route_solver_alns_500_for_20k_ops_with_latency_budget() -> None:
-    """20K-op instance with >300s latency should route to ALNS-500."""
+def test_route_solver_cover_for_20k_ops_with_latency_budget() -> None:
+    """20K-op long-horizon instance with >300s latency routes to RHC-GREEDY-COVER."""
     problem = make_simple_problem(n_orders=5000, ops_per_order=4)
 
     decision = route_solver_config(
@@ -272,8 +272,8 @@ def test_route_solver_alns_500_for_20k_ops_with_latency_budget() -> None:
         ),
     )
 
-    assert decision.solver_config == "ALNS-500"
-    assert "ALNS" in decision.reason
+    assert decision.solver_config == "RHC-GREEDY-COVER"
+    assert "rolling-horizon" in decision.reason
 
 
 def test_route_solver_rhc_alns_for_60k_ops_with_latency_budget() -> None:
@@ -377,3 +377,59 @@ def test_route_solver_exact_required_bypasses_alns() -> None:
 
     # exact_required should route to LBBD, not ALNS
     assert "LBBD" in decision.solver_config
+
+
+def test_route_solver_exact_required_beats_interactive_and_latency() -> None:
+    """A15-P1-1: exact_required is not shadowed by INTERACTIVE or latency<=1."""
+    problem = make_simple_problem()
+
+    interactive = route_solver_config(
+        problem,
+        context=SolverRoutingContext(regime=SolveRegime.INTERACTIVE, exact_required=True),
+    )
+    assert interactive.solver_config.startswith("CPSAT")
+
+    tight = route_solver_config(
+        problem,
+        context=SolverRoutingContext(preferred_max_latency_s=1, exact_required=True),
+    )
+    assert tight.solver_config.startswith("CPSAT")
+
+
+def test_route_solver_alns_500_for_5k_ops_with_400s_budget() -> None:
+    """A15-P1-3: 5k ops @ 400s must not be shadowed by the ALNS-300 branch."""
+    problem = make_simple_problem(n_orders=1250, ops_per_order=4)
+
+    decision = route_solver_config(
+        problem,
+        context=SolverRoutingContext(
+            regime=SolveRegime.NOMINAL,
+            preferred_max_latency_s=400,
+        ),
+    )
+
+    assert decision.solver_config == "ALNS-500"
+
+
+def test_route_solver_cover_for_50k_ops_without_latency_budget() -> None:
+    """50K ops without a latency hint must not fall through to unvalidated LBBD-HD."""
+    problem = make_simple_problem(n_orders=12500, ops_per_order=4)
+
+    decision = route_solver_config(problem)
+
+    assert decision.solver_config == "RHC-GREEDY-COVER"
+
+
+def test_route_solver_cover_for_50k_ops_with_400s_budget() -> None:
+    """50K ops @ 400s must not be swallowed by monolithic ALNS-500."""
+    problem = make_simple_problem(n_orders=12500, ops_per_order=4)
+
+    decision = route_solver_config(
+        problem,
+        context=SolverRoutingContext(
+            regime=SolveRegime.NOMINAL,
+            preferred_max_latency_s=400,
+        ),
+    )
+
+    assert decision.solver_config == "RHC-GREEDY-COVER"

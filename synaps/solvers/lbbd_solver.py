@@ -896,6 +896,29 @@ def _solve_subproblems(
     return all_assignments, overall_makespan, all_proven_optimal, False
 
 
+def _copy_op_for_cluster(
+    op: Operation,
+    *,
+    eligible: list[UUID],
+    all_op_ids: set[UUID],
+) -> Operation:
+    """Keep per-op windows and duration overrides valid on the cluster WC set."""
+    allowed = set(eligible)
+    return op.model_copy(
+        update={
+            "eligible_wc_ids": eligible,
+            "predecessor_op_id": (
+                op.predecessor_op_id if op.predecessor_op_id in all_op_ids else None
+            ),
+            "machine_duration_overrides": {
+                wc_id: minutes
+                for wc_id, minutes in op.machine_duration_overrides.items()
+                if wc_id in allowed
+            },
+        }
+    )
+
+
 def _build_subproblem(
     problem: ScheduleProblem,
     cluster_ops: list[Operation],
@@ -943,18 +966,7 @@ def _build_subproblem(
                 [assigned_wc] if assigned_wc and assigned_wc in cluster_wcs else list(cluster_wcs)
             )
             sub_operations.append(
-                Operation(
-                    id=op.id,
-                    order_id=op.order_id,
-                    seq_in_order=op.seq_in_order,
-                    state_id=op.state_id,
-                    base_duration_min=op.base_duration_min,
-                    eligible_wc_ids=eligible,
-                    predecessor_op_id=op.predecessor_op_id
-                    if op.predecessor_op_id in all_op_ids
-                    else None,
-                    domain_attributes=op.domain_attributes,
-                )
+                _copy_op_for_cluster(op, eligible=eligible, all_op_ids=all_op_ids)
             )
         else:
             # External predecessor — restrict to its assigned machine
@@ -964,18 +976,7 @@ def _build_subproblem(
             # Add the assigned machine to cluster_wcs temporarily
             eligible = [assigned_wc]
             sub_operations.append(
-                Operation(
-                    id=op.id,
-                    order_id=op.order_id,
-                    seq_in_order=op.seq_in_order,
-                    state_id=op.state_id,
-                    base_duration_min=op.base_duration_min,
-                    eligible_wc_ids=eligible,
-                    predecessor_op_id=op.predecessor_op_id
-                    if op.predecessor_op_id in all_op_ids
-                    else None,
-                    domain_attributes=op.domain_attributes,
-                )
+                _copy_op_for_cluster(op, eligible=eligible, all_op_ids=all_op_ids)
             )
 
     # Collect required entities

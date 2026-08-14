@@ -27,6 +27,7 @@ from synaps.solvers._dispatch_support import (
     find_earliest_feasible_slot,
     recompute_assignment_setups,
 )
+from synaps.solvers._time_windows import operation_earliest_offset_minutes
 from synaps.timegrain import physical_processing_minutes_for
 
 
@@ -103,6 +104,58 @@ def _virtualize_parallel_lanes(
         planning_horizon_end=problem.planning_horizon_end,
     )
     return transformed, virtual_to_original
+
+
+def _map_assignments_onto_virtual_lanes(
+    assignments: list[Assignment],
+    virtual_to_original: dict[Any, Any],
+) -> list[Assignment]:
+    """Map original-WC frozen assignments onto virtual lanes.
+
+    Used by IncrementalRepair so ``max_parallel > 1`` is explicit lane
+    virtualization rather than silent serialization or a hard ERROR.
+    Overlapping frozen ops on the same WC pack onto distinct lanes when
+    a free lane exists; leftover overlap stays on the earliest-free lane
+    so the repair neighbourhood can still move the disrupted ops.
+    """
+    if not virtual_to_original or not assignments:
+        return list(assignments)
+
+    original_to_lanes: dict[Any, list[Any]] = {}
+    for lane_id, original_id in virtual_to_original.items():
+        original_to_lanes.setdefault(original_id, []).append(lane_id)
+    for lane_ids in original_to_lanes.values():
+        lane_ids.sort(key=str)
+
+    lane_free_at: dict[Any, Any] = {}
+    mapped_by_op: dict[Any, Assignment] = {}
+    for assignment in sorted(
+        assignments,
+        key=lambda item: (item.start_time, item.end_time, str(item.operation_id)),
+    ):
+        lanes = original_to_lanes.get(assignment.work_center_id)
+        if not lanes:
+            mapped_by_op[assignment.operation_id] = assignment
+            continue
+        chosen = None
+        if assignment.lane_id is not None and assignment.lane_id in virtual_to_original:
+            chosen = assignment.lane_id
+        else:
+            for lane_id in lanes:
+                free_at = lane_free_at.get(lane_id)
+                if free_at is None or free_at <= assignment.start_time:
+                    chosen = lane_id
+                    break
+            if chosen is None:
+                chosen = min(
+                    lanes,
+                    key=lambda lane_id: lane_free_at.get(lane_id, assignment.start_time),
+                )
+        mapped = assignment.model_copy(update={"work_center_id": chosen, "lane_id": chosen})
+        mapped_by_op[assignment.operation_id] = mapped
+        lane_free_at[chosen] = max(lane_free_at.get(chosen, mapped.end_time), mapped.end_time)
+
+    return [mapped_by_op.get(assignment.operation_id, assignment) for assignment in assignments]
 
 
 def _unroll_lane_assignments(result: ScheduleResult, virtual_to_original: dict[Any, Any]) -> None:
@@ -299,12 +352,10 @@ class GreedyDispatch(BaseSolver):
                 due_offset = (order.due_date - horizon_start).total_seconds() / 60.0
                 w_j = order.priority / 500.0  # normalise around default priority
                 pred_end = op_end_offsets.get(op.predecessor_op_id, 0.0)
-                # M1: cannot start before the order release_date (material release).
-                if order.release_date is not None:
-                    pred_end = max(
-                        pred_end,
-                        (order.release_date - horizon_start).total_seconds() / 60.0,
-                    )
+                pred_end = max(
+                    pred_end,
+                    operation_earliest_offset_minutes(op, order, horizon_start),
+                )
 
                 eligible = (
                     op.eligible_wc_ids
@@ -563,10 +614,10 @@ def _greedy_complete(
         for op in ready:
             order = orders_by_id[op.order_id]
             pred_end = offsets.get(op.predecessor_op_id, 0.0)
-            if order.release_date is not None:
-                pred_end = max(
-                    pred_end, (order.release_date - horizon_start).total_seconds() / 60.0
-                )
+            pred_end = max(
+                pred_end,
+                operation_earliest_offset_minutes(op, order, horizon_start),
+            )
             eligible = (
                 op.eligible_wc_ids
                 if op.eligible_wc_ids
@@ -750,12 +801,10 @@ class BeamSearchDispatch(BaseSolver):
                     due_offset = (order.due_date - horizon_start).total_seconds() / 60.0
                     w_j = order.priority / 500.0
                     pred_end = op_end_offsets.get(op.predecessor_op_id, 0.0)
-                    # M1: cannot start before the order release_date (material release).
-                    if order.release_date is not None:
-                        pred_end = max(
-                            pred_end,
-                            (order.release_date - horizon_start).total_seconds() / 60.0,
-                        )
+                    pred_end = max(
+                        pred_end,
+                        operation_earliest_offset_minutes(op, order, horizon_start),
+                    )
 
                     eligible = (
                         op.eligible_wc_ids

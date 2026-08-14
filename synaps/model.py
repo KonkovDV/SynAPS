@@ -64,6 +64,11 @@ class Operation(BaseModel):
     base_duration_min: int = Field(ge=0)
     eligible_wc_ids: list[UUID] = Field(default_factory=list)
     predecessor_op_id: UUID | None = None
+    # Wave 15 / G11: optional per-op hard window (outage clearance). Distinct
+    # from Order.release_date / due_date so a predecessor chain can span
+    # disjoint days without last-window-wins.
+    earliest_start: datetime | None = None
+    latest_finish: datetime | None = None
     # T-30 / p_{o,m}: optional per-machine INTEGER minutes AFTER all factors.
     # Missing key → timegrain.duration_minutes(base, speed). Populated by the
     # .fjs loader for heterogeneous alternatives.

@@ -166,6 +166,19 @@ def proven_hard_violations(
         ):
             continue
         proven.append(violation)
+    # W16b-1: if any work center was verified under unproven greedy lane
+    # inference, the claim is UNKNOWN, not FEASIBLE. A greedy lane walk can
+    # produce genuinely infeasible lane setups — demoting them was a
+    # false-FEASIBLE hole on parallel machines at scale.
+    if scoped_unproven_wcs or global_unproven:
+        proven.append(
+            FeasibilityViolation(
+                "LANE_INFERENCE_UNPROVEN",
+                "One or more work centers verified under greedy lane inference; "
+                "setup-gap verdicts are unproven.",
+                work_center_id=None,
+            )
+        )
     return proven
 
 
@@ -872,27 +885,13 @@ class FeasibilityChecker:
                     )
                 )
 
-        # 7. Release dates (M1): an operation may not start before its order's
-        # release_date (production meaning: material not available before it).
-        for a in assignments:
-            checked_op = ops_by_id.get(a.operation_id)
-            if checked_op is None:
-                continue
-            order = orders_by_id.get(checked_op.order_id)
-            release = getattr(order, "release_date", None) if order is not None else None
-            if release is not None and a.start_time < release:
-                violations.append(
-                    FeasibilityViolation(
-                        "RELEASE_DATE_VIOLATION",
-                        (
-                            f"Operation {a.operation_id} starts at {a.start_time}, "
-                            f"before order release_date {release}."
-                        ),
-                        operation_id=a.operation_id,
-                    )
-                )
-                if not exhaustive:
-                    break
+        self._check_release_and_op_windows(
+            assignments=assignments,
+            ops_by_id=ops_by_id,
+            orders_by_id=orders_by_id,
+            violations=violations,
+            exhaustive=exhaustive,
+        )
 
         # 8. Operation durations (P0-3; hardened by F2, audit v4 — see the
         # helper's docstring for the physical-floor contract).
@@ -906,6 +905,65 @@ class FeasibilityChecker:
         )
 
         return violations
+
+    @staticmethod
+    def _check_release_and_op_windows(
+        *,
+        assignments: list[Assignment],
+        ops_by_id: dict[Any, Any],
+        orders_by_id: dict[Any, Any],
+        violations: list[FeasibilityViolation],
+        exhaustive: bool,
+    ) -> None:
+        """Order release_date plus optional per-op earliest_start / latest_finish."""
+
+        for assignment in assignments:
+            checked_op = ops_by_id.get(assignment.operation_id)
+            if checked_op is None:
+                continue
+            order = orders_by_id.get(checked_op.order_id)
+            release = getattr(order, "release_date", None) if order is not None else None
+            if release is not None and assignment.start_time < release:
+                violations.append(
+                    FeasibilityViolation(
+                        "RELEASE_DATE_VIOLATION",
+                        (
+                            f"Operation {assignment.operation_id} starts at "
+                            f"{assignment.start_time}, before order release_date {release}."
+                        ),
+                        operation_id=assignment.operation_id,
+                    )
+                )
+                if not exhaustive:
+                    return
+            earliest = getattr(checked_op, "earliest_start", None)
+            if earliest is not None and assignment.start_time < earliest:
+                violations.append(
+                    FeasibilityViolation(
+                        "RELEASE_DATE_VIOLATION",
+                        (
+                            f"Operation {assignment.operation_id} starts at "
+                            f"{assignment.start_time}, before earliest_start {earliest}."
+                        ),
+                        operation_id=assignment.operation_id,
+                    )
+                )
+                if not exhaustive:
+                    return
+            latest = getattr(checked_op, "latest_finish", None)
+            if latest is not None and assignment.end_time > latest:
+                violations.append(
+                    FeasibilityViolation(
+                        "HORIZON_BOUND_VIOLATION",
+                        (
+                            f"Operation {assignment.operation_id} ends at "
+                            f"{assignment.end_time}, after latest_finish {latest}."
+                        ),
+                        operation_id=assignment.operation_id,
+                    )
+                )
+                if not exhaustive:
+                    return
 
     @staticmethod
     def _check_referential_integrity(

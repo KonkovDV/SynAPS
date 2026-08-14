@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -18,6 +19,14 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 REPLAY_ARTIFACT_VERSION: Final = "2026-04-05"
+_FINGERPRINT_SKIP: Final = frozenset(
+    {
+        "warm_start_assignments",
+        "frozen_assignments",
+        "frozen_context_operations",
+        "base_assignments",
+    }
+)
 
 
 class ReplayObjectiveSnapshot(BaseModel):
@@ -73,6 +82,8 @@ class ReplayBenchmarkArtifact(BaseModel):
     problem_profile: dict[str, int | float | bool | str] = Field(default_factory=dict)
     routing: ReplayRoutingSnapshot
     portfolio_metadata: dict[str, Any] = Field(default_factory=dict)
+    random_seed: int | None = None
+    config_fingerprint: str | None = None
 
 
 class ReplayRuntimeArtifact(BaseModel):
@@ -96,6 +107,29 @@ class ReplayRuntimeArtifact(BaseModel):
     routing: ReplayRoutingSnapshot
     request_summary: dict[str, Any] = Field(default_factory=dict)
     portfolio_metadata: dict[str, Any] = Field(default_factory=dict)
+    random_seed: int | None = None
+    config_fingerprint: str | None = None
+
+
+def _config_fingerprint(*payloads: dict[str, Any]) -> str | None:
+    merged: dict[str, Any] = {}
+    for payload in payloads:
+        for key, value in payload.items():
+            if key in _FINGERPRINT_SKIP:
+                continue
+            merged[key] = value
+    if not merged:
+        return None
+    blob = json.dumps(merged, default=str, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+def _coerce_seed(*sources: dict[str, Any]) -> int | None:
+    for source in sources:
+        seed = source.get("random_seed")
+        if isinstance(seed, int) and not isinstance(seed, bool):
+            return seed
+    return None
 
 
 def _coerce_int_or_none(value: Any) -> int | None:
@@ -110,10 +144,6 @@ def _coerce_bool_or_none(value: Any) -> bool | None:
     if isinstance(value, bool):
         return value
     return None
-
-
-def _result_is_feasible(result: ScheduleResult) -> bool:
-    return result.status in {SolverStatus.FEASIBLE, SolverStatus.OPTIMAL}
 
 
 def _build_verification_snapshot(
@@ -269,6 +299,12 @@ def build_benchmark_replay_artifact(
     if not isinstance(regime, str) or not regime:
         regime = "nominal"
 
+    verification_snapshot = ReplayVerificationSnapshot(
+        performed=True,
+        feasible=bool(verification["feasible"]),
+        violation_count=int(verification["violation_count"]),
+        violation_kinds=list(verification["violation_kinds"]),
+    )
     return ReplayBenchmarkArtifact(
         instance_name=instance_path.name,
         instance_path=str(instance_path),
@@ -276,7 +312,7 @@ def build_benchmark_replay_artifact(
         selected_solver_config=selected_solver_config,
         solver_name=str(results["solver_name"]),
         result_status=str(results["status"]),
-        feasible=bool(results["feasible"]),
+        feasible=verification_snapshot.feasible,
         proved_optimal=bool(results["proved_optimal"]),
         assignments=int(results["assignments"]),
         objective=ReplayObjectiveSnapshot(
@@ -286,12 +322,7 @@ def build_benchmark_replay_artifact(
             total_material_loss=float(results["total_material_loss"]),
             weighted_sum=float(results["weighted_sum"]),
         ),
-        verification=ReplayVerificationSnapshot(
-            performed=True,
-            feasible=bool(verification["feasible"]),
-            violation_count=int(verification["violation_count"]),
-            violation_kinds=list(verification["violation_kinds"]),
-        ),
+        verification=verification_snapshot,
         statistics={
             key: value
             for key, value in statistics.items()
@@ -312,6 +343,8 @@ def build_benchmark_replay_artifact(
             ),
         ),
         portfolio_metadata=metadata,
+        random_seed=_coerce_seed(metadata),
+        config_fingerprint=_config_fingerprint(metadata),
     )
 
 
@@ -341,6 +374,7 @@ def build_runtime_replay_artifact(
     if not isinstance(regime, str) or not regime:
         regime = "nominal"
 
+    verification = _build_verification_snapshot(portfolio_metadata, result)
     return ReplayRuntimeArtifact(
         artifact_kind=artifact_kind,
         artifact_source=artifact_source,
@@ -349,7 +383,7 @@ def build_runtime_replay_artifact(
         selected_solver_config=selected_solver_config,
         solver_name=result.solver_name,
         result_status=result.status.value,
-        feasible=_result_is_feasible(result),
+        feasible=verification.feasible,
         proved_optimal=result.status is SolverStatus.OPTIMAL,
         assignments=len(result.assignments),
         objective=ReplayObjectiveSnapshot(
@@ -359,7 +393,7 @@ def build_runtime_replay_artifact(
             total_material_loss=result.objective.total_material_loss,
             weighted_sum=result.objective.weighted_sum,
         ),
-        verification=_build_verification_snapshot(portfolio_metadata, result),
+        verification=verification,
         problem_profile=build_problem_profile(problem).as_dict(),
         routing=ReplayRoutingSnapshot(
             execution_mode=str(portfolio_metadata.get("execution_mode", "solve")),
@@ -378,6 +412,8 @@ def build_runtime_replay_artifact(
         ),
         request_summary=request_summary,
         portfolio_metadata=portfolio_metadata,
+        random_seed=_coerce_seed(request_summary, portfolio_metadata),
+        config_fingerprint=_config_fingerprint(request_summary, portfolio_metadata),
     )
 
 

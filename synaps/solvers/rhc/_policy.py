@@ -272,8 +272,9 @@ PRESETS: dict[RhcPolicy, RhcPolicySpec] = {
         ),
     ),
     # GREEDY_COVER: constructive coverage-first path for 50K+ completeness.
-    # Reserves wall-time for residual greedy; soft-overrun allowed so leftover
-    # ops are not abandoned solely because windows burned the clock.
+    # At ≥10k ops the solver list-schedules in one global greedy pass (rolling
+    # windows are for search inners). Residual fill remains the safety net
+    # below that threshold; horizon overflow is still ERROR, not FEASIBLE.
     RhcPolicy.GREEDY_COVER: RhcPolicySpec(
         admission=AdmissionSpec(
             window_minutes=480,

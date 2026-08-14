@@ -59,6 +59,11 @@ from synaps.solvers.rhc._budget import (
     resolve_inner_window_time_cap as _resolve_inner_window_time_cap,
     scale_alns_inner_budget as _scale_alns_inner_budget,
 )
+from synaps.solvers.rhc._cover import (
+    place_operations_greedy,
+    place_operations_list_schedule,
+    should_use_global_greedy_cover,
+)
 from synaps.solvers.rhc._cross_window import (
     QUALITY_BUFFER_MAXLEN,
     WindowQualitySummary,
@@ -74,6 +79,7 @@ from synaps.solvers.rhc._window import (
     finalize_rhc_claim_status as _finalize_rhc_claim_status,
     reanchor_inner_assignments as _reanchor_inner_assignments,
     select_backtracking_assignments as _select_backtracking_assignments,
+    stabilization_pass_budget as _stabilization_pass_budget,
     stabilize_temporal_consistency as _stabilize_temporal_consistency,
 )
 from synaps.solvers.sdst_matrix import SdstMatrix
@@ -136,11 +142,15 @@ class RhcSolver(BaseSolver):
         window_minutes: int = int(kwargs.get("window_minutes", 480))
         overlap_minutes: int = int(kwargs.get("overlap_minutes", 120))
         inner_solver_name: str = str(kwargs.get("inner_solver", "alns"))
+        global_greedy_cover_min_ops: int = max(
+            0, int(kwargs.get("global_greedy_cover_min_ops", 10_000))
+        )
         inner_kwargs: dict[str, Any] = dict(kwargs.get("inner_kwargs", {}))
         # Prevent double-passing time_limit_s to inner solver.
         # RHC computes its own per-window budget.
         inner_kwargs.pop("time_limit_s", None)
         time_limit_s: float = float(kwargs.get("time_limit_s", 600))
+        determinism = str(kwargs.get("determinism", "strict"))
         fallback_repair_enabled: bool = bool(kwargs.get("fallback_repair_enabled", True))
         fallback_repair_on_timeout: bool = bool(kwargs.get("fallback_repair_on_timeout", True))
         fallback_repair_soft_budget_s: float = max(
@@ -384,6 +394,7 @@ class RhcSolver(BaseSolver):
         }
         sdst = SdstMatrix.from_problem(problem)
         dispatch_context = build_dispatch_context(problem)
+        default_wc_ids = [wc.id for wc in problem.work_centers]
 
         # P3.1: Variable fixing — detect stable ops across windows
         variable_fixing_enabled: bool = bool(kwargs.get("variable_fixing_enabled", True))
@@ -597,6 +608,7 @@ class RhcSolver(BaseSolver):
         committed_assignments: list[Assignment] = []
         committed_assignment_by_op: dict[UUID, Assignment] = {}
         committed_op_ids: set[UUID] = set()
+        sealed_window_op_ids: set[UUID] = set()
         prev_committed_by_op: dict[UUID, Assignment] = {}
         cross_window_stable_ops: set[UUID] = set()
         cross_window_variable_fixing_enabled = True
@@ -642,6 +654,7 @@ class RhcSolver(BaseSolver):
         backtracking_windows = 0
         backtracking_ops_total = 0
         horizon_clipped_assignments = 0
+        global_greedy_cover_used = False
         time_limit_reached = False
         fallback_repair_attempted = False
         fallback_repair_skipped = False
@@ -857,10 +870,6 @@ class RhcSolver(BaseSolver):
             frozen_assignments: list[Assignment],
             frozen_assignment_by_op: dict[UUID, Assignment],
         ) -> tuple[list[Assignment], int]:
-            # Thin wrapper around the pure kernel in _window.py.
-            # MachineIndex and find_earliest_feasible_slot are passed in so
-            # _window.py does not need to import them (avoids a runtime cycle
-            # via _dispatch_support).
             return _reanchor_inner_assignments(
                 assignments,
                 frozen_assignments=frozen_assignments,
@@ -892,15 +901,48 @@ class RhcSolver(BaseSolver):
             *,
             max_passes: int = 8,
         ) -> dict[str, int]:
-            # Thin wrapper around the pure kernel in _window.py.
             return _stabilize_temporal_consistency(
                 assignments,
                 ops_by_id=ops_by_id,
                 setup_minutes=dispatch_context.setup_minutes,
                 max_passes=max_passes,
+                immutable_op_ids=sealed_window_op_ids,
+                horizon_end=original_horizon_end,
+                dispatch_context=dispatch_context,
             )
 
-        while window_start_offset < horizon_minutes:
+        if should_use_global_greedy_cover(
+            inner_solver_name=inner_solver_name,
+            n_ops=len(problem.operations),
+            min_ops=global_greedy_cover_min_ops,
+        ):
+            # Coverage-complete constructive path: one list-schedule instead of
+            # repeating greedy insertion across rolling windows.
+            global_greedy_cover_used = True
+            cover_stats = place_operations_list_schedule(
+                operations=problem.operations,
+                dispatch_context=dispatch_context,
+                assignments=committed_assignments,
+                assignment_by_op=committed_assignment_by_op,
+                scheduled_ids=committed_op_ids,
+                horizon_start=horizon_start,
+                horizon_minutes=horizon_minutes,
+                op_earliest=op_earliest,
+                default_wc_ids=default_wc_ids,
+                deadline_exceeded=coverage_deadline_exceeded,
+            )
+            horizon_clipped_assignments += cover_stats.clipped
+            if cover_stats.time_limited:
+                time_limit_reached = True
+            logger.info(
+                "RHC global greedy cover placed %d/%d ops in %d passes (clipped=%d)",
+                cover_stats.placed,
+                len(problem.operations),
+                cover_stats.passes,
+                cover_stats.clipped,
+            )
+
+        while (not global_greedy_cover_used) and window_start_offset < horizon_minutes:
             if max_windows is not None and window_count >= max_windows:
                 logger.info("RHC max_windows reached (%d)", max_windows)
                 break
@@ -919,6 +961,8 @@ class RhcSolver(BaseSolver):
                 horizon_minutes,
             )
             window_count += 1
+            if window_count > 1:
+                sealed_window_op_ids.update(committed_op_ids)
 
             resolved_predecessor_ids = committed_op_ids | (
                 {
@@ -1359,6 +1403,9 @@ class RhcSolver(BaseSolver):
 
             rewound_assignments = select_backtracking_assignments(window_start_offset)
             rewound_ids = {assignment.operation_id for assignment in rewound_assignments}
+            # W16-P0-1: a rewound op is no longer committed — it must not stay
+            # sealed as immutable for the final stabilize pass.
+            sealed_window_op_ids.difference_update(rewound_ids)
             if rewound_assignments:
                 backtracking_windows += 1
                 backtracking_ops_total += len(rewound_assignments)
@@ -1908,6 +1955,7 @@ class RhcSolver(BaseSolver):
                                 committed_assignments.append(assignment)
                                 committed_assignment_by_op[op_id] = assignment
                                 committed_op_ids.add(op_id)
+                            sealed_window_op_ids.intersection_update(committed_op_ids)
                             if cross_window_variable_fixing_enabled:
                                 cross_window_stable_ops = _detect_cross_window_stable_ops(
                                     prev_committed_by_op=prev_committed_by_op,
@@ -2217,6 +2265,7 @@ class RhcSolver(BaseSolver):
                     committed_assignments.append(assignment)
                     committed_assignment_by_op[op_id] = assignment
                     committed_op_ids.add(op_id)
+                sealed_window_op_ids.intersection_update(committed_op_ids)
                 if cross_window_variable_fixing_enabled:
                     cross_window_stable_ops = _detect_cross_window_stable_ops(
                         prev_committed_by_op=prev_committed_by_op,
@@ -2353,92 +2402,34 @@ class RhcSolver(BaseSolver):
                 repair_machine_idx = MachineIndex(dispatch_context)
                 for assignment in committed_assignments:
                     repair_machine_idx.add(assignment)
-                fallback_iters = len(remaining_ops) * 3
-                fi = 0
-                while remaining_ops and fi < fallback_iters:
-                    if coverage_deadline_exceeded():
-                        time_limit_reached = True
-                        fallback_repair_time_limited = True
-                        logger.warning(
-                            "RHC fallback greedy repair stopped because the coverage "
-                            "deadline is exhausted"
-                        )
-                        break
-                    fi += 1
-                    placed = False
-                    for op in list(remaining_ops):
-                        if coverage_deadline_exceeded():
-                            time_limit_reached = True
-                            fallback_repair_time_limited = True
-                            logger.warning(
-                                "RHC fallback greedy repair stopped because the coverage "
-                                "deadline is exhausted"
-                            )
-                            break
-                        if op.predecessor_op_id and op.predecessor_op_id not in committed_op_ids:
-                            continue
-                        pred_end = 0.0
-                        if op.predecessor_op_id:
-                            pred_assignment = committed_assignment_by_op.get(op.predecessor_op_id)
-                            if pred_assignment is not None:
-                                pred_end = (
-                                    pred_assignment.end_time - horizon_start
-                                ).total_seconds() / 60.0
-                        eligible = (
-                            op.eligible_wc_ids
-                            if op.eligible_wc_ids
-                            else [wc.id for wc in problem.work_centers]
-                        )
-                        best_slot = None
-                        best_wc = None
-                        op_floor = max(pred_end, op_earliest.get(op.id, 0.0))
-                        for wc_id in eligible:
-                            slot = find_earliest_feasible_slot(
-                                dispatch_context,
-                                committed_assignments,
-                                op,
-                                wc_id,
-                                op_floor,
-                                machine_index=repair_machine_idx,
-                            )
-                            if slot is None:
-                                continue
-                            if slot.end_offset > horizon_minutes + 1e-9:
-                                horizon_clipped_assignments += 1
-                                continue
-                            if best_slot is None or slot.end_offset < best_slot.end_offset:
-                                best_slot = slot
-                                best_wc = wc_id
-                        if best_slot and best_wc:
-                            start = horizon_start + timedelta(
-                                minutes=best_slot.start_offset,
-                            )
-                            end = horizon_start + timedelta(
-                                minutes=best_slot.end_offset,
-                            )
-                            committed_assignments.append(
-                                Assignment(
-                                    operation_id=op.id,
-                                    work_center_id=best_wc,
-                                    start_time=start,
-                                    end_time=end,
-                                    setup_minutes=best_slot.setup_minutes,
-                                    aux_resource_ids=best_slot.aux_resource_ids,
-                                )
-                            )
-                            repair_machine_idx.add(committed_assignments[-1])
-                            committed_assignment_by_op[op.id] = committed_assignments[-1]
-                            committed_op_ids.add(op.id)
-                            remaining_ops.remove(op)
-                            placed = True
-                    if time_limit_reached or not placed:
-                        break
+                cover_stats = place_operations_greedy(
+                    operations=remaining_ops,
+                    dispatch_context=dispatch_context,
+                    assignments=committed_assignments,
+                    assignment_by_op=committed_assignment_by_op,
+                    scheduled_ids=committed_op_ids,
+                    machine_index=repair_machine_idx,
+                    horizon_start=horizon_start,
+                    horizon_minutes=horizon_minutes,
+                    op_earliest=op_earliest,
+                    default_wc_ids=default_wc_ids,
+                    deadline_exceeded=coverage_deadline_exceeded,
+                )
+                horizon_clipped_assignments += cover_stats.clipped
+                if cover_stats.time_limited:
+                    time_limit_reached = True
+                    fallback_repair_time_limited = True
+                    logger.warning(
+                        "RHC fallback greedy repair stopped because the coverage "
+                        "deadline is exhausted"
+                    )
 
         # ------- Final objective evaluation -------
-        stabilization_pass_budget = 8 if len(committed_assignments) <= 5_000 else 5
         temporal_stabilization = stabilize_temporal_consistency(
             committed_assignments,
-            max_passes=stabilization_pass_budget,
+            max_passes=_stabilization_pass_budget(
+                ops_by_id=ops_by_id, assigned_op_ids=committed_op_ids
+            ),
         )
         recompute_assignment_setups(committed_assignments, dispatch_context)
 
@@ -2532,6 +2523,8 @@ class RhcSolver(BaseSolver):
             metadata={
                 "acceleration": acceleration_status,
                 "windows_solved": window_count,
+                "global_greedy_cover": global_greedy_cover_used,
+                "global_greedy_cover_min_ops": global_greedy_cover_min_ops,
                 "ops_scheduled": scheduled_count,
                 "ops_total": total_ops,
                 "lower_bound": round(global_lower_bound.value, 4),
@@ -2747,6 +2740,10 @@ class RhcSolver(BaseSolver):
                 "temporal_stabilization": temporal_stabilization,
                 **notary_meta,
                 "time_limit_reached": time_limit_reached,
+                "wall_clock_path_dependent": True,
+                "determinism": determinism,
+                "determinism_violated": bool(time_limit_reached) and determinism == "strict",
+                "search_stop_reason": "wall_clock" if time_limit_reached else "completed",
                 "time_limit_s": time_limit_s,
                 "window_time_limit_s": window_time_limit_s,
                 "coverage_reserve_s": coverage_reserve_s,
@@ -2857,7 +2854,12 @@ class RhcSolver(BaseSolver):
             if indegree[op.id] != 0:
                 continue
             release_offset = order_release_offsets.get(op.order_id, 0.0)
-            result[op.id] = max(result.get(op.id, 0.0), release_offset)
+            op_earliest = 0.0
+            if op.earliest_start is not None:
+                op_earliest = (
+                    op.earliest_start - problem.planning_horizon_start
+                ).total_seconds() / 60.0
+            result[op.id] = max(result.get(op.id, 0.0), release_offset, op_earliest)
             queue.append(op.id)
 
         while queue:
@@ -2871,7 +2873,12 @@ class RhcSolver(BaseSolver):
                     if successor is not None
                     else 0.0
                 )
-                required_start = max(current_end, release_offset)
+                op_earliest = 0.0
+                if successor is not None and successor.earliest_start is not None:
+                    op_earliest = (
+                        successor.earliest_start - problem.planning_horizon_start
+                    ).total_seconds() / 60.0
+                required_start = max(current_end, release_offset, op_earliest)
                 if required_start > result.get(succ_id, 0.0):
                     result[succ_id] = required_start
                 indegree[succ_id] -= 1
@@ -2968,46 +2975,11 @@ class RhcSolver(BaseSolver):
         assignments: list[Assignment],
         sdst: SdstMatrix,
     ) -> ObjectiveValues:
-        """Compute final objective values."""
-        if not assignments:
-            return ObjectiveValues()
+        """Compute final objective values.
 
-        horizon_start = problem.planning_horizon_start
-        ops_by_id = {op.id: op for op in problem.operations}
+        W16b-3: delegate to the canonical evaluator so setup is lane-aware
+        and unscheduled orders are anchored at the horizon end (F10).
+        """
+        from synaps.objective import evaluate
 
-        makespan = max((a.end_time - horizon_start).total_seconds() / 60.0 for a in assignments)
-
-        total_setup = 0.0
-        total_material_loss = 0.0
-        total_energy = 0.0
-        by_machine: dict[Any, list[Assignment]] = {}
-        for a in assignments:
-            by_machine.setdefault(a.work_center_id, []).append(a)
-        for wc_id, ma in by_machine.items():
-            ma.sort(key=lambda a: a.start_time)
-            for i in range(1, len(ma)):
-                prev_state = ops_by_id[ma[i - 1].operation_id].state_id
-                curr_state = ops_by_id[ma[i].operation_id].state_id
-                total_setup += sdst.get_setup(wc_id, prev_state, curr_state)
-                total_material_loss += sdst.get_material_loss(wc_id, prev_state, curr_state)
-                total_energy += sdst.get_energy(wc_id, prev_state, curr_state)
-
-        order_completion: dict[Any, float] = {}
-        for a in assignments:
-            op = ops_by_id[a.operation_id]
-            end = (a.end_time - horizon_start).total_seconds() / 60.0
-            if op.order_id not in order_completion or end > order_completion[op.order_id]:
-                order_completion[op.order_id] = end
-        total_tardiness = 0.0
-        for o in problem.orders:
-            comp = order_completion.get(o.id, 0.0)
-            due = (o.due_date - horizon_start).total_seconds() / 60.0
-            total_tardiness += max(comp - due, 0.0)
-
-        return ObjectiveValues(
-            makespan_minutes=makespan,
-            total_setup_minutes=total_setup,
-            total_material_loss=total_material_loss,
-            total_tardiness_minutes=total_tardiness,
-            total_energy_kwh=total_energy,
-        )
+        return evaluate(problem, assignments)

@@ -207,6 +207,31 @@ def test_select_solver_handles_non_predictor_gracefully() -> None:
     assert decision.solver_config == "CPSAT-10"
 
 
+def test_select_solver_surfaces_unknown_advisory_config() -> None:
+    """A15-P2: unknown ML recommendation must not vanish into a silent fallthrough."""
+
+    class StubUnknownPredictor(RuntimePredictor):
+        def __init__(self) -> None:
+            super().__init__(model=object(), model_version="stub-unknown")
+
+        def predict(self, features: ProblemFeatures) -> RuntimeAdvisory:
+            return RuntimeAdvisory(
+                predicted_ms={"GREED": 20.0},
+                recommended_solver="NOT-A-SOLVER",
+                confidence=0.99,
+                model_version="stub-unknown",
+            )
+
+    _, _, decision = select_solver(
+        make_simple_problem(),
+        advisory_predictor=StubUnknownPredictor(),
+        advisory_confidence_threshold=0.3,
+    )
+
+    assert decision.solver_config == "CPSAT-10"
+    assert "ML advisory rejected" in decision.reason
+
+
 # ── Torch availability ──
 
 

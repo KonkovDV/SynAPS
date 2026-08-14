@@ -110,9 +110,17 @@ class TestCoverageReserveAndSoftFallback:
             # Fixture horizon is intentionally half of chain length; cover needs room.
             coverage_horizon_extension_factor=4.0,
         )
-        assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
         assert result.metadata["ops_unscheduled"] == 0
         assert len(result.assignments) == len(problem.operations)
+        # Extension is a coverage tool: ops past the declared horizon must not
+        # be claimed FEASIBLE against the customer contract.
+        if result.metadata.get("planning_horizon_extended"):
+            assert result.status == SolverStatus.ERROR
+            assert "HORIZON_BOUND_VIOLATION" in result.metadata.get(
+                "notary_hard_violation_kinds", []
+            )
+        else:
+            assert result.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
 
     def test_coverage_reserve_never_exceeds_half_budget(self) -> None:
         """Short timeboxes must not starve the window loop via min reserve."""

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from synaps.accelerators import resource_capacity_window_is_feasible
+from synaps.solvers._time_windows import operation_latest_finish_offset_minutes
 from synaps.timegrain import duration_minutes_for
 
 if TYPE_CHECKING:
@@ -67,8 +68,10 @@ class MachineIndex:
         bucket = self._by_machine.setdefault(assignment.work_center_id, [])
         bisect.insort(bucket, assignment, key=lambda a: a.start_time)
         self._all.append(assignment)
-        self._setup_window_starts = None
-        self._resource_windows_cache.clear()
+        if self._setup_window_starts is not None:
+            self._refresh_machine_setup_windows(assignment.work_center_id)
+        if self._context.requirements_by_op.get(assignment.operation_id):
+            self._resource_windows_cache.clear()
 
     # -- queries ----------------------------------------------------------
 
@@ -88,6 +91,8 @@ class MachineIndex:
         self,
         required_resource_ids: set[Any],
     ) -> dict[Any, ResourceWindowSeries]:
+        if not required_resource_ids:
+            return {}
         key = frozenset(required_resource_ids)
         if key not in self._resource_windows_cache:
             self._resource_windows_cache[key] = _resource_windows_by_resource(
@@ -100,29 +105,43 @@ class MachineIndex:
 
     # -- internal ---------------------------------------------------------
 
-    def _compute_setup_window_starts(self) -> dict[Any, float]:
+    def _setup_windows_for_assignments(
+        self, machine_assignments: list[Assignment]
+    ) -> dict[Any, float]:
         ctx = self._context
         result: dict[Any, float] = {}
-        for machine_assignments in self._by_machine.values():
-            previous: Assignment | None = None
-            for assignment in machine_assignments:
-                start_offset = _offset_minutes(ctx, assignment, end=False)
-                if previous is None:
-                    result[assignment.operation_id] = start_offset
-                else:
-                    prev_state = _assignment_state_id(ctx, previous)
-                    cur_state = _assignment_state_id(ctx, assignment)
-                    setup_before = (
-                        ctx.setup_minutes.get(
-                            (assignment.work_center_id, prev_state, cur_state),
-                            0,
-                        )
-                        if prev_state is not None and cur_state is not None
-                        else 0
+        previous: Assignment | None = None
+        for assignment in machine_assignments:
+            start_offset = _offset_minutes(ctx, assignment, end=False)
+            if previous is None:
+                result[assignment.operation_id] = start_offset
+            else:
+                prev_state = _assignment_state_id(ctx, previous)
+                cur_state = _assignment_state_id(ctx, assignment)
+                setup_before = (
+                    ctx.setup_minutes.get(
+                        (assignment.work_center_id, prev_state, cur_state),
+                        0,
                     )
-                    result[assignment.operation_id] = start_offset - setup_before
-                previous = assignment
+                    if prev_state is not None and cur_state is not None
+                    else 0
+                )
+                result[assignment.operation_id] = start_offset - setup_before
+            previous = assignment
         return result
+
+    def _compute_setup_window_starts(self) -> dict[Any, float]:
+        result: dict[Any, float] = {}
+        for machine_assignments in self._by_machine.values():
+            result.update(self._setup_windows_for_assignments(machine_assignments))
+        return result
+
+    def _refresh_machine_setup_windows(self, work_center_id: Any) -> None:
+        if self._setup_window_starts is None:
+            return
+        self._setup_window_starts.update(
+            self._setup_windows_for_assignments(self._by_machine.get(work_center_id, []))
+        )
 
 
 @dataclass(frozen=True)
@@ -181,6 +200,47 @@ def recompute_assignment_setups(
             previous = assignment
 
     return total_setup
+
+
+def has_aux_capacity_violation(
+    context: DispatchContext,
+    assignments: list[Assignment],
+) -> bool:
+    """True when any auxiliary pool is over-capacity on ``assignments``.
+
+    Sweep-line over setup+processing windows already in the assignment set
+    (no double-counting). Empty aux requirements are vacuously clean.
+    """
+    if not context.requirements_by_op or not assignments:
+        return False
+
+    setup_window_starts = _assignment_setup_window_starts(context, assignments)
+    events_by_resource: dict[Any, list[tuple[float, int]]] = {}
+    for assignment in assignments:
+        for requirement in context.requirements_by_op.get(assignment.operation_id, []):
+            start_offset = setup_window_starts.get(
+                assignment.operation_id,
+                _offset_minutes(context, assignment, end=False),
+            )
+            end_offset = _offset_minutes(context, assignment, end=True)
+            events_by_resource.setdefault(requirement.aux_resource_id, []).append(
+                (start_offset, requirement.quantity_needed)
+            )
+            events_by_resource.setdefault(requirement.aux_resource_id, []).append(
+                (end_offset, -requirement.quantity_needed)
+            )
+
+    for resource_id, events in events_by_resource.items():
+        resource = context.resources_by_id.get(resource_id)
+        if resource is None:
+            continue
+        in_use = 0
+        ordered = sorted(events, key=lambda item: (item[0], 0 if item[1] < 0 else 1))
+        for _timestamp, delta in ordered:
+            in_use += delta
+            if in_use > resource.pool_size:
+                return True
+    return False
 
 
 def build_dispatch_context(problem: ScheduleProblem) -> DispatchContext:
@@ -433,6 +493,10 @@ def find_earliest_feasible_slot(
             latest_start = following_start - setup_after - duration
         else:
             latest_start = float("inf")
+
+        op_latest = operation_latest_finish_offset_minutes(operation, context.horizon_start)
+        if op_latest is not None:
+            latest_start = min(latest_start, op_latest - duration)
 
         if gap_start > latest_start + 1e-9:
             return None

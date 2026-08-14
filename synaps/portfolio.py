@@ -120,6 +120,30 @@ def resolve_portfolio_resource_limits(
     )
 
 
+def _publish_time_limit_honesty(
+    details: dict[str, object],
+    merged_kwargs: Mapping[str, object],
+    limits: ResourceLimits | None,
+) -> None:
+    """A15-P1-2 / P1-9: name vs clamp vs resource wall, without lying.
+
+    ``solver_time_limit_s`` is the search box (config / kwarg). Resource-guard
+    ``timeout_s`` is a separate process wall and is not the CP-SAT/ALNS limit.
+    ``effective_time_limit_s`` is min(search box, wall) when both are numeric.
+    """
+    solver_box = merged_kwargs.get("time_limit_s")
+    details["solver_time_limit_s"] = solver_box
+    details["random_seed"] = merged_kwargs.get("random_seed")
+    wall = limits.timeout_s if limits is not None else None
+    numeric: list[float] = []
+    if isinstance(solver_box, int | float) and not isinstance(solver_box, bool):
+        numeric.append(float(solver_box))
+    if isinstance(wall, int | float) and not isinstance(wall, bool):
+        numeric.append(float(wall))
+    details["effective_time_limit_s"] = min(numeric) if numeric else None
+    details["search_time_limit_is_solver_box"] = True
+
+
 def _run_guarded_solve(
     solver: BaseSolver,
     problem: ScheduleProblem,
@@ -284,11 +308,8 @@ def solve_schedule(
     verification_details: dict[str, object] = {
         "problem_profile": profile.as_dict(),
         "resource_guards_active": limits is not None,
-        # RT-20 F4: the solver's own time-box (config default or kwarg) is what
-        # actually bounds search; the resource-guard timeout is a separate wall.
-        # Publishing both keeps "time limit" claims honest.
-        "solver_time_limit_s": merged_kwargs.get("time_limit_s"),
     }
+    _publish_time_limit_honesty(verification_details, merged_kwargs, limits)
     if limits is not None:
         verification_details["resource_limits"] = {
             "timeout_s": limits.timeout_s,
@@ -409,8 +430,8 @@ def repair_schedule(
         "disrupted_operation_count": len(set(disrupted_op_ids)),
         "problem_profile": profile.as_dict(),
         "resource_guards_active": limits is not None,
-        "solver_time_limit_s": merged_kwargs.get("time_limit_s"),
     }
+    _publish_time_limit_honesty(verification_details, merged_kwargs, limits)
     if verify_feasibility:
         verification = verify_schedule_result(problem, result)
         verification_details.update(

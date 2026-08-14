@@ -74,8 +74,8 @@ def test_lbbd_refuses_retired_s3_cut_kinds() -> None:
         _add_benders_cut_rows(h=None, cuts=[cut], var_index={}, cmax_idx=0)
 
 
-def test_incremental_repair_refuses_max_parallel() -> None:
-    """H2: max_parallel>1 is an explicit ERROR, not silent serialization."""
+def test_incremental_repair_virtualizes_max_parallel() -> None:
+    """H2 close: max_parallel>1 uses lane virtualization, not silent serialization."""
     state = State(code="S")
     wc = WorkCenter(code="P", capability_group="G", max_parallel=2)
     order = Order(external_ref="O", due_date=_HE)
@@ -106,8 +106,10 @@ def test_incremental_repair_refuses_max_parallel() -> None:
     result = IncrementalRepair().solve(
         problem, base_assignments=base, disrupted_op_ids=[op.id], radius=0
     )
-    assert result.status == SolverStatus.ERROR
-    assert "max_parallel" in str(result.metadata.get("error", ""))
+    assert result.status == SolverStatus.FEASIBLE
+    assert result.metadata.get("parallel_virtualization") is True
+    assert result.assignments[0].work_center_id == wc.id
+    assert result.assignments[0].lane_id is not None
 
 
 def test_incremental_repair_cpsat_fallback_respects_frozen_predecessor() -> None:

@@ -45,7 +45,7 @@ The **Solver Router** selects one standalone solver configuration based on opera
 
 | Regime | Trigger | Solver Chain | Latency | Quality |
 |--------|---------|-------------|---------|---------|
-| **NOMINAL** | Default planning cycle | `CPSAT-10`→`CPSAT-30`→`LBBD-10`→`ALNS-300`→`ALNS-500`→`RHC-ALNS`→`LBBD-HD` depending on size, latency budget, and constraints | 10–600 s | exact-first, metaheuristic for large instances |
+| **NOMINAL** | Default planning cycle | `CPSAT-10`→`CPSAT-30`→`LBBD-10`→`ALNS-300`/`ALNS-500` (≤10K with latency)→`RHC-GREEDY-COVER` (>10K)→`RHC-ALNS` (50K+ with 10+ min) | 10–1800 s | exact-first below 10K; rolling-horizon coverage above |
 | **RUSH_ORDER** | Priority order injection | `CPSAT-10` for small windows, otherwise `GREED`; repair API handles schedule-aware patching | < 1–10 s | bounded |
 | **BREAKDOWN** | Machine failure event | `CPSAT-10` for small windows, otherwise `GREED`; repair API handles local repair | < 1–10 s | bounded |
 | **MATERIAL_SHORTAGE** | Inventory alarm | `CPSAT-30`, `LBBD-5`, or `LBBD-10-HD` | 30–300 s | exact on constrained subproblems |
@@ -101,7 +101,7 @@ The `SolverRegistry` (`registry.py`) provides named profiles used by the Portfol
 | `LBBD-10-HD` | LbbdHdSolver | 300 s | 10 | Large factory |
 | `LBBD-20-HD` | LbbdHdSolver | 600 s | 20 | Extreme (50K+ ops, experimental — use RHC-ALNS as validated path) |
 | `ALNS-300` | AlnsSolver | 120 s | 300 | Metaheuristic for 1K–10K ops |
-| `ALNS-500` | AlnsSolver | 300 s | 500 | Metaheuristic for 10K–50K ops |
+| `ALNS-500` | AlnsSolver | 300 s | 500 | Metaheuristic for ≤10K ops with a 5+ minute budget |
 | `ALNS-1000` | AlnsSolver | 600 s | 1000 | Extended ALNS for 50K+ ops |
 | `RHC-ALNS` | RhcSolver (ALNS inner) | 600 s | 8h windows | Temporal decomposition for 50K–100K+ ops |
 | `RHC-CPSAT` | RhcSolver (CP-SAT inner) | 300 s | 8h windows | Temporal decomposition with exact per-window solve |
@@ -133,10 +133,14 @@ Default (NOMINAL):
     If N ≤ 120                     → CPSAT-30
     If N ≤ 500                     → LBBD-10
     If latency > 120s and N ≤ 10K  → ALNS-300
-    If latency > 300s and N ≤ 50K  → ALNS-500
+    If latency > 300s and N ≤ 10K  → ALNS-500
+    If N > 10K and N ≤ 50K         → RHC-GREEDY-COVER
+      (with or without latency > 300s; rolling-horizon coverage)
+    If latency > 600s and N ≥ 100K → RHC-ALNS-100K
     If latency > 600s and N > 50K  → RHC-ALNS
-    If N ≤ 50K                     → LBBD-10-HD
-    Else                           → LBBD-20-HD
+    If N > 10K                     → RHC-GREEDY-COVER
+    Else                           → LBBD-10-HD
+      (`LBBD-20-HD` remains exact_required-only at 50K+; unvalidated as default)
 ```
 
 The router is **deterministic** — same inputs always produce the same solver choice. No ML, no randomness. ALNS/RHC routes are only activated when the latency budget is generous and `exact_required` is not set; otherwise LBBD-HD remains the default large-scale path.

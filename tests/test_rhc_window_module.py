@@ -298,6 +298,8 @@ class TestStabilizeTemporalConsistency:
             "passes": 0,
             "precedence_shifts": 0,
             "machine_shifts": 0,
+            "aux_shifts": 0,
+            "ceiling_blocks": 0,
             "converged": 1,
         }
 

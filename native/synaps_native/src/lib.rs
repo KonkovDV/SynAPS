@@ -1,7 +1,11 @@
+mod cpu;
+
 use numpy::{PyArray1, PyArrayMethods, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use rayon::prelude::*;
+
+use cpu::{prefetch_f64_at, prefetch_i64_at, prefetch_rhc_soa, PREFETCH_DISTANCE};
 
 // ---------------------------------------------------------------------------
 // Fast approximate exp (Schraudolph 1999, IEEE-754 bit trick).
@@ -405,6 +409,11 @@ fn rhc_element_csr(
     } else {
         let mut min_val = f64::INFINITY;
         for k in row_start..row_end {
+            // Irregular mao[] gather: hardware stride prefetch cannot follow CSR.
+            if k + PREFETCH_DISTANCE < row_end {
+                let ahead = indices[k + PREFETCH_DISTANCE] as usize;
+                prefetch_f64_at(mao, ahead);
+            }
             let idx = indices[k] as usize;
             if idx < machine_count {
                 let val = unsafe { *mao.get_unchecked(idx) };
@@ -429,6 +438,39 @@ fn rhc_element_csr(
     let pressure = pressure * (1.0 + overdue * (due_pressure_overdue_boost - 1.0));
 
     (slack, pressure)
+}
+
+#[inline(always)]
+fn score_rhc_element(
+    i: usize,
+    n: usize,
+    offsets: &[i64],
+    indices: &[i64],
+    mao: &[f64],
+    machine_count: usize,
+    peo: &[f64],
+    d_off: &[f64],
+    rpt: &[f64],
+    ow: &[f64],
+    ptm: &[f64],
+    safe_pressure_denominator: f64,
+    due_pressure_overdue_boost: f64,
+) -> (f64, f64) {
+    prefetch_rhc_soa(i, n, peo, d_off, rpt, ow, ptm, offsets);
+    rhc_element_csr(
+        i,
+        offsets,
+        indices,
+        mao,
+        machine_count,
+        peo,
+        d_off,
+        rpt,
+        ow,
+        ptm,
+        safe_pressure_denominator,
+        due_pressure_overdue_boost,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -493,8 +535,9 @@ fn compute_rhc_candidate_metrics_batch(
             .into_par_iter()
             .with_min_len(RAYON_MIN_CHUNK)
             .for_each(|i| {
-                let (slack, pressure) = rhc_element_csr(
+                let (slack, pressure) = score_rhc_element(
                     i,
+                    n,
                     &csr_offsets,
                     &csr_indices,
                     &machine_available_offsets,
@@ -593,8 +636,9 @@ fn compute_rhc_candidate_metrics_batch_np<'py>(
             .into_par_iter()
             .with_min_len(RAYON_MIN_CHUNK)
             .for_each(|i| {
-                let (slack, pressure) = rhc_element_csr(
+                let (slack, pressure) = score_rhc_element(
                     i,
+                    n,
                     offsets_raw,
                     indices_raw,
                     mao_raw,
@@ -688,8 +732,9 @@ fn compute_rhc_candidate_metrics_batch_np_jagged<'py>(
             .into_par_iter()
             .with_min_len(RAYON_MIN_CHUNK)
             .for_each(|i| {
-                let (slack, pressure) = rhc_element_csr(
+                let (slack, pressure) = score_rhc_element(
                     i,
+                    n,
                     &csr_offsets,
                     &csr_indices,
                     mao_raw,
@@ -1384,6 +1429,7 @@ fn greedy_repair_batch<'py>(
 
     // Release GIL during computation — the main loop is sequential but
     // avoids holding the GIL for potentially long 50K-operation dispatches.
+    let mut failed_op: Option<usize> = None;
     py.allow_threads(|| {
         // Per-machine state: availability time and last state index
         let mut machine_available_at = vec![0.0f64; n_wc];
@@ -1393,6 +1439,16 @@ fn greedy_repair_batch<'py>(
         let mut op_end = vec![0.0f64; n];
 
         for i in 0..n {
+            // Sequential SoA + next CSR row (software pipeline, one cache line ahead).
+            if i + PREFETCH_DISTANCE < n {
+                prefetch_f64_at(durations, i + PREFETCH_DISTANCE);
+                prefetch_i64_at(preds, i + PREFETCH_DISTANCE);
+                prefetch_i64_at(states, i + PREFETCH_DISTANCE);
+                prefetch_i64_at(elig_off, i + 1 + PREFETCH_DISTANCE);
+                let next_row = elig_off[i + PREFETCH_DISTANCE] as usize;
+                prefetch_i64_at(elig_idx, next_row);
+            }
+
             // Predecessor constraint
             let pred_end = if preds[i] >= 0 {
                 let pred_idx = preds[i] as usize;
@@ -1414,6 +1470,21 @@ fn greedy_repair_batch<'py>(
 
             // Scan eligible machines for earliest completion
             for k in row_start..row_end {
+                if k + PREFETCH_DISTANCE < row_end {
+                    let m_ahead = elig_idx[k + PREFETCH_DISTANCE] as usize;
+                    prefetch_f64_at(&speeds, m_ahead);
+                    prefetch_f64_at(&machine_available_at, m_ahead);
+                    if m_ahead < n_wc && machine_last_state[m_ahead] >= 0 && states[i] >= 0 {
+                        let prev_s = machine_last_state[m_ahead] as usize;
+                        let curr_s = states[i] as usize;
+                        if prev_s < n_states && curr_s < n_states {
+                            prefetch_f64_at(
+                                sdst,
+                                m_ahead * n_states * n_states + prev_s * n_states + curr_s,
+                            );
+                        }
+                    }
+                }
                 let m = elig_idx[k] as usize;
                 if m >= n_wc {
                     continue;
@@ -1451,12 +1522,11 @@ fn greedy_repair_batch<'py>(
                 }
             }
 
-            // Fallback: if no eligible machine found (shouldn't happen with valid input),
-            // assign to machine 0 with a large penalty offset.
+            // Empty CSR row: fail closed. Machine-0 + 1e6 was a silent lie vs
+            // the Python contract (eligible=[] means all work centers).
             if best_machine < 0 {
-                best_machine = 0;
-                best_start = pred_end + 1_000_000.0;
-                best_end = best_start + durations[i];
+                failed_op = Some(i);
+                return;
             }
 
             starts_slice[i] = best_start;
@@ -1469,6 +1539,12 @@ fn greedy_repair_batch<'py>(
             machine_last_state[bm] = states[i];
         }
     });
+
+    if let Some(i) = failed_op {
+        return Err(PyValueError::new_err(format!(
+            "greedy_repair_batch: operation {i} has empty eligible machine set"
+        )));
+    }
 
     Ok((out_starts.into(), out_ends.into(), out_machines.into()))
 }

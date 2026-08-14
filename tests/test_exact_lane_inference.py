@@ -126,12 +126,14 @@ def test_greedy_fallback_emits_lane_inference_unproven(monkeypatch) -> None:
     assert "LANE_INFERENCE_UNPROVEN" in kinds
     assert any(v.kind == "LANE_INFERENCE_UNPROVEN" for v in violations)
     assert hard_violations(violations), "hard faults must remain after filtering advisory"
-    # Wave 8 / RT17-H2: customer oracle demotes unproven greedy triggers.
-    assert not proven_hard_violations(violations)
+    # W16b-1: unproven greedy lanes are UNKNOWN, not a customer FEASIBLE claim.
+    proven = proven_hard_violations(violations)
+    assert any(v.kind == "LANE_INFERENCE_UNPROVEN" for v in proven)
+    assert not any(v.kind == "SETUP_GAP_VIOLATION" for v in proven)
 
 
 def test_verify_schedule_result_feasible_when_lane_unproven(monkeypatch) -> None:
-    """Portfolio verified_feasible must not false-fail the greedy-trap under fallback."""
+    """Unproven greedy lanes must not certify verified_feasible (W16b-1)."""
     import synaps.solvers.feasibility_checker as checker_mod
     from synaps.model import ScheduleResult, SolverStatus
     from synaps.validation import verify_schedule_result
@@ -144,5 +146,5 @@ def test_verify_schedule_result_feasible_when_lane_unproven(monkeypatch) -> None
         assignments=assignments,
     )
     verification = verify_schedule_result(problem, result)
-    assert verification.feasible is True
+    assert verification.feasible is False
     assert "LANE_INFERENCE_UNPROVEN" in verification.violation_kinds

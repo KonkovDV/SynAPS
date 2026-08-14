@@ -82,6 +82,10 @@ INNER_SUMMARY_METADATA_KEYS: tuple[str, ...] = (
     # C4 (Task 3b): Cross-window operator bias metadata.
     "cross_window_bias_applied",
     "cross_window_bias_operator_deltas",
+    "wall_clock_path_dependent",
+    "determinism",
+    "determinism_violated",
+    "search_stop_reason",
 )
 
 
