@@ -7,12 +7,16 @@ from uuid import uuid4
 
 from synaps.domains.cable import (
     CABLE_PVC_WEIGHTS,
+    NERVOUS_STAGES,
     CableSku,
     assignment_hamming,
     cable_kpis,
     duration_minutes_from_length,
     generate_cable_instance,
+    generate_nervous_month,
+    nervous_sku_catalog,
     peak_wip_drums,
+    run_nervous_month,
     setup_transition,
     split_length_into_reels,
     state_code,
@@ -84,6 +88,24 @@ def test_parent_order_splits_into_reels() -> None:
     assert parents == {"ORD-0001"}
     first_ops = [op for op in problem.operations if op.seq_in_order == 1]
     assert all(op.earliest_start is not None for op in first_ops)
+
+
+def test_campaign_gate_is_release_not_due() -> None:
+    problem = generate_cable_instance(
+        n_orders=12,
+        seed=1,
+        horizon_hours=720,
+        rush_fraction=0.15,
+        scatter_releases=True,
+        shuffle_skus=True,
+    )
+    orders = {order.id: order for order in problem.orders}
+    for operation in problem.operations:
+        if operation.seq_in_order != 1 or operation.earliest_start is None:
+            continue
+        order = orders[operation.order_id]
+        assert operation.earliest_start < order.due_date
+        assert operation.earliest_start >= problem.planning_horizon_start
 
 
 def test_cable_pvc_weights_prefer_lower_material() -> None:
@@ -195,3 +217,30 @@ def test_freeze_blocks_rush_from_stealing_issued_slot() -> None:
     )
     unconstrained_by_op = {row.operation_id: row for row in unconstrained.assignments}
     assert unconstrained_by_op[second.id].start_time <= unconstrained_by_op[first.id].start_time
+
+
+def test_nervous_sku_catalog_and_tiny_month_feasible() -> None:
+    assert len(nervous_sku_catalog()) == 36
+    assert len(NERVOUS_STAGES) == 6
+    problem = generate_nervous_month(
+        n_orders=8,
+        seed=1,
+        machines_per_stage=2,
+        drum_pool_size=24,
+    )
+    assert problem.planning_horizon_end - problem.planning_horizon_start == timedelta(hours=720)
+    assert any(order.release_date is not None for order in problem.orders)
+    assert {op.domain_attributes["stage"] for op in problem.operations} >= {"draw", "pack"}
+    report = run_nervous_month(
+        n_orders=8,
+        seed=1,
+        waves=1,
+        disruptions_per_wave=2,
+        machines_per_stage=2,
+        drum_pool_size=24,
+    )
+    assert report["status"] == "feasible"
+    assert report["notary_hard_violations"] == 0
+    assert report["n_operations"] == len(problem.operations)
+    assert report["solver_config"] == "GREED"
+    assert report["waves"]

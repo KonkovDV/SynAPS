@@ -131,6 +131,30 @@ def test_cli_cable_demo_emits_kpis(capsys: pytest.CaptureFixture[str]) -> None:
     assert payload["claim"].startswith("synthetic")
 
 
+def test_cli_cable_nervous_month_tiny(capsys: pytest.CaptureFixture[str]) -> None:
+    exit_code = main(
+        [
+            "cable-nervous-month",
+            "--orders",
+            "6",
+            "--waves",
+            "1",
+            "--disruptions",
+            "2",
+            "--machines-per-stage",
+            "2",
+            "--drum-pool",
+            "24",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["status"] == "feasible"
+    assert payload["notary_hard_violations"] == 0
+    assert payload["solver_config"] == "GREED"
+    assert payload["waves"]
+
+
 def test_cli_list_solver_configs_emits_manifest(capsys: pytest.CaptureFixture[str]) -> None:
     exit_code = main(["list-solver-configs"])
     captured = capsys.readouterr()

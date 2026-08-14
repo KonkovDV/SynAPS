@@ -185,6 +185,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional path where the JSON manifest should be written instead of stdout",
     )
     _add_cable_demo_parser(subparsers)
+    _add_cable_nervous_parser(subparsers)
     return parser
 
 
@@ -226,6 +227,35 @@ def _run_cable_demo(args: argparse.Namespace) -> int:
     }
     _write_json_output(payload, args.output_file)
     return 0 if result.status.value == "feasible" and not hard else 1
+
+
+def _add_cable_nervous_parser(subparsers: Any) -> None:
+    parser = subparsers.add_parser(
+        "cable-nervous-month",
+        help="Harsh synthetic 30-day cable month: cover-solve + freeze/rush waves",
+    )
+    parser.add_argument("--orders", type=int, default=1600, help="Parent sales orders")
+    parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--waves", type=int, default=4)
+    parser.add_argument("--disruptions", type=int, default=20)
+    parser.add_argument("--machines-per-stage", type=int, default=16)
+    parser.add_argument("--drum-pool", type=int, default=96)
+    parser.add_argument("--output-file", type=Path, help="Write JSON report here")
+
+
+def _run_cable_nervous(args: argparse.Namespace) -> int:
+    from synaps.domains.cable import run_nervous_month
+
+    report = run_nervous_month(
+        n_orders=args.orders,
+        seed=args.seed,
+        waves=args.waves,
+        disruptions_per_wave=args.disruptions,
+        machines_per_stage=args.machines_per_stage,
+        drum_pool_size=args.drum_pool,
+    )
+    _write_json_output(report, args.output_file)
+    return 0 if report["status"] == "feasible" and report["notary_hard_violations"] == 0 else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -359,6 +389,9 @@ def main(argv: list[str] | None = None) -> int:
 
     elif args.command == "cable-demo":
         return _run_cable_demo(args)
+
+    elif args.command == "cable-nervous-month":
+        return _run_cable_nervous(args)
 
     parser.error(f"Unsupported command: {args.command}")
 

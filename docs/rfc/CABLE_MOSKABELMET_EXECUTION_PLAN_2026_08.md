@@ -227,6 +227,9 @@ Estimated effort if executed continuously: C0 1–2 d, C1 2–4 d, C2 3–5 d, C
 ## Implementation note (2026-08-14)
 
 Shipped encode-first: domain 9 + generator + KPIs + campaign windows +
-`CABLE_PVC_WEIGHTS` + IncrementalRepair freeze. Not shipped: C5a–d, live MES,
-Dmax inside CP-SAT, factory −24% drums as a measured effect.
+`CABLE_PVC_WEIGHTS` + IncrementalRepair freeze. Nervous-month evidence
+(2026-08-14): 20 316 ops `feasible` at 16 machines/stage in 9.36 s cover;
+8/stage overflows under list-schedule+SMED. See
+`docs/rfc/CABLE_NERVOUS_MONTH_ACCEL_2026_08.md`. Not shipped: C5a–d, live MES,
+Dmax inside CP-SAT, factory −24% drums as a measured effect, ATCS-on-COVER.
 

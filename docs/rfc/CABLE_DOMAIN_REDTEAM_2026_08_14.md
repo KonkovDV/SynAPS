@@ -19,6 +19,7 @@ Do not advertise “SynAPS now plans Moskabelmet”.
 | **C-P1-1** | P1 | `Order.quantity` unused | Adapter still writes `base_duration_min`; quantity stored as metres for PDM round-trip, kernel unchanged (honest) |
 | **C-P1-2** | P1 | Hamming formula `\|△\|/\|old\|` on tuples exceeded 1 | Rewritten as share of baseline ops whose `(wc, start)` moved, in `[0,1]` |
 | **C-P2-1** | P2 | Catalog had 8 domains | Domain 9 + `schema/examples/cable.json` |
+| **C-R6** | P2 | No 5k–40k cable FEASIBLE pack | Closed 2026-08-14: nervous-month 20 316 ops. `CABLE_NERVOUS_MONTH_REDTEAM_2026_08_14.md` |
 
 Evidence: `tests/test_domain_cable.py` + `tests/test_architecture.py` (ratchet) +
 `tests/test_incremental_repair.py` + `tests/test_contracts.py` + CLI demo
@@ -33,7 +34,6 @@ Evidence: `tests/test_domain_cable.py` + `tests/test_architecture.py` (ratchet) 
 | **C-R3** | P1 | Freeze does not apply to `solve_schedule` | Issued-plan lock is a *repair* policy. A first GREEDY plan can still interleave colours. |
 | **C-R4** | P2 | Campaign windows only snap `earliest_start` | Not INFIMUM lot combining. Cross-order predecessors still illegal. |
 | **C-R5** | P2 | Setup minutes are parametric, not plant SMED | 240/360/400 min are order-of-magnitude vs MAPRE hundreds of minutes, not a dump. |
-| **C-R6** | P2 | No 5k–40k cable `FEASIBLE` evidence pack | C0 generator smoke is 2–3 parent orders. Do not quote 500k GREEDY_COVER here. |
 | **C-R7** | P2 | `allow_freeze_break` is a boolean, not an ACL | A client can always set it true. Policy, not cryptography. |
 | **C-R8** | P2 | Blocking / no-wait / AMR / RFID drums | PyJobShop class, Processes 2025 AMR, Prysmian Alesea — out of kernel. |
 
@@ -50,4 +50,4 @@ Do not add: INFIMUM 39k/40 min, +78M RUB, 27 days, Zhu −9.8% makespan, Prysmia
 
 ## Next honest step
 
-Measure `peak_wip_drums` vs processing-aux peak on a 5k cable instance. Open C5a only if C4 weights + freeze cannot move Dmax.
+Measure `peak_wip_drums` vs processing-aux peak on a 5k cable instance. Open C5a only if C4 weights + freeze cannot move Dmax. Nervous-month 20 316-op pack is done (`D_max=265` vs pool 96).

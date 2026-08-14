@@ -91,7 +91,10 @@ Suggested `domain_attributes`:
 - `line_speed_m_per_min`, `stage`
 - `hold_semantics: processing_only` on drum aux
 
-Generator: `synaps.domains.cable.generate_cable_instance`. CLI: `python -m synaps cable-demo`.
+Generator: `synaps.domains.cable.generate_cable_instance`. CLI:
+`python -m synaps cable-demo` (tiny) and `python -m synaps cable-nervous-month`
+(30-day synthetic pack). Measured 20 316-op month:
+[CABLE_NERVOUS_MONTH_ACCEL_2026_08.md](../rfc/CABLE_NERVOUS_MONTH_ACCEL_2026_08.md).
 
 ## 9. Market of solutions (August 2026)
 
@@ -137,7 +140,7 @@ Encoded:
 - \(p_o = \max(1,\lceil L_{\text{reel}}/v_{\text{stage}}\rceil)\) written to `base_duration_min`
 - SDST \(\sigma\) from SKU deltas + `material_loss` scrap metres
 - Drum Cumulative on processing window
-- Campaign: `earliest_start` snapped to family×due slots
+- Campaign: `earliest_start` snapped to the earliest **release** in a family×due slot (not to the due date)
 - Freeze: `start_time < freeze_horizon_end` subtracted from repair neighbourhood (rush cannot steal; breakdown of that op still can)
 - \(D_{\max}\) and Hamming \(R\) as **functionals**, not CP-SAT terms
 

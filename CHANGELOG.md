@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Nervous-month cable benchmark:** `python -m synaps cable-nervous-month`.
+  Synthetic 30-day high-mix MTO (1 600 parents, 36 SKUs, 15% rush, 6 stages).
+  Seed=1, 16 machines/stage, 96 drums: 20 316 ops, `RHC-GREEDY-COVER`
+  `feasible`, exhaustive notary empty, stabilize converged, generate 0.97 s /
+  cover 9.36 s / notary 0.31 s, makespan 39 660/43 200 min. Four freeze+repair
+  waves all `feasible` (repair 5.1–6.0 s vs re-cover 9.25 s, Hamming \(R\)
+  ≤0.00064). Same mix at 8 machines/stage overflows the horizon (coverage
+  0.50). Evidence and acceleration plan:
+  `docs/rfc/CABLE_NERVOUS_MONTH_ACCEL_2026_08.md`. Red Team:
+  `docs/rfc/CABLE_NERVOUS_MONTH_REDTEAM_2026_08_14.md`. Not Moskabelmet MES,
+  not INFIMUM, not the 500k synthetic cover.
+
 - **Cable domain (encode-first, Moskabelmet-shaped):** `docs/domains/cable.md`
   is domain 9. Adapter writes metres→`base_duration_min`, pre-splits reels,
   parametric colour/section/compound SDST, drum aux, campaign
@@ -20,6 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   data, not INFIMUM, not C5 hold-until-successor.
 
 ### Changed
+
+- **Cable campaign gate:** `apply_campaign_windows` opens a shared
+  `earliest_start` at the earliest **release** in a `(state, due-slot)` group.
+  Snapping the gate to the due-date slot forbade starting until the due bucket
+  and made a loaded month horizon-infeasible. Regression:
+  `test_campaign_gate_is_release_not_due`.
 
 - **500k GREEDY_COVER evidence:** model cap is 500_000 operations.
   Native parallel SGS (Kolisch ready-heap, integer `ceil(base/speed)`
