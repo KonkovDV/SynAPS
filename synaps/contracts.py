@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from datetime import datetime  # noqa: TC003
 from pathlib import Path
 from typing import Final, Literal
 from uuid import UUID  # noqa: TC003
@@ -173,6 +174,8 @@ class RepairRequest(BaseModel):
     radius: int | None = None
     regime: SolveRegime = SolveRegime.BREAKDOWN
     verify_feasibility: bool = True
+    freeze_horizon_end: datetime | None = None
+    allow_freeze_break: bool = False
 
 
 class SolveResponse(BaseModel):
@@ -493,12 +496,18 @@ def execute_repair_request(request: RepairRequest) -> RepairResponse:
 
     check_contract_version(request.contract_version)
     _assert_no_precedence_cycle(request.problem)
+    repair_kwargs: dict[str, object] = {
+        "allow_freeze_break": request.allow_freeze_break,
+    }
+    if request.freeze_horizon_end is not None:
+        repair_kwargs["freeze_horizon_end"] = request.freeze_horizon_end
     result = repair_schedule(
         request.problem,
         base_assignments=request.base_assignments,
         disrupted_op_ids=request.disrupted_op_ids,
         radius=request.radius,
         regime=request.regime,
+        solve_kwargs=repair_kwargs,
         verify_feasibility=request.verify_feasibility,
     )
     return RepairResponse(request_id=request.request_id, result=result)

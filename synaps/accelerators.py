@@ -36,6 +36,7 @@ _native_sdst_batch_lookup_cls: type | None = None
 _native_NativeSdstBatchLookup: type | None = None  # noqa: N816 - legacy test hook
 _native_compute_destroy_worst_scores: Callable[..., Any] | None = None
 _native_greedy_repair_batch: Callable[..., Any] | None = None
+_native_list_schedule_cover: Callable[..., Any] | None = None
 
 if os.getenv("SYNAPS_DISABLE_NATIVE_ACCELERATION") == "1":
     _native_compute_atcs_log_score = None
@@ -50,6 +51,7 @@ if os.getenv("SYNAPS_DISABLE_NATIVE_ACCELERATION") == "1":
     _native_NativeSdstBatchLookup = None  # noqa: N816
     _native_compute_destroy_worst_scores = None
     _native_greedy_repair_batch = None
+    _native_list_schedule_cover = None
 else:
     try:
         _synaps_native = importlib.import_module("synaps_native")
@@ -67,6 +69,7 @@ else:
         _native_NativeSdstBatchLookup = None  # noqa: N816
         _native_compute_destroy_worst_scores = None
         _native_greedy_repair_batch = None
+        _native_list_schedule_cover = None
     else:
         _native_compute_atcs_log_score = getattr(
             _synaps_native,
@@ -122,6 +125,11 @@ else:
         _native_greedy_repair_batch = getattr(
             _synaps_native,
             "greedy_repair_batch",
+            None,
+        )
+        _native_list_schedule_cover = getattr(
+            _synaps_native,
+            "list_schedule_cover",
             None,
         )
 
@@ -184,6 +192,7 @@ def _native_kernel_flags() -> dict[str, bool]:
         "sdst_batch_lookup": _native_sdst_batch_lookup_cls is not None,
         "destroy_worst_scores": _native_compute_destroy_worst_scores is not None,
         "greedy_repair_batch": _native_greedy_repair_batch is not None,
+        "list_schedule_cover": _native_list_schedule_cover is not None,
     }
 
 
@@ -218,6 +227,7 @@ def get_acceleration_status() -> dict[str, Any]:
         if kernels["destroy_worst_scores"]
         else "python",
         "greedy_repair_batch_backend": "native" if kernels["greedy_repair_batch"] else "python",
+        "list_schedule_cover_backend": "native" if kernels["list_schedule_cover"] else "python",
     }
 
 
@@ -894,6 +904,61 @@ def greedy_repair_batch_native(
         return None
 
 
+def list_schedule_cover_native(
+    base_durations: np.ndarray,
+    predecessor_indices: np.ndarray,
+    seq_in_order: np.ndarray,
+    uuid_rank: np.ndarray,
+    earliest: np.ndarray,
+    latest_finish: np.ndarray,
+    eligible_offsets: np.ndarray,
+    eligible_indices: np.ndarray,
+    state_ids: np.ndarray,
+    sdst_setup_flat: np.ndarray,
+    n_wc: int,
+    n_states: int,
+    speed_factors: np.ndarray,
+    horizon_minutes: float,
+    aux_offsets: np.ndarray,
+    aux_resource_indices: np.ndarray,
+    aux_quantities: np.ndarray,
+    aux_pool_sizes: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
+    """Try native parallel SGS cover. Returns None if native unavailable."""
+
+    if _native_list_schedule_cover is None or not _HAS_NUMPY:
+        return None
+    try:
+        starts, ends, machines, setups = _native_list_schedule_cover(
+            np.ascontiguousarray(base_durations, dtype=np.float64),
+            np.ascontiguousarray(predecessor_indices, dtype=np.int64),
+            np.ascontiguousarray(seq_in_order, dtype=np.int32),
+            np.ascontiguousarray(uuid_rank, dtype=np.int32),
+            np.ascontiguousarray(earliest, dtype=np.float64),
+            np.ascontiguousarray(latest_finish, dtype=np.float64),
+            np.ascontiguousarray(eligible_offsets, dtype=np.int64),
+            np.ascontiguousarray(eligible_indices, dtype=np.int64),
+            np.ascontiguousarray(state_ids, dtype=np.int64),
+            np.ascontiguousarray(sdst_setup_flat, dtype=np.float64),
+            int(n_wc),
+            int(n_states),
+            np.ascontiguousarray(speed_factors, dtype=np.float64),
+            float(horizon_minutes),
+            np.ascontiguousarray(aux_offsets, dtype=np.int64),
+            np.ascontiguousarray(aux_resource_indices, dtype=np.int64),
+            np.ascontiguousarray(aux_quantities, dtype=np.int32),
+            np.ascontiguousarray(aux_pool_sizes, dtype=np.int32),
+        )
+        return (
+            np.asarray(starts, dtype=np.float64),
+            np.asarray(ends, dtype=np.float64),
+            np.asarray(machines, dtype=np.int64),
+            np.asarray(setups, dtype=np.int64),
+        )
+    except Exception:
+        return None
+
+
 __all__ = [
     "compute_atcs_log_score",
     "compute_atcs_log_scores_batch",
@@ -903,6 +968,7 @@ __all__ = [
     "evaluate_objective_batch",
     "get_acceleration_status",
     "greedy_repair_batch_native",
+    "list_schedule_cover_native",
     "native_sdst_batch_lookup",
     "resource_capacity_window_is_feasible",
     "stabilize_temporal_batch",

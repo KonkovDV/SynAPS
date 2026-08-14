@@ -1,0 +1,70 @@
+{
+  "_comment": "Cable / wire domain parametrization example for SynAPS (encode-first, not a live plant dump)",
+  "states": [
+    {
+      "code": "Cu-PVC-BK-16",
+      "label": "Cu PVC black 16 mm2",
+      "domain_attributes": {
+        "conductor": "Cu",
+        "insulation": "PVC",
+        "color": "BK",
+        "section_mm2": 16,
+        "domain": "cable"
+      }
+    },
+    {
+      "code": "Cu-PVC-RD-16",
+      "label": "Cu PVC red 16 mm2",
+      "domain_attributes": {
+        "conductor": "Cu",
+        "insulation": "PVC",
+        "color": "RD",
+        "section_mm2": 16,
+        "domain": "cable"
+      }
+    }
+  ],
+  "setup_matrix_example": {
+    "from_state": "Cu-PVC-BK-16",
+    "to_state": "Cu-PVC-RD-16",
+    "setup_minutes": 240,
+    "material_loss": 15.0,
+    "energy_kwh": 20.0,
+    "domain_attributes": {
+      "change_kind": "color",
+      "parametric": true,
+      "not_moskabelmet_smed": true
+    }
+  },
+  "work_center_example": {
+    "code": "extrude-01",
+    "capability_group": "extrusion",
+    "speed_factor": 1.0,
+    "domain_attributes": {
+      "stage": "extrude",
+      "line_speed_m_per_min": 25.0,
+      "domain": "cable"
+    }
+  },
+  "auxiliary_resource_example": {
+    "code": "drum_std",
+    "resource_type": "drum",
+    "pool_size": 8,
+    "domain_attributes": {
+      "hold_semantics": "processing_only",
+      "flange_mm": 1000,
+      "domain": "cable"
+    }
+  },
+  "order_example": {
+    "external_ref": "ORD-0001-R1",
+    "quantity": 1000,
+    "unit": "m",
+    "domain_attributes": {
+      "length_m": 1000,
+      "reel_id": "ORD-0001-R1",
+      "parent_order_ref": "ORD-0001",
+      "sku": "Cu-PVC-BK-16"
+    }
+  }
+}

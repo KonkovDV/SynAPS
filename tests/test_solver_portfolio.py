@@ -276,8 +276,8 @@ def test_route_solver_cover_for_20k_ops_with_latency_budget() -> None:
     assert "rolling-horizon" in decision.reason
 
 
-def test_route_solver_rhc_alns_for_60k_ops_with_latency_budget() -> None:
-    """60K-op instance with >600s latency should route to RHC-ALNS."""
+def test_route_solver_cover_for_60k_ops_with_latency_budget() -> None:
+    """60K-op instance with >600s latency uses the 50k-feasible cover path."""
     problem = make_simple_problem(n_orders=15000, ops_per_order=4)
 
     decision = route_solver_config(
@@ -288,8 +288,24 @@ def test_route_solver_rhc_alns_for_60k_ops_with_latency_budget() -> None:
         ),
     )
 
-    assert decision.solver_config == "RHC-ALNS"
-    assert "Receding Horizon" in decision.reason
+    assert decision.solver_config == "RHC-GREEDY-COVER"
+    assert "rolling-horizon greedy" in decision.reason
+
+
+def test_route_solver_cover_for_100k_ops_with_latency_budget() -> None:
+    """100K-op instance with >600s latency also uses cover, not RHC-ALNS-100K."""
+    problem = make_simple_problem(n_orders=25000, ops_per_order=4)
+
+    decision = route_solver_config(
+        problem,
+        context=SolverRoutingContext(
+            regime=SolveRegime.NOMINAL,
+            preferred_max_latency_s=900,
+        ),
+    )
+
+    assert decision.solver_config == "RHC-GREEDY-COVER"
+    assert "rolling-horizon greedy" in decision.reason
 
 
 def test_route_feasibility_first_greedy_for_medium_nominal() -> None:
@@ -336,22 +352,6 @@ def test_route_feasibility_first_cover_for_ultra_large_with_latency() -> None:
 
     assert decision.solver_config == "RHC-GREEDY-COVER"
     assert "coverage-complete" in decision.reason
-
-
-def test_route_solver_rhc_alns_100k_profile_for_100k_ops_with_latency_budget() -> None:
-    """100K-op instance with >600s latency should route to the named 100K RHC profile."""
-    problem = make_simple_problem(n_orders=25000, ops_per_order=4)
-
-    decision = route_solver_config(
-        problem,
-        context=SolverRoutingContext(
-            regime=SolveRegime.NOMINAL,
-            preferred_max_latency_s=900,
-        ),
-    )
-
-    assert decision.solver_config == "RHC-ALNS-100K"
-    assert "100k" in decision.reason.lower() or "300/90" in decision.reason
 
 
 def test_route_solver_lbbd_for_large_ops_without_latency_budget() -> None:

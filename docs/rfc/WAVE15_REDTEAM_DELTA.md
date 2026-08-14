@@ -32,6 +32,10 @@
 | **W16-C8/10** | P1 | Horizon extension claimed FEASIBLE; notary vs oracle skew | Placement may extend; claim uses original horizon + `exhaustive=True`. |
 | **W16-C11** | P0 | ALNS `_reanchor_against_frozen` `while True` on stacked frozen extra-ops (float dust / first-hit blocker) hung full pytest ~37% | Bounded loop; jump by `max` overlapping end; abort if earliest-start does not increase |
 | **W16-C13** | P1 | `test_accelerators` fake-`synaps_native` left kernels None for later files | Restore real extension + reload accelerators after each poison test |
+| **W16-C14** | P0 | GREEDY_COVER list-schedule ignored `Operation.latest_finish`; G11 outage windows could park past the declared finish while gap-fill already refused | Cap `_delay_start_for_aux` at `min(horizon, latest_finish)` |
+| **W16-C15** | P1 | Router auto-selected `RHC-ALNS` / `RHC-ALNS-100K` at 60k/100k@>600s — search-entry profiles, not the 50k-FEASIBLE cover path | Auto-route those budgets to `RHC-GREEDY-COVER`; named ALNS profiles stay in the registry |
+| **W16-C16** | P1 | Residual gap-fill after 100k list-schedule hung: 100k `MachineIndex.add` insorts + every gap scanned every aux occupancy | `MachineIndex.extend` bulk-load; `_candidate_starts` bisects `ends_sorted` |
+| **W16-C17** | P1 | Non-delay append left idle holes; leftover chains waited for quadratic residual | On tail failure, insertion SGS (`select_earliest_horizon_slot`) in the same ready-queue pass |
 
 Probes: `tests/test_algebra_rt15_probes.py`. Prior RT-20 probes remain green.
 

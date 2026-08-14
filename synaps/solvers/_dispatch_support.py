@@ -73,6 +73,19 @@ class MachineIndex:
         if self._context.requirements_by_op.get(assignment.operation_id):
             self._resource_windows_cache.clear()
 
+    def extend(self, assignments: list[Assignment]) -> None:
+        """Bulk-load assignments with one sort per machine (residual cover)."""
+
+        if not assignments:
+            return
+        for assignment in assignments:
+            self._by_machine.setdefault(assignment.work_center_id, []).append(assignment)
+            self._all.append(assignment)
+        for bucket in self._by_machine.values():
+            bucket.sort(key=lambda item: item.start_time)
+        self._setup_window_starts = None
+        self._resource_windows_cache.clear()
+
     # -- queries ----------------------------------------------------------
 
     def get_machine_assignments(self, work_center_id: Any) -> list[Assignment]:
@@ -159,6 +172,7 @@ class ResourceWindowSeries:
     start_offsets: list[float]
     end_offsets: list[float]
     quantities: list[int]
+    ends_sorted: list[float]
 
 
 def recompute_assignment_setups(
@@ -378,6 +392,7 @@ def _resource_windows_by_resource(
             start_offsets=[window[0] for window in windows],
             end_offsets=[window[1] for window in windows],
             quantities=[window[2] for window in windows],
+            ends_sorted=sorted(window[1] for window in windows),
         )
         for resource_id, windows in resource_windows.items()
     }
@@ -401,11 +416,14 @@ def _candidate_starts(
         return [gap_start]
 
     if resource_windows_by_resource is not None:
+        lo_end = gap_start - setup_minutes
+        hi_end = latest_start - setup_minutes
         for resource_windows in resource_windows_by_resource.values():
-            for _other_start, other_end, _quantity in resource_windows.windows:
-                release_offset = other_end + setup_minutes
-                if gap_start <= release_offset <= latest_start:
-                    starts.add(release_offset)
+            ends = resource_windows.ends_sorted
+            left = bisect.bisect_left(ends, lo_end)
+            right = bisect.bisect_right(ends, hi_end)
+            for other_end in ends[left:right]:
+                starts.add(other_end + setup_minutes)
         return sorted(starts)
 
     for assignment in scheduled_assignments:

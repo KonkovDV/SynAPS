@@ -97,24 +97,6 @@ def _route_feasibility_first_nominal(
                     f"routing for {op_count} ops when latency budget exceeds {latency}s"
                 ),
             )
-        if op_count >= 100_000 and latency > 600:
-            return SolverRoutingDecision(
-                solver_config="RHC-GREEDY-COVER",
-                reason=(
-                    "feasibility-first runtime policy uses coverage-complete RHC for "
-                    f"{op_count} ops when the latency budget exceeds {latency}s "
-                    "(ALNS refine is deferred until after full coverage)"
-                ),
-            )
-        if op_count > _INDUSTRIAL_OPS and latency > 600:
-            return SolverRoutingDecision(
-                solver_config="RHC-GREEDY-COVER",
-                reason=(
-                    "feasibility-first runtime policy prefers coverage-complete "
-                    f"RHC-GREEDY-COVER for ultra-large nominal instances ({op_count} ops) "
-                    f"under a {latency}s+ latency budget"
-                ),
-            )
     if op_count > _LONG_HORIZON_OPS:
         return SolverRoutingDecision(
             solver_config="RHC-GREEDY",
@@ -161,23 +143,10 @@ def _route_long_horizon_balanced(
                     "adaptive destroy/repair over rigid decomposition"
                 ),
             )
-        if op_count >= 100_000 and latency > 600:
-            return SolverRoutingDecision(
-                solver_config="RHC-ALNS-100K",
-                reason=(
-                    f"ultra-large nominal instance ({op_count} ops) with 10+ minute budget "
-                    "benefits from the named 100K RHC-ALNS profile "
-                    "(300/90 geometry, bounded search-entry settings)"
-                ),
-            )
         if op_count > _INDUSTRIAL_OPS and latency > 600:
             return SolverRoutingDecision(
-                solver_config="RHC-ALNS",
-                reason=(
-                    f"ultra-large nominal instance ({op_count} ops) with 10+ minute budget "
-                    "benefits from Receding Horizon Control with ALNS inner solver "
-                    "(temporal decomposition into ≤5000 ops/window)"
-                ),
+                solver_config="RHC-GREEDY-COVER",
+                reason=_cover_reason(op_count, feasibility_first=False),
             )
     if op_count > _LONG_HORIZON_OPS:
         return SolverRoutingDecision(

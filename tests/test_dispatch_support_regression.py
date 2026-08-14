@@ -81,6 +81,32 @@ def test_machine_index_incremental_setup_windows_match_full_recompute(
     assert incremental.get_setup_window_starts() == cold.get_setup_window_starts()
 
 
+def test_machine_index_extend_matches_sequential_add(
+    simple_problem: ScheduleProblem,
+) -> None:
+    context = build_dispatch_context(simple_problem)
+    machine_id = simple_problem.work_centers[0].id
+    assignments = [
+        Assignment(
+            operation_id=operation.id,
+            work_center_id=machine_id,
+            start_time=HORIZON_START + timedelta(minutes=index * 40),
+            end_time=HORIZON_START + timedelta(minutes=index * 40 + 20),
+            setup_minutes=0,
+        )
+        for index, operation in enumerate(simple_problem.operations[:3])
+    ]
+    bulk = MachineIndex(context)
+    bulk.extend(assignments)
+    sequential = MachineIndex(context)
+    for assignment in assignments:
+        sequential.add(assignment)
+    assert bulk.get_setup_window_starts() == sequential.get_setup_window_starts()
+    assert [a.operation_id for a in bulk.get_machine_assignments(machine_id)] == [
+        a.operation_id for a in sequential.get_machine_assignments(machine_id)
+    ]
+
+
 def test_recompute_assignment_setups_tolerates_missing_previous_operation(
     simple_problem: ScheduleProblem,
 ) -> None:

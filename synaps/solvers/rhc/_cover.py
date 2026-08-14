@@ -1,12 +1,16 @@
 """Constructive coverage kernels for RHC greedy fill.
 
 At ≥10k ops GREEDY_COVER uses a non-delay list-schedule (append after each
-machine's ready time). Rolling windows and full gap insertion remain for
-search inners and residual fill.
+machine's ready time). If the tail is infeasible, insert into the earliest
+idle gap on an eligible machine (active / insertion SGS) and push successors
+in the same pass. Residual gap-fill remains a safety net.
 
 Academic basis:
     - Pinedo (2016): list scheduling / non-delay dispatch.
-    - Residual RHC fill keeps gap insertion for leftover ops that need holes.
+    - Kolisch (1996): serial SGS = earliest feasible insertion.
+    - Artigues, Lopez, Ayache (Ann. OR 2005, arXiv:cs/0606043): appending
+      SGS is not active under SDST; insertion SGS is required.
+    - Zhang et al. (Processes 2019): first-fit idle-period / extrusion insert.
 """
 
 from __future__ import annotations
@@ -19,7 +23,8 @@ from typing import TYPE_CHECKING, Any
 
 from synaps.accelerators import resource_capacity_window_is_feasible
 from synaps.model import Assignment
-from synaps.solvers._dispatch_support import find_earliest_feasible_slot
+from synaps.solvers._dispatch_support import MachineIndex, find_earliest_feasible_slot
+from synaps.solvers._time_windows import operation_latest_finish_offset_minutes
 from synaps.timegrain import duration_minutes_for
 
 if TYPE_CHECKING:
@@ -28,9 +33,14 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from synaps.model import Operation
-    from synaps.solvers._dispatch_support import DispatchContext, MachineIndex, SlotCandidate
+    from synaps.solvers._dispatch_support import DispatchContext, SlotCandidate
 
 _GLOBAL_GREEDY_COVER_MIN_OPS_DEFAULT = 10_000
+_NATIVE_LIST_SCHEDULE_MIN_OPS = 10_000
+_MAX_LIST_SCHEDULE_GAP_INSERTS = 64
+# Above this, in-pass insertion fragments the calendar; residual one-shot
+# gap-fill on an append-only timeline is cheaper (measured 100k hang).
+_MAX_LIST_SCHEDULE_GAP_OPS = 80_000
 
 
 @dataclass(frozen=True)
@@ -41,6 +51,7 @@ class GreedyCoverStats:
     clipped: int
     passes: int
     time_limited: bool
+    gap_inserted: int = 0
 
 
 def should_use_global_greedy_cover(
@@ -292,12 +303,49 @@ def place_operations_list_schedule(
     default_wc_ids: Sequence[UUID],
     deadline_exceeded: Callable[[], bool] | None = None,
 ) -> GreedyCoverStats:
-    """Non-delay list schedule over the ready queue (earliest floor first).
+    """Ready-queue non-delay append; insertion SGS on a failed tail (capped)."""
 
-    Placing every seq=0 before any seq=1 parks late-release first-ops on
-    machines and starves early chains. The ready heap keeps early successors
-    eligible as soon as their predecessor finishes.
-    """
+    native_stats = _try_native_list_schedule(
+        operations=operations,
+        dispatch_context=dispatch_context,
+        assignments=assignments,
+        assignment_by_op=assignment_by_op,
+        scheduled_ids=scheduled_ids,
+        horizon_start=horizon_start,
+        horizon_minutes=horizon_minutes,
+        op_earliest=op_earliest,
+        default_wc_ids=default_wc_ids,
+    )
+    if native_stats is not None:
+        return native_stats
+    return _place_operations_list_schedule_python(
+        operations=operations,
+        dispatch_context=dispatch_context,
+        assignments=assignments,
+        assignment_by_op=assignment_by_op,
+        scheduled_ids=scheduled_ids,
+        horizon_start=horizon_start,
+        horizon_minutes=horizon_minutes,
+        op_earliest=op_earliest,
+        default_wc_ids=default_wc_ids,
+        deadline_exceeded=deadline_exceeded,
+    )
+
+
+def _place_operations_list_schedule_python(
+    *,
+    operations: Sequence[Operation],
+    dispatch_context: DispatchContext,
+    assignments: list[Assignment],
+    assignment_by_op: dict[UUID, Assignment],
+    scheduled_ids: set[UUID],
+    horizon_start: datetime,
+    horizon_minutes: float,
+    op_earliest: Mapping[UUID, float],
+    default_wc_ids: Sequence[UUID],
+    deadline_exceeded: Callable[[], bool] | None = None,
+) -> GreedyCoverStats:
+    """Python parallel SGS with capped insertion into idle gaps."""
 
     heap, successors = _ready_heap(operations, op_earliest)
     tails: dict[UUID, tuple[float, UUID | None]] = {
@@ -306,6 +354,8 @@ def place_operations_list_schedule(
     aux_windows: dict[UUID, list[tuple[float, float, int]]] = {}
     clipped = 0
     placed = 0
+    gap_inserted = 0
+    gap_attempts = 0
     time_limited = False
     ops_by_id = dispatch_context.ops_by_id
     while heap:
@@ -320,42 +370,144 @@ def place_operations_list_schedule(
             if pred_assignment is None:
                 continue
             pred_end = (pred_assignment.end_time - horizon_start).total_seconds() / 60.0
-        floor = max(pred_end, op_earliest.get(op.id, 0.0))
-        slot = _best_list_schedule_slot(
-            op=op,
-            dispatch_context=dispatch_context,
-            tails=tails,
-            aux_windows=aux_windows,
-            floor=floor,
-            default_wc_ids=default_wc_ids,
-            horizon_minutes=horizon_minutes,
+        allow_gap = (
+            gap_attempts < _MAX_LIST_SCHEDULE_GAP_INSERTS
+            and len(operations) < _MAX_LIST_SCHEDULE_GAP_OPS
         )
-        if slot is None:
-            clipped += 1
-            continue
-        start, end, setup, wc_id, aux_ids = slot
-        _commit_list_schedule_assignment(
+        placed_one, inserted, end = _place_ready_list_operation(
             op=op,
-            start=start,
-            end=end,
-            setup=setup,
-            wc_id=wc_id,
-            aux_ids=aux_ids,
+            floor=max(pred_end, op_earliest.get(op.id, 0.0)),
             dispatch_context=dispatch_context,
             assignments=assignments,
             assignment_by_op=assignment_by_op,
             scheduled_ids=scheduled_ids,
             tails=tails,
             aux_windows=aux_windows,
+            default_wc_ids=default_wc_ids,
             horizon_start=horizon_start,
+            horizon_minutes=horizon_minutes,
+            allow_gap=allow_gap,
         )
+        if inserted:
+            gap_inserted += 1
+        if allow_gap and (inserted or not placed_one):
+            gap_attempts += 1
+        if not placed_one:
+            clipped += 1
+            continue
         placed += 1
         for succ in successors[op.id]:
             succ_floor = max(end, op_earliest.get(succ.id, 0.0))
             heappush(heap, (succ_floor, succ.seq_in_order, str(succ.id), succ.id))
     return GreedyCoverStats(
-        placed=placed, clipped=clipped, passes=1, time_limited=time_limited
+        placed=placed,
+        clipped=clipped,
+        passes=1,
+        time_limited=time_limited,
+        gap_inserted=gap_inserted,
     )
+
+
+def _ensure_list_schedule_index(
+    machine_index: MachineIndex | None,
+    dispatch_context: DispatchContext,
+    assignments: list[Assignment],
+) -> MachineIndex:
+    if machine_index is None:
+        machine_index = MachineIndex(dispatch_context)
+        machine_index.extend(assignments)
+    return machine_index
+
+
+def _best_gap_cover_slot(
+    *,
+    op: Operation,
+    dispatch_context: DispatchContext,
+    assignments: list[Assignment],
+    machine_index: MachineIndex,
+    floor: float,
+    default_wc_ids: Sequence[UUID],
+    horizon_minutes: float,
+) -> tuple[float, float, int, UUID, list[UUID]] | None:
+    eligible = op.eligible_wc_ids if op.eligible_wc_ids else default_wc_ids
+    best_slot, best_wc, _clipped = select_earliest_horizon_slot(
+        dispatch_context=dispatch_context,
+        assignments=assignments,
+        operation=op,
+        eligible_wc_ids=eligible,
+        earliest_start=floor,
+        horizon_minutes=horizon_minutes,
+        machine_index=machine_index,
+    )
+    if best_slot is None or best_wc is None:
+        return None
+    return (
+        best_slot.start_offset,
+        best_slot.end_offset,
+        best_slot.setup_minutes,
+        best_wc,
+        list(best_slot.aux_resource_ids),
+    )
+
+
+def _place_ready_list_operation(
+    *,
+    op: Operation,
+    floor: float,
+    dispatch_context: DispatchContext,
+    assignments: list[Assignment],
+    assignment_by_op: dict[UUID, Assignment],
+    scheduled_ids: set[UUID],
+    tails: dict[UUID, tuple[float, UUID | None]],
+    aux_windows: dict[UUID, list[tuple[float, float, int]]],
+    default_wc_ids: Sequence[UUID],
+    horizon_start: datetime,
+    horizon_minutes: float,
+    allow_gap: bool = True,
+) -> tuple[bool, bool, float]:
+    """Place one ready op. Returns (placed, gap_inserted, end)."""
+
+    slot = _best_list_schedule_slot(
+        op=op,
+        dispatch_context=dispatch_context,
+        tails=tails,
+        aux_windows=aux_windows,
+        floor=floor,
+        default_wc_ids=default_wc_ids,
+        horizon_minutes=horizon_minutes,
+    )
+    inserted = False
+    if slot is None and allow_gap:
+        machine_index = _ensure_list_schedule_index(None, dispatch_context, assignments)
+        slot = _best_gap_cover_slot(
+            op=op,
+            dispatch_context=dispatch_context,
+            assignments=assignments,
+            machine_index=machine_index,
+            floor=floor,
+            default_wc_ids=default_wc_ids,
+            horizon_minutes=horizon_minutes,
+        )
+        inserted = slot is not None
+    if slot is None:
+        return False, False, 0.0
+    start, end, setup, wc_id, aux_ids = slot
+    _commit_list_schedule_assignment(
+        op=op,
+        start=start,
+        end=end,
+        setup=setup,
+        wc_id=wc_id,
+        aux_ids=aux_ids,
+        dispatch_context=dispatch_context,
+        assignments=assignments,
+        assignment_by_op=assignment_by_op,
+        scheduled_ids=scheduled_ids,
+        tails=tails,
+        aux_windows=aux_windows,
+        horizon_start=horizon_start,
+    )
+    return True, inserted, end
 
 
 def _ready_heap(
@@ -390,7 +542,7 @@ def _commit_list_schedule_assignment(
     tails: dict[UUID, tuple[float, UUID | None]],
     aux_windows: dict[UUID, list[tuple[float, float, int]]],
     horizon_start: datetime,
-) -> None:
+) -> Assignment:
     assignment = Assignment(
         operation_id=op.id,
         work_center_id=wc_id,
@@ -402,12 +554,15 @@ def _commit_list_schedule_assignment(
     assignments.append(assignment)
     assignment_by_op[op.id] = assignment
     scheduled_ids.add(op.id)
-    tails[wc_id] = (end, op.state_id)
+    last_end, _last_state = tails.get(wc_id, (0.0, None))
+    if end + 1e-9 >= last_end:
+        tails[wc_id] = (end, op.state_id)
     aux_start = start - setup
     for requirement in dispatch_context.requirements_by_op.get(op.id, []):
         aux_windows.setdefault(requirement.aux_resource_id, []).append(
             (aux_start, end, int(requirement.quantity_needed))
         )
+    return assignment
 
 
 def _best_list_schedule_slot(
@@ -440,6 +595,10 @@ def _best_list_schedule_slot(
             earliest_start=floor,
             setup_minutes=dispatch_context.setup_minutes,
         )
+        latest = operation_latest_finish_offset_minutes(
+            op, dispatch_context.horizon_start
+        )
+        cap = horizon_minutes if latest is None else min(horizon_minutes, latest)
         delayed = _delay_start_for_aux(
             start=start,
             duration=duration,
@@ -447,7 +606,7 @@ def _best_list_schedule_slot(
             requirements=requirements,
             aux_windows=aux_windows,
             resources_by_id=dispatch_context.resources_by_id,
-            horizon_minutes=horizon_minutes,
+            horizon_minutes=cap,
         )
         if delayed is None:
             continue
@@ -455,3 +614,273 @@ def _best_list_schedule_slot(
         if best is None or end < best[1] or (end == best[1] and str(wc_id) < str(best[3])):
             best = (delayed, end, setup, wc_id, aux_ids)
     return best
+
+
+def _try_native_list_schedule(
+    *,
+    operations: Sequence[Operation],
+    dispatch_context: DispatchContext,
+    assignments: list[Assignment],
+    assignment_by_op: dict[UUID, Assignment],
+    scheduled_ids: set[UUID],
+    horizon_start: datetime,
+    horizon_minutes: float,
+    op_earliest: Mapping[UUID, float],
+    default_wc_ids: Sequence[UUID],
+) -> GreedyCoverStats | None:
+    """SoA parallel SGS via Rust. None means use the Python cover."""
+
+    import os
+
+    from synaps.accelerators import _native_list_schedule_cover, list_schedule_cover_native
+
+    if os.getenv("SYNAPS_DISABLE_LIST_SCHEDULE_NATIVE") == "1":
+        return None
+    if assignments or len(operations) < _NATIVE_LIST_SCHEDULE_MIN_OPS:
+        return None
+    if _native_list_schedule_cover is None:
+        return None
+    if any(op.machine_duration_overrides for op in operations):
+        return None
+    packed = _pack_list_schedule_native(
+        operations=operations,
+        dispatch_context=dispatch_context,
+        op_earliest=op_earliest,
+        default_wc_ids=default_wc_ids,
+        horizon_minutes=horizon_minutes,
+    )
+    if packed is None:
+        return None
+    arrays, idx_to_wc = packed
+    result = list_schedule_cover_native(**arrays)
+    if result is None:
+        return None
+    starts, ends, machines, setups = result
+    placed, clipped = _materialize_native_cover(
+        operations=operations,
+        dispatch_context=dispatch_context,
+        assignments=assignments,
+        assignment_by_op=assignment_by_op,
+        scheduled_ids=scheduled_ids,
+        horizon_start=horizon_start,
+        idx_to_wc=idx_to_wc,
+        starts=starts,
+        ends=ends,
+        machines=machines,
+        setups=setups,
+    )
+    return GreedyCoverStats(
+        placed=placed,
+        clipped=clipped,
+        passes=1,
+        time_limited=False,
+        gap_inserted=0,
+    )
+
+
+def _pack_list_schedule_native(
+    *,
+    operations: Sequence[Operation],
+    dispatch_context: DispatchContext,
+    op_earliest: Mapping[UUID, float],
+    default_wc_ids: Sequence[UUID],
+    horizon_minutes: float,
+) -> tuple[dict[str, Any], list[Any]] | None:
+    """Pack SoA arrays for ``list_schedule_cover``. Returns None on skip."""
+
+    import numpy as np
+
+    n = len(operations)
+    if n == 0 or not default_wc_ids:
+        return None
+    idx_to_wc = list(default_wc_ids)
+    maps = {
+        "wc": {wc_id: idx for idx, wc_id in enumerate(idx_to_wc)},
+        "op": {op.id: i for i, op in enumerate(operations)},
+        "state": {},
+        "aux": {res_id: idx for idx, res_id in enumerate(dispatch_context.resources_by_id)},
+        "all_wc": idx_to_wc,
+    }
+    rows = _empty_native_cover_rows(n)
+    id_strings = _fill_native_cover_rows(
+        operations, dispatch_context, op_earliest, maps, rows
+    )
+    n_wc = len(idx_to_wc)
+    n_states = max(len(maps["state"]), 1)
+    uuid_rank = np.empty(n, dtype=np.int32)
+    for rank, idx in enumerate(sorted(range(n), key=id_strings.__getitem__)):
+        uuid_rank[idx] = rank
+    speeds = np.array(
+        [float(dispatch_context.wc_by_id[wc_id].speed_factor) for wc_id in idx_to_wc],
+        dtype=np.float64,
+    )
+    pools = np.array(
+        [int(resource.pool_size) for resource in dispatch_context.resources_by_id.values()],
+        dtype=np.int32,
+    )
+    sdst = _sdst_flat_from_context(
+        dispatch_context.setup_minutes, maps["wc"], maps["state"], n_wc, n_states
+    )
+    arrays = _native_cover_array_dict(
+        rows, uuid_rank, speeds, pools, n_wc, n_states, horizon_minutes, sdst
+    )
+    return arrays, idx_to_wc
+
+
+def _empty_native_cover_rows(n: int) -> dict[str, Any]:
+    import numpy as np
+
+    elig_off = np.empty(n + 1, dtype=np.int64)
+    aux_off = np.empty(n + 1, dtype=np.int64)
+    elig_off[0] = 0
+    aux_off[0] = 0
+    return {
+        "durations": np.empty(n, dtype=np.float64),
+        "preds": np.full(n, -1, dtype=np.int64),
+        "seq": np.empty(n, dtype=np.int32),
+        "earliest": np.empty(n, dtype=np.float64),
+        "latest": np.empty(n, dtype=np.float64),
+        "states": np.empty(n, dtype=np.int64),
+        "elig_off": elig_off,
+        "elig_flat": [],
+        "aux_off": aux_off,
+        "aux_res_flat": [],
+        "aux_qty_flat": [],
+    }
+
+
+def _fill_native_cover_rows(
+    operations: Sequence[Operation],
+    dispatch_context: DispatchContext,
+    op_earliest: Mapping[UUID, float],
+    maps: dict[str, Any],
+    rows: dict[str, Any],
+) -> list[str]:
+    import math
+
+    id_strings: list[str] = []
+    wc_id_to_idx = maps["wc"]
+    for i, op in enumerate(operations):
+        rows["durations"][i] = float(op.base_duration_min)
+        rows["seq"][i] = int(op.seq_in_order)
+        rows["earliest"][i] = float(op_earliest.get(op.id, 0.0))
+        finish = operation_latest_finish_offset_minutes(op, dispatch_context.horizon_start)
+        rows["latest"][i] = math.inf if finish is None else float(finish)
+        rows["states"][i] = maps["state"].setdefault(op.state_id, len(maps["state"]))
+        if op.predecessor_op_id is not None:
+            rows["preds"][i] = int(maps["op"].get(op.predecessor_op_id, -1))
+        eligible = op.eligible_wc_ids if op.eligible_wc_ids else maps["all_wc"]
+        rows["elig_flat"].extend(
+            wc_id_to_idx[wc_id] for wc_id in eligible if wc_id in wc_id_to_idx
+        )
+        rows["elig_off"][i + 1] = len(rows["elig_flat"])
+        for requirement in dispatch_context.requirements_by_op.get(op.id, []):
+            aux_idx = maps["aux"].get(requirement.aux_resource_id)
+            if aux_idx is None:
+                continue
+            rows["aux_res_flat"].append(aux_idx)
+            rows["aux_qty_flat"].append(int(requirement.quantity_needed))
+        rows["aux_off"][i + 1] = len(rows["aux_res_flat"])
+        id_strings.append(str(op.id))
+    return id_strings
+
+
+def _sdst_flat_from_context(
+    setup_minutes: Mapping[Any, int],
+    wc_id_to_idx: Mapping[Any, int],
+    state_to_idx: Mapping[Any, int],
+    n_wc: int,
+    n_states: int,
+) -> Any:
+    import numpy as np
+
+    sdst = np.zeros(n_wc * n_states * n_states, dtype=np.float64)
+    for (wc_id, from_state, to_state), minutes in setup_minutes.items():
+        wi = wc_id_to_idx.get(wc_id)
+        fi = state_to_idx.get(from_state)
+        ti = state_to_idx.get(to_state)
+        if wi is None or fi is None or ti is None:
+            continue
+        sdst[wi * n_states * n_states + fi * n_states + ti] = float(minutes)
+    return sdst
+
+
+def _native_cover_array_dict(
+    rows: dict[str, Any],
+    uuid_rank: Any,
+    speeds: Any,
+    pools: Any,
+    n_wc: int,
+    n_states: int,
+    horizon_minutes: float,
+    sdst: Any,
+) -> dict[str, Any]:
+    import numpy as np
+
+    return {
+        "base_durations": rows["durations"],
+        "predecessor_indices": rows["preds"],
+        "seq_in_order": rows["seq"],
+        "uuid_rank": uuid_rank,
+        "earliest": rows["earliest"],
+        "latest_finish": rows["latest"],
+        "eligible_offsets": rows["elig_off"],
+        "eligible_indices": np.asarray(rows["elig_flat"], dtype=np.int64),
+        "state_ids": rows["states"],
+        "sdst_setup_flat": sdst,
+        "n_wc": n_wc,
+        "n_states": n_states,
+        "speed_factors": speeds,
+        "horizon_minutes": float(horizon_minutes),
+        "aux_offsets": rows["aux_off"],
+        "aux_resource_indices": np.asarray(rows["aux_res_flat"], dtype=np.int64),
+        "aux_quantities": np.asarray(rows["aux_qty_flat"], dtype=np.int32),
+        "aux_pool_sizes": pools,
+    }
+
+
+def _materialize_native_cover(
+    *,
+    operations: Sequence[Operation],
+    dispatch_context: DispatchContext,
+    assignments: list[Assignment],
+    assignment_by_op: dict[UUID, Assignment],
+    scheduled_ids: set[UUID],
+    horizon_start: datetime,
+    idx_to_wc: Sequence[Any],
+    starts: Any,
+    ends: Any,
+    machines: Any,
+    setups: Any,
+) -> tuple[int, int]:
+    """Commit native placements with model_construct (skip per-row validation)."""
+
+    placed = 0
+    clipped = 0
+    n_wc = len(idx_to_wc)
+    for i, op in enumerate(operations):
+        machine = int(machines[i])
+        if machine < 0 or machine >= n_wc:
+            clipped += 1
+            continue
+        start = float(starts[i])
+        end = float(ends[i])
+        aux_ids = [
+            requirement.aux_resource_id
+            for requirement in dispatch_context.requirements_by_op.get(op.id, [])
+        ]
+        assignment = Assignment.model_construct(
+            operation_id=op.id,
+            work_center_id=idx_to_wc[machine],
+            start_time=horizon_start + timedelta(minutes=start),
+            end_time=horizon_start + timedelta(minutes=end),
+            setup_minutes=int(setups[i]),
+            aux_resource_ids=aux_ids,
+            lane_id=None,
+        )
+        assignments.append(assignment)
+        assignment_by_op[op.id] = assignment
+        scheduled_ids.add(op.id)
+        placed += 1
+    return placed, clipped
+

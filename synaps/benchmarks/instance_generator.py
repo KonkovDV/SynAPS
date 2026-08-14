@@ -116,7 +116,8 @@ def generate_large_instance(
     ]
 
     # Orders and operations
-    n_orders = max(1, n_operations // ops_per_order)
+    min_chain = max(1, ops_per_order - 2)
+    n_orders = max(1, (n_operations + min_chain - 1) // min_chain)
     orders: list[Order] = []
     operations: list[Operation] = []
     aux_requirements: list[OperationAuxRequirement] = []

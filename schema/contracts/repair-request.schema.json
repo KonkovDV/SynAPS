@@ -78,6 +78,7 @@
         },
         "pool_size": {
           "default": 1,
+          "minimum": 1,
           "title": "Pool Size",
           "type": "integer"
         },
@@ -106,6 +107,19 @@
           "title": "Domain Attributes",
           "type": "object"
         },
+        "earliest_start": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Earliest Start"
+        },
         "eligible_wc_ids": {
           "items": {
             "format": "uuid",
@@ -118,6 +132,29 @@
           "format": "uuid",
           "title": "Id",
           "type": "string"
+        },
+        "latest_finish": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Latest Finish"
+        },
+        "machine_duration_overrides": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "propertyNames": {
+            "format": "uuid"
+          },
+          "title": "Machine Duration Overrides",
+          "type": "object"
         },
         "order_id": {
           "format": "uuid",
@@ -171,6 +208,7 @@
         },
         "quantity_needed": {
           "default": 1,
+          "minimum": 1,
           "title": "Quantity Needed",
           "type": "integer"
         }
@@ -211,6 +249,7 @@
         },
         "quantity": {
           "default": 1.0,
+          "exclusiveMinimum": 0,
           "title": "Quantity",
           "type": "number"
         },
@@ -263,7 +302,7 @@
           "items": {
             "$ref": "#/$defs/Operation"
           },
-          "maxItems": 200000,
+          "maxItems": 500000,
           "title": "Operations",
           "type": "array"
         },
@@ -332,6 +371,7 @@
         },
         "energy_kwh": {
           "default": 0.0,
+          "minimum": 0.0,
           "title": "Energy Kwh",
           "type": "number"
         },
@@ -347,6 +387,7 @@
         },
         "material_loss": {
           "default": 0.0,
+          "minimum": 0.0,
           "title": "Material Loss",
           "type": "number"
         },
@@ -440,11 +481,13 @@
         },
         "max_parallel": {
           "default": 1,
+          "minimum": 1,
           "title": "Max Parallel",
           "type": "integer"
         },
         "speed_factor": {
           "default": 1.0,
+          "exclusiveMinimum": 0,
           "title": "Speed Factor",
           "type": "number"
         }
@@ -459,11 +502,16 @@
   },
   "description": "Canonical request contract for bounded repair execution.",
   "properties": {
+    "allow_freeze_break": {
+      "default": false,
+      "title": "Allow Freeze Break",
+      "type": "boolean"
+    },
     "base_assignments": {
       "items": {
         "$ref": "#/$defs/Assignment"
       },
-      "maxItems": 200000,
+      "maxItems": 500000,
       "title": "Base Assignments",
       "type": "array"
     },
@@ -478,9 +526,22 @@
         "format": "uuid",
         "type": "string"
       },
-      "maxItems": 200000,
+      "maxItems": 500000,
       "title": "Disrupted Op Ids",
       "type": "array"
+    },
+    "freeze_horizon_end": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Freeze Horizon End"
     },
     "problem": {
       "$ref": "#/$defs/ScheduleProblem"

@@ -50,7 +50,7 @@ _STRICT_WALL_SAFETY_FACTOR = 2.0
 
 # P1-1: the default hierarchical objective is a big-M scalarization
 # ``makespan * secondary_bound + secondary_terms``. At the model's stated scale
-# (MAX_SCHEDULE_OPERATIONS = 200_000) ``(horizon + 1) * secondary_bound`` can
+# (MAX_SCHEDULE_OPERATIONS = 500_000) ``(horizon + 1) * secondary_bound`` can
 # exceed the CP-SAT int64 objective domain, corrupting the solve. When the big-M
 # would overflow this safe ceiling we degrade to a PURE lexicographic objective
 # (minimize makespan alone — the dominant term — leaving the secondary terms as a

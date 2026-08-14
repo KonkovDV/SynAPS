@@ -1,4 +1,5 @@
 mod cpu;
+mod list_schedule;
 
 use numpy::{PyArray1, PyArrayMethods, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
@@ -1570,5 +1571,6 @@ fn synaps_native(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> 
     module.add_function(wrap_pyfunction!(stabilize_temporal_batch, module)?)?;
     module.add_function(wrap_pyfunction!(compute_destroy_worst_scores, module)?)?;
     module.add_function(wrap_pyfunction!(greedy_repair_batch, module)?)?;
+    module.add_function(wrap_pyfunction!(list_schedule::list_schedule_cover, module)?)?;
     Ok(())
 }

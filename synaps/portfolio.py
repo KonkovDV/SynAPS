@@ -418,6 +418,7 @@ def repair_schedule(
         radius=applied_radius,
         solve_kwargs=solve_kwargs,
     )
+    merged_kwargs.setdefault("regime", regime)
     limits = resolve_portfolio_resource_limits(solve_kwargs=merged_kwargs)
     result = _run_guarded_solve(
         solver,

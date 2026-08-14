@@ -120,6 +120,17 @@ def test_cli_write_contract_schemas_writes_bundle(
     assert (output_dir / "solve-response.schema.json").exists()
 
 
+def test_cli_cable_demo_emits_kpis(capsys: pytest.CaptureFixture[str]) -> None:
+    exit_code = main(["cable-demo", "--orders", "2", "--seed", "1"])
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["status"] == "feasible"
+    assert payload["notary_hard_violations"] == 0
+    assert payload["kpis"]["coverage"] == 1.0
+    assert "peak_wip_drums" in payload["kpis"]
+    assert payload["claim"].startswith("synthetic")
+
+
 def test_cli_list_solver_configs_emits_manifest(capsys: pytest.CaptureFixture[str]) -> None:
     exit_code = main(["list-solver-configs"])
     captured = capsys.readouterr()

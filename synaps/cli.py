@@ -6,7 +6,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from synaps import solve_schedule
 from synaps.contracts import (
@@ -184,8 +184,48 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Optional path where the JSON manifest should be written instead of stdout",
     )
-
+    _add_cable_demo_parser(subparsers)
     return parser
+
+
+def _add_cable_demo_parser(subparsers: Any) -> None:
+    parser = subparsers.add_parser(
+        "cable-demo",
+        help="Synthetic cable instance → GREEDY → cable KPIs (not a factory plan)",
+    )
+    parser.add_argument("--orders", type=int, default=4, help="Parent sales orders before reel split")
+    parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument(
+        "--output-file",
+        type=Path,
+        help="Optional path where the JSON result should be written instead of stdout",
+    )
+
+
+def _run_cable_demo(args: argparse.Namespace) -> int:
+    from synaps.domains.cable import CABLE_PVC_WEIGHTS, cable_kpis, generate_cable_instance
+    from synaps.objective import evaluate, scalarize
+    from synaps.solvers.feasibility_checker import FeasibilityChecker, proven_hard_violations
+    from synaps.solvers.greedy_dispatch import GreedyDispatch
+
+    problem = generate_cable_instance(n_orders=args.orders, seed=args.seed)
+    result = GreedyDispatch().solve(problem)
+    hard = proven_hard_violations(
+        FeasibilityChecker().check(problem, result.assignments, exhaustive=True)
+    )
+    objective = evaluate(problem, result.assignments)
+    payload = {
+        "status": result.status.value,
+        "operations": len(problem.operations),
+        "orders": len(problem.orders),
+        "notary_hard_violations": len(hard),
+        "kpis": cable_kpis(problem, result.assignments),
+        "scalar_default": scalarize(objective),
+        "scalar_cable_pvc": scalarize(objective, CABLE_PVC_WEIGHTS),
+        "claim": "synthetic encode-first cable demo; not Moskabelmet MES data",
+    }
+    _write_json_output(payload, args.output_file)
+    return 0 if result.status.value == "feasible" and not hard else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -316,6 +356,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "list-solver-configs":
         _write_json_output(build_solver_registry_manifest(), args.output_file)
         return 0
+
+    elif args.command == "cable-demo":
+        return _run_cable_demo(args)
 
     parser.error(f"Unsupported command: {args.command}")
 

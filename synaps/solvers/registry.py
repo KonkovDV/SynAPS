@@ -237,7 +237,7 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
             "Extended Hierarchical LBBD. "
             "Tighter gap (0.5%), smaller clusters (≤150 ops), 20 iterations, 10min budget. "
             "Designed for 50 000+ ops via ~333 clusters; no DOE validation at that scale yet "
-            "— use RHC-ALNS as the validated path for 50K+ instances."
+            "— use RHC-GREEDY-COVER as the validated coverage path for 50K+ instances."
         ),
     ),
     # ---- ALNS variants (5k-50k+ operations) ----

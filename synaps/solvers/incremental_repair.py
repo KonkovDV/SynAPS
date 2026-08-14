@@ -22,6 +22,7 @@ from synaps.solvers._dispatch_support import (
     recompute_assignment_setups,
 )
 from synaps.solvers._time_windows import operation_earliest_offset_minutes
+from synaps.planning_policy import frozen_ids_for_repair
 from synaps.solvers.feasibility_checker import FeasibilityChecker, proven_hard_violations
 
 if TYPE_CHECKING:
@@ -242,6 +243,7 @@ class IncrementalRepair(BaseSolver):
             if not new_layer:
                 break
             neighbourhood.update(new_layer)
+        neighbourhood -= frozen_ids_for_repair(base_assignments, kwargs)
 
         # Separate frozen vs. repaired assignments
         frozen = [a for a in base_assignments if a.operation_id not in neighbourhood]

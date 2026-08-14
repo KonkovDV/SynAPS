@@ -51,7 +51,7 @@ python -m synaps list-solver-configs
 
 **Есть:** deterministic-first портфель, стабильные solve/repair контракты, feasibility checker, CI, lockfiles + SBOM.
 
-**Не заявлено:** валидация на живом заводе; полное feasible 50K в исторических ALNS/GREEDY timebox без coverage-complete пути и достаточного wall-time.
+**Не заявлено:** валидация на живом заводе; SOTA; N-1 / SAIDI. `RHC-ALNS` не гарантия completeness в коротком timebox. Честный `FEASIBLE` на 50K–100K — путь `RHC-GREEDY-COVER` (достаточно станков относительно горизонта), не ALNS.
 
 Протокол evidence: [`benchmark/BENCHMARK_EVIDENCE_50K_2026_05_18.md`](benchmark/BENCHMARK_EVIDENCE_50K_2026_05_18.md). История: [`CHANGELOG.md`](CHANGELOG.md).
 

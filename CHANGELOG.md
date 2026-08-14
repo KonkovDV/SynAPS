@@ -7,20 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Cable domain (encode-first, Moskabelmet-shaped):** `docs/domains/cable.md`
+  is domain 9. Adapter writes metres→`base_duration_min`, pre-splits reels,
+  parametric colour/section/compound SDST, drum aux, campaign
+  `earliest_start` buckets, `cable_kpis` (`peak_wip_drums`, Hamming R),
+  named `CABLE_PVC_WEIGHTS` (does not change `DEFAULT_WEIGHTS`). CLI
+  `python -m synaps cable-demo`. Repair freeze: `freeze_horizon_end` on
+  `RepairRequest` / IncrementalRepair kwargs so a rush cannot steal
+  issued-plan slots (breakdown of that op still can). Not live-factory
+  data, not INFIMUM, not C5 hold-until-successor.
+
 ### Changed
 
+- **500k GREEDY_COVER evidence:** model cap is 500_000 operations.
+  Native parallel SGS (Kolisch ready-heap, integer `ceil(base/speed)`
+  grain, SDST, horizon/`latest_finish`, aux delay on every eligible
+  machine, PREFETCHT0, no AVX-512) at ≥10k ops.
+  `generate_large_instance(500000, n_machines=1000, n_aux_resources=100,
+  machine_flexibility=0.05, horizon_hours=720, seed=1)` → 499 770 ops
+  (order-packing undershoot on this seed), `FEASIBLE`, notary empty,
+  stabilize converged, 3 leftovers into residual, makespan 31 656 /
+  43 200 min, ~145 s solve / ~28 s generate, ~2.3 GB RSS. Same load
+  class as 50k@100 machines. Not SOTA.
+  200k@400 machines / 40 aux: 200 000 ops, `FEASIBLE`, ~45 s.
+  100k@200: 100 000 ops, `FEASIBLE`, ~26 s.
 - **50k GREEDY_COVER global list-schedule:** `RHC-GREEDY-COVER` at ≥10k
   ops places the full instance with one non-delay list-schedule (append
   after each machine's ready time) instead of quadratic gap insertion
   across ~90 rolling windows. Leftovers still use residual gap-fill.
   Horizon overflow is still `ERROR`. This is a coverage path, not a SOTA
   claim.
+- **60k GREEDY_COVER evidence:** `generate_large_instance(60000,
+  n_machines=100, horizon_hours=720, seed=1)` → 59 932 ops, `FEASIBLE`,
+  notary empty, stabilize converged, makespan 41 298 / 43 200 min,
+  ~6.7 s (6 leftovers into residual). Same generator at 120 machines:
+  60 000 ops, makespan 34 056, ~7.7 s. Not SOTA.
+- **Residual cover at 100k:** bulk-load `MachineIndex.extend` and bisect
+  aux release times in `_candidate_starts` so leftover gap-fill does not
+  scan every historical aux window on every machine gap. Evidence:
+  `generate_large_instance(100000, n_machines=200, horizon_hours=720,
+  seed=1)` → 100 000 ops, `FEASIBLE`, notary empty, stabilize
+  converged, makespan 33 627 / 43 200 min, ~26 s (~157 leftovers into
+  residual). Same load class as 50k@100 machines, not SOTA.
+- **List-schedule insertion SGS:** when a ready op cannot append to a
+  machine tail (aux delay / `latest_finish` / horizon), GREEDY_COVER
+  inserts into the earliest idle gap and keeps the successor on the
+  ready heap instead of dumping the chain into residual gap-fill.
+  At most 64 in-pass inserts, and only below 80k ops: at 100k
+  insertion fragments the calendar and residual gap-fill hangs.
+- **List-schedule honors `Operation.latest_finish`:** the append-only
+  cover caps the aux-bump horizon at the G11 latest-finish offset so an
+  outage window cannot be parked past the declared finish
+  (`HORIZON_BOUND_VIOLATION`). Gap insert uses the same cap via
+  `find_earliest_feasible_slot`.
 - **Long-horizon routing (RHO practice transfer):** instances with **>10k ops**
   now default to `RHC-GREEDY-COVER` instead of unvalidated `LBBD-HD` or
-  monolithic `ALNS-500`. `5k@400s` stays `ALNS-500`; `60k@900s` stays
-  `RHC-ALNS`; exact_required still uses LBBD-HD. Transfer from L-RHO
-  (ICLR 2025, arXiv:2502.15791) and Graph-RHO (2026, arXiv:2604.10073) —
-  rolling horizon, not a 50k `FEASIBLE` or SOTA claim.
+  monolithic `ALNS-500`. `5k@400s` stays `ALNS-500`; `60k@900s` and
+  `100k@900s` also use `RHC-GREEDY-COVER` (the honest 50k `FEASIBLE`
+  path). Named `RHC-ALNS` / `RHC-ALNS-100K` remain explicit registry
+  profiles, not auto-routes. exact_required still uses LBBD-HD. Transfer
+  from L-RHO (ICLR 2025, arXiv:2502.15791) and Graph-RHO (2026,
+  arXiv:2604.10073) — rolling horizon, not a SOTA claim.
 - **Native CPU prefetch (HPC §3.1):** `synaps_native` issues `PREFETCHT0` at
   distance 8 on RHC SoA/CSR gathers and `greedy_repair` SDST scans. AVX2/FMA3
   only (Raptor Lake; no AVX-512). Expected gain is at 500k+ L3 overflow, not

@@ -45,7 +45,7 @@ The **Solver Router** selects one standalone solver configuration based on opera
 
 | Regime | Trigger | Solver Chain | Latency | Quality |
 |--------|---------|-------------|---------|---------|
-| **NOMINAL** | Default planning cycle | `CPSAT-10`→`CPSAT-30`→`LBBD-10`→`ALNS-300`/`ALNS-500` (≤10K with latency)→`RHC-GREEDY-COVER` (>10K)→`RHC-ALNS` (50K+ with 10+ min) | 10–1800 s | exact-first below 10K; rolling-horizon coverage above |
+| **NOMINAL** | Default planning cycle | `CPSAT-10`→`CPSAT-30`→`LBBD-10`→`ALNS-300`/`ALNS-500` (≤10K with latency)→`RHC-GREEDY-COVER` (>10K, including 50K+/100K with 10+ min) | 10–1800 s | exact-first below 10K; rolling-horizon coverage above |
 | **RUSH_ORDER** | Priority order injection | `CPSAT-10` for small windows, otherwise `GREED`; repair API handles schedule-aware patching | < 1–10 s | bounded |
 | **BREAKDOWN** | Machine failure event | `CPSAT-10` for small windows, otherwise `GREED`; repair API handles local repair | < 1–10 s | bounded |
 | **MATERIAL_SHORTAGE** | Inventory alarm | `CPSAT-30`, `LBBD-5`, or `LBBD-10-HD` | 30–300 s | exact on constrained subproblems |
@@ -99,11 +99,11 @@ The `SolverRegistry` (`registry.py`) provides named profiles used by the Portfol
 | `LBBD-10` | LbbdSolver | 60 s | 10 | Full decomposition |
 | `LBBD-5-HD` | LbbdHdSolver | 120 s | 5 | Industrial ($\leq 50$K ops) |
 | `LBBD-10-HD` | LbbdHdSolver | 300 s | 10 | Large factory |
-| `LBBD-20-HD` | LbbdHdSolver | 600 s | 20 | Extreme (50K+ ops, experimental — use RHC-ALNS as validated path) |
+| `LBBD-20-HD` | LbbdHdSolver | 600 s | 20 | Extreme (50K+ ops, experimental — use RHC-GREEDY-COVER as the validated coverage path) |
 | `ALNS-300` | AlnsSolver | 120 s | 300 | Metaheuristic for 1K–10K ops |
 | `ALNS-500` | AlnsSolver | 300 s | 500 | Metaheuristic for ≤10K ops with a 5+ minute budget |
 | `ALNS-1000` | AlnsSolver | 600 s | 1000 | Extended ALNS for 50K+ ops |
-| `RHC-ALNS` | RhcSolver (ALNS inner) | 600 s | 8h windows | Temporal decomposition for 50K–100K+ ops |
+| `RHC-ALNS` | RhcSolver (ALNS inner) | 600 s | 8h windows | Explicit refine profile; not the auto-route at 50K–100K+ |
 | `RHC-CPSAT` | RhcSolver (CP-SAT inner) | 300 s | 8h windows | Temporal decomposition with exact per-window solve |
 | `RHC-GREEDY` | RhcSolver (Greedy inner) | 120 s | 8h windows | Fast temporal decomposition baseline for 100K+ ops |
 
@@ -136,9 +136,10 @@ Default (NOMINAL):
     If latency > 300s and N ≤ 10K  → ALNS-500
     If N > 10K and N ≤ 50K         → RHC-GREEDY-COVER
       (with or without latency > 300s; rolling-horizon coverage)
-    If latency > 600s and N ≥ 100K → RHC-ALNS-100K
-    If latency > 600s and N > 50K  → RHC-ALNS
+    If latency > 600s and N > 50K  → RHC-GREEDY-COVER
+      (`RHC-ALNS` / `RHC-ALNS-100K` remain explicit registry profiles)
     If N > 10K                     → RHC-GREEDY-COVER
+      (native parallel SGS at ≥10k ops; model cap 500k operations)
     Else                           → LBBD-10-HD
       (`LBBD-20-HD` remains exact_required-only at 50K+; unvalidated as default)
 ```

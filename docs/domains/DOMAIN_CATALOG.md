@@ -4,7 +4,7 @@
 
 <details><summary>🇷🇺 Краткое описание</summary>
 
-Каталог отраслевых доменов SynAPS. Каждый домен описывает маппинг канонической модели FJSP на специфику отрасли: словарь состояний (state dictionary), семантику матрицы переналадок, вспомогательные ресурсы, палитру KPI, нормативные требования. 8 доменов: металлургия, фармацевтика, электроника, ЦОД, энергетика, пищевая промышленность, логистика, аэрокосмос.
+Каталог отраслевых доменов SynAPS. Каждый домен описывает маппинг канонической модели FJSP на специфику отрасли: словарь состояний (state dictionary), семантику матрицы переналадок, вспомогательные ресурсы, палитру KPI, нормативные требования. 8 доменов: металлургия, фармацевтика, электроника, ЦОД, энергетика, пищевая промышленность, логистика, аэрокосмос. Девятый — кабель/провод (length-based), см. [cable.md](cable.md).
 </details>
 
 ---
@@ -37,6 +37,7 @@ Each domain guide follows a uniform structure:
 | 6 | [Food & Beverage](food_beverage.md) | ✅ | [`food_beverage.json`](../../schema/examples/food_beverage.json) | Flavor/allergen changeover | HACCP CCP gates, shelf-life window |
 | 7 | [Logistics](logistics.md) | ✅ | — | Vehicle/route reconfiguration | Time-window constraints, vehicle capacity |
 | 8 | [Aerospace](aerospace.md) | ✅ | — | Material/coating change | AS9100 traceability, NDT hold points |
+| 9 | [Cable / wire](cable.md) | ✅ | [`cable.json`](../../schema/examples/cable.json) | Colour / section / compound | Reel pre-split, drum WIP ≠ processing aux |
 
 ---
 
@@ -67,4 +68,4 @@ $$\text{Domain-specific process} \xrightarrow{\text{adapter}} \text{MO-FJSP-SDST
 
 ---
 
-*8 domains documented. Catalog version 1.0 — 2026-04.*
+*9 domains documented. Catalog version 1.1 — 2026-08-14. Cable is an encode-first adapter, not a live Moskabelmet deployment.*

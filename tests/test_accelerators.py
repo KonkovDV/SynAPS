@@ -570,6 +570,7 @@ _ALL_NATIVE_KERNEL_ATTRS = (
     "_native_sdst_batch_lookup_cls",
     "_native_compute_destroy_worst_scores",
     "_native_greedy_repair_batch",
+    "_native_list_schedule_cover",
 )
 
 
@@ -578,8 +579,12 @@ def test_native_available_matches_native_module_and_includes_greedy() -> None:
     status = accelerators.get_acceleration_status()
     assert status["native_available"] is (status["native_module"] is not None)
     assert "greedy_repair_batch" in status["native_kernels"]
+    assert "list_schedule_cover" in status["native_kernels"]
     assert status["native_kernels"]["greedy_repair_batch"] is (
         status["greedy_repair_batch_backend"] == "native"
+    )
+    assert status["native_kernels"]["list_schedule_cover"] is (
+        status["list_schedule_cover_backend"] == "native"
     )
 
 
@@ -648,3 +653,72 @@ def test_synaps_engine_load_graph_rejects_length_mismatch() -> None:
             np.array([1.0, 2.0], dtype=np.float64),
             np.array([6.0, 7.0], dtype=np.float64),
         )
+
+
+def test_native_list_schedule_cover_places_chain_and_clips_horizon() -> None:
+    pytest.importorskip("synaps_native", reason="native module not built")
+    if accelerators._native_list_schedule_cover is None:
+        pytest.skip("list_schedule_cover kernel is not in this wheel")
+    empty_i64 = np.array([], dtype=np.int64)
+    empty_i32 = np.array([], dtype=np.int32)
+    kwargs = {
+        "base_durations": np.array([10.0, 10.0]),
+        "predecessor_indices": np.array([-1, 0], dtype=np.int64),
+        "seq_in_order": np.array([0, 1], dtype=np.int32),
+        "uuid_rank": np.array([0, 1], dtype=np.int32),
+        "earliest": np.array([0.0, 0.0]),
+        "latest_finish": np.array([np.inf, np.inf]),
+        "eligible_offsets": np.array([0, 1, 2], dtype=np.int64),
+        "eligible_indices": np.array([0, 0], dtype=np.int64),
+        "state_ids": np.array([0, 0], dtype=np.int64),
+        "sdst_setup_flat": np.array([0.0]),
+        "n_wc": 1,
+        "n_states": 1,
+        "speed_factors": np.array([1.0]),
+        "aux_offsets": np.array([0, 0, 0], dtype=np.int64),
+        "aux_resource_indices": empty_i64,
+        "aux_quantities": empty_i32,
+        "aux_pool_sizes": empty_i32,
+    }
+    placed = accelerators.list_schedule_cover_native(**kwargs, horizon_minutes=30.0)
+    assert placed is not None
+    starts, ends, machines, _setups = placed
+    assert list(machines) == [0, 0]
+    assert ends[0] == pytest.approx(10.0)
+    assert starts[1] == pytest.approx(10.0)
+    clipped = accelerators.list_schedule_cover_native(**kwargs, horizon_minutes=15.0)
+    assert clipped is not None
+    _s, _e, machines_clip, _st = clipped
+    assert int(machines_clip[0]) == 0
+    assert int(machines_clip[1]) == -1
+
+
+def test_native_list_schedule_cover_uses_ceil_grain() -> None:
+    pytest.importorskip("synaps_native", reason="native module not built")
+    if accelerators._native_list_schedule_cover is None:
+        pytest.skip("list_schedule_cover kernel is not in this wheel")
+    result = accelerators.list_schedule_cover_native(
+        base_durations=np.array([10.0]),
+        predecessor_indices=np.array([-1], dtype=np.int64),
+        seq_in_order=np.array([0], dtype=np.int32),
+        uuid_rank=np.array([0], dtype=np.int32),
+        earliest=np.array([0.0]),
+        latest_finish=np.array([np.inf]),
+        eligible_offsets=np.array([0, 1], dtype=np.int64),
+        eligible_indices=np.array([0], dtype=np.int64),
+        state_ids=np.array([0], dtype=np.int64),
+        sdst_setup_flat=np.array([0.0]),
+        n_wc=1,
+        n_states=1,
+        speed_factors=np.array([3.0]),
+        horizon_minutes=100.0,
+        aux_offsets=np.array([0, 0], dtype=np.int64),
+        aux_resource_indices=np.array([], dtype=np.int64),
+        aux_quantities=np.array([], dtype=np.int32),
+        aux_pool_sizes=np.array([], dtype=np.int32),
+    )
+    assert result is not None
+    _starts, ends, machines, _setups = result
+    assert int(machines[0]) == 0
+    assert ends[0] == pytest.approx(4.0)
+

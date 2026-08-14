@@ -25,7 +25,7 @@ Public technical docs for the scheduling core.
 
 ## Domains
 
-- [DOMAIN_CATALOG.md](domains/DOMAIN_CATALOG.md)
+- [DOMAIN_CATALOG.md](domains/DOMAIN_CATALOG.md) (9 verticals, including [cable](domains/cable.md))
 - Vertical notes under [`domains/`](domains/)
 
 ## Research

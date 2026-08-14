@@ -5,9 +5,13 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+import pytest
+
 from synaps.model import (
     Assignment,
+    AuxiliaryResource,
     Operation,
+    OperationAuxRequirement,
     Order,
     ScheduleProblem,
     SolverStatus,
@@ -204,6 +208,179 @@ def test_list_schedule_runs_early_successor_before_late_release() -> None:
     assert by_op[late0].start_time >= HORIZON_START + timedelta(minutes=20)
 
 
+def test_list_schedule_respects_latest_finish() -> None:
+    """G11: append-only cover must not park an op past Operation.latest_finish."""
+
+    problem = _two_op_problem(duration=30, horizon_minutes=120)
+    tight = problem.operations[1].model_copy(
+        update={"latest_finish": HORIZON_START + timedelta(minutes=40)}
+    )
+    problem = problem.model_copy(
+        update={"operations": [problem.operations[0], tight]}
+    )
+    context = build_dispatch_context(problem)
+    assignments: list[Assignment] = []
+    by_op: dict = {}
+    scheduled: set = set()
+    stats = place_operations_list_schedule(
+        operations=problem.operations,
+        dispatch_context=context,
+        assignments=assignments,
+        assignment_by_op=by_op,
+        scheduled_ids=scheduled,
+        horizon_start=HORIZON_START,
+        horizon_minutes=120.0,
+        op_earliest={op.id: 0.0 for op in problem.operations},
+        default_wc_ids=[problem.work_centers[0].id],
+    )
+    assert stats.placed == 1
+    assert stats.clipped >= 1
+    assert tight.id not in scheduled
+    assert assignments[0].end_time <= HORIZON_START + timedelta(minutes=30)
+
+
+def test_list_schedule_inserts_into_idle_gap_when_tail_blocked() -> None:
+    """Insertion SGS: aux delay parks a tail and leaves a hole a later op must use."""
+
+    state = State(id=uuid4(), code="S0", label="S0")
+    m1 = WorkCenter(id=uuid4(), code="M1", capability_group="g", speed_factor=1.0)
+    m2 = WorkCenter(id=uuid4(), code="M2", capability_group="g", speed_factor=1.0)
+    aux = AuxiliaryResource(id=uuid4(), code="CRANE", resource_type="tool", pool_size=1)
+    hold_order = Order(
+        id=uuid4(),
+        external_ref="HOLD",
+        due_date=HORIZON_START + timedelta(days=1),
+        priority=1,
+    )
+    park_order = Order(
+        id=uuid4(),
+        external_ref="PARK",
+        due_date=HORIZON_START + timedelta(days=1),
+        priority=1,
+    )
+    fit_order = Order(
+        id=uuid4(),
+        external_ref="FIT",
+        due_date=HORIZON_START + timedelta(days=1),
+        priority=1,
+    )
+    hold_id = uuid4()
+    park_id = uuid4()
+    fit_id = uuid4()
+    operations = [
+        Operation(
+            id=hold_id,
+            order_id=hold_order.id,
+            seq_in_order=0,
+            state_id=state.id,
+            base_duration_min=80,
+            eligible_wc_ids=[m2.id],
+        ),
+        Operation(
+            id=park_id,
+            order_id=park_order.id,
+            seq_in_order=0,
+            state_id=state.id,
+            base_duration_min=10,
+            eligible_wc_ids=[m1.id],
+            earliest_start=HORIZON_START + timedelta(minutes=1),
+        ),
+        Operation(
+            id=fit_id,
+            order_id=fit_order.id,
+            seq_in_order=0,
+            state_id=state.id,
+            base_duration_min=20,
+            eligible_wc_ids=[m1.id],
+            earliest_start=HORIZON_START + timedelta(minutes=10),
+            latest_finish=HORIZON_START + timedelta(minutes=40),
+        ),
+    ]
+    problem = ScheduleProblem(
+        states=[state],
+        orders=[hold_order, park_order, fit_order],
+        operations=operations,
+        work_centers=[m1, m2],
+        setup_matrix=[],
+        auxiliary_resources=[aux],
+        aux_requirements=[
+            OperationAuxRequirement(
+                operation_id=hold_id, aux_resource_id=aux.id, quantity_needed=1
+            ),
+            OperationAuxRequirement(
+                operation_id=park_id, aux_resource_id=aux.id, quantity_needed=1
+            ),
+        ],
+        planning_horizon_start=HORIZON_START,
+        planning_horizon_end=HORIZON_START + timedelta(minutes=200),
+    )
+    context = build_dispatch_context(problem)
+    assignments: list[Assignment] = []
+    by_op: dict = {}
+    scheduled: set = set()
+    stats = place_operations_list_schedule(
+        operations=problem.operations,
+        dispatch_context=context,
+        assignments=assignments,
+        assignment_by_op=by_op,
+        scheduled_ids=scheduled,
+        horizon_start=HORIZON_START,
+        horizon_minutes=200.0,
+        op_earliest={hold_id: 0.0, park_id: 1.0, fit_id: 10.0},
+        default_wc_ids=[m1.id, m2.id],
+    )
+    assert stats.placed == 3
+    assert stats.clipped == 0
+    assert stats.gap_inserted >= 1
+    assert by_op[fit_id].end_time <= HORIZON_START + timedelta(minutes=40)
+    assert by_op[fit_id].start_time < by_op[park_id].start_time
+
+
+def test_greedy_cover_does_not_claim_feasible_when_latest_finish_blocks() -> None:
+    """Incomplete G11 cover must not stamp FEASIBLE."""
+
+    problem = _two_op_problem(duration=30, horizon_minutes=120)
+    tight = problem.operations[1].model_copy(
+        update={"latest_finish": HORIZON_START + timedelta(minutes=40)}
+    )
+    problem = problem.model_copy(update={"operations": [problem.operations[0], tight]})
+    result = RhcSolver(policy=RhcPolicy.GREEDY_COVER).solve(
+        problem,
+        time_limit_s=10,
+        global_greedy_cover_min_ops=0,
+        coverage_horizon_extension_factor=1.0,
+    )
+    assert result.status != SolverStatus.FEASIBLE
+    assert len(result.assignments) < len(problem.operations)
+
+
+def test_greedy_cover_generator_instance_claims_feasible() -> None:
+    """Locks the cover path on a Brandimarte-style instance, not a toy chain."""
+
+    from synaps.benchmarks.instance_generator import generate_large_instance
+
+    problem = generate_large_instance(
+        n_operations=400,
+        n_machines=8,
+        n_states=10,
+        ops_per_order=5,
+        machine_flexibility=0.25,
+        setup_density=0.5,
+        horizon_hours=720,
+        seed=1,
+    )
+    result = RhcSolver(policy=RhcPolicy.GREEDY_COVER).solve(
+        problem,
+        time_limit_s=30,
+        global_greedy_cover_min_ops=0,
+        coverage_horizon_extension_factor=1.0,
+    )
+    assert result.status == SolverStatus.FEASIBLE
+    assert len(result.assignments) == len(problem.operations)
+    assert result.metadata.get("notary_hard_violation_kinds") == []
+    assert result.metadata.get("global_greedy_cover") is True
+
+
 def test_global_greedy_cover_claims_feasible_inside_declared_horizon() -> None:
     problem = _two_op_problem(duration=30, horizon_minutes=90)
     extra_ops = []
@@ -243,3 +420,26 @@ def test_global_greedy_cover_claims_feasible_inside_declared_horizon() -> None:
     assert result.metadata.get("temporal_stabilization_converged") is True
     for assignment in result.assignments:
         assert assignment.end_time <= problem.planning_horizon_end
+
+
+def test_native_list_schedule_cover_solves_small_instance_when_forced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("synaps_native", reason="native module not built")
+    from synaps.accelerators import _native_list_schedule_cover
+    from synaps.solvers.rhc import _cover as cover_mod
+
+    if _native_list_schedule_cover is None:
+        pytest.skip("list_schedule_cover kernel is not in this wheel")
+    monkeypatch.setattr(cover_mod, "_NATIVE_LIST_SCHEDULE_MIN_OPS", 0)
+    problem = _two_op_problem(duration=30, horizon_minutes=90)
+    result = RhcSolver(policy=RhcPolicy.GREEDY_COVER).solve(
+        problem,
+        time_limit_s=30,
+        global_greedy_cover_min_ops=0,
+        coverage_horizon_extension_factor=1.0,
+    )
+    assert len(result.assignments) == 2
+    assert result.status == SolverStatus.FEASIBLE
+    assert result.metadata.get("notary_hard_violation_kinds") == []
+

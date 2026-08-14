@@ -749,7 +749,7 @@ def test_study_rhc_500k_blocks_execution_above_model_operation_limit(
 
     report = study_module.study_rhc_500k(
         execution_mode="gated",
-        scales=[500_000],
+        scales=[500_001],
         seeds=[1],
         solver_names=["RHC-GREEDY"],
         lane="throughput",

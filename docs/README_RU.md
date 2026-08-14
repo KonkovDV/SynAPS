@@ -16,7 +16,9 @@ Language: [EN](README.md) | **RU**
 
 ## Домены
 
-[`domains/DOMAIN_CATALOG.md`](domains/DOMAIN_CATALOG.md) и вертикали в [`domains/`](domains/).
+## Домены
+
+[`domains/DOMAIN_CATALOG.md`](domains/DOMAIN_CATALOG.md) — 9 вертикалей, включая [кабель/провод](domains/cable.md).
 
 ## Research
 

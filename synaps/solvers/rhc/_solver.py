@@ -935,11 +935,13 @@ class RhcSolver(BaseSolver):
             if cover_stats.time_limited:
                 time_limit_reached = True
             logger.info(
-                "RHC global greedy cover placed %d/%d ops in %d passes (clipped=%d)",
+                "RHC global greedy cover placed %d/%d ops in %d passes "
+                "(clipped=%d gap_inserted=%d)",
                 cover_stats.placed,
                 len(problem.operations),
                 cover_stats.passes,
                 cover_stats.clipped,
+                cover_stats.gap_inserted,
             )
 
         while (not global_greedy_cover_used) and window_start_offset < horizon_minutes:
@@ -2400,8 +2402,7 @@ class RhcSolver(BaseSolver):
                 remaining_ops = [op for op in problem.operations if op.id in unscheduled_ids]
                 remaining_ops.sort(key=lambda op: op.seq_in_order)
                 repair_machine_idx = MachineIndex(dispatch_context)
-                for assignment in committed_assignments:
-                    repair_machine_idx.add(assignment)
+                repair_machine_idx.extend(committed_assignments)
                 cover_stats = place_operations_greedy(
                     operations=remaining_ops,
                     dispatch_context=dispatch_context,

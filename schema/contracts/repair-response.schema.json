@@ -62,9 +62,19 @@
     "ObjectiveValues": {
       "description": "Multi-objective value vector.",
       "properties": {
+        "coverage": {
+          "default": 1.0,
+          "title": "Coverage",
+          "type": "number"
+        },
         "makespan_minutes": {
           "default": 0.0,
           "title": "Makespan Minutes",
+          "type": "number"
+        },
+        "total_energy_kwh": {
+          "default": 0.0,
+          "title": "Total Energy Kwh",
           "type": "number"
         },
         "total_material_loss": {
@@ -81,6 +91,11 @@
           "default": 0.0,
           "title": "Total Tardiness Minutes",
           "type": "number"
+        },
+        "unscheduled_operations": {
+          "default": 0,
+          "title": "Unscheduled Operations",
+          "type": "integer"
         },
         "weighted_sum": {
           "default": 0.0,
