@@ -50,4 +50,4 @@ Do not add: INFIMUM 39k/40 min, +78M RUB, 27 days, Zhu −9.8% makespan, Prysmia
 
 ## Next honest step
 
-Measure `peak_wip_drums` vs processing-aux peak on a 5k cable instance. Open C5a only if C4 weights + freeze cannot move Dmax. Nervous-month 20 316-op pack is done (`D_max=265` vs pool 96).
+Measure `peak_wip_drums` vs processing-aux peak on a 5k cable instance. Open C5a only if C4 weights + freeze cannot move Dmax. Nervous-month 20 316-op pack is done (`D_max=265` vs pool 96). Plant/vendor OSINT ledger: `docs/rfc/CABLE_MOSKABELMET_OSINT_REDTEAM_2026_08_15.md`.

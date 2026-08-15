@@ -2,13 +2,23 @@
 
 INFIMUM 2.0 and ADVARIS both cluster similar SKUs into one launch. SynAPS
 rejects cross-order ``predecessor_op_id``, so this preprocessor only aligns
-``earliest_start`` of first-stage ops in the same state into due-date buckets.
+``earliest_start`` of first-stage ops.
 
-The gate is the earliest release in that (state, due-slot) group, snapped down
-to the slot grid. Optional ``colour_phase`` then shifts the gate by a
-deterministic colour/insulation slot (0-2) without passing the due date.
-Snapping the gate *to the due date* (the 2026-08-14 bug) forbids starting
-until the due bucket and overflows a loaded month.
+The gate is the earliest release in a (state, due-slot) group, snapped down
+to the slot grid. Mixing 16 mm² and 35 mm² into one colour gate (tried
+2026-08-15) interleaved 360 min section setups and raised tardiness.
+With ``colour_phase``, shops of ≤8 machines/stage use a 6-colour wheel
+(at most five slots, skipped if it would pass due). Wider shops keep the
+hash%3 stagger: a 40 h wheel raised tardiness at 16/stage (2026-08-15).
+hash%3 packs two colours into one slot; the wheel is for the tight shop
+where colour SDST otherwise fills the calendar. Snapping the gate *to
+the due date* (the 2026-08-14 bug) forbids starting until the due bucket.
+
+Algebra (1600-order month): processing is 19% of an 8-machine calendar;
+the leftover ~1.7e6 min must cover setups. Random SDST is ~175 min/op
+and does not fit. Bounded ATCS delay of one SMED on an append-only SGS
+collapsed 16-stage coverage (Kolisch non-delay vs Artigues insertion).
+Hold-until-successor drums do not add machine-minutes (C5a stays gated).
 """
 
 from __future__ import annotations
@@ -16,6 +26,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
+from synaps.domains.cable.adapter import CABLE_COLORS
 from synaps.model import Operation, Order, ScheduleProblem
 
 if TYPE_CHECKING:
@@ -36,6 +47,7 @@ def apply_campaign_windows(
     *,
     slot_hours: int = 8,
     colour_phase: bool = False,
+    colour_cycle: int = 3,
 ) -> ScheduleProblem:
     """Open a shared start gate per SKU×due slot at the group's earliest release."""
 
@@ -59,27 +71,39 @@ def apply_campaign_windows(
         )
         gate = horizon + slot * int(gate_seconds // slot.total_seconds())
         for operation, order in members:
-            operation.earliest_start = _colour_phased_gate(
-                gate, slot, order, operation, states_by_id, colour_phase
+            operation.earliest_start = _colour_stagger_gate(
+                gate, slot, horizon, order, operation, states_by_id,
+                colour_phase, colour_cycle,
             )
     return problem
 
 
-def _colour_phased_gate(
+def _colour_stagger_gate(
     gate: datetime,
     slot: timedelta,
+    horizon: datetime,
     order: Order,
     operation: Operation,
     states_by_id: dict[object, State],
     colour_phase: bool,
+    colour_cycle: int,
 ) -> datetime:
     if not colour_phase:
         return gate
     state = states_by_id.get(operation.state_id)
     attrs = state.domain_attributes if state is not None else {}
-    phase = (
-        sum(ord(char) for char in f"{attrs.get('insulation', '')}-{attrs.get('color', '')}")
-        % 3
-    )
-    shifted = gate + slot * phase
+    if colour_cycle >= 6:
+        color = str(attrs.get("color", ""))
+        try:
+            index = CABLE_COLORS.index(color)
+        except ValueError:
+            return gate
+        gate_slot = int(round((gate - horizon).total_seconds() / slot.total_seconds()))
+        wait = (index - gate_slot) % len(CABLE_COLORS)
+    else:
+        wait = (
+            sum(ord(char) for char in f"{attrs.get('insulation', '')}-{attrs.get('color', '')}")
+            % max(colour_cycle, 1)
+        )
+    shifted = gate + slot * wait
     return shifted if shifted <= order.due_date else gate

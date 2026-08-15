@@ -929,6 +929,8 @@ def list_schedule_cover_native(
     k1: float = 2.0,
     k2: float = 0.5,
     k3: float = 0.5,
+    floor_window: float = 0.0,
+    exhaust_window: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
     """Try native parallel SGS cover. Returns None if native unavailable."""
 
@@ -941,6 +943,8 @@ def list_schedule_cover_native(
             extra["k1"] = float(k1)
             extra["k2"] = float(k2)
             extra["k3"] = float(k3)
+            extra["floor_window"] = float(floor_window)
+            extra["exhaust_window"] = float(exhaust_window)
             if weights is not None:
                 extra["weights"] = np.ascontiguousarray(weights, dtype=np.float64)
             if material_loss is not None:

@@ -107,11 +107,114 @@ Findings:
    The 8-machine shop needs a capacity or quality lever (S6 gate), not a
    ready rule.
 
+## A1 windowed ATCS + mix-sized family (2026-08-15, seed=1, this machine)
+
+Unbounded ATCS jumped later-ready ops and collapsed coverage. Cover ATCS
+now scores only inside the current non-delay floor class
+(`floor <= min(ready floors) + 0`). Same-floor ATCS still prefers zero
+setup (unit test). Native ABI adds optional `floor_window` (default 0).
+
+Family lines are sized by SKU-catalog share (nervous mix 12 PVC / 24 XLPE
+→ ~1/3 of machines), not 50/50.
+
+Cover-only probes, colour phase on, `time_limit_s=45`:
+
+| Shop | Rule | Family | Status | Wall | Setup min | Tardiness | Peak WIP |
+|------|------|--------|--------|------|-----------|-----------|----------|
+| 16/stage, pool 96 | FIFO | off | **feasible** | 7.6 s | 2 636 200 | 16 588 | 159 |
+| 16/stage, pool 96 | ATCS windowed | off | **feasible** | 8.9 s | 2 518 440 | 1 922 | 94 |
+| 16/stage, pool 96 | FIFO | mix-sized | **feasible** | 5.6 s | 2 511 240 | 26 647 | 113 |
+| 16/stage, pool 96 | ATCS windowed | mix-sized | **feasible** | 6.8 s | 2 488 800 | 24 227 | 100 |
+| 8/stage, pool 48 | FIFO | off | error | 11.8 s | — | — | coverage 0.496 |
+| 8/stage, pool 48 | ATCS windowed | off | error | 12.6 s | — | — | coverage 0.525 |
+| 8/stage, pool 48 | FIFO | mix-sized | error | 7.3 s | — | — | coverage 0.554 |
+
+Nervous-month COVER default is windowed ATCS (CLI / `run_nervous_month`).
+Registry `RHC-GREEDY-COVER` stays FIFO so 50k/500k cover does not change.
+Family lines stay opt-in at 16/stage: mix-sized is feasible but tardiness
+is worse than ATCS-only. 1600@8 under this A1-only table was infeasible
+(best coverage 0.554); exhaustive stay closed it later in this RFC.
+Peak WIP 94 vs drum pool 96 is a cover-only KPI, not a C5a close.
+
 Full default month (1 600 @ 16, FIFO, colour, `--new-rush 2`, 4 waves):
 cover 9.25 s, exhaustive notary 0.77 s with 0 hard violations,
 `temporal_stabilization_converged=1`; new-parent rush insert repair 3.9 s
 vs full re-solve 10.7 s on the **mutated** instance (2.75×, N-R3); four
 reshuffle waves repair 6.1–7.4 s vs full 10.9 s. Total CLI wall ≈ 66 s.
+
+## Algebra, papers, and the 8-machine residual (2026-08-15)
+
+Processing on the 1 600-order month is 385 818 min. An 8/stage calendar is
+2 073 600 min → 19% utilisation if setups were free. Minutes left for
+setups: ~1.69e6. To place all 20 316 ops the mean setup must be **≤83 min/op**.
+Observed ~175 min/op on the ops that fit under FIFO, ~99 min/op under
+family+wheel — still above the 83 min budget. This is a changeover problem,
+not a raw machine-hour shortage.
+
+C5a hold-until-successor occupies drums longer; it does not add those
+1.69e6 setup minutes. Doubling the drum pool (48→96) left 8-stage
+placement **unchanged** (15 905 ops). C5a stays gated.
+
+Kolisch (1996): parallel SGS = non-delay; the non-delay set is not
+dominant. Artigues, Lopez, Ayache (Ann. OR 2005 / arXiv:cs/0606043):
+appending SGS is not active under SDST; insertion SGS is. Lee–Bhaskaran–
+Pinedo ATCS (IIE 1997 / EJOR 1997): k1/k2 are look-ahead *scales*, not a
+licence to jump the ready floor. A 240 min ATCS floor window (one colour
+SMED) on this append-only cover collapsed 16-stage coverage (0.986) and
+exploded tardiness — the same stranded-tail failure as unbounded ATCS,
+milder. Native month cover remains append-only (gap inserts = 0).
+
+Tried and rejected as defaults:
+
+| Lever | 16/stage | 8/stage | Keep? |
+|-------|----------|---------|-------|
+| ATCS floor window 240 / 400 | error (0.986) / not default | 0.48–0.57 | **no** — `--cover-atcs-window` stays 0 |
+| Merge 16+35 mm² into one colour gate | tardiness 1 922 → 4 430 | — | **no** — section SDST 360 min mixes |
+| 6-colour wheel at 16/stage | tardiness 1 922 → 6 017 | — | **no** at 16; **yes** at ≤8 |
+| Colour-dedicated lines | feasible, tardiness 154 657 | coverage 0.77 | opt-in `--colour-lines` |
+| Extra drums 48→96 | — | identical 15 905 ops | not the bottleneck |
+
+## Exhaustive stay closes 1600@8 (2026-08-15)
+
+Processing 385 818 min vs 8/stage calendar 2 073 600 min leaves **≤83 min/op**
+for setups. A general ATCS floor window (any job) collapsed 16-stage coverage.
+Mahmoodi/Dooley (IJPR 1991) exhaustive group scheduling plus Flynn (JOM 1987)
+repetitive lots: do not switch family while a continuation can run, and stay
+on the hot machine even when a colder machine would finish earlier. Pfund
+ATCSR bounds that idle; we use one colour SMED (240 min) **only** for
+zero-setup continuations (`cover_atcs_exhaust_window`), never as a general
+floor window.
+
+Cover-only, seed=1, ATCS window 0, `time_limit_s=45`, no fallback repair:
+
+| Shop | Family | Colour lines | Wheel | Exhaust stay | Status | Wall | Setup | Tardiness | Notes |
+|------|--------|--------------|-------|--------------|--------|------|-------|-----------|-------|
+| 16/stage, pool 96 | off | off | hash%3 | 0 | **feasible** | 13.7 s | 2 518 440 | **1 922** | default unchanged |
+| 8/stage, pool 48 | 1 flex | off | 6-wheel | 240 + hot machine | **feasible** | 4.3 s | 997 600 | 87 134 | **49.1 min/op** |
+| 8/stage, pool 48 | off | off | 6-wheel | 240 + hot machine | **feasible** | 9.8 s | 1 094 680 | 246 509 | family not required for cover |
+| 8/stage, pool 48 | 1 flex | off | 6-wheel | 0 | error | 5.2 s | 1 577 120 | — | coverage 0.793 |
+| 8/stage, pool 48 | 1 flex | off | off | 240 + hot machine | error | 8.0 s | 1 492 960 | — | coverage 0.939 |
+| 8/stage, pool 48 | 1 flex | inside family | off | 240 + hot machine | error | 4.4 s | 1 519 600 | — | coverage 0.854; cells fragment |
+
+Nervous-month CLI at ≤8/stage now defaults to family flex + colour wheel +
+exhaust stay. `--colour-lines` stays opt-in. `--no-family-lines` remains
+feasible with worse tardiness. C5a stays gated. 16-stage family stays opt-in.
+
+What shipped (cover-only, seed=1, colour phase on, window 0, `time_limit_s=45`):
+
+| Shop | Family flex | Colour lines | Cycle | Status | Wall | Setup | Tardiness | Notes |
+|------|-------------|--------------|-------|--------|------|-------|-----------|-------|
+| 16/stage, pool 96 | off | off | hash%3 | **feasible** | 15.2 s | 2 518 440 | **1 922** | default restored |
+| 16/stage, pool 96 | 1 flex | off | hash%3 | **feasible** | 12.3 s | 2 411 760 | **3 670** | was 24 227 without flex |
+| 8/stage, pool 48 | off | off | 6-wheel | error | 8.5 s | — | — | coverage **0.684** (was 0.525) |
+| 8/stage, pool 48 | 1 flex | off | 6-wheel | error | 7.8 s | 1 568 600 | — | coverage **0.783**, 98.6 min/op |
+| 8/stage, pool 96 | 1 flex | off | 6-wheel | error | 7.8 s | 1 568 600 | — | same placement as pool 48 |
+
+Family lines stay opt-in at 16/stage: flex recovered most of the due-date routing
+(Nyhuis/Schmidt 2025; Schaller/Gupta family tardiness) but 3 670 > 1 922.
+At ≤8/stage they default **on** because they cut tardiness on the feasible
+cover (87 134 vs 246 509 without family). Peak WIP 94 vs drum pool 96 is a
+cover-only KPI, not a C5a close.
 
 ## Why setups ate the 8-machine shop
 
@@ -136,12 +239,12 @@ main cover loop. No DRL as the factory engine. No vendoring dmorill GPL-3.
 
 | Rank | Move | Outcome (2026-08-14) | Kernel? |
 |------|------|----------------------|---------|
-| **A1** | ATCS ready pop in native COVER | **Falsified as month cover.** Coverage 100% → 62–70% at k1∈{2,50,200}. Flag ships opt-in; FIFO stays default. Windowed ATCS is future work. | Yes — shipped, not default |
-| **A2** | Family-dedicated `eligible_wc_ids` | **Infeasible at 16/stage** (even split, XLPE ⅔ of mix). Opt-in `--family-lines`. Needs mix-sized split. | No |
+| **A1** | ATCS ready pop in native COVER | Unbounded ATCS falsified (2026-08-14). **Windowed (non-delay) ATCS FEASIBLE at 16/stage** (2026-08-15): tardiness 16 588 → 1 922. Floor window 240 collapsed 16-stage coverage. Continuation exhaust (not a general window) + hot-machine stay makes **1600@8 FEASIBLE**. Registry stays FIFO. | Yes — default on month CLI only |
+| **A2** | Family-dedicated `eligible_wc_ids` | Mix-sized + 1 flex: **FEASIBLE at 16/stage**, tardiness 3 670 > ATCS-only 1 922 (opt-in). At ≤8 default **on**: tardiness 87 134 vs 246 509 without family on the feasible cover. | No |
 | **A3** | Incremental aux calendar in IncrementalRepair | `MachineIndex.add` appends aux windows; `extend(frozen)` instead of per-row add. Wave repair 6.1–7.4 s vs cover 9.25 s (still ~1.4×, not <1 s). | Repair path |
 | **A4** | Delta notary | **Not shipped.** One drum pool ⇒ neighbourhood slice == full occupancy. Exhaustive remains default. | — |
-| **A5** | Colour-phase campaign | **Default on.** Tardiness 134 224 → 40 580; peak WIP 265 → 183; setup 2.75e6 → 2.65e6. `--no-colour-phase` recovers baseline. | No |
-| **A6** | C5a hold-until-successor | Still gated. 1600@8 infeasible under FIFO (0.480) and ATCS (0.561). | Gated C5 |
+| **A5** | Colour-phase campaign | **Default on.** hash%3 at >8; 6-colour wheel at ≤8. Required for 8-stage cover (0.939 without wheel). `--colour-lines` opt-in (tardiness 154k at 16; coverage 0.854 at 8). | No |
+| **A6** | C5a hold-until-successor | Still gated. Algebra: leftover calendar was setup minutes; exhaust stay cut mean setup 98 → 49 min/op. Drum pool 48→96 did not move placement. | Gated C5 |
 
 Out of scope for speed: GPU GA, AVX-512, DRL factory policy, 500k synthetic
 coverage numbers, INFIMUM marketing, GREED ATCS at ≥10k.

@@ -22,6 +22,7 @@ from synaps.model import (
 from synaps.solvers._dispatch_support import MachineIndex, build_dispatch_context
 from synaps.solvers.rhc import RhcPolicy, RhcSolver
 from synaps.solvers.rhc._cover import (
+    _atcs_window_indices,
     place_operations_greedy,
     place_operations_list_schedule,
     should_use_global_greedy_cover,
@@ -546,4 +547,384 @@ def test_cover_atcs_prefers_zero_setup_same_state() -> None:
     assert fifo[other.id].start_time <= fifo[same.id].start_time
     assert atcs[same.id].start_time <= atcs[other.id].start_time
     assert atcs[same.id].setup_minutes == 0
+
+
+def test_cover_atcs_does_not_jump_future_floor() -> None:
+    """Non-delay ATCS must not skip an earlier-ready op for a later zero-setup."""
+
+    state_a = State(id=uuid4(), code="A", label="A")
+    state_b = State(id=uuid4(), code="B", label="B")
+    wc = WorkCenter(id=uuid4(), code="M1", capability_group="g", speed_factor=1.0)
+    order_seed = Order(
+        id=uuid4(), external_ref="SEED", due_date=HORIZON_START + timedelta(days=1)
+    )
+    order_early = Order(
+        id=uuid4(), external_ref="EARLY", due_date=HORIZON_START + timedelta(days=1)
+    )
+    order_late = Order(
+        id=uuid4(), external_ref="LATE", due_date=HORIZON_START + timedelta(days=1)
+    )
+    seeded = Operation(
+        id=uuid4(),
+        order_id=order_seed.id,
+        seq_in_order=1,
+        state_id=state_a.id,
+        base_duration_min=10,
+        eligible_wc_ids=[wc.id],
+    )
+    early = Operation(
+        id=uuid4(),
+        order_id=order_early.id,
+        seq_in_order=1,
+        state_id=state_b.id,
+        base_duration_min=10,
+        eligible_wc_ids=[wc.id],
+    )
+    late = Operation(
+        id=uuid4(),
+        order_id=order_late.id,
+        seq_in_order=1,
+        state_id=state_a.id,
+        base_duration_min=10,
+        eligible_wc_ids=[wc.id],
+    )
+    problem = ScheduleProblem(
+        states=[state_a, state_b],
+        orders=[order_seed, order_early, order_late],
+        operations=[seeded, early, late],
+        work_centers=[wc],
+        setup_matrix=[
+            SetupEntry(
+                work_center_id=wc.id,
+                from_state_id=state_a.id,
+                to_state_id=state_b.id,
+                setup_minutes=100,
+            ),
+            SetupEntry(
+                work_center_id=wc.id,
+                from_state_id=state_b.id,
+                to_state_id=state_a.id,
+                setup_minutes=100,
+            ),
+        ],
+        planning_horizon_start=HORIZON_START,
+        planning_horizon_end=HORIZON_START + timedelta(hours=8),
+    )
+    seeded_asg = Assignment(
+        operation_id=seeded.id,
+        work_center_id=wc.id,
+        start_time=HORIZON_START,
+        end_time=HORIZON_START + timedelta(minutes=10),
+    )
+    context = build_dispatch_context(problem)
+    assignments = [seeded_asg.model_copy()]
+    by_op = {seeded.id: assignments[0]}
+    place_operations_list_schedule(
+        operations=problem.operations,
+        dispatch_context=context,
+        assignments=assignments,
+        assignment_by_op=by_op,
+        scheduled_ids={seeded.id},
+        horizon_start=HORIZON_START,
+        horizon_minutes=480.0,
+        op_earliest={seeded.id: 0.0, early.id: 0.0, late.id: 200.0},
+        default_wc_ids=[wc.id],
+        cover_ready_rule="atcs",
+    )
+    by_id = {row.operation_id: row for row in assignments}
+    assert by_id[early.id].start_time <= by_id[late.id].start_time
+
+
+def test_cover_atcs_bounded_delay_waits_for_same_state() -> None:
+    """A one-setup window may idle for a later zero-setup successor."""
+
+    state_a = State(id=uuid4(), code="A", label="A")
+    state_b = State(id=uuid4(), code="B", label="B")
+    wc = WorkCenter(id=uuid4(), code="M1", capability_group="g", speed_factor=1.0)
+    order_seed = Order(
+        id=uuid4(), external_ref="SEED", due_date=HORIZON_START + timedelta(days=1)
+    )
+    order_early = Order(
+        id=uuid4(), external_ref="EARLY", due_date=HORIZON_START + timedelta(days=1)
+    )
+    order_late = Order(
+        id=uuid4(), external_ref="LATE", due_date=HORIZON_START + timedelta(days=1)
+    )
+    seeded = Operation(
+        id=uuid4(),
+        order_id=order_seed.id,
+        seq_in_order=1,
+        state_id=state_a.id,
+        base_duration_min=10,
+        eligible_wc_ids=[wc.id],
+    )
+    early = Operation(
+        id=uuid4(),
+        order_id=order_early.id,
+        seq_in_order=1,
+        state_id=state_b.id,
+        base_duration_min=10,
+        eligible_wc_ids=[wc.id],
+    )
+    late = Operation(
+        id=uuid4(),
+        order_id=order_late.id,
+        seq_in_order=1,
+        state_id=state_a.id,
+        base_duration_min=10,
+        eligible_wc_ids=[wc.id],
+    )
+    problem = ScheduleProblem(
+        states=[state_a, state_b],
+        orders=[order_seed, order_early, order_late],
+        operations=[seeded, early, late],
+        work_centers=[wc],
+        setup_matrix=[
+            SetupEntry(
+                work_center_id=wc.id,
+                from_state_id=state_a.id,
+                to_state_id=state_b.id,
+                setup_minutes=100,
+            ),
+            SetupEntry(
+                work_center_id=wc.id,
+                from_state_id=state_b.id,
+                to_state_id=state_a.id,
+                setup_minutes=100,
+            ),
+        ],
+        planning_horizon_start=HORIZON_START,
+        planning_horizon_end=HORIZON_START + timedelta(hours=8),
+    )
+    seeded_asg = Assignment(
+        operation_id=seeded.id,
+        work_center_id=wc.id,
+        start_time=HORIZON_START,
+        end_time=HORIZON_START + timedelta(minutes=10),
+    )
+    context = build_dispatch_context(problem)
+    assignments = [seeded_asg.model_copy()]
+    by_op = {seeded.id: assignments[0]}
+    place_operations_list_schedule(
+        operations=problem.operations,
+        dispatch_context=context,
+        assignments=assignments,
+        assignment_by_op=by_op,
+        scheduled_ids={seeded.id},
+        horizon_start=HORIZON_START,
+        horizon_minutes=480.0,
+        op_earliest={seeded.id: 0.0, early.id: 0.0, late.id: 200.0},
+        default_wc_ids=[wc.id],
+        cover_ready_rule="atcs",
+        cover_atcs_floor_window=200.0,
+    )
+    by_id = {row.operation_id: row for row in assignments}
+    assert by_id[late.id].start_time <= by_id[early.id].start_time
+    assert by_id[late.id].setup_minutes == 0
+
+
+def test_cover_atcs_exhaust_waits_only_for_zero_setup() -> None:
+    """Exhaust is continuation-only; a general floor window is a different lever."""
+
+    stats = [
+        (0.0, 100.0, 10.0, 0.0),
+        (150.0, 50.0, 10.0, 0.0),
+        (200.0, 0.0, 10.0, 0.0),
+    ]
+    assert _atcs_window_indices(stats, 0.0, 0.0) == [0]
+    assert _atcs_window_indices(stats, 0.0, 200.0) == [2]
+    assert _atcs_window_indices(stats, 200.0, 0.0) == [0, 1, 2]
+
+
+def test_cover_atcs_exhaust_window_waits_for_same_state() -> None:
+    """Continuation exhaust (not a general ATCS floor window) keeps the family."""
+
+    state_a = State(id=uuid4(), code="A", label="A")
+    state_b = State(id=uuid4(), code="B", label="B")
+    wc = WorkCenter(id=uuid4(), code="M1", capability_group="g", speed_factor=1.0)
+    order_seed = Order(
+        id=uuid4(), external_ref="SEED", due_date=HORIZON_START + timedelta(days=1)
+    )
+    order_early = Order(
+        id=uuid4(), external_ref="EARLY", due_date=HORIZON_START + timedelta(days=1)
+    )
+    order_late = Order(
+        id=uuid4(), external_ref="LATE", due_date=HORIZON_START + timedelta(days=1)
+    )
+    seeded = Operation(
+        id=uuid4(),
+        order_id=order_seed.id,
+        seq_in_order=1,
+        state_id=state_a.id,
+        base_duration_min=10,
+        eligible_wc_ids=[wc.id],
+    )
+    early = Operation(
+        id=uuid4(),
+        order_id=order_early.id,
+        seq_in_order=1,
+        state_id=state_b.id,
+        base_duration_min=10,
+        eligible_wc_ids=[wc.id],
+    )
+    late = Operation(
+        id=uuid4(),
+        order_id=order_late.id,
+        seq_in_order=1,
+        state_id=state_a.id,
+        base_duration_min=10,
+        eligible_wc_ids=[wc.id],
+    )
+    problem = ScheduleProblem(
+        states=[state_a, state_b],
+        orders=[order_seed, order_early, order_late],
+        operations=[seeded, early, late],
+        work_centers=[wc],
+        setup_matrix=[
+            SetupEntry(
+                work_center_id=wc.id,
+                from_state_id=state_a.id,
+                to_state_id=state_b.id,
+                setup_minutes=100,
+            ),
+            SetupEntry(
+                work_center_id=wc.id,
+                from_state_id=state_b.id,
+                to_state_id=state_a.id,
+                setup_minutes=100,
+            ),
+        ],
+        planning_horizon_start=HORIZON_START,
+        planning_horizon_end=HORIZON_START + timedelta(hours=8),
+    )
+    seeded_asg = Assignment(
+        operation_id=seeded.id,
+        work_center_id=wc.id,
+        start_time=HORIZON_START,
+        end_time=HORIZON_START + timedelta(minutes=10),
+    )
+    context = build_dispatch_context(problem)
+    assignments = [seeded_asg.model_copy()]
+    by_op = {seeded.id: assignments[0]}
+    place_operations_list_schedule(
+        operations=problem.operations,
+        dispatch_context=context,
+        assignments=assignments,
+        assignment_by_op=by_op,
+        scheduled_ids={seeded.id},
+        horizon_start=HORIZON_START,
+        horizon_minutes=480.0,
+        op_earliest={seeded.id: 0.0, early.id: 0.0, late.id: 200.0},
+        default_wc_ids=[wc.id],
+        cover_ready_rule="atcs",
+        cover_atcs_exhaust_window=200.0,
+    )
+    by_id = {row.operation_id: row for row in assignments}
+    assert by_id[late.id].start_time <= by_id[early.id].start_time
+    assert by_id[late.id].setup_minutes == 0
+
+
+def test_cover_atcs_exhaust_stays_on_hot_machine() -> None:
+    """Exhaustive stay: a zero-setup tail beats a colder earlier-end (Flynn)."""
+
+    state_a = State(id=uuid4(), code="A", label="A")
+    state_b = State(id=uuid4(), code="B", label="B")
+    hot = WorkCenter(id=uuid4(), code="HOT", capability_group="g", speed_factor=1.0)
+    cold = WorkCenter(id=uuid4(), code="COLD", capability_group="g", speed_factor=1.0)
+    order_hot = Order(
+        id=uuid4(), external_ref="HOT", due_date=HORIZON_START + timedelta(days=1)
+    )
+    order_cold = Order(
+        id=uuid4(), external_ref="COLD", due_date=HORIZON_START + timedelta(days=1)
+    )
+    order_job = Order(
+        id=uuid4(), external_ref="JOB", due_date=HORIZON_START + timedelta(days=1)
+    )
+    seed_hot = Operation(
+        id=uuid4(),
+        order_id=order_hot.id,
+        seq_in_order=1,
+        state_id=state_a.id,
+        base_duration_min=200,
+        eligible_wc_ids=[hot.id],
+    )
+    seed_cold = Operation(
+        id=uuid4(),
+        order_id=order_cold.id,
+        seq_in_order=1,
+        state_id=state_b.id,
+        base_duration_min=1,
+        eligible_wc_ids=[cold.id],
+    )
+    job = Operation(
+        id=uuid4(),
+        order_id=order_job.id,
+        seq_in_order=1,
+        state_id=state_a.id,
+        base_duration_min=10,
+        eligible_wc_ids=[hot.id, cold.id],
+    )
+    problem = ScheduleProblem(
+        states=[state_a, state_b],
+        orders=[order_hot, order_cold, order_job],
+        operations=[seed_hot, seed_cold, job],
+        work_centers=[hot, cold],
+        setup_matrix=[
+            SetupEntry(
+                work_center_id=cold.id,
+                from_state_id=state_b.id,
+                to_state_id=state_a.id,
+                setup_minutes=100,
+            ),
+            SetupEntry(
+                work_center_id=hot.id,
+                from_state_id=state_a.id,
+                to_state_id=state_b.id,
+                setup_minutes=100,
+            ),
+        ],
+        planning_horizon_start=HORIZON_START,
+        planning_horizon_end=HORIZON_START + timedelta(hours=8),
+    )
+    context = build_dispatch_context(problem)
+
+    def _place(*, exhaust: float) -> dict:
+        seeded = [
+            Assignment(
+                operation_id=seed_hot.id,
+                work_center_id=hot.id,
+                start_time=HORIZON_START,
+                end_time=HORIZON_START + timedelta(minutes=200),
+            ),
+            Assignment(
+                operation_id=seed_cold.id,
+                work_center_id=cold.id,
+                start_time=HORIZON_START,
+                end_time=HORIZON_START + timedelta(minutes=1),
+            ),
+        ]
+        by_op = {row.operation_id: row for row in seeded}
+        assignments = list(seeded)
+        place_operations_list_schedule(
+            operations=problem.operations,
+            dispatch_context=context,
+            assignments=assignments,
+            assignment_by_op=by_op,
+            scheduled_ids={seed_hot.id, seed_cold.id},
+            horizon_start=HORIZON_START,
+            horizon_minutes=480.0,
+            op_earliest={seed_hot.id: 0.0, seed_cold.id: 0.0, job.id: 0.0},
+            default_wc_ids=[hot.id, cold.id],
+            cover_ready_rule="atcs",
+            cover_atcs_exhaust_window=exhaust,
+        )
+        return {row.operation_id: row for row in assignments}
+
+    jumped = _place(exhaust=0.0)
+    stayed = _place(exhaust=240.0)
+    assert jumped[job.id].work_center_id == cold.id
+    assert jumped[job.id].setup_minutes == 100
+    assert stayed[job.id].work_center_id == hot.id
+    assert stayed[job.id].setup_minutes == 0
+
 

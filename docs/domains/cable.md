@@ -13,7 +13,7 @@
 
 Jobs are make-to-order lengths (metres), not piece counts. A customer order of length \(L_j\) is pre-split into sub-reels of capacity \(L_{\text{reel}}\) (Zhu et al., *Processes* 14(5):769, 2026). Each sub-reel is its own SynAPS `Order` (linear `predecessor_op_id` cannot express two parallel reels inside one order). Stages are typically drawing → stranding → extrusion → sheathing/test. Work centers are alternative machines per stage (hybrid flexible flow shop).
 
-Moskabelmet public facts (CFO Russia 08.10.2025; Ruscable 2022; INFIMUM 2.0 / GIA 2025; Ruscable Insider 2026-08-03): 2–3% standard SKU margin, materials ~80% of cost, 4–25 process stages, 10–15 of 100 quotes become orders, 3-day plan freeze cut drums 80→61 in a LEAN pilot. Treat vendor APS numbers (39k ops / 40 min, +78M RUB, 27 days) as marketing, not a SynAPS benchmark.
+Moskabelmet is a **group**, not one shop. Public facts (CFO Russia 08.10.2025; Ruscable 2022; INFIMUM 2.0 / GIA 2025; Ruscable Insider 2026-08-03): 2–3% standard SKU margin, materials ~80% of cost, 4–25 process stages, 10–15 of 100 quotes become orders. The 3-day freeze (drums 80→61, +20% output) is **Завод Москабель** FCK/LEAN, not MOSITLAB APS. Moskabel-Fujikura FCK (stranding WIP −58%, cycle 8→5 days) is a **different plant**. Treat vendor APS numbers (39k ops / 40 min, +78M RUB, 27 days, launches −10×) as marketing, not a SynAPS benchmark. Hostile OSINT ledger: [CABLE_MOSKABELMET_OSINT_REDTEAM_2026_08_15.md](../rfc/CABLE_MOSKABELMET_OSINT_REDTEAM_2026_08_15.md).
 
 ## 2. SDST Mapping
 
@@ -116,7 +116,7 @@ Honest market sentence: **there is no open-source cable APS**. There is a mature
 
 | Source | What to copy | What not to copy |
 |--------|--------------|------------------|
-| Moskabelmet LEAN/ФЦК | 3-day freeze before any new solver | Claim −24% drums on synthetic data |
+| Moskabelmet LEAN/ФЦК (Завод Москабель) | 3-day freeze before any new solver; MAPRE/Drum Twister SMED is shop-floor, not APS | Claim −24% drums on synthetic data; mix with Fujikura FCK |
 | СКК + 1С:ERP | Length/operation NSI in ERP | Treat ERP planning as FJSP |
 | Prysmian Emmen 2026 | Drum as a tracked asset | Put RFID into the kernel |
 | Zhu et al. 2026 HFFS | \(n_j=\lceil L_j/L_{\text{reel}}\rceil\), sub-reel sequence, energy, VNS repair 18h→0.83h | ACO-VNS as the 50k engine; −9.8% makespan as SynAPS evidence |
@@ -140,10 +140,11 @@ Encoded:
 - \(p_o = \max(1,\lceil L_{\text{reel}}/v_{\text{stage}}\rceil)\) written to `base_duration_min`
 - SDST \(\sigma\) from SKU deltas + `material_loss` scrap metres
 - Drum Cumulative on processing window
-- Campaign: `earliest_start` snapped to the earliest **release** in a family×due slot (not to the due date). Optional `colour_phase` shifts that gate by a deterministic colour/insulation slot (0–2) without passing the due date.
+- Campaign: `earliest_start` snapped to the earliest **release** in a SKU×due slot (not to the due date). Optional `colour_phase` staggers that gate: hash%3 (0–2 slots) when a stage has >8 machines; a 6-colour wheel (at most five slots, never past due) when ≤8. Mixing 16 mm² and 35 mm² into one colour gate interleaved section SDST and is not used.
 - Freeze: `start_time < freeze_horizon_end` subtracted from repair neighbourhood (rush cannot steal; breakdown of that op still can). `allow_freeze_break` is a **boolean policy flag**, not an ACL: any caller can set it true. First-solve pin: `solve_schedule(..., issued_assignments=..., freeze_horizon_end=...)` collapses freeze-window ops to the issued machine and interval (`pin_issued_plan`).
-- Family-dedicated lines: optional `family_dedicated_lines` splits PVC vs XLPE `eligible_wc_ids` when a stage has ≥2 machines. Opt-in only: an even split halves per-family capacity and is measured infeasible at 16 machines/stage on the nervous mix.
-- COVER ready rule: FIFO is the default everywhere (`cover_ready_rule="fifo"`). ATCS among ready ops exists as an opt-in (`"atcs"`, native + Python parity) but is **measured to collapse month-scale coverage** (2026-08-14 probe matrix in `docs/rfc/CABLE_NERVOUS_MONTH_ACCEL_2026_08.md`) — do not enable for production cover.
+- Family-dedicated lines: `family_dedicated_lines` splits PVC vs XLPE `eligible_wc_ids` when a stage has ≥2 machines. Line counts follow SKU-catalog share (not 50/50). One flex overflow machine when n≥3 (Schaller/Gupta family tardiness). Opt-in at 16/stage (tardiness 3 670 vs ATCS-only 1 922). Default **on** at ≤8/stage (tardiness 87 134 vs 246 509 without family on the feasible cover).
+- Colour-dedicated lines: optional `colour_dedicated_lines` when a stage has ≥6 machines (2 flex at n≥8). Opt-in; tardiness at 16/stage is much worse than ATCS-only, and at 8/stage they drop coverage (0.854 vs FEASIBLE without cells).
+- COVER ready rule: nervous-month COVER defaults to **windowed** ATCS with floor window 0 (non-delay). Unbounded ATCS and a 240 min delay window on *any* job both collapsed month coverage. At ≤8/stage a separate `cover_atcs_exhaust_window` (default 240) waits only for a zero-setup continuation and stays on the hot machine (Mahmoodi/Dooley 1991; Flynn 1987). The 50k/500k registry path stays FIFO (`cover_ready_rule="fifo"`).
 - \(D_{\max}\) and Hamming \(R\) as **functionals**, not CP-SAT terms
 - CP-SAT/ALNS search may take `CABLE_PVC_CPSAT_WEIGHTS` (integer scale of `CABLE_PVC_WEIGHTS`). GREEDY default is unchanged.
 

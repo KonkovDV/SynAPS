@@ -175,6 +175,8 @@ struct CoverArrays<'a> {
     k1: f64,
     k2: f64,
     k3: f64,
+    floor_window: f64,
+    exhaust_window: f64,
 }
 
 fn run_list_schedule(a: CoverArrays<'_>) -> (Vec<f64>, Vec<f64>, Vec<i64>, Vec<i64>) {
@@ -355,6 +357,27 @@ fn setup_on_machine(
     0.0
 }
 
+fn prefers_cover_slot(
+    exhaust: f64,
+    end: f64,
+    setup: f64,
+    machine: usize,
+    best_end: f64,
+    best_setup: f64,
+    best_machine: usize,
+) -> bool {
+    // Exhaustive family stay (Mahmoodi/Dooley; Flynn repetitive lots): a
+    // zero-setup machine beats a colder earlier-end when exhaust is on.
+    if exhaust > 0.0 {
+        let cont = setup <= EPS;
+        let best_cont = best_setup <= EPS;
+        if cont != best_cont {
+            return cont;
+        }
+    }
+    end < best_end || (end == best_end && machine < best_machine)
+}
+
 fn place_append_only(
     a: &CoverArrays<'_>,
     i: usize,
@@ -390,7 +413,19 @@ fn place_append_only(
         if end > cap + EPS {
             continue;
         }
-        if end < best_end || (end == best_end && machine < best_machine.unwrap_or(usize::MAX)) {
+        let take = match best_machine {
+            None => true,
+            Some(best_m) => prefers_cover_slot(
+                a.exhaust_window,
+                end,
+                setup,
+                machine,
+                best_end,
+                best_setup,
+                best_m,
+            ),
+        };
+        if take {
             best_end = end;
             best_start = start;
             best_setup = setup;
@@ -457,7 +492,17 @@ fn place_with_aux_delay(
             continue;
         };
         let delayed_end = delayed + duration;
-        if best.is_none_or(|b| delayed_end < b.0 || (delayed_end == b.0 && machine < b.3)) {
+        if best.is_none_or(|b| {
+            prefers_cover_slot(
+                a.exhaust_window,
+                delayed_end,
+                setup,
+                machine,
+                b.0,
+                b.2,
+                b.3,
+            )
+        }) {
             best = Some((delayed_end, delayed, setup, machine));
         }
     }
@@ -560,6 +605,19 @@ fn pick_atcs_ready(
     } else {
         1.0
     };
+    let min_floor = stats
+        .iter()
+        .map(|row| row.0)
+        .fold(f64::INFINITY, f64::min);
+    let has_continuation = a.exhaust_window > 0.0
+        && stats.iter().any(|(floor, setup, ..)| {
+            *setup <= EPS && *floor <= min_floor + a.exhaust_window + EPS
+        });
+    let floor_cap = if has_continuation {
+        min_floor + a.exhaust_window
+    } else {
+        min_floor + a.floor_window
+    };
     let mut best_i = 0usize;
     let mut best_score = f64::NEG_INFINITY;
     let mut best_floor = f64::INFINITY;
@@ -568,6 +626,12 @@ fn pick_atcs_ready(
     for (slot, &idx) in ready.iter().enumerate() {
         let i = idx as usize;
         let (floor, setup, p, material) = stats[slot];
+        if floor > floor_cap + EPS {
+            continue;
+        }
+        if has_continuation && setup > EPS {
+            continue;
+        }
         let cap = a.horizon.min(a.latest[i]);
         let slack = (cap - p - floor).max(0.0);
         let mut score = op_weight(a, i).ln() - p.max(0.1).ln() - slack / (a.k1 * p_bar);
@@ -770,7 +834,9 @@ fn run_atcs_cover(
     material_loss=None,
     k1=2.0,
     k2=0.5,
-    k3=0.5
+    k3=0.5,
+    floor_window=0.0,
+    exhaust_window=0.0
 ))]
 pub fn list_schedule_cover<'py>(
     py: Python<'py>,
@@ -798,6 +864,8 @@ pub fn list_schedule_cover<'py>(
     k1: f64,
     k2: f64,
     k3: f64,
+    floor_window: f64,
+    exhaust_window: f64,
 ) -> PyResult<(
     Py<PyArray1<f64>>,
     Py<PyArray1<f64>>,
@@ -922,6 +990,8 @@ pub fn list_schedule_cover<'py>(
             k1,
             k2,
             k3,
+            floor_window,
+            exhaust_window,
         });
         starts_slice.copy_from_slice(&starts_v);
         ends_slice.copy_from_slice(&ends_v);

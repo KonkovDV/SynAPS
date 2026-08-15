@@ -44,6 +44,13 @@ _MAX_LIST_SCHEDULE_GAP_OPS = 80_000
 _COVER_ATCS_K1 = 2.0
 _COVER_ATCS_K2 = 0.5
 _COVER_ATCS_K3 = 0.5
+# Non-delay window: ATCS may not jump a ready op whose floor is later
+# than min(ready floors) + window. Window 0 is Kolisch parallel SGS
+# (non-delay). Unbounded ATCS collapsed month coverage (2026-08-14).
+# Nervous month uses one colour SMED (240 min) as a bounded delay
+# (Artigues 2005: non-delay is not dominant under SDST; Lee–Pinedo k2
+# look-ahead is a wait/setup tradeoff at setup-duration scale).
+_COVER_ATCS_FLOOR_WINDOW = 0.0
 
 
 @dataclass(frozen=True)
@@ -307,6 +314,8 @@ def place_operations_list_schedule(
     deadline_exceeded: Callable[[], bool] | None = None,
     cover_ready_rule: str = "fifo",
     order_priority_by_id: Mapping[UUID, int] | None = None,
+    cover_atcs_floor_window: float = _COVER_ATCS_FLOOR_WINDOW,
+    cover_atcs_exhaust_window: float = 0.0,
 ) -> GreedyCoverStats:
     """Ready-queue non-delay append; insertion SGS on a failed tail (capped)."""
 
@@ -322,6 +331,8 @@ def place_operations_list_schedule(
         default_wc_ids=default_wc_ids,
         cover_ready_rule=cover_ready_rule,
         order_priority_by_id=order_priority_by_id,
+        cover_atcs_floor_window=cover_atcs_floor_window,
+        cover_atcs_exhaust_window=cover_atcs_exhaust_window,
     )
     if native_stats is not None:
         return native_stats
@@ -338,6 +349,8 @@ def place_operations_list_schedule(
         deadline_exceeded=deadline_exceeded,
         cover_ready_rule=cover_ready_rule,
         order_priority_by_id=order_priority_by_id,
+        cover_atcs_floor_window=cover_atcs_floor_window,
+        cover_atcs_exhaust_window=cover_atcs_exhaust_window,
     )
 
 
@@ -355,6 +368,8 @@ def _place_operations_list_schedule_python(
     deadline_exceeded: Callable[[], bool] | None = None,
     cover_ready_rule: str = "fifo",
     order_priority_by_id: Mapping[UUID, int] | None = None,
+    cover_atcs_floor_window: float = _COVER_ATCS_FLOOR_WINDOW,
+    cover_atcs_exhaust_window: float = 0.0,
 ) -> GreedyCoverStats:
     """Python parallel SGS with capped insertion into idle gaps."""
 
@@ -379,6 +394,8 @@ def _place_operations_list_schedule_python(
         deadline_exceeded=deadline_exceeded,
         cover_ready_rule=cover_ready_rule,
         order_priority_by_id=order_priority_by_id,
+        cover_atcs_floor_window=cover_atcs_floor_window,
+        cover_atcs_exhaust_window=cover_atcs_exhaust_window,
     )
 
 
@@ -400,11 +417,10 @@ def _run_python_cover_loop(
     deadline_exceeded: Callable[[], bool] | None,
     cover_ready_rule: str,
     order_priority_by_id: Mapping[UUID, int] | None,
+    cover_atcs_floor_window: float,
+    cover_atcs_exhaust_window: float,
 ) -> GreedyCoverStats:
-    clipped = 0
-    placed = 0
-    gap_inserted = 0
-    gap_attempts = 0
+    clipped = placed = gap_inserted = gap_attempts = 0
     time_limited = False
     ops_by_id = dispatch_context.ops_by_id
     while heap:
@@ -420,6 +436,8 @@ def _run_python_cover_loop(
             horizon_start=horizon_start,
             horizon_minutes=horizon_minutes,
             order_priority_by_id=order_priority_by_id,
+            cover_atcs_floor_window=cover_atcs_floor_window,
+            cover_atcs_exhaust_window=cover_atcs_exhaust_window,
         )
         op = ops_by_id[op_id]
         pred_end = 0.0
@@ -428,9 +446,8 @@ def _run_python_cover_loop(
             if pred_assignment is None:
                 continue
             pred_end = (pred_assignment.end_time - horizon_start).total_seconds() / 60.0
-        allow_gap = (
-            gap_attempts < _MAX_LIST_SCHEDULE_GAP_INSERTS
-            and len(operations) < _MAX_LIST_SCHEDULE_GAP_OPS
+        allow_gap = gap_attempts < _MAX_LIST_SCHEDULE_GAP_INSERTS and (
+            len(operations) < _MAX_LIST_SCHEDULE_GAP_OPS
         )
         placed_one, inserted, end = _place_ready_list_operation(
             op=op,
@@ -445,6 +462,7 @@ def _run_python_cover_loop(
             horizon_start=horizon_start,
             horizon_minutes=horizon_minutes,
             allow_gap=allow_gap,
+            cover_atcs_exhaust_window=cover_atcs_exhaust_window,
         )
         if inserted:
             gap_inserted += 1
@@ -458,10 +476,8 @@ def _run_python_cover_loop(
             heap, successors[op.id], end=end, op_earliest=op_earliest,
             as_list=cover_ready_rule == "atcs",
         )
-    return GreedyCoverStats(
-        placed=placed, clipped=clipped, passes=1, time_limited=time_limited,
-        gap_inserted=gap_inserted,
-    )
+    return GreedyCoverStats(placed=placed, clipped=clipped, passes=1,
+        time_limited=time_limited, gap_inserted=gap_inserted)
 
 
 def _enqueue_cover_successors(
@@ -536,6 +552,7 @@ def _place_ready_list_operation(
     horizon_start: datetime,
     horizon_minutes: float,
     allow_gap: bool = True,
+    cover_atcs_exhaust_window: float = 0.0,
 ) -> tuple[bool, bool, float]:
     """Place one ready op. Returns (placed, gap_inserted, end)."""
 
@@ -547,6 +564,7 @@ def _place_ready_list_operation(
         floor=floor,
         default_wc_ids=default_wc_ids,
         horizon_minutes=horizon_minutes,
+        cover_atcs_exhaust_window=cover_atcs_exhaust_window,
     )
     inserted = False
     if slot is None and allow_gap:
@@ -644,6 +662,8 @@ def _pop_cover_ready(
     horizon_start: datetime,
     horizon_minutes: float,
     order_priority_by_id: Mapping[UUID, int] | None,
+    cover_atcs_floor_window: float = _COVER_ATCS_FLOOR_WINDOW,
+    cover_atcs_exhaust_window: float = 0.0,
 ) -> tuple[float, int, str, UUID]:
     if cover_ready_rule != "atcs":
         return heappop(heap)
@@ -658,6 +678,8 @@ def _pop_cover_ready(
             horizon_start=horizon_start,
             horizon_minutes=horizon_minutes,
             order_priority_by_id=order_priority_by_id,
+            cover_atcs_floor_window=cover_atcs_floor_window,
+            cover_atcs_exhaust_window=cover_atcs_exhaust_window,
         )
     )
 
@@ -708,6 +730,8 @@ def _atcs_pick_index(
     horizon_start: datetime,
     horizon_minutes: float,
     order_priority_by_id: Mapping[UUID, int] | None,
+    cover_atcs_floor_window: float = _COVER_ATCS_FLOOR_WINDOW,
+    cover_atcs_exhaust_window: float = 0.0,
 ) -> int:
     p_sum = setup_sum = setup_n = mat_sum = mat_n = 0.0
     stats: list[tuple[float, float, float, float]] = []
@@ -727,10 +751,14 @@ def _atcs_pick_index(
     p_bar = max(p_sum / len(heap), 0.1)
     s_bar = max(setup_sum / setup_n, 1.0) if setup_n else 1.0
     m_bar = max(mat_sum / mat_n, 1.0) if mat_n else 1.0
-    best_i = 0
+    eligible = _atcs_window_indices(
+        stats, cover_atcs_floor_window, cover_atcs_exhaust_window
+    )
+    best_i = eligible[0]
     best_numeric = (float("-inf"), float("inf"), 0)
     best_sid = ""
-    for index, item in enumerate(heap):
+    for index in eligible:
+        item = heap[index]
         operation = ops_by_id[item[3]]
         floor, setup, processing, material = stats[index]
         latest = operation_latest_finish_offset_minutes(operation, horizon_start)
@@ -754,6 +782,33 @@ def _atcs_pick_index(
             best_sid = item[2]
             best_i = index
     return best_i
+
+
+def _atcs_window_indices(
+    stats: list[tuple[float, float, float, float]],
+    floor_window: float = _COVER_ATCS_FLOOR_WINDOW,
+    exhaust_window: float = 0.0,
+) -> list[int]:
+    """Keep ATCS inside a floor class; exhaust zero-setup runs when asked.
+
+    Mahmoodi/Dooley exhaustive group scheduling: do not switch family while a
+    continuation is already in the queue. Pfund ATCSR allows a bounded idle
+    for that continuation. A general ATCS floor window (any job, not just
+    setup 0) collapsed 16-stage coverage (2026-08-15).
+    """
+
+    min_floor = min(row[0] for row in stats)
+    if exhaust_window > 0.0:
+        cap = min_floor + exhaust_window
+        continuations = [
+            index
+            for index, row in enumerate(stats)
+            if row[0] <= cap + 1e-9 and row[1] <= 1e-9
+        ]
+        if continuations:
+            return continuations
+    cap = min_floor + max(0.0, floor_window)
+    return [index for index, row in enumerate(stats) if row[0] <= cap + 1e-9]
 
 
 def _commit_list_schedule_assignment(
@@ -803,8 +858,9 @@ def _best_list_schedule_slot(
     floor: float,
     default_wc_ids: Sequence[UUID],
     horizon_minutes: float,
+    cover_atcs_exhaust_window: float = 0.0,
 ) -> tuple[float, float, int, UUID, list[UUID]] | None:
-    """Return (start, end, setup, wc_id, aux_ids) with earliest completion."""
+    """Return (start, end, setup, wc_id, aux_ids). Exhaust prefers setup 0."""
 
     eligible = op.eligible_wc_ids if op.eligible_wc_ids else default_wc_ids
     requirements = dispatch_context.requirements_by_op.get(op.id, [])
@@ -840,7 +896,14 @@ def _best_list_schedule_slot(
         if delayed is None:
             continue
         end = delayed + duration
-        if best is None or end < best[1] or (end == best[1] and str(wc_id) < str(best[3])):
+        cont = cover_atcs_exhaust_window > 0.0 and setup <= 1e-9
+        best_cont = best is not None and best[2] <= 1e-9
+        take = best is None
+        if not take and cover_atcs_exhaust_window > 0.0 and cont != best_cont:
+            take = cont
+        elif not take:
+            take = end < best[1] or (end == best[1] and str(wc_id) < str(best[3]))
+        if take:
             best = (delayed, end, setup, wc_id, aux_ids)
     return best
 
@@ -858,6 +921,8 @@ def _try_native_list_schedule(
     default_wc_ids: Sequence[UUID],
     cover_ready_rule: str = "fifo",
     order_priority_by_id: Mapping[UUID, int] | None = None,
+    cover_atcs_floor_window: float = _COVER_ATCS_FLOOR_WINDOW,
+    cover_atcs_exhaust_window: float = 0.0,
 ) -> GreedyCoverStats | None:
     """SoA parallel SGS via Rust. None means use the Python cover."""
 
@@ -881,6 +946,8 @@ def _try_native_list_schedule(
         horizon_minutes=horizon_minutes,
         cover_ready_rule=cover_ready_rule,
         order_priority_by_id=order_priority_by_id,
+        cover_atcs_floor_window=cover_atcs_floor_window,
+        cover_atcs_exhaust_window=cover_atcs_exhaust_window,
     )
     if packed is None:
         return None
@@ -920,6 +987,8 @@ def _pack_list_schedule_native(
     horizon_minutes: float,
     cover_ready_rule: str = "fifo",
     order_priority_by_id: Mapping[UUID, int] | None = None,
+    cover_atcs_floor_window: float = _COVER_ATCS_FLOOR_WINDOW,
+    cover_atcs_exhaust_window: float = 0.0,
 ) -> tuple[dict[str, Any], list[Any]] | None:
     """Pack SoA arrays for ``list_schedule_cover``. Returns None on skip."""
 
@@ -975,6 +1044,8 @@ def _pack_list_schedule_native(
             ],
             dtype=np.float64,
         )
+        arrays["floor_window"] = float(max(0.0, cover_atcs_floor_window))
+        arrays["exhaust_window"] = float(max(0.0, cover_atcs_exhaust_window))
     return arrays, idx_to_wc
 
 

@@ -146,6 +146,8 @@ class RhcSolver(BaseSolver):
             0, int(kwargs.get("global_greedy_cover_min_ops", 10_000))
         )
         cover_ready_rule: str = str(kwargs.get("cover_ready_rule", "fifo"))
+        cover_atcs_floor_window: float = max(0.0, float(kwargs.get("cover_atcs_floor_window", 0.0)))
+        cover_atcs_exhaust_window: float = max(0.0, float(kwargs.get("cover_atcs_exhaust_window", 0.0)))
         inner_kwargs: dict[str, Any] = dict(kwargs.get("inner_kwargs", {}))
         # Prevent double-passing time_limit_s to inner solver.
         # RHC computes its own per-window budget.
@@ -933,6 +935,8 @@ class RhcSolver(BaseSolver):
                 deadline_exceeded=coverage_deadline_exceeded,
                 cover_ready_rule=cover_ready_rule,
                 order_priority_by_id={order.id: order.priority for order in problem.orders},
+                cover_atcs_floor_window=cover_atcs_floor_window,
+                cover_atcs_exhaust_window=cover_atcs_exhaust_window,
             )
             horizon_clipped_assignments += cover_stats.clipped
             if cover_stats.time_limited:

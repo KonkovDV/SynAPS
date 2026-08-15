@@ -11,21 +11,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **COVER ATCS ready rule (opt-in):** native + Python list-schedule can pop the
   ready set by Pinedo ATCS log-score (`cover_ready_rule="atcs"`) then still
-  place by earliest-end machine. **Measured and falsified as the month cover
-  rule (2026-08-14):** coverage collapses 100% → 62–70% at every k tested
-  (append-only SGS timeline fragments under out-of-floor-order picks), so FIFO
-  stays the default in the registry, `run_nervous_month`, and the CLI; ATCS is
-  an experimental opt-in with Python/native parity tests. Family-dedicated
-  PVC/XLPE lines (opt-in `--family-lines`; infeasible at 16 machines/stage),
-  colour-phase campaign (default on: tardiness 134 224 → 40 580 min, peak WIP
-  265 → 183 drums on the 1 600-order month), mid-month `add_rush_orders`
-  (repair 3.9 s vs full re-solve 10.7 s on the mutated instance), and
-  `pin_issued_plan` on `solve_schedule` (issued freeze on the first
-  constructive solve). IncrementalRepair appends aux windows on
-  `MachineIndex.add` instead of dropping the 20k frozen cache. Delta notary
-  is **not** shipped: one drum pool means a slice is the full set; cover and
-  repair still use exhaustive `full_notary`. C5a hold-until-successor remains
-  gated. Not Moskabelmet MES, not INFIMUM, not a 500k cable proof.
+  place by earliest-end machine. Unbounded ATCS collapsed month coverage
+  (2026-08-14). **Windowed (non-delay) ATCS is FEASIBLE at 16/stage
+  (2026-08-15):** tardiness 16 588 → 1 922 min, setup 2.64e6 → 2.52e6, peak WIP
+  159 → 94 vs FIFO on the same cover probe. Nervous-month CLI defaults to
+  windowed ATCS; registry `RHC-GREEDY-COVER` stays FIFO (50k/500k unchanged).
+  Family-dedicated PVC/XLPE lines are mix-sized by SKU share with one
+  flex overflow machine when n≥3 (opt-in `--family-lines`; tardiness at
+  16/stage 24 227 → 3 670 vs ATCS-only 1 922). Colour-phase campaign
+  default on: hash%3 stagger at >8 machines/stage, 6-colour wheel at
+  ≤8 (rush skips a wait that would pass due). Colour-dedicated lines
+  (`--colour-lines`) are opt-in; they explode tardiness at 16/stage
+  and drop 8-stage coverage. **1600@8 is COVER-feasible** (2026-08-15)
+  with mix-sized family flex + 6-colour wheel + continuation exhaust
+  (ready-queue zero-setup + hot-machine stay): 20 316/20 316, setup
+  49.1 min/op (budget 83), tardiness 87 134 vs 1 922 at 16/stage.
+  A general ATCS floor window of one colour SMED collapsed 16-stage
+  coverage; extra drums (48→96) did not move 8-stage placement; C5a
+  stays gated (hold-until-successor does not add machine-minutes).
+  `add_rush_orders`, `pin_issued_plan`, IncrementalRepair aux-window
+  append as before. Delta notary is **not** shipped. Not Moskabelmet
+  MES, not INFIMUM, not a 500k cable proof.
 
 - **Nervous-month cable benchmark:** `python -m synaps cable-nervous-month`.
   Synthetic 30-day high-mix MTO (1 600 parents, 36 SKUs, 15% rush, 6 stages).
@@ -33,11 +39,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `feasible`, exhaustive notary empty, stabilize converged, generate 0.97 s /
   cover 9.36 s / notary 0.31 s, makespan 39 660/43 200 min. Four freeze+repair
   waves all `feasible` (repair 5.1–6.0 s vs re-cover 9.25 s, Hamming \(R\)
-  ≤0.00064). Same mix at 8 machines/stage overflows the horizon (coverage
-  0.50). Evidence and acceleration plan:
+  ≤0.00064). Same mix at 8/stage overflowed under FIFO (coverage 0.50);
+  with family flex + 6-colour wheel + continuation exhaust it is
+  **FEASIBLE** (20 316/20 316, 4.3 s cover, 49.1 min/op, tardiness 87 134).
+  Evidence and acceleration plan:
   `docs/rfc/CABLE_NERVOUS_MONTH_ACCEL_2026_08.md`. Red Team:
-  `docs/rfc/CABLE_NERVOUS_MONTH_REDTEAM_2026_08_14.md`. Not Moskabelmet MES,
-  not INFIMUM, not the 500k synthetic cover.
+  `docs/rfc/CABLE_NERVOUS_MONTH_REDTEAM_2026_08_14.md`. OSINT + plant/vendor
+  attack ledger (2026-08-15):
+  `docs/rfc/CABLE_MOSKABELMET_OSINT_REDTEAM_2026_08_15.md`. Not Moskabelmet
+  MES, not INFIMUM, not the 500k synthetic cover.
 
 - **Cable domain (encode-first, Moskabelmet-shaped):** `docs/domains/cable.md`
   is domain 9. Adapter writes metres→`base_duration_min`, pre-splits reels,

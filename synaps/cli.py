@@ -249,20 +249,59 @@ def _add_cable_nervous_parser(subparsers: Any) -> None:
     parser.add_argument(
         "--cover-ready-rule",
         choices=("fifo", "atcs"),
-        default="fifo",
-        help="COVER ready pop: fifo (default; measured feasible) or atcs "
-        "(experimental: collapses coverage on the nervous month, 2026-08-14)",
+        default="atcs",
+        help="COVER ready pop: atcs scores inside a floor window "
+        "(nervous default window 0 = non-delay); fifo is the 50k/500k registry default",
     )
     parser.add_argument(
+        "--cover-atcs-window",
+        type=float,
+        default=0.0,
+        help="ATCS may wait this many minutes past the earliest ready floor "
+        "(0 = non-delay; one SMED of delay on any job collapsed 16-stage coverage)",
+    )
+    parser.add_argument(
+        "--cover-atcs-exhaust",
+        type=float,
+        default=None,
+        help="Wait this many minutes only for a zero-setup continuation "
+        "(default 240 at ≤8 machines/stage, 0 at 16; not a general ATCS window)",
+    )
+    family = parser.add_mutually_exclusive_group()
+    family.add_argument(
         "--family-lines",
         action="store_true",
-        help="Dedicate machine subsets per family (PVC vs XLPE); opt-in: "
-        "halves per-family capacity, infeasible at 16 machines/stage",
+        help="Dedicate machine subsets per family (PVC vs XLPE), sized by "
+        "SKU-catalog share, with one flex overflow machine when n≥3 "
+        "(default on when machines/stage is 3–8)",
     )
-    parser.add_argument(
+    family.add_argument(
+        "--no-family-lines",
+        action="store_true",
+        help="Disable family-dedicated lines (default off at 16/stage)",
+    )
+    colour = parser.add_mutually_exclusive_group()
+    colour.add_argument(
+        "--colour-lines",
+        action="store_true",
+        help="Split colours inside the family machine list when a stage has "
+        "≥6 machines (2 flex at n≥8); opt-in — drops 8-stage coverage",
+    )
+    colour.add_argument(
+        "--no-colour-lines",
+        action="store_true",
+        help="Disable colour-dedicated lines (default off)",
+    )
+    phase = parser.add_mutually_exclusive_group()
+    phase.add_argument(
+        "--colour-phase",
+        action="store_true",
+        help="Force the colour campaign wheel (default on when colour lines are off)",
+    )
+    phase.add_argument(
         "--no-colour-phase",
         action="store_true",
-        help="Disable colour/insulation campaign slot phase",
+        help="Disable colour campaign wheel",
     )
     parser.add_argument(
         "--new-rush",
@@ -271,6 +310,14 @@ def _add_cable_nervous_parser(subparsers: Any) -> None:
         help="New parent orders inserted after cover (0 disables N-R3 wave)",
     )
     parser.add_argument("--output-file", type=Path, help="Write JSON report here")
+
+
+def _tri_state(on: bool, off: bool) -> bool | None:
+    if off:
+        return False
+    if on:
+        return True
+    return None
 
 
 def _run_cable_nervous(args: argparse.Namespace) -> int:
@@ -283,9 +330,12 @@ def _run_cable_nervous(args: argparse.Namespace) -> int:
         disruptions_per_wave=args.disruptions,
         machines_per_stage=args.machines_per_stage,
         drum_pool_size=args.drum_pool,
-        family_dedicated_lines=args.family_lines,
-        colour_phase=not args.no_colour_phase,
+        family_dedicated_lines=_tri_state(args.family_lines, args.no_family_lines),
+        colour_phase=_tri_state(args.colour_phase, args.no_colour_phase),
+        colour_dedicated_lines=_tri_state(args.colour_lines, args.no_colour_lines),
         cover_ready_rule=args.cover_ready_rule,
+        cover_atcs_floor_window=args.cover_atcs_window,
+        cover_atcs_exhaust_window=args.cover_atcs_exhaust,
         new_rush_orders=args.new_rush,
     )
     _write_json_output(report, args.output_file)

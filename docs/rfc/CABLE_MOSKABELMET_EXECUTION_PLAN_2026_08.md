@@ -224,12 +224,14 @@ C5 additionally: `feasibility_checker.py`, `cpsat_solver.py`, `native/synaps_nat
 
 Estimated effort if executed continuously: C0 1–2 d, C1 2–4 d, C2 3–5 d, C3 2–3 d, C4 3–5 d, C5a 1–2 w after a written gate.
 
-## Implementation note (2026-08-14)
+## Implementation note (2026-08-15)
 
 Shipped encode-first: domain 9 + generator + KPIs + campaign windows +
-`CABLE_PVC_WEIGHTS` + IncrementalRepair freeze. Nervous-month evidence
-(2026-08-14): 20 316 ops `feasible` at 16 machines/stage in 9.36 s cover;
-8/stage overflows under list-schedule+SMED. See
-`docs/rfc/CABLE_NERVOUS_MONTH_ACCEL_2026_08.md`. Not shipped: C5a–d, live MES,
-Dmax inside CP-SAT, factory −24% drums as a measured effect, ATCS-on-COVER.
+`CABLE_PVC_WEIGHTS` + IncrementalRepair freeze. Nervous-month evidence:
+20 316 ops `feasible` at 16 machines/stage (windowed ATCS, tardiness 1 922)
+and at 8/stage (family flex + 6-colour wheel + continuation exhaust stay,
+tardiness 87 134, 49.1 min/op vs budget 83). See
+`docs/rfc/CABLE_NERVOUS_MONTH_ACCEL_2026_08.md`. OSINT Red Team:
+`docs/rfc/CABLE_MOSKABELMET_OSINT_REDTEAM_2026_08_15.md`. Not shipped: C5a–d,
+live MES, Dmax inside CP-SAT, factory −24% drums as a measured effect.
 

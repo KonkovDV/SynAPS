@@ -25,6 +25,7 @@ _COLOR_SETUP = (240, 15.0, 20.0)
 _SECTION_SETUP = (360, 30.0, 45.0)
 _INSULATION_SETUP = (400, 40.0, 80.0)
 _CONDUCTOR_SETUP = (120, 20.0, 25.0)
+CABLE_COLORS = ("BK", "RD", "WH", "BL", "GN", "GY")
 
 STAGES: tuple[tuple[str, str, float], ...] = (
     ("draw", "drawing", 80.0),

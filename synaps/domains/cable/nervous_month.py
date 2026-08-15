@@ -20,7 +20,43 @@ from synaps.solvers.incremental_repair import IncrementalRepair
 from synaps.solvers.registry import create_solver
 from synaps.solvers.router import SolveRegime
 
-# 6 stages (plant public range is 4–25). Extra test/pack lengthens chains and WIP.
+# Bounded ATCS delay for the nervous month. Window 0 is non-delay
+# (Kolisch parallel SGS). One colour SMED (240) on *any* ready job
+# collapsed 16-stage coverage (2026-08-15). Exhaust is continuation-only
+# (Mahmoodi/Dooley 1991; Pfund ATCSR). Registry stays at 0.
+_NERVOUS_ATCS_FLOOR_WINDOW = 0.0
+_NERVOUS_ATCS_EXHAUST_WINDOW = 240.0
+
+
+def _resolve_tight_shop_levers(
+    machines_per_stage: int,
+    *,
+    family_dedicated_lines: bool | None,
+    colour_dedicated_lines: bool | None,
+    colour_phase: bool | None,
+    cover_atcs_exhaust_window: float | None,
+) -> tuple[bool, bool, bool, float]:
+    """8-machine shop: family cells + colour wheel + continuation stay.
+
+    Colour-dedicated lines fragment the 8-machine shop (coverage 0.85).
+    The FEASIBLE mix is mix-sized family flex, a 6-colour campaign wheel,
+    and exhaustive stay (ready-queue continuations + hot-machine preference).
+    Colour cells stay opt-in. 16-stage stays ATCS-only (tardiness 1 922).
+    """
+
+    tight = machines_per_stage <= 8
+    family = (
+        tight and machines_per_stage >= 3
+        if family_dedicated_lines is None
+        else family_dedicated_lines
+    )
+    colour = False if colour_dedicated_lines is None else colour_dedicated_lines
+    phase = (not colour) if colour_phase is None else colour_phase
+    if cover_atcs_exhaust_window is None:
+        exhaust = _NERVOUS_ATCS_EXHAUST_WINDOW if tight else 0.0
+    else:
+        exhaust = max(0.0, float(cover_atcs_exhaust_window))
+    return family, colour, phase, exhaust
 NERVOUS_STAGES: tuple[tuple[str, str, float], ...] = STAGES + (
     ("test", "testing", 50.0),
     ("pack", "packing", 70.0),
@@ -50,14 +86,16 @@ def generate_nervous_month(
     drum_pool_size: int = 96,
     family_dedicated_lines: bool = False,
     colour_phase: bool = True,
+    colour_dedicated_lines: bool = False,
 ) -> ScheduleProblem:
     """30-day high-mix make-to-order month. Default ~2×10⁴ ops after reel split.
 
     16 machines/stage is the measured COVER-feasible shop for this mix
-    (8/stage overflows the 720 h horizon under FIFO list-schedule + SMED-scale
-    SDST). Colour-phase campaign is an encode-first default; family-dedicated
-    lines are opt-in (halve per-family capacity: infeasible at 16/stage,
-    measured 2026-08-14). Pass colour_phase=False for the plain baseline.
+    with ATCS, no family/colour split (tardiness 1 922). At ≤8/stage,
+    ``run_nervous_month`` turns on mix-sized family cells, the 6-colour
+    wheel, and continuation-only ATCS exhaust with hot-machine stay.
+    Colour-dedicated lines stay opt-in (they drop 8-stage coverage).
+    Direct calls here keep the flags as passed.
     """
 
     return generate_cable_instance(
@@ -76,6 +114,7 @@ def generate_nervous_month(
         shuffle_skus=True,
         family_dedicated_lines=family_dedicated_lines,
         colour_phase=colour_phase,
+        colour_dedicated_lines=colour_dedicated_lines,
     )
 
 
@@ -127,12 +166,19 @@ def _notary_count(problem: ScheduleProblem, assignments: list[Assignment]) -> in
 def _solve_month(
     problem: ScheduleProblem,
     *,
-    cover_ready_rule: str = "fifo",
+    cover_ready_rule: str = "atcs",
+    cover_atcs_floor_window: float = _NERVOUS_ATCS_FLOOR_WINDOW,
+    cover_atcs_exhaust_window: float = 0.0,
 ) -> tuple[Any, str, float]:
     solver_name = _cover_solver_name(len(problem.operations))
     solver, kwargs = create_solver(solver_name)
     if solver_name == "RHC-GREEDY-COVER":
-        kwargs = {**kwargs, "cover_ready_rule": cover_ready_rule}
+        kwargs = {
+            **kwargs,
+            "cover_ready_rule": cover_ready_rule,
+            "cover_atcs_floor_window": cover_atcs_floor_window,
+            "cover_atcs_exhaust_window": cover_atcs_exhaust_window,
+        }
     started = time.perf_counter()
     result = solver.solve(problem, **kwargs)
     return result, solver_name, time.perf_counter() - started
@@ -168,6 +214,8 @@ def _run_wave(
     disruptions: int,
     compare_full_resolve: bool,
     cover_ready_rule: str,
+    cover_atcs_floor_window: float,
+    cover_atcs_exhaust_window: float,
 ) -> tuple[Any, dict[str, Any]]:
     freeze_end = problem.planning_horizon_start + timedelta(days=3 + wave_index * 7)
     targets = _select_rush_targets(problem, assignments, freeze_end, disruptions)
@@ -200,7 +248,12 @@ def _run_wave(
         **_wave_meta(repaired),
     }
     if compare_full_resolve:
-        _full, _name, full_s = _solve_month(problem, cover_ready_rule=cover_ready_rule)
+        _full, _name, full_s = _solve_month(
+            problem,
+            cover_ready_rule=cover_ready_rule,
+            cover_atcs_floor_window=cover_atcs_floor_window,
+            cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+        )
         row["full_resolve_s"] = round(full_s, 3)
         row["full_resolve_status"] = _full.status.value
         if repair_s > 0:
@@ -215,7 +268,10 @@ def _new_rush_wave(
     n_orders: int,
     seed: int,
     family_dedicated: bool,
+    colour_dedicated: bool,
     cover_ready_rule: str,
+    cover_atcs_floor_window: float,
+    cover_atcs_exhaust_window: float,
 ) -> dict[str, Any]:
     """Insert new parent reels after cover; repair vs full re-solve on the mutant."""
 
@@ -227,6 +283,7 @@ def _new_rush_wave(
         due=release + timedelta(hours=48),
         seed=seed,
         family_dedicated=family_dedicated,
+        colour_dedicated=colour_dedicated,
     )
     known = {operation.id for operation in problem.operations}
     new_ids = [operation.id for operation in mutated.operations if operation.id not in known]
@@ -241,7 +298,12 @@ def _new_rush_wave(
         regime=SolveRegime.RUSH_ORDER,
     )
     repair_s = time.perf_counter() - started
-    full, solver_name, full_s = _solve_month(mutated, cover_ready_rule=cover_ready_rule)
+    full, solver_name, full_s = _solve_month(
+        mutated,
+        cover_ready_rule=cover_ready_rule,
+        cover_atcs_floor_window=cover_atcs_floor_window,
+        cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+    )
     row: dict[str, Any] = {
         "kind": "new_parent_insert",
         "n_new_parents": n_orders,
@@ -265,6 +327,8 @@ def _run_reshuffle_waves(
     waves: int,
     disruptions_per_wave: int,
     cover_ready_rule: str,
+    cover_atcs_floor_window: float,
+    cover_atcs_exhaust_window: float,
 ) -> list[dict[str, Any]]:
     wave_rows: list[dict[str, Any]] = []
     current = list(assignments)
@@ -277,6 +341,8 @@ def _run_reshuffle_waves(
             disruptions=disruptions_per_wave,
             compare_full_resolve=not compared,
             cover_ready_rule=cover_ready_rule,
+            cover_atcs_floor_window=cover_atcs_floor_window,
+            cover_atcs_exhaust_window=cover_atcs_exhaust_window,
         )
         wave_rows.append(row)
         compared = compared or not row.get("skipped", False)
@@ -290,6 +356,48 @@ def _run_reshuffle_waves(
     return wave_rows
 
 
+def _post_cover_waves(
+    problem: ScheduleProblem,
+    result: Any,
+    *,
+    feasible: bool,
+    new_rush_orders: int,
+    seed: int,
+    family_dedicated: bool,
+    colour_dedicated: bool,
+    cover_ready_rule: str,
+    cover_atcs_floor_window: float,
+    cover_atcs_exhaust_window: float,
+    waves: int,
+    disruptions_per_wave: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    if not feasible:
+        _log("skipping waves: cover is not FEASIBLE")
+        return [], None
+    new_rush = None
+    if new_rush_orders > 0:
+        new_rush = _new_rush_wave(
+            problem,
+            result.assignments,
+            n_orders=new_rush_orders,
+            seed=seed + 99,
+            family_dedicated=family_dedicated,
+            colour_dedicated=colour_dedicated,
+            cover_ready_rule=cover_ready_rule,
+            cover_atcs_floor_window=cover_atcs_floor_window,
+            cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+        )
+    return _run_reshuffle_waves(
+        problem,
+        result.assignments,
+        waves=waves,
+        disruptions_per_wave=disruptions_per_wave,
+        cover_ready_rule=cover_ready_rule,
+        cover_atcs_floor_window=cover_atcs_floor_window,
+        cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+    ), new_rush
+
+
 def run_nervous_month(
     *,
     n_orders: int = 1600,
@@ -298,70 +406,72 @@ def run_nervous_month(
     disruptions_per_wave: int = 20,
     machines_per_stage: int = 16,
     drum_pool_size: int = 96,
-    family_dedicated_lines: bool = False,
-    colour_phase: bool = True,
-    cover_ready_rule: str = "fifo",
+    family_dedicated_lines: bool | None = None,
+    colour_phase: bool | None = None,
+    colour_dedicated_lines: bool | None = None,
+    cover_ready_rule: str = "atcs",
+    cover_atcs_floor_window: float = _NERVOUS_ATCS_FLOOR_WINDOW,
+    cover_atcs_exhaust_window: float | None = None,
     new_rush_orders: int = 2,
 ) -> dict[str, Any]:
     """Generate, cover-solve, then weekly freeze+rush repair. Returns JSON report."""
 
+    family, colour, colour_phase, exhaust = _resolve_tight_shop_levers(
+        machines_per_stage,
+        family_dedicated_lines=family_dedicated_lines,
+        colour_dedicated_lines=colour_dedicated_lines,
+        colour_phase=colour_phase,
+        cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+    )
     gen_started = time.perf_counter()
     problem = generate_nervous_month(
         n_orders=n_orders,
         seed=seed,
         machines_per_stage=machines_per_stage,
         drum_pool_size=drum_pool_size,
-        family_dedicated_lines=family_dedicated_lines,
+        family_dedicated_lines=family,
         colour_phase=colour_phase,
+        colour_dedicated_lines=colour,
     )
     generate_s = time.perf_counter() - gen_started
     _log(
         f"generated ops={len(problem.operations)} reels={len(problem.orders)} "
         f"setups={len(problem.setup_matrix)} in {generate_s:.2f}s"
     )
-    result, solver_name, solve_s = _solve_month(problem, cover_ready_rule=cover_ready_rule)
+    result, solver_name, solve_s = _solve_month(
+        problem,
+        cover_ready_rule=cover_ready_rule,
+        cover_atcs_floor_window=cover_atcs_floor_window,
+        cover_atcs_exhaust_window=exhaust,
+    )
     _log(f"cover {solver_name} status={result.status.value} in {solve_s:.2f}s")
     notary_started = time.perf_counter()
     hard = _notary_count(problem, result.assignments)
     notary_s = time.perf_counter() - notary_started
     _log(f"notary hard={hard} in {notary_s:.2f}s")
-    feasible = result.status.value == "feasible" and not hard
-    wave_rows: list[dict[str, Any]] = []
-    new_rush: dict[str, Any] | None = None
-    if not feasible:
-        _log("skipping waves: cover is not FEASIBLE")
-    else:
-        if new_rush_orders > 0:
-            new_rush = _new_rush_wave(
-                problem,
-                result.assignments,
-                n_orders=new_rush_orders,
-                seed=seed + 99,
-                family_dedicated=family_dedicated_lines,
-                cover_ready_rule=cover_ready_rule,
-            )
-        wave_rows = _run_reshuffle_waves(
-            problem,
-            result.assignments,
-            waves=waves,
-            disruptions_per_wave=disruptions_per_wave,
-            cover_ready_rule=cover_ready_rule,
-        )
-    return _month_report(
+    wave_rows, new_rush = _post_cover_waves(
         problem,
         result,
-        solver_name=solver_name,
-        cover_ready_rule=cover_ready_rule,
-        family_dedicated_lines=family_dedicated_lines,
-        colour_phase=colour_phase,
-        n_orders=n_orders,
+        feasible=result.status.value == "feasible" and not hard,
+        new_rush_orders=new_rush_orders,
         seed=seed,
-        generate_s=generate_s,
-        solve_s=solve_s,
-        notary_s=notary_s,
-        hard=hard,
-        wave_rows=wave_rows,
-        new_rush=new_rush,
+        family_dedicated=family,
+        colour_dedicated=colour,
+        cover_ready_rule=cover_ready_rule,
+        cover_atcs_floor_window=cover_atcs_floor_window,
+        cover_atcs_exhaust_window=exhaust,
+        waves=waves,
+        disruptions_per_wave=disruptions_per_wave,
+    )
+    return _month_report(
+        problem, result, solver_name=solver_name,
+        cover_ready_rule=cover_ready_rule,
+        cover_atcs_floor_window=cover_atcs_floor_window,
+        cover_atcs_exhaust_window=exhaust,
+        family_dedicated_lines=family,
+        colour_phase=colour_phase, colour_dedicated_lines=colour,
+        n_orders=n_orders, seed=seed, generate_s=generate_s, solve_s=solve_s,
+        notary_s=notary_s, hard=hard, wave_rows=wave_rows, new_rush=new_rush,
     )
 
 
@@ -371,8 +481,11 @@ def _month_report(
     *,
     solver_name: str,
     cover_ready_rule: str,
+    cover_atcs_floor_window: float,
+    cover_atcs_exhaust_window: float,
     family_dedicated_lines: bool,
     colour_phase: bool,
+    colour_dedicated_lines: bool,
     n_orders: int,
     seed: int,
     generate_s: float,
@@ -394,8 +507,15 @@ def _month_report(
         "horizon_hours": 720,
         "solver_config": solver_name,
         "cover_ready_rule": cover_ready_rule if solver_name == "RHC-GREEDY-COVER" else "n/a",
+        "cover_atcs_floor_window": (
+            cover_atcs_floor_window if solver_name == "RHC-GREEDY-COVER" else None
+        ),
+        "cover_atcs_exhaust_window": (
+            cover_atcs_exhaust_window if solver_name == "RHC-GREEDY-COVER" else None
+        ),
         "family_dedicated_lines": family_dedicated_lines,
         "colour_phase": colour_phase,
+        "colour_dedicated_lines": colour_dedicated_lines,
         "status": result.status.value,
         "generate_s": round(generate_s, 3),
         "solve_s": round(solve_s, 3),

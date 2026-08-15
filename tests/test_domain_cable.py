@@ -11,6 +11,7 @@ from synaps.domains.cable import (
     NERVOUS_STAGES,
     CableSku,
     add_rush_orders,
+    apply_campaign_windows,
     assignment_hamming,
     cable_kpis,
     duration_minutes_from_length,
@@ -246,6 +247,206 @@ def test_family_dedicated_lines_split_pvc_xlpe() -> None:
     assert pvc_ids
     assert xlpe_ids
     assert pvc_ids.isdisjoint(xlpe_ids)
+
+
+def test_family_lines_follow_sku_mix_not_half() -> None:
+    problem = generate_cable_instance(
+        n_orders=6,
+        seed=1,
+        machines_per_stage=3,
+        family_dedicated_lines=True,
+        skus=(
+            CableSku("Cu", "PVC", "BK", 16),
+            CableSku("Cu", "XLPE", "BK", 16),
+            CableSku("Al", "XLPE", "BK", 16),
+        ),
+    )
+    pvc_ids: set = set()
+    xlpe_ids: set = set()
+    states = {state.id: state for state in problem.states}
+    for operation in problem.operations:
+        insulation = str(states[operation.state_id].domain_attributes.get("insulation"))
+        if insulation == "PVC":
+            pvc_ids.update(operation.eligible_wc_ids)
+        else:
+            xlpe_ids.update(operation.eligible_wc_ids)
+    assert pvc_ids
+    assert xlpe_ids
+    by_group: dict[str, list] = {}
+    for center in problem.work_centers:
+        by_group.setdefault(center.capability_group, []).append(center.id)
+    for ids in by_group.values():
+        pvc_in = pvc_ids.intersection(ids)
+        xlpe_in = xlpe_ids.intersection(ids)
+        assert len(pvc_in) == 2
+        assert len(xlpe_in) == 2
+        assert len(pvc_in & xlpe_in) == 1
+
+
+def test_colour_wheel_staggers_colours_not_past_due() -> None:
+    """Colour wheel staggers colours; rush due skips a wait that would pass due."""
+
+    horizon = _H0
+    state_bk = State(
+        id=uuid4(),
+        code="Cu-PVC-BK-16",
+        domain_attributes={"insulation": "PVC", "color": "BK", "section_mm2": 16},
+    )
+    state_rd = State(
+        id=uuid4(),
+        code="Cu-PVC-RD-16",
+        domain_attributes={"insulation": "PVC", "color": "RD", "section_mm2": 16},
+    )
+    wc = WorkCenter(code="draw-01", capability_group="drawing")
+    bk_order = Order(
+        id=uuid4(),
+        external_ref="BK",
+        release_date=horizon,
+        due_date=horizon + timedelta(hours=72),
+    )
+    rd_order = Order(
+        id=uuid4(),
+        external_ref="RD",
+        release_date=horizon,
+        due_date=horizon + timedelta(hours=72),
+    )
+    rush = Order(
+        id=uuid4(),
+        external_ref="RUSH-GY",
+        release_date=horizon,
+        due_date=horizon + timedelta(hours=4),
+    )
+    state_gy = State(
+        id=uuid4(),
+        code="Cu-PVC-GY-16",
+        domain_attributes={"insulation": "PVC", "color": "GY", "section_mm2": 16},
+    )
+    op_bk = Operation(
+        id=uuid4(),
+        order_id=bk_order.id,
+        seq_in_order=1,
+        state_id=state_bk.id,
+        base_duration_min=10,
+        eligible_wc_ids=[wc.id],
+    )
+    op_rd = Operation(
+        id=uuid4(),
+        order_id=rd_order.id,
+        seq_in_order=1,
+        state_id=state_rd.id,
+        base_duration_min=10,
+        eligible_wc_ids=[wc.id],
+    )
+    op_rush = Operation(
+        id=uuid4(),
+        order_id=rush.id,
+        seq_in_order=1,
+        state_id=state_gy.id,
+        base_duration_min=10,
+        eligible_wc_ids=[wc.id],
+    )
+    problem = ScheduleProblem(
+        states=[state_bk, state_rd, state_gy],
+        orders=[bk_order, rd_order, rush],
+        operations=[op_bk, op_rd, op_rush],
+        work_centers=[wc],
+        setup_matrix=[],
+        planning_horizon_start=horizon,
+        planning_horizon_end=horizon + timedelta(hours=168),
+    )
+    apply_campaign_windows(problem, slot_hours=8, colour_phase=True, colour_cycle=6)
+    assert op_bk.earliest_start == horizon
+    assert op_rd.earliest_start == horizon + timedelta(hours=8)
+    assert op_rush.earliest_start == horizon
+
+
+def test_colour_lines_one_machine_per_colour() -> None:
+    from synaps.domains.cable.adapter import CABLE_COLORS
+
+    skus = tuple(CableSku("Cu", "PVC", color, 16) for color in CABLE_COLORS)
+    problem = generate_cable_instance(
+        n_orders=6,
+        seed=1,
+        machines_per_stage=6,
+        colour_dedicated_lines=True,
+        skus=skus,
+    )
+    states = {state.id: state for state in problem.states}
+    by_group: dict[str, list] = {}
+    for center in problem.work_centers:
+        by_group.setdefault(center.capability_group, []).append(center.id)
+    colour_wcs: dict[str, set] = {color: set() for color in CABLE_COLORS}
+    for operation in problem.operations:
+        color = str(states[operation.state_id].domain_attributes.get("color"))
+        colour_wcs[color].update(operation.eligible_wc_ids)
+    for ids in by_group.values():
+        id_set = set(ids)
+        parts = [colour_wcs[color] & id_set for color in CABLE_COLORS]
+        assert all(len(part) == 1 for part in parts)
+        assert len(set().union(*parts)) == 6
+
+
+def test_family_and_colour_lines_colour_split_inside_family() -> None:
+    from synaps.domains.cable.adapter import CABLE_COLORS
+
+    problem = generate_cable_instance(
+        n_orders=36,
+        seed=1,
+        machines_per_stage=8,
+        family_dedicated_lines=True,
+        colour_dedicated_lines=True,
+        skus=nervous_sku_catalog(),
+        stages=NERVOUS_STAGES,
+    )
+    states = {state.id: state for state in problem.states}
+    by_group: dict[str, list] = {}
+    for center in problem.work_centers:
+        by_group.setdefault(center.capability_group, []).append(center.id)
+    pvc_ids: set = set()
+    xlpe_by_colour: dict[str, set] = {color: set() for color in CABLE_COLORS}
+    for operation in problem.operations:
+        attrs = states[operation.state_id].domain_attributes
+        if str(attrs.get("insulation")) == "PVC":
+            pvc_ids.update(operation.eligible_wc_ids)
+        else:
+            xlpe_by_colour[str(attrs.get("color"))].update(operation.eligible_wc_ids)
+    for ids in by_group.values():
+        id_set = set(ids)
+        pvc_in = pvc_ids & id_set
+        assert len(pvc_in) == 3
+        xlpe_parts = [xlpe_by_colour[color] & id_set for color in CABLE_COLORS]
+        assert all(len(part) == 1 for part in xlpe_parts)
+        assert len(set().union(*xlpe_parts)) == 6
+        assert len(pvc_in & set().union(*xlpe_parts)) == 1
+
+
+def test_tight_shop_auto_family_colour_exhaust_not_wheel() -> None:
+    from synaps.domains.cable.nervous_month import _resolve_tight_shop_levers
+
+    family, colour, phase, exhaust = _resolve_tight_shop_levers(
+        8,
+        family_dedicated_lines=None,
+        colour_dedicated_lines=None,
+        colour_phase=None,
+        cover_atcs_exhaust_window=None,
+    )
+    assert (family, colour, phase, exhaust) == (True, False, True, 240.0)
+    family, colour, phase, exhaust = _resolve_tight_shop_levers(
+        16,
+        family_dedicated_lines=None,
+        colour_dedicated_lines=None,
+        colour_phase=None,
+        cover_atcs_exhaust_window=None,
+    )
+    assert (family, colour, phase, exhaust) == (False, False, True, 0.0)
+    family, colour, phase, exhaust = _resolve_tight_shop_levers(
+        2,
+        family_dedicated_lines=None,
+        colour_dedicated_lines=None,
+        colour_phase=None,
+        cover_atcs_exhaust_window=None,
+    )
+    assert (family, colour, phase, exhaust) == (False, False, True, 240.0)
 
 
 def test_colour_phase_does_not_pass_due() -> None:

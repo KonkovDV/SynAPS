@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from synaps.domains.cable.adapter import (
+    CABLE_COLORS,
     STAGES,
     CableSku,
     duration_minutes_from_length,
@@ -114,6 +115,8 @@ def _append_reel_chain(
     operations: list[Operation],
     aux_requirements: list[OperationAuxRequirement],
     family_dedicated: bool = False,
+    pvc_lines_by_group: dict[str, int] | None = None,
+    colour_dedicated: bool = False,
 ) -> None:
     order = Order(
         id=uuid4(),
@@ -135,7 +138,12 @@ def _append_reel_chain(
     predecessor_id = None
     for seq, (stage_code, group, speed) in enumerate(stages, start=1):
         eligible = _eligible_ids_for_sku(
-            sku, group, centers_by_group, family_dedicated=family_dedicated
+            sku,
+            group,
+            centers_by_group,
+            family_dedicated=family_dedicated,
+            pvc_line_count=(pvc_lines_by_group or {}).get(group),
+            colour_dedicated=colour_dedicated,
         )
         operation = Operation(
             id=uuid4(),
@@ -169,15 +177,82 @@ def _eligible_ids_for_sku(
     centers_by_group: dict[str, list[WorkCenter]],
     *,
     family_dedicated: bool,
+    pvc_line_count: int | None = None,
+    colour_dedicated: bool = False,
 ) -> list:
     centers = centers_by_group[group]
+    family_ids = _family_ids_for_sku(
+        sku, centers, family_dedicated=family_dedicated, pvc_line_count=pvc_line_count
+    )
+    if not colour_dedicated:
+        return family_ids
+    family_centers = [center for center in centers if center.id in set(family_ids)]
+    return _colour_ids_for_sku(sku, family_centers or centers)
+
+
+def _family_ids_for_sku(
+    sku: CableSku,
+    centers: list[WorkCenter],
+    *,
+    family_dedicated: bool,
+    pvc_line_count: int | None,
+) -> list:
     if not family_dedicated or len(centers) < 2:
         return [center.id for center in centers]
-    split = (len(centers) + 1) // 2
-    chosen = centers[:split] if sku.insulation == "PVC" else centers[split:]
+    flex_n = 0 if len(centers) < 3 else 1
+    flex = centers[-flex_n:] if flex_n else []
+    dedicated = centers[:-flex_n] if flex_n else centers
+    split = pvc_line_count if pvc_line_count is not None else (len(dedicated) + 1) // 2
+    if len(dedicated) >= 2:
+        split = min(max(1, split), len(dedicated) - 1)
+    else:
+        split = len(dedicated)
+    chosen = dedicated[:split] if sku.insulation == "PVC" else dedicated[split:]
     if not chosen:
-        chosen = centers
-    return [center.id for center in chosen]
+        chosen = dedicated
+    return [center.id for center in chosen + flex]
+
+
+def _colour_ids_for_sku(sku: CableSku, centers: list[WorkCenter]) -> list:
+    """One colour per dedicated machine when n≥6; leftover machines are flex."""
+
+    if len(centers) < 6:
+        return [center.id for center in centers]
+    flex_n = 0 if len(centers) == 6 else (1 if len(centers) == 7 else 2)
+    flex = centers[-flex_n:] if flex_n else []
+    dedicated = centers[:-flex_n] if flex_n else centers
+    try:
+        index = CABLE_COLORS.index(sku.color)
+    except ValueError:
+        index = 0
+    chosen = [
+        center for i, center in enumerate(dedicated) if i % len(CABLE_COLORS) == index
+    ]
+    if not chosen:
+        chosen = [dedicated[index % len(dedicated)]]
+    return [center.id for center in chosen + flex]
+
+
+def _pvc_lines_by_group(
+    centers_by_group: dict[str, list[WorkCenter]],
+    skus: tuple[CableSku, ...],
+) -> dict[str, int]:
+    """Size PVC vs XLPE dedicated lines by catalog share; flex is extra."""
+
+    pvc = sum(1 for sku in skus if sku.insulation == "PVC")
+    total = max(len(skus), 1)
+    share = pvc / total
+    has_pvc = pvc > 0
+    has_other = pvc < len(skus)
+    splits: dict[str, int] = {}
+    for group, centers in centers_by_group.items():
+        n_centers = len(centers)
+        dedicated_n = n_centers - 1 if n_centers >= 3 else n_centers
+        if dedicated_n < 2 or not has_pvc or not has_other:
+            splits[group] = dedicated_n if has_pvc else 0
+            continue
+        splits[group] = min(max(1, round(dedicated_n * share)), dedicated_n - 1)
+    return splits
 
 
 def _parent_jobs(
@@ -239,6 +314,7 @@ def generate_cable_instance(
     shuffle_skus: bool = False,
     family_dedicated_lines: bool = False,
     colour_phase: bool = False,
+    colour_dedicated_lines: bool = False,
 ) -> ScheduleProblem:
     """Make-to-order cable instance. Child orders are pre-split reels, not lots."""
 
@@ -278,6 +354,7 @@ def generate_cable_instance(
         by_group=by_group,
         drum=drum,
         family_dedicated_lines=family_dedicated_lines,
+        colour_dedicated_lines=colour_dedicated_lines,
         orders=orders,
         operations=operations,
         aux_requirements=aux_requirements,
@@ -294,7 +371,8 @@ def generate_cable_instance(
         planning_horizon_end=horizon_end,
     )
     return apply_campaign_windows(
-        problem, slot_hours=campaign_slot_hours, colour_phase=colour_phase
+        problem, slot_hours=campaign_slot_hours, colour_phase=colour_phase,
+        colour_cycle=6 if colour_phase and machines_per_stage <= 8 else 3,
     )
 
 
@@ -315,10 +393,14 @@ def _fill_reel_orders(
     by_group: dict[str, list[WorkCenter]],
     drum: AuxiliaryResource,
     family_dedicated_lines: bool,
+    colour_dedicated_lines: bool,
     orders: list[Order],
     operations: list[Operation],
     aux_requirements: list[OperationAuxRequirement],
 ) -> None:
+    pvc_lines = (
+        _pvc_lines_by_group(by_group, chosen_skus) if family_dedicated_lines else None
+    )
     for sku, length_m, release, due, priority, parent_ref in _parent_jobs(
         rng,
         n_orders=n_orders,
@@ -348,6 +430,8 @@ def _fill_reel_orders(
                 operations=operations,
                 aux_requirements=aux_requirements,
                 family_dedicated=family_dedicated_lines,
+                pvc_lines_by_group=pvc_lines,
+                colour_dedicated=colour_dedicated_lines,
             )
 
 
@@ -398,6 +482,7 @@ def add_rush_orders(
     seed: int,
     priority: int = 980,
     family_dedicated: bool = False,
+    colour_dedicated: bool = False,
 ) -> ScheduleProblem:
     """Append new parent reels onto an existing shop (mid-month rush dump)."""
 
@@ -413,6 +498,7 @@ def add_rush_orders(
     orders = list(problem.orders)
     operations = list(problem.operations)
     aux_requirements = list(problem.aux_requirements)
+    pvc_lines = _pvc_lines_by_group(by_group, skus) if family_dedicated else None
     for index in range(n_orders):
         sku = skus[rng.randrange(len(skus))]
         _append_reel_chain(
@@ -431,6 +517,8 @@ def add_rush_orders(
             operations=operations,
             aux_requirements=aux_requirements,
             family_dedicated=family_dedicated,
+            pvc_lines_by_group=pvc_lines,
+            colour_dedicated=colour_dedicated,
         )
     return problem.model_copy(
         update={

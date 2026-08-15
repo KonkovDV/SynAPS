@@ -6,22 +6,22 @@ hygiene, and MobiRoute residuals. Claim level: **experiment**.
 
 ## Verdict
 
-**ship with residuals.** ATCS is falsified as the month cover rule
-(coverage collapses 100% → 62–70% at every k tested; root cause in
-`CABLE_NERVOUS_MONTH_ACCEL_2026_08.md`); it ships only as an opt-in flag
-with Python/native parity and unit tests. FIFO is the default in the
-registry, `run_nervous_month`, and the CLI. Family-dedicated lines are
-opt-in (infeasible at 16/stage). Colour phase is default-on (measured
-tardiness/WIP win). C5a hold-until-successor stays gated. Delta notary is
-not shipped. 1600@8 is **not FEASIBLE** under either ready rule — recorded,
-not claimed.
+**ship with residuals.** Unbounded ATCS remains falsified. **Windowed
+(non-delay) ATCS is the nervous-month default** (FEASIBLE at 16/stage,
+tardiness 1 922, 2026-08-15). Registry `RHC-GREEDY-COVER` stays FIFO.
+Family-dedicated lines are mix-sized: opt-in at 16/stage (tardiness 3 670
+vs 1 922); default **on** at ≤8. Colour phase stays default-on (hash%3
+at 16/stage, 6-colour wheel at ≤8). Continuation exhaust (Mahmoodi/Dooley
++ Flynn stay) is default at ≤8. C5a stays gated. Delta notary is not
+shipped. **1600@8 is COVER-feasible** (20 316/20 316, 49.1 min/op,
+tardiness 87 134) with family + wheel + exhaust stay.
 
 ## Attacks that had to land before merge
 
 | Attack | Result |
 |--------|--------|
 | ATCS changes 50k/500k FIFO cover | **blocked** — registry kwargs omit `cover_ready_rule`; Python passes extra native kwargs only when `ready_rule != 0` |
-| ATCS among min-floor only | **blocked** — native/Python scan **all** ready ops |
+| ATCS among min-floor only | **now the rule** — unbounded scan collapsed coverage; windowed ATCS scores `floor <= min(ready)+0`. Regression: `test_cover_atcs_does_not_jump_future_floor` |
 | Non-metric SDST / missing last state | min-setup over eligible machines; first pop has `last_state=None` → setup 0 (same as GREED cold start) |
 | Aux delay ignored by ATCS key | ATCS chooses the ready op; placement is still earliest-end + aux bump (same as FIFO) |
 | `latest_finish` / horizon cap | slack uses `min(horizon, latest_finish)`; placement still caps at that |
@@ -32,6 +32,11 @@ not claimed.
 | Delta notary blind to frozen | **not shipped**. One drum pool ⇒ neighbourhood slice == full occupancy. Repair still exhaustive |
 | Family split with 1 machine/stage | falls back to all machines of the group |
 | Colour phase past due | gate snaps back to unshifted release gate |
+| 6-colour wheel vs hash%3 | wheel only when machines_per_stage ≤8; 16/stage keeps hash%3 (tardiness 6 017 vs 1 922) |
+| ATCS floor window = one SMED | 240 min delay on *any* job collapsed 16-stage coverage (0.986); default window 0 |
+| Exhaust = general ATCS window | **blocked** — `cover_atcs_exhaust_window` scores only zero-setup continuations and prefers the hot machine; 16-stage exhaust stays 0 |
+| Extra drums close 8-stage | **falsified** — pool 48 and 96 placed the same ops; 8-stage closed by exhaust stay, not drums |
+| S6 C5a “for 8-machine cover” | still gated; leftover calendar is setup minutes, not drum hold |
 | GREED `temporal_stabilization_converged=True` | tiny CLI reports `None` / `n/a (GREED)` |
 | Mixing 499770/145s into cable | forbidden; worlds stay split in CHANGELOG/RFC |
 | S6 C5a “for speed” | still gated (`peak_wip_drums` vs pool is quality, not cover time) |
@@ -40,7 +45,7 @@ not claimed.
 
 | ID | Close |
 |----|-------|
-| S1 | `cover_ready_rule=atcs` native `list_schedule.rs` + Python parity via `compute_atcs_log_score` |
+| S1 | `cover_ready_rule=atcs` native `list_schedule.rs` + Python parity via `compute_atcs_log_score`; `cover_atcs_exhaust_window` continuation + hot-machine stay |
 | S2 | `family_dedicated_lines` PVC vs XLPE `eligible_wc_ids` |
 | S3 | `MachineIndex.add` appends aux windows instead of dropping the frozen cache |
 | S5 | `colour_phase` campaign; freeze as `pin_issued_plan` / IncrementalRepair (L-RHO analogue is policy, not GNN) |
@@ -57,7 +62,7 @@ not claimed.
 |----|--------|
 | S4 delta notary | **not shipped** — one drum pool; exhaustive remains default |
 | S6 C5a | **gated** until a successor RFC + numbers |
-| N-R1 1600@8 | **measured infeasible** under FIFO (0.480) and ATCS (0.561); not a ready-rule problem |
+| N-R1 1600@8 | **closed COVER-feasible** (2026-08-15). Family flex + 6-colour wheel + continuation exhaust (ready-queue + hot-machine stay): 20 316/20 316, 49.1 min/op (budget 83), tardiness 87 134. Colour cells dropped coverage to 0.854. Extra drums 48→96 identical. C5a still gated. |
 | N-R6 seeds 1..5 | not run this wave; single seed=1 only |
 | N-R4 Hamming 0 | still a no-move explanation, not freeze quality |
 | N-R7 | full notary on repair still dominates if cache miss |
@@ -73,15 +78,19 @@ not claimed.
 
 | Probe | status | placed | wall | setup min | notes |
 |-------|--------|--------|------|-----------|-------|
-| 1600@16 FIFO+colour (default) | **feasible** | 20 316/20 316 | cover 9.25 s | 2 651 760 | notary 0, converged 1, tardiness 40 580, peak WIP 183 |
-| 1600@16 ATCS k1=2.0 | error | 13 033 | 185.9 s | 1 724 320 | coverage collapse, not parametric |
-| 1600@16 ATCS k1=50 k2=0.1 | error | 14 138 | 194.4 s | 2 000 440 | retune does not recover coverage |
-| 1600@16 ATCS k1=200 k2=0.05 | error | 14 145 | 183.1 s | 1 642 120 | |
-| 1600@16 FIFO family+colour | error | 18 811 | 14.2 s | — | family split halves per-family capacity |
-| 1600@8 FIFO+colour | error | 9 755 (0.480) | 22.5 s | 1 758 640 | N-R1: not FEASIBLE |
-| 1600@8 ATCS+colour | error | 11 388 (0.561) | 167.1 s | 1 084 880 | N-R1: best coverage, still not FEASIBLE |
+| 1600@16 FIFO+colour | **feasible** | 20 316/20 316 | 7.6 s | 2 636 200 | tardiness 16 588, WIP 159 (cover-only, 2026-08-15) |
+| 1600@16 windowed ATCS+colour | **feasible** | 20 316/20 316 | 8.9 s | 2 518 440 | tardiness 1 922, WIP 94; nervous-month default |
+| 1600@16 FIFO mix-sized family | **feasible** | 20 316/20 316 | 5.6 s | 2 511 240 | tardiness 26 647; 50/50 was error |
+| 1600@16 ATCS+family | **feasible** | 20 316/20 316 | 6.8 s | 2 488 800 | tardiness 24 227 — worse than ATCS-only |
+| 1600@8 FIFO+colour | error | 10 084 (0.496) | 11.8 s | — | N-R1 |
+| 1600@8 windowed ATCS | error | 10 664 (0.525) | 12.6 s | — | N-R1 |
+| 1600@16 ATCS+family flex | **feasible** | 20 316/20 316 | 12.3 s | 2 411 760 | tardiness **3 670** (was 24 227 without flex) |
+| 1600@8 ATCS 6-colour wheel | error | 13 901 (0.684) | 8.5 s | — | was 0.525 without wheel |
+| 1600@8 ATCS+family+wheel | error | 15 905 (0.783) | 7.8 s | 1 568 600 | without exhaust stay |
+| 1600@8 family+wheel+exhaust stay | **feasible** | 20 316/20 316 | 4.3 s | 997 600 | tardiness 87 134, 49.1 min/op; N-R1 closed |
 | tiny CLI GREED | feasible | — | — | — | notary 0, converged n/a (GREED), CI |
 
 N-R6 multiseed (1..5) is **not run** this wave; single seed=1 only. Do not
 quote INFIMUM, +78M ₽, Zhu −9.8%, Prysmian −25%, N-1, SAIDI, SOTA,
-or “repair 10×”.
+or “repair 10×”. Plant/vendor OSINT ledger:
+`docs/rfc/CABLE_MOSKABELMET_OSINT_REDTEAM_2026_08_15.md`.
