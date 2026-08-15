@@ -183,11 +183,10 @@ measured on the generator”, “8-machine FIFO is FEASIBLE”.
 
 ## 9. Next honest step
 
-C6a (multiseed 1..5 @1600×8 cover+notary) is **done**. Next is C6b:
-freeze vs insert \(D_{\max}\) on seeds 1 and 2. Then C6c weighted
-residual/ALNS on a downscaled instance. Open C5a only if freeze+C4 leave
-span \(D_{\max}\gg\) occupancy. Do not ingest 1С. Do not vendor GPL
-FJSSP-SDST. Plan: `CABLE_C6_POST_OSINT_PLAN_2026_08_15.md`.
+C6a (multiseed 1..5 @1600×8 cover+notary) and C6b (freeze-pair seeds 1–2)
+are **done**. Occupancy 21 ≪ pool 48 ≪ span 155–222; rush WIP Δ flips
+sign. Next is C6c weighted residual/ALNS on a downscaled instance. Do
+not open C5a. Do not ingest 1С. Plan: `CABLE_C6_POST_OSINT_PLAN_2026_08_15.md`.
 
 ## Sources (retrieved 2026-08-15)
 

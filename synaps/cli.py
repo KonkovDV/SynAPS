@@ -310,6 +310,7 @@ def _add_cable_nervous_parser(subparsers: Any) -> None:
         help="New parent orders inserted after cover (0 disables N-R3 wave)",
     )
     parser.add_argument("--seeds", help="Comma-separated seeds; overrides --seed")
+    parser.add_argument("--freeze-pair", action="store_true")
     parser.add_argument("--output-file", type=Path, help="Write JSON report here")
 
 
@@ -324,6 +325,7 @@ def _tri_state(on: bool, off: bool) -> bool | None:
 def _run_cable_nervous(args: argparse.Namespace) -> int:
     from synaps.domains.cable import (
         parse_nervous_seeds,
+        run_freeze_insert_pair,
         run_nervous_month,
         run_nervous_month_multiseed,
     )
@@ -343,6 +345,24 @@ def _run_cable_nervous(args: argparse.Namespace) -> int:
         "cover_atcs_exhaust_window": args.cover_atcs_exhaust,
         "new_rush_orders": args.new_rush,
     }
+    if args.freeze_pair:
+        pair_kwargs = {
+            key: kwargs[key]
+            for key in kwargs
+            if key not in {"waves", "disruptions_per_wave", "new_rush_orders"}
+        }
+        pair_kwargs["n_rush"] = args.new_rush
+        pair_kwargs["n_steal"] = args.disruptions
+        reports = [run_freeze_insert_pair(seed=item, **pair_kwargs) for item in seeds]
+        report = reports[0] if len(reports) == 1 else {
+            "claim": reports[0]["claim"],
+            "seeds": list(seeds),
+            "runs": reports,
+            "all_feasible": all(item["all_feasible"] for item in reports),
+        }
+        ok = bool(report["all_feasible"]) if len(seeds) > 1 else bool(reports[0]["all_feasible"])
+        _write_json_output(report, args.output_file)
+        return 0 if ok else 1
     if len(seeds) == 1:
         report = run_nervous_month(seed=seeds[0], **kwargs)
         ok = report["status"] == "feasible" and report["notary_hard_violations"] == 0

@@ -21,7 +21,9 @@ from synaps.domains.cable import (
     generate_nervous_month,
     nervous_sku_catalog,
     parse_nervous_seeds,
+    peak_processing_drums,
     peak_wip_drums,
+    run_freeze_insert_pair,
     run_nervous_month,
     run_nervous_month_multiseed,
     setup_transition,
@@ -80,8 +82,11 @@ def test_generate_cable_instance_greedy_feasible() -> None:
     kpis = cable_kpis(problem, result.assignments, baseline=result.assignments)
     assert kpis["coverage"] == 1.0
     assert int(kpis["peak_wip_drums"]) >= 1
+    assert int(kpis["peak_processing_drums"]) >= 1
+    assert int(kpis["peak_processing_drums"]) <= int(kpis["peak_wip_drums"])
     assert kpis["stability_hamming"] == 0.0
     assert peak_wip_drums(problem, result.assignments) == kpis["peak_wip_drums"]
+    assert peak_processing_drums(problem, result.assignments) == kpis["peak_processing_drums"]
 
 
 def test_parent_order_splits_into_reels() -> None:
@@ -599,3 +604,21 @@ def test_nervous_multiseed_tiny_aggregates() -> None:
     assert len(report["tardiness_minutes"]) == 2
     assert {run["seed"] for run in report["runs"]} == {1, 2}
     assert all(run["solver_config"] == "GREED" for run in report["runs"])
+
+
+def test_freeze_insert_pair_tiny_keeps_freeze_feasible() -> None:
+    report = run_freeze_insert_pair(
+        n_orders=6,
+        seed=1,
+        machines_per_stage=2,
+        drum_pool_size=24,
+        n_rush=1,
+        n_steal=2,
+    )
+    assert report["all_feasible"] is True
+    assert report["n_new_ops"] >= 1
+    assert report["rush"]["freeze_repair"]["status"] == "feasible"
+    assert report["steal"]["freeze"]["status"] == "feasible"
+    freeze_h = float(report["steal"]["freeze"]["kpis"]["stability_hamming"])
+    open_h = float(report["steal"]["open"]["kpis"]["stability_hamming"])
+    assert freeze_h <= open_h

@@ -55,5 +55,6 @@ SynAPS 499770/145s as cable evidence, N-1, SAIDI, SOTA, “we replaced INFIMUM�
 
 ## Next honest step
 
-C6b freeze vs insert-anywhere on 1600@8 seeds 1 and 2. Do not open C5a
-to make the month faster. Plan: `CABLE_C6_POST_OSINT_PLAN_2026_08_15.md`.
+C6b freeze vs insert-anywhere on 1600@8 seeds 1 and 2 is **done**
+(`CABLE_C6_POST_OSINT_PLAN_2026_08_15.md`). Occupancy 21 ≪ pool 48.
+Do not open C5a to make the month faster.

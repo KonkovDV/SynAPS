@@ -42,6 +42,26 @@ def _reel_spans(
     return list(spans.values())
 
 
+def peak_processing_drums(problem: ScheduleProblem, assignments: list[Assignment]) -> int:
+    """Sweep-line peak of drum aux on ``[start, end)``. Setup-hold is not included."""
+
+    needed = {item.operation_id for item in problem.aux_requirements}
+    events: list[tuple[datetime, int]] = []
+    for assignment in assignments:
+        if assignment.operation_id not in needed:
+            continue
+        events.append((assignment.start_time, 1))
+        events.append((assignment.end_time, -1))
+    events.sort(key=lambda item: (item[0], item[1]))
+    peak = 0
+    live = 0
+    for _when, delta in events:
+        live += delta
+        if live > peak:
+            peak = live
+    return peak
+
+
 def peak_wip_drums(problem: ScheduleProblem, assignments: list[Assignment]) -> int:
     """Sweep-line peak of overlapping reel spans (WIP drums, not processing aux)."""
 
@@ -100,6 +120,7 @@ def cable_kpis(
         "total_tardiness_minutes": objective.total_tardiness_minutes,
         "total_energy_kwh": objective.total_energy_kwh,
         "peak_wip_drums": peak_wip_drums(problem, assignments),
+        "peak_processing_drums": peak_processing_drums(problem, assignments),
         "reel_count": len(_reel_spans(problem, assignments)),
     }
     if baseline is not None:

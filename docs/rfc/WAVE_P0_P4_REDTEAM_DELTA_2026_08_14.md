@@ -61,7 +61,7 @@ tardiness 87 134) with family + wheel + exhaust stay.
 | ID | Status |
 |----|--------|
 | S4 delta notary | **not shipped** — one drum pool; exhaustive remains default |
-| S6 C5a | **gated** until a successor RFC + numbers |
+| S6 C5a | **gated** — C6b occupancy 21 ≪ pool 48 ≪ span 155–222. Hold would stress the pool. |
 | N-R1 1600@8 | **closed COVER-feasible** (2026-08-15). Family flex + 6-colour wheel + continuation exhaust (ready-queue + hot-machine stay): 20 316/20 316, 49.1 min/op (budget 83), tardiness 87 134. Colour cells dropped coverage to 0.854. Extra drums 48→96 identical. C5a still gated. |
 | N-R6 seeds 1..5 | **C6a closed cover+notary** (2026-08-15). Tardiness 48 269–164 355 (median 87 134). Freeze waves still seed=1. No CI. |
 | N-R4 Hamming 0 | still a no-move explanation, not freeze quality |

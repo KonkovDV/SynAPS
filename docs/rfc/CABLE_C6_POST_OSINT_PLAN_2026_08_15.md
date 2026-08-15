@@ -54,23 +54,22 @@ on every seed — still the **span** KPI, not Cumulative occupancy.
 N-R6 is **closed for cover+notary**. It is **not** closed for freeze
 waves or new-parent rush on the 8-machine shop.
 
-### C6b — Freeze vs insert \(D_{\max}\) pair (next)
+### C6b — Freeze vs insert \(D_{\max}\) pair — **DONE 2026-08-15**
 
-Plant freeze came **before** APS. Encode-first success criterion 2 is
-still unmeasured on the month pack.
+CLI: `python -m synaps cable-nervous-month --freeze-pair --orders 1600 --machines-per-stage 8 --drum-pool 48 --new-rush 2 --disruptions 20 --seeds 1,2`
 
-**Do:** same seed (start with 1 and 2 — median and worst tardiness).
-Cover once. Then (i) freeze 72 h + rush admission `allow_freeze_break=False`;
-(ii) same rushes with freeze off / insert-anywhere. Compare
-`peak_wip_drums` and tardiness. Directional only.
+Insert-anywhere is **full COVER of the mutated shop**, not `allow_freeze_break=True` on new-op neighbourhood (that flag is a no-op when issued ops are not in `disrupted_op_ids`). Steal-window pair *does* flip the flag on freeze-window ops.
 
-**Pass:** freeze does not lose FEASIBLE; report the delta even if WIP
-does not fall.
+**Pass:** freeze arms stay `feasible`, notary 0. Measured (this machine):
 
-**Fail / stop:** if freeze makes cover `error`, fix policy, do not open
-C5a.
+| Seed | Cover WIP / proc / tard | Rush freeze WIP / tard / \(R\) | Rush insert WIP / tard | WIP Δ (freeze−insert) | Steal freeze \(R\) | Steal open \(R\) | Steal WIP Δ |
+|------|-------------------------|--------------------------------|------------------------|-----------------------|--------------------|------------------|-------------|
+| 1 | 155 / **21** / 87 134 | 156 / 118 823 / **0** | **222** / 188 221 | **−66** | 0 | 0.00084 | 0 |
+| 2 | 206 / **21** / 164 355 | 206 / 168 285 / **0** | **166** / 114 304 | **+40** | 0.00050 | 0.00119 | 0 |
 
-**Forbidden:** claim −24% drums, Fujikura −58% WIP, INFIMUM tare turnover.
+12 new ops from 2 rush parents. Freeze Hamming 0 on issued ops (calendar held). Steal of 20 freeze-window ops does **not** move \(D_{\max}\). Processing occupancy is **21 vs pool 48 vs span 155–222**.
+
+Sign of rush WIP delta **flips by seed**. Do not claim freeze reduces drums. Do not claim −24%.
 
 ### C6c — Tardiness quality without touching COVER defaults
 
@@ -89,10 +88,12 @@ floor window — that already collapsed 16-stage coverage. Leave it off.
 
 ### C6d — C5a gate note (still gated)
 
-Open C5a **only if** C6b freeze + C6c weights leave
-\(D_{\max}\gg\) processing-pool **and** a processing-aux peak on the
-same assignments is materially smaller (occupancy ≠ span). Write a
-separate kernel RFC. Atomic delivery.
+C6b measured occupancy **21** ≪ pool **48** ≪ span **155–222**. Hold-until-successor
+would lengthen occupancy toward span and **stress** a pool that currently has
+slack. Do not open C5a to “make drums honest” on this pack.
+
+Open C5a **only if** a later freeze+C6c run shows processing occupancy
+hitting the pool **and** span still ≫ occupancy after that. Separate kernel RFC.
 
 Do not open C5a to “make 8 machines fit”. They already fit.
 
@@ -108,11 +109,12 @@ Do not open C5a to “make 8 machines fit”. They already fit.
 | GPL FJSSP-SDST, AVX-512, DRL factory engine | Standing forbids |
 | CI for 1600@8×5 | ~27 s local, not a unit test |
 
-## Tooling shipped with C6a
+## Tooling shipped with C6a–C6b
 
-- `parse_nervous_seeds` / `run_nervous_month_multiseed`
-- CLI `--seeds 1,2,3,4,5` (overrides `--seed`)
-- Tiny GREED tests only. The 20k table above is **local evidence**, not CI.
+- `parse_nervous_seeds` / `run_nervous_month_multiseed` / `run_freeze_insert_pair`
+- CLI `--seeds`, `--freeze-pair` (`--new-rush` → n_rush, `--disruptions` → n_steal)
+- `peak_processing_drums` in `cable_kpis` (`[start, end)` occupancy, no setup-hold)
+- Tiny GREED tests only. 20k tables are **local evidence**, not CI.
 
 Reproduce C6a:
 
@@ -120,11 +122,16 @@ Reproduce C6a:
 python -m synaps cable-nervous-month --orders 1600 --machines-per-stage 8 --drum-pool 48 --waves 0 --new-rush 0 --seeds 1,2,3,4,5
 ```
 
+Reproduce C6b:
+
+```
+python -m synaps cable-nervous-month --freeze-pair --orders 1600 --machines-per-stage 8 --drum-pool 48 --new-rush 2 --disruptions 20 --seeds 1,2
+```
+
 ## Next session start here
 
-1. C6b freeze pair on seeds 1 and 2.
-2. Stop. Write the C5a/C6c gate from those two numbers.
-3. Only then C6c downscaled weighted residual.
+1. **C6c** downscaled weighted residual/ALNS (`CABLE_PVC_WEIGHTS`). Tardiness is still the CFO-shaped hole; freeze did not close it.
+2. Stop. Do not open C5a: occupancy 21 ≪ pool 48.
+3. Do not ingest 1С.
 
-Estimated effort: C6b 0.5–1 d, C6c 1–2 d, C6d 1–2 w **if** the gate
-opens. C6a is done.
+C6a and C6b are done. C6d stays gated.

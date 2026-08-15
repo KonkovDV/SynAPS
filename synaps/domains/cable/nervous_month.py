@@ -155,6 +155,37 @@ def _select_rush_targets(
     return picked
 
 
+def _select_steal_targets(
+    problem: ScheduleProblem,
+    assignments: list[Assignment],
+    freeze_end: Any,
+    limit: int,
+) -> list[UUID]:
+    """High-priority ops that already start inside the freeze window."""
+
+    orders = {order.id: order for order in problem.orders}
+    ops_by_id = {operation.id: operation for operation in problem.operations}
+    ranked: list[tuple[int, UUID]] = []
+    for assignment in assignments:
+        if assignment.start_time >= freeze_end:
+            continue
+        operation = ops_by_id.get(assignment.operation_id)
+        if operation is None:
+            continue
+        ranked.append((orders[operation.order_id].priority, assignment.operation_id))
+    ranked.sort(reverse=True)
+    picked: list[UUID] = []
+    seen: set[UUID] = set()
+    for _priority, operation_id in ranked:
+        if operation_id in seen:
+            continue
+        seen.add(operation_id)
+        picked.append(operation_id)
+        if len(picked) >= limit:
+            break
+    return picked
+
+
 def _notary_count(problem: ScheduleProblem, assignments: list[Assignment]) -> int:
     return len(
         proven_hard_violations(
@@ -398,25 +429,20 @@ def _post_cover_waves(
     ), new_rush
 
 
-def run_nervous_month(
+def _cover_nervous_shop(
     *,
-    n_orders: int = 1600,
-    seed: int = 1,
-    waves: int = 4,
-    disruptions_per_wave: int = 20,
-    machines_per_stage: int = 16,
-    drum_pool_size: int = 96,
-    family_dedicated_lines: bool | None = None,
-    colour_phase: bool | None = None,
-    colour_dedicated_lines: bool | None = None,
-    cover_ready_rule: str = "atcs",
-    cover_atcs_floor_window: float = _NERVOUS_ATCS_FLOOR_WINDOW,
-    cover_atcs_exhaust_window: float | None = None,
-    new_rush_orders: int = 2,
+    n_orders: int,
+    seed: int,
+    machines_per_stage: int,
+    drum_pool_size: int,
+    family_dedicated_lines: bool | None,
+    colour_phase: bool | None,
+    colour_dedicated_lines: bool | None,
+    cover_ready_rule: str,
+    cover_atcs_floor_window: float,
+    cover_atcs_exhaust_window: float | None,
 ) -> dict[str, Any]:
-    """Generate, cover-solve, then weekly freeze+rush repair. Returns JSON report."""
-
-    family, colour, colour_phase, exhaust = _resolve_tight_shop_levers(
+    family, colour, phase, exhaust = _resolve_tight_shop_levers(
         machines_per_stage,
         family_dedicated_lines=family_dedicated_lines,
         colour_dedicated_lines=colour_dedicated_lines,
@@ -430,7 +456,7 @@ def run_nervous_month(
         machines_per_stage=machines_per_stage,
         drum_pool_size=drum_pool_size,
         family_dedicated_lines=family,
-        colour_phase=colour_phase,
+        colour_phase=phase,
         colour_dedicated_lines=colour,
     )
     generate_s = time.perf_counter() - gen_started
@@ -449,30 +475,231 @@ def run_nervous_month(
     hard = _notary_count(problem, result.assignments)
     notary_s = time.perf_counter() - notary_started
     _log(f"notary hard={hard} in {notary_s:.2f}s")
-    wave_rows, new_rush = _post_cover_waves(
-        problem,
-        result,
-        feasible=result.status.value == "feasible" and not hard,
-        new_rush_orders=new_rush_orders,
+    return {
+        "problem": problem,
+        "result": result,
+        "solver_name": solver_name,
+        "family": family,
+        "colour": colour,
+        "colour_phase": phase,
+        "exhaust": exhaust,
+        "generate_s": generate_s,
+        "solve_s": solve_s,
+        "notary_s": notary_s,
+        "hard": hard,
+        "cover_ready_rule": cover_ready_rule,
+        "cover_atcs_floor_window": cover_atcs_floor_window,
+    }
+
+
+def run_nervous_month(
+    *,
+    n_orders: int = 1600,
+    seed: int = 1,
+    waves: int = 4,
+    disruptions_per_wave: int = 20,
+    machines_per_stage: int = 16,
+    drum_pool_size: int = 96,
+    family_dedicated_lines: bool | None = None,
+    colour_phase: bool | None = None,
+    colour_dedicated_lines: bool | None = None,
+    cover_ready_rule: str = "atcs",
+    cover_atcs_floor_window: float = _NERVOUS_ATCS_FLOOR_WINDOW,
+    cover_atcs_exhaust_window: float | None = None,
+    new_rush_orders: int = 2,
+) -> dict[str, Any]:
+    """Generate, cover-solve, then weekly freeze+rush repair. Returns JSON report."""
+
+    shop = _cover_nervous_shop(
+        n_orders=n_orders,
         seed=seed,
-        family_dedicated=family,
-        colour_dedicated=colour,
+        machines_per_stage=machines_per_stage,
+        drum_pool_size=drum_pool_size,
+        family_dedicated_lines=family_dedicated_lines,
+        colour_phase=colour_phase,
+        colour_dedicated_lines=colour_dedicated_lines,
         cover_ready_rule=cover_ready_rule,
         cover_atcs_floor_window=cover_atcs_floor_window,
-        cover_atcs_exhaust_window=exhaust,
+        cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+    )
+    wave_rows, new_rush = _post_cover_waves(
+        shop["problem"],
+        shop["result"],
+        feasible=shop["result"].status.value == "feasible" and not shop["hard"],
+        new_rush_orders=new_rush_orders,
+        seed=seed,
+        family_dedicated=shop["family"],
+        colour_dedicated=shop["colour"],
+        cover_ready_rule=shop["cover_ready_rule"],
+        cover_atcs_floor_window=shop["cover_atcs_floor_window"],
+        cover_atcs_exhaust_window=shop["exhaust"],
         waves=waves,
         disruptions_per_wave=disruptions_per_wave,
     )
     return _month_report(
-        problem, result, solver_name=solver_name,
+        shop["problem"], shop["result"], solver_name=shop["solver_name"],
+        cover_ready_rule=shop["cover_ready_rule"],
+        cover_atcs_floor_window=shop["cover_atcs_floor_window"],
+        cover_atcs_exhaust_window=shop["exhaust"],
+        family_dedicated_lines=shop["family"],
+        colour_phase=shop["colour_phase"], colour_dedicated_lines=shop["colour"],
+        n_orders=n_orders, seed=seed, generate_s=shop["generate_s"],
+        solve_s=shop["solve_s"], notary_s=shop["notary_s"], hard=shop["hard"],
+        wave_rows=wave_rows, new_rush=new_rush,
+    )
+
+
+def _arm_kpis(
+    problem: ScheduleProblem,
+    result: Any,
+    wall_s: float,
+    baseline: list[Assignment] | None = None,
+) -> dict[str, Any]:
+    return {
+        "status": result.status.value,
+        "wall_s": round(wall_s, 3),
+        "notary_hard_violations": _notary_count(problem, result.assignments),
+        "kpis": cable_kpis(problem, result.assignments, baseline=baseline),
+    }
+
+
+def _repair_disrupted(
+    problem: ScheduleProblem,
+    assignments: list[Assignment],
+    disrupted: list[UUID],
+    freeze_end: Any,
+    allow_break: bool,
+) -> tuple[Any, float]:
+    started = time.perf_counter()
+    repaired = IncrementalRepair().solve(
+        problem,
+        base_assignments=assignments,
+        disrupted_op_ids=disrupted,
+        radius=4,
+        freeze_horizon_end=freeze_end,
+        allow_freeze_break=allow_break,
+        regime=SolveRegime.RUSH_ORDER,
+    )
+    return repaired, time.perf_counter() - started
+
+
+def _wip_delta(left: dict[str, Any], right: dict[str, Any]) -> int:
+    return int(left["kpis"]["peak_wip_drums"]) - int(right["kpis"]["peak_wip_drums"])
+
+
+def _c6b_rush_arms(shop: dict[str, Any], n_rush: int, seed: int) -> dict[str, Any]:
+    problem = shop["problem"]
+    result = shop["result"]
+    freeze_end = problem.planning_horizon_start + timedelta(days=3)
+    mutated = add_rush_orders(
+        problem,
+        n_orders=n_rush,
+        release=freeze_end,
+        due=freeze_end + timedelta(hours=48),
+        seed=seed + 99,
+        family_dedicated=shop["family"],
+        colour_dedicated=shop["colour"],
+    )
+    known = {operation.id for operation in problem.operations}
+    new_ids = [op.id for op in mutated.operations if op.id not in known]
+    frozen_rep, freeze_s = _repair_disrupted(
+        mutated, result.assignments, new_ids, freeze_end, False
+    )
+    insert, _name, insert_s = _solve_month(
+        mutated,
+        cover_ready_rule=shop["cover_ready_rule"],
+        cover_atcs_floor_window=shop["cover_atcs_floor_window"],
+        cover_atcs_exhaust_window=shop["exhaust"],
+    )
+    freeze_row = _arm_kpis(mutated, frozen_rep, freeze_s, result.assignments)
+    insert_row = _arm_kpis(mutated, insert, insert_s)
+    return {
+        "n_new_ops": len(new_ids),
+        "freeze_repair": freeze_row,
+        "insert_cover": insert_row,
+        "wip_delta": _wip_delta(freeze_row, insert_row),
+    }
+
+
+def _c6b_steal_arms(shop: dict[str, Any], n_steal: int) -> dict[str, Any]:
+    problem = shop["problem"]
+    result = shop["result"]
+    freeze_end = problem.planning_horizon_start + timedelta(days=3)
+    steal_ids = _select_steal_targets(problem, result.assignments, freeze_end, n_steal)
+    steal_f, steal_f_s = _repair_disrupted(
+        problem, result.assignments, steal_ids, freeze_end, False
+    )
+    steal_o, steal_o_s = _repair_disrupted(
+        problem, result.assignments, steal_ids, freeze_end, True
+    )
+    freeze_row = _arm_kpis(problem, steal_f, steal_f_s, result.assignments)
+    open_row = _arm_kpis(problem, steal_o, steal_o_s, result.assignments)
+    return {
+        "n_targets": len(steal_ids),
+        "freeze": freeze_row,
+        "open": open_row,
+        "wip_delta": _wip_delta(freeze_row, open_row),
+    }
+
+
+def run_freeze_insert_pair(
+    *,
+    n_orders: int = 1600,
+    seed: int = 1,
+    machines_per_stage: int = 8,
+    drum_pool_size: int = 48,
+    family_dedicated_lines: bool | None = None,
+    colour_phase: bool | None = None,
+    colour_dedicated_lines: bool | None = None,
+    cover_ready_rule: str = "atcs",
+    cover_atcs_floor_window: float = _NERVOUS_ATCS_FLOOR_WINDOW,
+    cover_atcs_exhaust_window: float | None = None,
+    n_rush: int = 2,
+    n_steal: int = 20,
+) -> dict[str, Any]:
+    """C6b: freeze+repair vs full re-cover insert, plus steal-window pair."""
+
+    shop = _cover_nervous_shop(
+        n_orders=n_orders,
+        seed=seed,
+        machines_per_stage=machines_per_stage,
+        drum_pool_size=drum_pool_size,
+        family_dedicated_lines=family_dedicated_lines,
+        colour_phase=colour_phase,
+        colour_dedicated_lines=colour_dedicated_lines,
         cover_ready_rule=cover_ready_rule,
         cover_atcs_floor_window=cover_atcs_floor_window,
-        cover_atcs_exhaust_window=exhaust,
-        family_dedicated_lines=family,
-        colour_phase=colour_phase, colour_dedicated_lines=colour,
-        n_orders=n_orders, seed=seed, generate_s=generate_s, solve_s=solve_s,
-        notary_s=notary_s, hard=hard, wave_rows=wave_rows, new_rush=new_rush,
+        cover_atcs_exhaust_window=cover_atcs_exhaust_window,
     )
+    result = shop["result"]
+    rush = _c6b_rush_arms(shop, n_rush, seed)
+    steal = _c6b_steal_arms(shop, n_steal)
+    freeze_ok = (
+        result.status.value == "feasible"
+        and shop["hard"] == 0
+        and rush["freeze_repair"]["status"] == "feasible"
+        and rush["freeze_repair"]["notary_hard_violations"] == 0
+        and steal["freeze"]["status"] == "feasible"
+        and steal["freeze"]["notary_hard_violations"] == 0
+    )
+    return {
+        "claim": "synthetic C6b freeze vs insert; not Moskabelmet MES; not -24% drums",
+        "seed": seed,
+        "n_rush_parents": n_rush,
+        "n_new_ops": rush["n_new_ops"],
+        "n_steal_targets": steal["n_targets"],
+        "cover": {
+            "status": result.status.value,
+            "kpis": cable_kpis(shop["problem"], result.assignments),
+            "generate_s": shop["generate_s"],
+            "solve_s": shop["solve_s"],
+            "notary_s": shop["notary_s"],
+            "hard": shop["hard"],
+        },
+        "rush": rush,
+        "steal": steal,
+        "all_feasible": freeze_ok,
+    }
 
 
 def parse_nervous_seeds(raw: str | None, seed: int) -> tuple[int, ...]:

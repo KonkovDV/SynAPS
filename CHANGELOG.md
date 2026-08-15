@@ -44,7 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **FEASIBLE** (20 316/20 316, 4.3 s cover, 49.1 min/op, tardiness 87 134).
   **C6a multiseed 1..5** (2026-08-15, waves=0): all five COVER-feasible,
   notary 0; tardiness min/median/max **48 269 / 87 134 / 164 355**.
-  `--seeds` overrides `--seed`. Evidence:
+  **C6b freeze-pair** (seeds 1–2): freeze repair stays FEASIBLE, issued
+  Hamming 0; rush WIP Δ **−66 / +40** (sign flips); processing occupancy
+  **21** vs pool 48 vs span 155–222. `--seeds`, `--freeze-pair`. Evidence:
   `docs/rfc/CABLE_C6_POST_OSINT_PLAN_2026_08_15.md`. Acceleration:
   `docs/rfc/CABLE_NERVOUS_MONTH_ACCEL_2026_08.md`. Red Team:
   `docs/rfc/CABLE_NERVOUS_MONTH_REDTEAM_2026_08_14.md`,

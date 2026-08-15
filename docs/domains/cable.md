@@ -53,7 +53,7 @@ Same-state transitions are 0. Family clustering (campaign windows) is how “10�
 
 | Resource | Kernel encoding | Honesty gap |
 |----------|-----------------|-------------|
-| Take-up / pay-off drums | `AuxiliaryResource` type `drum`, required on every stage | Cumulative occupies `[start−setup, end)` only. Plant drums stay in WIP until the next stage or ship. KPI `peak_wip_drums` measures the wider span. Kernel C5a (hold-until-successor) is gated. |
+| Take-up / pay-off drums | `AuxiliaryResource` type `drum`, required on every stage | Cumulative occupies `[start−setup, end)` only. Plant drums stay in WIP until the next stage or ship. KPI `peak_wip_drums` measures the wider span; `peak_processing_drums` is `[start, end)` occupancy (C6b: 21 vs pool 48 vs span 155–222 on 1600@8). Kernel C5a (hold-until-successor) is gated — it would push occupancy toward span. |
 | Calibrators / dies | extra aux pools (not in the default generator) | Same processing occupancy |
 | Crane / AMR | extra aux (Processes 2025 special-cable AMR paper) | Out of default instance |
 | Warehouse hold | not modelled | Prysmian Alesea / Aucxis RFID (Emmen, 2026-08) is IoT, not APS |
