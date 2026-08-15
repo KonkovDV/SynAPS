@@ -30,7 +30,7 @@ Evidence: `tests/test_domain_cable.py` + `tests/test_architecture.py` (ratchet) 
 | ID | Sev | Finding | Why it stays |
 |----|-----|---------|--------------|
 | **C-R1** | P1 | `CABLE_PVC_WEIGHTS` is not used by GREEDY/ATCS construction | Intentional. C6c residual ALNS searches the vector; COVER does not. |
-| **C-R2** | P1 | `peak_wip_drums` is a schedule functional, not a Cumulative constraint | Processing aux frees the drum at op end. Plant WIP holds until the next stage. C5a. Demo: pool ≫ 2 while Dmax=2 on a tiny instance — gap will grow with chain slack. |
+| **C-R2** | P1 | `peak_wip_drums` is a schedule functional, not a Cumulative constraint | **Named 2026-08-15:** three peaks in `cable_kpis`. C5a still gated (occupancy ≪ pool). `CABLE_CR2_DRUM_METRICS_REDTEAM_2026_08_15.md` |
 | **C-R3** | P1 | Freeze does not apply to `solve_schedule` | Issued-plan lock is a *repair* policy. A first GREEDY plan can still interleave colours. |
 | **C-R4** | P2 | Campaign windows only snap `earliest_start` | Not INFIMUM lot combining. Cross-order predecessors still illegal. |
 | **C-R5** | P2 | Setup minutes are parametric, not plant SMED | 240/360/400 min are order-of-magnitude vs MAPRE hundreds of minutes, not a dump. |
@@ -50,4 +50,5 @@ Do not add: INFIMUM 39k/40 min, +78M RUB, 27 days, Zhu −9.8% makespan, Prysmia
 
 ## Next honest step
 
-Measure `peak_wip_drums` vs processing-aux peak on a 5k cable instance. Open C5a only if C4 weights + freeze cannot move Dmax. Nervous-month 20 316-op pack is done (`D_max=265` vs pool 96). C6c residual: `docs/rfc/CABLE_C6C_REDTEAM_2026_08_15.md`. Plant/vendor OSINT ledger: `docs/rfc/CABLE_MOSKABELMET_OSINT_REDTEAM_2026_08_15.md`.
+OPS-WHEEL (maturin interpreter). C5a stays gated. Three drum peaks:
+`CABLE_CR2_DRUM_METRICS_REDTEAM_2026_08_15.md`. Do not put weights into COVER.

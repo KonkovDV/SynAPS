@@ -53,7 +53,7 @@ Same-state transitions are 0. Family clustering (campaign windows) is how “10�
 
 | Resource | Kernel encoding | Honesty gap |
 |----------|-----------------|-------------|
-| Take-up / pay-off drums | `AuxiliaryResource` type `drum`, required on every stage | Cumulative occupies `[start−setup, end)` only. Plant drums stay in WIP until the next stage or ship. KPI `peak_wip_drums` measures the wider span; `peak_processing_drums` is `[start, end)` occupancy (C6b: 21 vs pool 48 vs span 155–222 on 1600@8). Kernel C5a (hold-until-successor) is gated — it would push occupancy toward span. |
+| Take-up / pay-off drums | `AuxiliaryResource` type `drum`, required on every stage | Three peaks, not one: `peak_wip_drums` = reel span first→last stage; `peak_processing_drums` = `[start, end)`; `peak_aux_hold_drums` = `[start−setup, end)` (checker F1 / Cumulative window). C6b 1600@8 quoted **processing 21** vs pool 48 vs **span 155–222**. C5a (hold-until-successor) is gated — it would push occupancy toward span, not toward processing. |
 | Calibrators / dies | extra aux pools (not in the default generator) | Same processing occupancy |
 | Crane / AMR | extra aux (Processes 2025 special-cable AMR paper) | Out of default instance |
 | Warehouse hold | not modelled | Prysmian Alesea / Aucxis RFID (Emmen, 2026-08) is IoT, not APS |
@@ -66,6 +66,8 @@ Same-state transitions are 0. Family clustering (campaign windows) is how “10�
 | Weighted tardiness | `evaluate` | due-date / ATP |
 | Setup minutes + `material_loss` | `evaluate`; `CABLE_PVC_WEIGHTS` | INFIMUM “наладочные длины” |
 | `peak_wip_drums` | `cable_kpis` only | freeze −24% drums; INFIMUM tare turnover |
+| `peak_processing_drums` | `cable_kpis` only | processing occupancy `[start, end)`; C6b = 21 @1600×8 |
+| `peak_aux_hold_drums` | `cable_kpis` only | Cumulative window `[start−setup, end)`; not C5a |
 | Hamming \(R\) | `assignment_hamming` | INFIMUM shift continuity |
 | Makespan | demoted in `cable_pvc` | secondary |
 
@@ -140,7 +142,7 @@ Encoded:
 
 - \(p_o = \max(1,\lceil L_{\text{reel}}/v_{\text{stage}}\rceil)\) written to `base_duration_min`
 - SDST \(\sigma\) from SKU deltas + `material_loss` scrap metres
-- Drum Cumulative on processing window
+- Drum Cumulative on `[start−setup, end)` (checker / CP-SAT). KPI `peak_aux_hold_drums` reports that window from assignment stamps; `peak_processing_drums` is `[start, end)` only.
 - Campaign: `earliest_start` snapped to the earliest **release** in a SKU×due slot (not to the due date). Optional `colour_phase` staggers that gate: hash%3 (0–2 slots) when a stage has >8 machines; a 6-colour wheel (at most five slots, never past due) when ≤8. Mixing 16 mm² and 35 mm² into one colour gate interleaved section SDST and is not used.
 - Freeze: `start_time < freeze_horizon_end` subtracted from repair neighbourhood (rush cannot steal; breakdown of that op still can). `allow_freeze_break` is a **boolean policy flag**, not an ACL: any caller can set it true. First-solve pin: `solve_schedule(..., issued_assignments=..., freeze_horizon_end=...)` collapses freeze-window ops to the issued machine and interval (`pin_issued_plan`).
 - Family-dedicated lines: `family_dedicated_lines` splits PVC vs XLPE `eligible_wc_ids` when a stage has ≥2 machines. Line counts follow SKU-catalog share (not 50/50). One flex overflow machine when n≥3 (Schaller/Gupta family tardiness). Opt-in at 16/stage (tardiness 3 670 vs ATCS-only 1 922). Default **on** at ≤8/stage (tardiness 87 134 vs 246 509 without family on the feasible cover).

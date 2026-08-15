@@ -92,6 +92,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   new default. No segment tree. Evidence:
   `docs/rfc/CABLE_S4_DELTA_NOTARY_REDTEAM_2026_08_15.md`.
 
+- **Drum KPI split (C-R2):** `cable_kpis` publishes three peaks:
+  `peak_wip_drums` (reel span), `peak_processing_drums` (`[start, end)`),
+  `peak_aux_hold_drums` (`[start−setup, end)` stamp / checker F1).
+  C6b occupancy **21** is processing, not F1 and not WIP span 155–222.
+  C5a stays gated. Evidence:
+  `docs/rfc/CABLE_CR2_DRUM_METRICS_REDTEAM_2026_08_15.md`.
+
 - **Cable domain (encode-first, Moskabelmet-shaped):** `docs/domains/cable.md`
   is domain 9. Adapter writes metres→`base_duration_min`, pre-splits reels,
   parametric colour/section/compound SDST, drum aux, campaign

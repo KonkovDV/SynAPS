@@ -1,13 +1,20 @@
 """Cable schedule functionals that the kernel does not search (C2/C4).
 
-``D_max`` is WIP drum count: a reel occupies a drum from first-stage start to
-last-stage end, unlike Cumulative aux which frees the token when the op ends.
+Three drum peaks (C-R2). They are not interchangeable:
+
+* ``peak_wip_drums`` — reel span from first-stage start to last-stage end
+  (plant WIP / Dmax). Not a Cumulative constraint.
+* ``peak_processing_drums`` — drum aux on ``[start, end)``. Setup-hold omitted.
+* ``peak_aux_hold_drums`` — drum aux on ``[start - setup, end)`` using the
+  assignment setup stamp (checker F1 / CP-SAT Cumulative window). Still not
+  hold-until-successor (C5a, gated).
+
 Hamming R is canonical schedule stability from ``02_CANONICAL_FORM.md``.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from synaps.model import Assignment, ScheduleProblem
@@ -42,16 +49,7 @@ def _reel_spans(
     return list(spans.values())
 
 
-def peak_processing_drums(problem: ScheduleProblem, assignments: list[Assignment]) -> int:
-    """Sweep-line peak of drum aux on ``[start, end)``. Setup-hold is not included."""
-
-    needed = {item.operation_id for item in problem.aux_requirements}
-    events: list[tuple[datetime, int]] = []
-    for assignment in assignments:
-        if assignment.operation_id not in needed:
-            continue
-        events.append((assignment.start_time, 1))
-        events.append((assignment.end_time, -1))
+def _peak_from_events(events: list[tuple[datetime, int]]) -> int:
     events.sort(key=lambda item: (item[0], item[1]))
     peak = 0
     live = 0
@@ -60,6 +58,37 @@ def peak_processing_drums(problem: ScheduleProblem, assignments: list[Assignment
         if live > peak:
             peak = live
     return peak
+
+
+def _drum_aux_op_ids(problem: ScheduleProblem) -> set[Any]:
+    return {item.operation_id for item in problem.aux_requirements}
+
+
+def peak_processing_drums(problem: ScheduleProblem, assignments: list[Assignment]) -> int:
+    """Sweep-line peak of drum aux on ``[start, end)``. Setup-hold is not included."""
+
+    needed = _drum_aux_op_ids(problem)
+    events: list[tuple[datetime, int]] = []
+    for assignment in assignments:
+        if assignment.operation_id not in needed:
+            continue
+        events.append((assignment.start_time, 1))
+        events.append((assignment.end_time, -1))
+    return _peak_from_events(events)
+
+
+def peak_aux_hold_drums(problem: ScheduleProblem, assignments: list[Assignment]) -> int:
+    """Sweep-line peak of drum aux on ``[start - setup, end)`` (stamp, F1 window)."""
+
+    needed = _drum_aux_op_ids(problem)
+    events: list[tuple[datetime, int]] = []
+    for assignment in assignments:
+        if assignment.operation_id not in needed:
+            continue
+        occupancy_start = assignment.start_time - timedelta(minutes=assignment.setup_minutes)
+        events.append((occupancy_start, 1))
+        events.append((assignment.end_time, -1))
+    return _peak_from_events(events)
 
 
 def peak_wip_drums(problem: ScheduleProblem, assignments: list[Assignment]) -> int:
@@ -69,14 +98,7 @@ def peak_wip_drums(problem: ScheduleProblem, assignments: list[Assignment]) -> i
     for start, end in _reel_spans(problem, assignments):
         events.append((start, 1))
         events.append((end, -1))
-    events.sort(key=lambda item: (item[0], item[1]))
-    peak = 0
-    live = 0
-    for _when, delta in events:
-        live += delta
-        if live > peak:
-            peak = live
-    return peak
+    return _peak_from_events(events)
 
 
 def assignment_hamming(
@@ -121,6 +143,7 @@ def cable_kpis(
         "total_energy_kwh": objective.total_energy_kwh,
         "peak_wip_drums": peak_wip_drums(problem, assignments),
         "peak_processing_drums": peak_processing_drums(problem, assignments),
+        "peak_aux_hold_drums": peak_aux_hold_drums(problem, assignments),
         "reel_count": len(_reel_spans(problem, assignments)),
     }
     if baseline is not None:

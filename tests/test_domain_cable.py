@@ -22,6 +22,7 @@ from synaps.domains.cable import (
     nervous_report_ok,
     nervous_sku_catalog,
     parse_nervous_seeds,
+    peak_aux_hold_drums,
     peak_processing_drums,
     peak_wip_drums,
     run_freeze_insert_pair,
@@ -85,10 +86,40 @@ def test_generate_cable_instance_greedy_feasible() -> None:
     assert kpis["coverage"] == 1.0
     assert int(kpis["peak_wip_drums"]) >= 1
     assert int(kpis["peak_processing_drums"]) >= 1
+    assert int(kpis["peak_aux_hold_drums"]) >= int(kpis["peak_processing_drums"])
     assert int(kpis["peak_processing_drums"]) <= int(kpis["peak_wip_drums"])
     assert kpis["stability_hamming"] == 0.0
     assert peak_wip_drums(problem, result.assignments) == kpis["peak_wip_drums"]
     assert peak_processing_drums(problem, result.assignments) == kpis["peak_processing_drums"]
+    assert peak_aux_hold_drums(problem, result.assignments) == kpis["peak_aux_hold_drums"]
+
+
+def test_aux_hold_peak_counts_setup_window_not_processing_span() -> None:
+    """C-R2: ``[start - setup, end)`` can overlap when ``[start, end)`` does not."""
+
+    problem = generate_cable_instance(n_orders=3, seed=1, horizon_hours=240)
+    needed = [item.operation_id for item in problem.aux_requirements]
+    assert len(needed) >= 2
+    horizon = problem.planning_horizon_start
+    wc_a = problem.work_centers[0].id
+    wc_b = problem.work_centers[min(1, len(problem.work_centers) - 1)].id
+    first = Assignment(
+        operation_id=needed[0],
+        work_center_id=wc_a,
+        start_time=horizon,
+        end_time=horizon + timedelta(minutes=30),
+        setup_minutes=0,
+    )
+    second = Assignment(
+        operation_id=needed[1],
+        work_center_id=wc_b,
+        start_time=horizon + timedelta(minutes=30),
+        end_time=horizon + timedelta(minutes=60),
+        setup_minutes=20,
+    )
+    planted = [first, second]
+    assert peak_processing_drums(problem, planted) == 1
+    assert peak_aux_hold_drums(problem, planted) == 2
 
 
 def test_parent_order_splits_into_reels() -> None:

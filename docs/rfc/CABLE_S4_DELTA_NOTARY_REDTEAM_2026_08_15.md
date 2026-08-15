@@ -86,7 +86,7 @@ infeasible baselines, parallel machines, or other seeds.
 | **S4-R3** | P2 | Shadow is slower than exhaustive (runs both). Use it as an oracle, not a hot path |
 | **S4-R4** | P2 | Stamp-fill on skipped serial machines trusts `assignment.setup_minutes`; matrix-recomputed windows remain the exhaustive path |
 | **C6-R1-R2** | P1 | Freeze-wave Hamming path-dependence is a different kernel |
-| **C-R2** | P3 | `peak_wip_drums` vs occupancy vs Cumulative hold — docs only |
+| **C-R2** | P3 | Three drum peaks named; C5a still gated |
 
 ## Forbidden claims
 
@@ -96,6 +96,6 @@ OPTIMAL, Moskabelmet MES, 8-stage freeze quality.
 
 ## Next honest step
 
-C-R2 documentation accuracy (span vs occupancy vs Cumulative hold). C5a stays
+OPS-WHEEL (py3.12 maturin vs py3.13 probes). C5a stays
 gated. Do not put weights into COVER. Do not flip ALNS to UCB1. Do not flip
 the notary default in the same breath as this probe.

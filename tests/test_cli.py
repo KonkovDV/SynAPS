@@ -130,6 +130,8 @@ def test_cli_cable_demo_emits_kpis(capsys: pytest.CaptureFixture[str]) -> None:
     assert payload["notary_hard_violations"] == 0
     assert payload["kpis"]["coverage"] == 1.0
     assert "peak_wip_drums" in payload["kpis"]
+    assert "peak_processing_drums" in payload["kpis"]
+    assert "peak_aux_hold_drums" in payload["kpis"]
     assert payload["claim"].startswith("synthetic")
 
 

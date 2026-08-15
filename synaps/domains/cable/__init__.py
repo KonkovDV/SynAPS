@@ -13,6 +13,7 @@ from synaps.domains.cable.instance import add_rush_orders, generate_cable_instan
 from synaps.domains.cable.kpis import (
     assignment_hamming,
     cable_kpis,
+    peak_aux_hold_drums,
     peak_processing_drums,
     peak_wip_drums,
 )
@@ -46,6 +47,7 @@ __all__ = [
     "nervous_report_ok",
     "nervous_sku_catalog",
     "parse_nervous_seeds",
+    "peak_aux_hold_drums",
     "peak_processing_drums",
     "peak_wip_drums",
     "run_freeze_insert_pair",

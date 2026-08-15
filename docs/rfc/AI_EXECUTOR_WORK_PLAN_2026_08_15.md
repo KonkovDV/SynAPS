@@ -26,6 +26,7 @@
 | K2 MAB + native rank leftovers (P2) | UCB1 opt-in determinism + pulls; ALNS-300 stays roulette; ceil snap already tested; `p_{o,m}` ABI still deferred |
 | K3 wall-clock stamp | boolean matches wall cut; not a CI error; not bitwise identity |
 | S4 delta notary (opt-in) | `exhaustive`/`delta`/`shadow`; default exhaustive; 1600@8 shadow 8/8 match; no default flip |
+| C-R2 drum KPI split | three peaks named; C5a still gated |
 
 ## 1. Priority stack (do in this order)
 
@@ -75,15 +76,13 @@ parallel never skipped. `shadow` fail-closes onto exhaustive. Lemma I
 Shadow notary 0.37–0.48 s; repair 2.2–2.5 s (placement dominates).
 **Not promoted to default.** RT: `CABLE_S4_DELTA_NOTARY_REDTEAM_2026_08_15.md`.
 
-### Wave C-R2 — Documentation accuracy only — **next**
+### Wave C-R2 — Documentation accuracy only — **DONE 2026-08-15**
 
-`peak_wip_drums` (span) vs `peak_processing_drums` (occupancy) vs Cumulative
-aux (setup-hold): keep all three visible in `cable_kpis`; update
-`docs/domains/cable.md` if any claim drifts. No kernel change — C5a stays
-**gated** (C6b: occupancy 21 ≪ pool 48 ≪ span 155–222; hold-until-successor
-would stress the pool).
+Three drum peaks are now named in `cable_kpis` and `docs/domains/cable.md`.
+C6b **21** is processing occupancy. C5a stays gated. RT:
+`CABLE_CR2_DRUM_METRICS_REDTEAM_2026_08_15.md`.
 
-### Wave OPS — Tooling hygiene (P3)
+### Wave OPS — Tooling hygiene (P3) — **next**
 
 - OPS-WHEEL: document that maturin defaults to py3.12 while probes run on
   `C:\py313` junction; add `--interpreter` to the build note in
@@ -143,7 +142,6 @@ would stress the pool).
 
 ## 6. Immediate next command for the executor
 
-C-R2 documentation accuracy (`peak_wip_drums` vs occupancy vs Cumulative
-hold). No kernel. Do not open C5a. Do not put weights into COVER.
-Do not claim C6-R1 waves are stably FEASIBLE. Do not flip ALNS to UCB1.
-Do not flip the notary default.
+OPS-WHEEL: document maturin `--interpreter C:\py313\python.exe` vs default
+py3.12. `.cursor-*` and `docs/gridplan/` stay untracked. Do not open C5a.
+Do not put weights into COVER. Do not flip the notary default.
