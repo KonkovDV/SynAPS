@@ -55,5 +55,5 @@ INFIMUM −24% drums, OPTIMAL, Moskabelmet MES.
 
 ## Next honest step
 
-OPS-WHEEL (py3.12 maturin vs py3.13 probes). Do not open C5a. Do not flip
+C7 kernel leftovers. Do not open C5a. Do not flip
 the notary default. Do not put weights into COVER.

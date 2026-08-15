@@ -118,3 +118,4 @@ docs/research/SYNAPS_SILICON_HPC_ROADMAP_2026.md
 research/50k_scale_academic_audit.md
 scripts/check_native_seed_debug*.py
 scripts/diag_native_seed.py
+docs/gridplan/

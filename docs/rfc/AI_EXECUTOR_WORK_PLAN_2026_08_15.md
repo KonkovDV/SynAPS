@@ -27,6 +27,7 @@
 | K3 wall-clock stamp | boolean matches wall cut; not a CI error; not bitwise identity |
 | S4 delta notary (opt-in) | `exhaustive`/`delta`/`shadow`; default exhaustive; 1600@8 shadow 8/8 match; no default flip |
 | C-R2 drum KPI split | three peaks named; C5a still gated |
+| OPS-WHEEL | maturin interpreter note; `docs/gridplan/` gitignored |
 
 ## 1. Priority stack (do in this order)
 
@@ -82,13 +83,19 @@ Three drum peaks are now named in `cable_kpis` and `docs/domains/cable.md`.
 C6b **21** is processing occupancy. C5a stays gated. RT:
 `CABLE_CR2_DRUM_METRICS_REDTEAM_2026_08_15.md`.
 
-### Wave OPS — Tooling hygiene (P3) — **next**
+### Wave OPS — Tooling hygiene (P3) — **DONE 2026-08-15**
 
-- OPS-WHEEL: document that maturin defaults to py3.12 while probes run on
-  `C:\py313` junction; add `--interpreter` to the build note in
-  `docs/domains/cable.md` / CONTRIBUTING.
-- Repo hygiene: `.cursor-*.png`, `.cursor-tmp-diff.txt`, `docs/gridplan/`
-  stay untracked; add `.cursor-*` to `.gitignore` if not present.
+Documented maturin `--interpreter` vs py3.13 probes. `docs/gridplan/`
+gitignored. RT: `OPS_WHEEL_REDTEAM_2026_08_15.md`.
+
+### Wave C7 — Kernel leftovers (P2) — **next**
+
+From the 11.08 algebra ledger, not a cable feature:
+
+- Normalize order `release_date` to minute grain at ingest (CP-SAT vs checker).
+- `epsilon_primary` overflow guard (`2^62`, same as weighted branch).
+- Block `sat_parameters` from overriding `num_workers` / `random_seed` under `strict`.
+- Portfolio tie-break via `scalarize()` on canonical `evaluate()`, not raw `weighted_sum`.
 
 ## 2. Explicit non-goals (permanent until a new RFC)
 
@@ -142,6 +149,7 @@ C6b **21** is processing occupancy. C5a stays gated. RT:
 
 ## 6. Immediate next command for the executor
 
-OPS-WHEEL: document maturin `--interpreter C:\py313\python.exe` vs default
-py3.12. `.cursor-*` and `docs/gridplan/` stay untracked. Do not open C5a.
+C7 kernel leftovers (release minute grain, epsilon `2^62` guard,
+`sat_parameters` must not override `num_workers`/`random_seed` under
+`strict`, portfolio tie-break via `scalarize()`). Do not open C5a.
 Do not put weights into COVER. Do not flip the notary default.
