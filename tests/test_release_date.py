@@ -26,9 +26,17 @@ from synaps.model import (
 from synaps.solvers.cpsat_solver import CpSatSolver
 from synaps.solvers.feasibility_checker import FeasibilityChecker
 from synaps.solvers.greedy_dispatch import GreedyDispatch
+from synaps.timegrain import ceil_datetime_to_minute
 
 H0 = datetime(2026, 1, 1, tzinfo=UTC)
 HE = H0 + timedelta(days=10)
+
+
+def test_ceil_datetime_to_minute_is_idempotent_on_grid() -> None:
+    """Exact minutes stay put; 90s ceils to 2; pre-horizon instants stay put."""
+    assert ceil_datetime_to_minute(H0 + timedelta(minutes=1), H0) == H0 + timedelta(minutes=1)
+    assert ceil_datetime_to_minute(H0 + timedelta(seconds=90), H0) == H0 + timedelta(minutes=2)
+    assert ceil_datetime_to_minute(H0 - timedelta(seconds=30), H0) == H0 - timedelta(seconds=30)
 
 
 def _released_problem() -> ScheduleProblem:
@@ -60,6 +68,7 @@ def _released_problem() -> ScheduleProblem:
 def test_checker_flags_release_date_violation() -> None:
     """M1: a start before the order release_date must be a violation."""
     problem = _released_problem()
+    assert problem.orders[0].release_date == H0 + timedelta(minutes=500)
     op = problem.operations[0]
     early = [
         Assignment(
@@ -137,4 +146,84 @@ def test_greedy_honors_release_date() -> None:
         release = orders[ops[a.operation_id].order_id].release_date
         assert release is not None
         assert a.start_time >= release, f"greedy started {a.start_time} before release {release}"
+    assert not FeasibilityChecker().check(problem, result.assignments, exhaustive=True)
+
+
+def test_ingest_ceils_subminute_release_and_leaves_due_date() -> None:
+    """C7: published EST is the minute grid; due_date is not retimed."""
+    due = H0 + timedelta(days=9, seconds=90)
+    release = H0 + timedelta(seconds=90)
+    earliest = H0 + timedelta(seconds=30)
+    state = State(code="s")
+    wc = WorkCenter(code="M", capability_group="G")
+    order = Order(external_ref="O1", due_date=due, release_date=release)
+    op = Operation(
+        order_id=order.id,
+        seq_in_order=1,
+        state_id=state.id,
+        base_duration_min=60,
+        eligible_wc_ids=[wc.id],
+        earliest_start=earliest,
+    )
+    problem = ScheduleProblem(
+        states=[state], orders=[order], operations=[op], work_centers=[wc],
+        setup_matrix=[], planning_horizon_start=H0, planning_horizon_end=HE,
+    )
+    assert problem.orders[0].release_date == H0 + timedelta(minutes=2)
+    assert problem.operations[0].earliest_start == H0 + timedelta(minutes=1)
+    assert problem.orders[0].due_date == due
+
+
+def test_checker_rejects_start_inside_ceiled_release_gap() -> None:
+    """C7: a start at the raw 90s instant is late vs the ingested 2-minute EST."""
+    state = State(code="s")
+    wc = WorkCenter(code="M", capability_group="G")
+    order = Order(
+        external_ref="O1",
+        due_date=H0 + timedelta(days=9),
+        release_date=H0 + timedelta(seconds=90),
+    )
+    op = Operation(
+        order_id=order.id, seq_in_order=1, state_id=state.id,
+        base_duration_min=60, eligible_wc_ids=[wc.id],
+    )
+    problem = ScheduleProblem(
+        states=[state], orders=[order], operations=[op], work_centers=[wc],
+        setup_matrix=[], planning_horizon_start=H0, planning_horizon_end=HE,
+    )
+    gap = [
+        Assignment(
+            operation_id=op.id,
+            work_center_id=wc.id,
+            start_time=H0 + timedelta(seconds=90),
+            end_time=H0 + timedelta(seconds=90, minutes=60),
+        )
+    ]
+    violations = FeasibilityChecker().check(problem, gap, exhaustive=True)
+    assert any(v.kind == "RELEASE_DATE_VIOLATION" for v in violations), (
+        f"90s start must miss the ingested 2-minute release: {[v.kind for v in violations]}"
+    )
+
+
+def test_greedy_honors_subminute_release_on_minute_grid() -> None:
+    """C7: greedy places on the same ceiled EST as CP-SAT / the checker."""
+    state = State(code="s")
+    wc = WorkCenter(code="M", capability_group="G")
+    order = Order(
+        external_ref="O1",
+        due_date=H0 + timedelta(days=9),
+        release_date=H0 + timedelta(seconds=90),
+    )
+    op = Operation(
+        order_id=order.id, seq_in_order=1, state_id=state.id,
+        base_duration_min=60, eligible_wc_ids=[wc.id],
+    )
+    problem = ScheduleProblem(
+        states=[state], orders=[order], operations=[op], work_centers=[wc],
+        setup_matrix=[], planning_horizon_start=H0, planning_horizon_end=HE,
+    )
+    result = GreedyDispatch().solve(problem)
+    assert result.assignments
+    snapped = H0 + timedelta(minutes=2)
+    assert result.assignments[0].start_time >= snapped
     assert not FeasibilityChecker().check(problem, result.assignments, exhaustive=True)

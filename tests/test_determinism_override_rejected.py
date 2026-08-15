@@ -55,3 +55,27 @@ def test_worker_override_allowed_in_fast_mode() -> None:
     )
     assert result.assignments
     assert result.metadata["determinism"] == "fast"
+
+
+def test_random_seed_override_rejected_in_strict_mode() -> None:
+    """C7: sat_parameters must not swap the solve() seed under strict."""
+    problem = _tiny_problem()
+    with pytest.raises(ValueError, match="random_seed"):
+        CpSatSolver().solve(
+            problem, time_limit_s=5, determinism="strict", random_seed=42,
+            auto_greedy_warm_start=False,
+            sat_parameters={"random_seed": 99},
+        )
+
+
+def test_random_seed_override_allowed_in_fast_mode() -> None:
+    """Fast mode may still override the seed; the published seed must follow."""
+    problem = _tiny_problem()
+    result = CpSatSolver().solve(
+        problem, time_limit_s=5, determinism="fast", random_seed=42,
+        auto_greedy_warm_start=False,
+        sat_parameters={"random_seed": 99},
+    )
+    assert result.assignments
+    assert result.random_seed == 99
+    assert result.metadata["sat_parameters"]["random_seed"] == 99

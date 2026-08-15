@@ -20,12 +20,15 @@ from synaps.model import (
     Operation,
     Order,
     ScheduleProblem,
+    ScheduleResult,
+    SolverStatus,
     State,
     WorkCenter,
 )
 from synaps.objective import DEFAULT_WEIGHTS, evaluate, objective_sort_key, scalarize
 from synaps.solvers.cpsat_solver import CpSatSolver
 from synaps.solvers.greedy_dispatch import GreedyDispatch
+from synaps.solvers.pareto_slice_solver import ParetoSliceCpSatSolver
 
 _INSTANCES = Path(__file__).resolve().parent.parent / "benchmark" / "instances"
 
@@ -86,3 +89,60 @@ def test_default_weights_are_makespan_only() -> None:
     }
     obj = ObjectiveValues(makespan_minutes=42.0, total_setup_minutes=1000.0, total_energy_kwh=99.0)
     assert scalarize(obj) == 42.0
+
+
+_SETUP_WEIGHTS = {
+    "makespan": 0.0,
+    "setup": 1.0,
+    "material": 0.0,
+    "tardiness": 0.0,
+    "energy": 0.0,
+}
+
+
+def test_sort_key_ignores_solver_native_weighted_sum() -> None:
+    """C7: leftover big-M vs 0.0 must not invert scalarize() ranking."""
+    alns_worse = ObjectiveValues(
+        makespan_minutes=100.0,
+        total_setup_minutes=50.0,
+        coverage=1.0,
+        weighted_sum=0.0,
+    )
+    cpsat_better = ObjectiveValues(
+        makespan_minutes=100.0,
+        total_setup_minutes=10.0,
+        coverage=1.0,
+        weighted_sum=10_000_000.0,
+    )
+    assert objective_sort_key(cpsat_better, _SETUP_WEIGHTS) < objective_sort_key(
+        alns_worse, _SETUP_WEIGHTS
+    )
+    assert scalarize(cpsat_better, _SETUP_WEIGHTS) == 10.0
+    assert scalarize(alns_worse, _SETUP_WEIGHTS) == 50.0
+
+
+def test_pareto_tie_break_uses_scalarize_not_native_weighted_sum() -> None:
+    """C7: Pareto slice pick must follow scalarize(), not leftover weighted_sum."""
+    worse = ScheduleResult(
+        solver_name="alns",
+        status=SolverStatus.FEASIBLE,
+        objective=ObjectiveValues(
+            makespan_minutes=100.0,
+            total_setup_minutes=50.0,
+            coverage=1.0,
+            weighted_sum=0.0,
+        ),
+    )
+    better = ScheduleResult(
+        solver_name="cpsat",
+        status=SolverStatus.FEASIBLE,
+        objective=ObjectiveValues(
+            makespan_minutes=100.0,
+            total_setup_minutes=10.0,
+            coverage=1.0,
+            weighted_sum=10_000_000.0,
+        ),
+    )
+    picker = ParetoSliceCpSatSolver()
+    assert picker._is_candidate_better(better, worse, "setup", _SETUP_WEIGHTS)
+    assert not picker._is_candidate_better(worse, better, "setup", _SETUP_WEIGHTS)

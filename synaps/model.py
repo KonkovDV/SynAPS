@@ -9,6 +9,8 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, model_validator
 
+from synaps.timegrain import snap_schedule_windows_to_minute_grain
+
 MAX_SCHEDULE_STATES = 10_000
 MAX_SCHEDULE_ORDERS = 200_000
 MAX_SCHEDULE_OPERATIONS = 500_000
@@ -117,6 +119,8 @@ def normalize_schedule_problem_data(data: object) -> object:
 
     if not isinstance(data, dict):
         return data
+
+    data = snap_schedule_windows_to_minute_grain(data)
 
     raw_operations = data.get("operations")
     if not isinstance(raw_operations, list):

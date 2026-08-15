@@ -88,14 +88,18 @@ C6b **21** is processing occupancy. C5a stays gated. RT:
 Documented maturin `--interpreter` vs py3.13 probes. `docs/gridplan/`
 gitignored. RT: `OPS_WHEEL_REDTEAM_2026_08_15.md`.
 
-### Wave C7 — Kernel leftovers (P2) — **next**
+### Wave C7 — Kernel leftovers (P2) — **DONE 2026-08-15**
 
-From the 11.08 algebra ledger, not a cable feature:
+From the 11.08 algebra ledger, not a cable feature. RT:
+`CABLE_C7_KERNEL_LEFTOVERS_REDTEAM_2026_08_15.md`.
 
-- Normalize order `release_date` to minute grain at ingest (CP-SAT vs checker).
-- `epsilon_primary` overflow guard (`2^62`, same as weighted branch).
-- Block `sat_parameters` from overriding `num_workers` / `random_seed` under `strict`.
-- Portfolio tie-break via `scalarize()` on canonical `evaluate()`, not raw `weighted_sum`.
+- Ingest ceils order `release_date` and operation `earliest_start` to
+  the minute grid. `due_date` / `latest_finish` not retimed (C7-R1).
+- `epsilon_primary` overflow guard: **already F5**; not re-implemented.
+- `sat_parameters` cannot override `num_workers` (already F9) or
+  `random_seed` under `strict`. `fast` remains the opt-out.
+- `objective_sort_key` and Pareto pick use `scalarize()`, not leftover
+  `weighted_sum`.
 
 ## 2. Explicit non-goals (permanent until a new RFC)
 
@@ -118,10 +122,10 @@ From the 11.08 algebra ledger, not a cable feature:
 | `evaluate()` phantom setup on lane-less parallel machines | Closed W14/W15 (lane-aware evaluator, `_build_lane_sequences`) | Regression tests only |
 | Checker greedy lane inference incomplete (false rejects) | Mitigated: `LANE_INFERENCE_UNPROVEN` = hard UNKNOWN (W16b-1) | Keep; do not demote |
 | DURATION_MISMATCH 1-min inter-solver tolerance | Intentional (commit 46a8ed3) | Do not remove without cross-solver parity run |
-| CP-SAT sub-minute release truncation vs checker datetime compare | Open (P3) | Wave C7: normalize releases to minute grain at ingest; test with second-grain fixture |
-| `epsilon_primary` big-M lacks the overflow guard | Open (P2) | Wave C7: same `2^62` guard as weighted branch + test |
-| `sat_parameters` override can set `num_workers` → breaks strict determinism | Open (P2) | Wave C7: block `num_workers`/`random_seed` override under `strict` |
-| `weighted_sum` units diverge (CP-SAT big-M vs 0.0 ALNS/LBBD) | Open (P2) | Wave C7: portfolio tie-break must use `scalarize()` on canonical `evaluate()`, not raw `weighted_sum`; regression test on tie |
+| CP-SAT sub-minute release truncation vs checker datetime compare | Closed C7 | Ingest ceils EST; greedy offset ceils; due_date untouched |
+| `epsilon_primary` big-M lacks the overflow guard | Closed F5 (C7 confirmed) | `tests/test_bigm_overflow_guard.py`; do not re-implement |
+| `sat_parameters` override can set `num_workers` → breaks strict determinism | Closed F9 + C7 | Workers already denied; C7 also denies `random_seed` under `strict` |
+| `weighted_sum` units diverge (CP-SAT big-M vs 0.0 ALNS/LBBD) | Closed F4 wrap + C7 sort | `objective_sort_key` / Pareto use `scalarize()`; inversion test |
 | BHK `compute_machine_tsp_lower_bound` docstring over-claim on non-metric matrices | Guarded by sentinel test; cuts removed | Keep cut ban; fix docstring wording only |
 | LBBD post-assembly `max_passes` non-convergence → silent infeasible | Closed (S2/A15): unproven ⇒ no cut, no FEASIBLE claim | — |
 | Chain-only precedence (no DAG) | Scope decision | Document; do not extend without RFC |
@@ -149,7 +153,6 @@ From the 11.08 algebra ledger, not a cable feature:
 
 ## 6. Immediate next command for the executor
 
-C7 kernel leftovers (release minute grain, epsilon `2^62` guard,
-`sat_parameters` must not override `num_workers`/`random_seed` under
-`strict`, portfolio tie-break via `scalarize()`). Do not open C5a.
-Do not put weights into COVER. Do not flip the notary default.
+Standing forbids only. Optional residual C7-R1: floor `latest_finish` at
+ingest. Do not open C5a. Do not put weights into COVER. Do not flip the
+notary default. Do not flip ALNS to UCB1.

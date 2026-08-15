@@ -229,6 +229,8 @@ class GreedyDispatch(BaseSolver):
         """
         from synaps.objective import evaluate, objective_sort_key
 
+        raw_weights = kwargs.get("objective_weights")
+        weights = dict(raw_weights) if isinstance(raw_weights, dict) else None
         candidate_rules: list[tuple[float, float, float]] = []
         seen: set[tuple[float, float, float]] = set()
         for rule in (
@@ -248,7 +250,8 @@ class GreedyDispatch(BaseSolver):
             candidate_solver = GreedyDispatch(k1=k1, k2=k2, k3=k3)
             candidate_result = candidate_solver._solve_core(virtual_problem, **kwargs)
             candidate_key = objective_sort_key(
-                evaluate(virtual_problem, candidate_result.assignments)
+                evaluate(virtual_problem, candidate_result.assignments),
+                weights,
             )
             if best_key is None or candidate_key < best_key:
                 best_key = candidate_key

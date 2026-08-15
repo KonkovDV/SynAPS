@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Kernel leftovers (C7):** ingest ceils `release_date` /
+  `earliest_start` onto the integer-minute grid (due_date untouched);
+  `sat_parameters` cannot override `random_seed` under `determinism="strict"`
+  (workers were already F9); `objective_sort_key` and Pareto slice pick
+  use `scalarize()`, ignoring leftover CP-SAT big-M `weighted_sum`.
+  F5 `epsilon_primary` `2^62` overflow was already shipped — ledger
+  closed, not re-implemented. Evidence:
+  `docs/rfc/CABLE_C7_KERNEL_LEFTOVERS_REDTEAM_2026_08_15.md`.
+
 - **COVER ATCS ready rule (opt-in):** native + Python list-schedule can pop the
   ready set by Pinedo ATCS log-score (`cover_ready_rule="atcs"`) then still
   place by earliest-end machine. Unbounded ATCS collapsed month coverage

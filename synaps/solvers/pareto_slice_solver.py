@@ -19,6 +19,7 @@ import time
 from typing import Any
 
 from synaps.model import ObjectiveValues, ScheduleProblem, ScheduleResult, SolverStatus
+from synaps.objective import scalarize
 from synaps.solvers import BaseSolver
 from synaps.solvers.cpsat_solver import CpSatSolver
 
@@ -81,24 +82,24 @@ class ParetoSliceCpSatSolver(BaseSolver):
         candidate: ScheduleResult,
         incumbent: ScheduleResult | None,
         primary_objective: str,
+        weights: dict[str, float] | None = None,
     ) -> bool:
         if incumbent is None:
             return True
 
-        # P0-5: coverage is the level-0 objective (a slice that abandons work
-        # must never win on makespan alone); the primary objective, makespan,
-        # and the scalarized sum break ties after it.
+        # P0-5/C7: coverage first; then primary, makespan, scalarize().
+        # Ignore solver-native weighted_sum (CP-SAT big-M vs ALNS 0.0).
         candidate_rank = (
             -float(candidate.objective.coverage),
             self._primary_value(candidate.objective, primary_objective),
             float(candidate.objective.makespan_minutes),
-            float(candidate.objective.weighted_sum),
+            scalarize(candidate.objective, weights),
         )
         incumbent_rank = (
             -float(incumbent.objective.coverage),
             self._primary_value(incumbent.objective, primary_objective),
             float(incumbent.objective.makespan_minutes),
-            float(incumbent.objective.weighted_sum),
+            scalarize(incumbent.objective, weights),
         )
         return candidate_rank < incumbent_rank
 
@@ -148,6 +149,8 @@ class ParetoSliceCpSatSolver(BaseSolver):
         num_workers = int(kwargs.get("num_workers", 8))
         material_loss_scale = int(kwargs.get("material_loss_scale", 1000))
         primary_objective = str(kwargs.get("primary_objective", "setup"))
+        raw_weights = kwargs.get("objective_weights")
+        objective_weights = dict(raw_weights) if isinstance(raw_weights, dict) else None
         max_makespan_ratio = float(kwargs.get("max_makespan_ratio", 1.05))
         epsilon_grid = self._normalise_epsilon_grid(
             max_makespan_ratio=max_makespan_ratio,
@@ -234,7 +237,12 @@ class ParetoSliceCpSatSolver(BaseSolver):
                         "primary_value": float(primary_value),
                     }
                 )
-                if self._is_candidate_better(slice_result, selected_result, primary_objective):
+                if self._is_candidate_better(
+                    slice_result,
+                    selected_result,
+                    primary_objective,
+                    objective_weights,
+                ):
                     selected_result = slice_result
                     selected_ratio = epsilon_ratio
 

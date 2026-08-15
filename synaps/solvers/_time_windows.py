@@ -8,6 +8,7 @@ mis-place later ops.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
@@ -16,7 +17,11 @@ def operation_earliest_offset_minutes(
     order: Any | None,
     horizon_start: Any,
 ) -> float:
-    """Minutes from horizon start; max(order.release, op.earliest_start, 0)."""
+    """Minutes from horizon start; max(order.release, op.earliest_start, 0).
+
+    The return is ceiled onto the integer-minute grid (C7 / F8): a 90s release
+    is offset 2, matching CP-SAT. Ingest also snaps the published datetimes.
+    """
 
     floor = 0.0
     release = getattr(order, "release_date", None) if order is not None else None
@@ -25,7 +30,10 @@ def operation_earliest_offset_minutes(
     earliest = getattr(operation, "earliest_start", None)
     if earliest is not None:
         floor = max(floor, (earliest - horizon_start).total_seconds() / 60.0)
-    return max(0.0, floor)
+    floor = max(0.0, floor)
+    if floor <= 0.0:
+        return 0.0
+    return float(math.ceil(floor - 1e-12))
 
 
 def operation_latest_finish_offset_minutes(operation: Any, horizon_start: Any) -> float | None:

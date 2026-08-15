@@ -27,11 +27,13 @@ from synaps.timegrain import duration_minutes_for
 # through ``sat_parameters`` — doing so silently defeats the timebox (D3).
 _TIMEBOX_PARAMETERS = frozenset({"max_time_in_seconds", "max_deterministic_time"})
 
-# F9 (audit v4): in strict determinism the single-worker invariant is what makes
-# a fixed seed reproducible; overriding the worker count via ``sat_parameters``
-# silently re-enables the multi-threaded portfolio race that N1 removed. Reject
-# worker-count overrides in strict mode, same as the timebox keys (N3).
-_STRICT_MODE_DENIED_PARAMETERS = frozenset({"num_workers", "num_search_workers"})
+# F9 / C7: in strict determinism the single-worker invariant and the solve()
+# random_seed are what make a run reproducible; overriding either via
+# sat_parameters silently races the portfolio or swaps the published seed.
+# Reject both in strict mode, same as the timebox keys (N3).
+_STRICT_MODE_DENIED_PARAMETERS = frozenset(
+    {"num_workers", "num_search_workers", "random_seed"}
+)
 
 # N1 (audit v3, ADR-0001): strict determinism runs CP-SAT single-threaded and
 # stops on MACHINE-INDEPENDENT deterministic time — the SOLE binding limit — so
@@ -235,10 +237,9 @@ def _apply_sat_parameter_overrides(
     * ``"fast"`` keeps the multi-threaded wall-clock portfolio, which is faster
       but not reproducible with more than one worker.
 
-    Explicit ``overrides`` win for every parameter EXCEPT the time limits
-    (``max_time_in_seconds`` / ``max_deterministic_time``): those are owned by
-    ``time_limit_s`` and raise ``ValueError`` if overridden, so the timebox
-    cannot be bypassed through ``sat_parameters`` (audit v3, N3).
+    Explicit ``overrides`` win except time limits (N3) and, in ``strict``,
+    worker count / ``random_seed`` (F9/C7). Timebox keys always raise;
+    strict identity keys raise unless the caller uses ``determinism="fast"``.
     """
 
     solver.parameters.max_time_in_seconds = time_limit_s
@@ -286,13 +287,13 @@ def _apply_sat_parameter_overrides(
                 f"the search budget is controlled only by time_limit_s."
             )
         if determinism == "strict" and key in _STRICT_MODE_DENIED_PARAMETERS:
-            # F9 (audit v4): strict mode is reproducible BECAUSE it is
-            # single-threaded; a num_workers override would silently re-enable
-            # the racing portfolio. Use determinism="fast" to opt out.
+            # F9/C7: strict mode is reproducible because it is single-threaded
+            # and seeded only via solve(random_seed=). Use determinism="fast"
+            # to opt out.
             raise ValueError(
-                f"Cannot override CP-SAT worker count {key!r} via sat_parameters "
-                f"in determinism='strict' (single-threading is the reproducibility "
-                f"invariant, see ADR-0001); use determinism='fast' to opt out."
+                f"Cannot override CP-SAT parameter {key!r} via sat_parameters "
+                f"in determinism='strict' (workers and random_seed are "
+                f"reproducibility invariants, ADR-0001); use determinism='fast' to opt out."
             )
         if not hasattr(solver.parameters, key):
             raise ValueError(f"Unknown CP-SAT parameter override: {key}")

@@ -41,15 +41,24 @@ def coverage_fraction(*, total_operations: int, scheduled_operations: int) -> fl
     return scheduled_operations / total_operations
 
 
-def objective_sort_key(objective: ObjectiveValues) -> tuple[float, float, float]:
+def objective_sort_key(
+    objective: ObjectiveValues,
+    weights: dict[str, float] | None = None,
+) -> tuple[float, float, float]:
     """Canonical lexicographic rank (lower is better).
 
     Level 0 is coverage (negated so HIGHER coverage sorts first): a schedule
     that abandons operations must never rank ahead of a fuller one, no matter
-    how good its makespan looks (P0-5). Ties fall back to makespan, then the
-    scalarized weighted sum.
+    how good its makespan looks (P0-5). Ties fall back to makespan, then
+    :func:`scalarize` under *weights* (default :data:`DEFAULT_WEIGHTS`).
+    Solver-native ``objective.weighted_sum`` is ignored: CP-SAT used to publish
+    a big-M int64 there while ALNS/LBBD left 0.0, which inverted ties (F4/C7).
     """
-    return (-objective.coverage, objective.makespan_minutes, objective.weighted_sum)
+    return (
+        -objective.coverage,
+        objective.makespan_minutes,
+        scalarize(objective, weights),
+    )
 
 
 def evaluate(problem: ScheduleProblem, assignments: list[Assignment]) -> ObjectiveValues:
