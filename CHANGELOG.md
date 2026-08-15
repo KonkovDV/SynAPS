@@ -50,9 +50,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   COVER then ALNS (`--weighted-residual`); 1600@8 seeds 1..5, 60 s,
   destroy 20. PVC tardiness 48 056–164 080 (Δ −478..−25 vs cover);
   PVC scalar beat makespan residual **4/5**. 400@8 is the native-dead
-  zone (5148 ops). `--seeds`, `--freeze-pair`, `--weighted-residual`.
+  zone (5148 ops). **C6-R1 weekly freeze waves** (2026-08-15): 1600@8
+  seeds 1–2, `waves=4`. Seed 1 always `feasible`/notary 0. Seed 2
+  `INFEASIBLE` once (weeks 3–4, notary=1); seven later months green.
+  Hamming is path-dependent. Dirty weeks no longer chain. CLI exit 1
+  if a week is dirty. Occupancy stayed 21. Not a freeze-quality proof.
+  `--seeds`, `--freeze-pair`, `--weighted-residual`.
   Evidence: `docs/rfc/CABLE_C6_POST_OSINT_PLAN_2026_08_15.md`,
-  `docs/rfc/CABLE_C6C_REDTEAM_2026_08_15.md`. Acceleration:
+  `docs/rfc/CABLE_C6C_REDTEAM_2026_08_15.md`,
+  `docs/rfc/CABLE_C6R1_REDTEAM_2026_08_15.md`. Acceleration:
   `docs/rfc/CABLE_NERVOUS_MONTH_ACCEL_2026_08.md`. Red Team:
   `docs/rfc/CABLE_NERVOUS_MONTH_REDTEAM_2026_08_14.md`,
   `docs/rfc/CABLE_C6_PLAN_REDTEAM_2026_08_15.md`. OSINT ledger:

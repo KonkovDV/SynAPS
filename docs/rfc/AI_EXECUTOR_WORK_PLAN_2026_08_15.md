@@ -23,6 +23,7 @@
 | 8-stage seed distribution | C6a (5 seeds, all feasible, notary 0) |
 | Freeze vs insert pair + occupancy vs span | C6b (occupancy 21 ≪ pool 48) |
 | C6c weighted ALNS residual (search, not COVER) | 1600@8 seeds 1..5; PVC tard −478..−25; scalar 4/5 |
+| C6-R1 weekly freeze-wave plumbing | stop-on-dirty, notary kinds, CLI oracle; stable 8-stage pass **not** claimed |
 
 ## 1. Priority stack (do in this order)
 
@@ -34,14 +35,17 @@ Quality = C6a shop. ALNS-300 destroy 300 did 1 iter/90 s. Residual
 scalar beat makespan residual on 4/5 (seed 3 miss). Hole 48k–164k remains.
 RT: `CABLE_C6C_REDTEAM_2026_08_15.md`.
 
-### Wave C6-R1 — 8-stage weekly freeze waves (small) — **next**
+### Wave C6-R1 — 8-stage weekly freeze waves (small) — **DONE 2026-08-15**
 
-Hole: freeze evidence at 8/stage is a rush-insert pair, not four weekly reshuffles
-(`waves=0` in C6a). `run_nervous_month` with `waves=4, disruptions=20` at 8/stage,
-seeds 1..2. Pass: all waves feasible, notary 0, Hamming reported honestly
-(wave-1 \(R=0\) is a no-move, not proof of freeze quality).
+Hole: freeze evidence at 8/stage was a rush-insert pair, not four weekly
+reshuffles. Ran `waves=4, disruptions=20`, seeds 1..2. Plumbing: stop chaining
+dirty weeks; `notary_kinds` / `unrepaired_count`; CLI `nervous_report_ok`.
+Seed 1 always green. Seed 2 `INFEASIBLE` once (notary=1, weeks 3–4), then
+green on seven later months. Hamming path-dependent. Occupancy 21.
+**Not claimed:** freeze works at 8-stage.
+RT: `CABLE_C6R1_REDTEAM_2026_08_15.md`.
 
-### Wave K2 — ALNS MAB + native rank leftovers (P2)
+### Wave K2 — ALNS MAB + native rank leftovers (P2) — **next**
 
 - `DESIGN_ALNS_MAB_OPERATOR_SELECTION.md` exists; selection default is still
   roulette. Ship UCB1 as **opt-in** flag with a seeded determinism test;
@@ -138,4 +142,5 @@ python -m synaps cable-nervous-month --orders 1600 --machines-per-stage 8 \
   --drum-pool 48 --waves 4 --disruptions 20 --new-rush 0 --seeds 1,2
 ```
 
-C6-R1 freeze waves. Do not open C5a. Do not put weights into COVER.
+K2 ALNS MAB opt-in. Do not open C5a. Do not put weights into COVER.
+Do not claim C6-R1 waves are stably FEASIBLE.

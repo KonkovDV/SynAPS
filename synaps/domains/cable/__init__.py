@@ -19,6 +19,7 @@ from synaps.domains.cable.kpis import (
 from synaps.domains.cable.nervous_month import (
     NERVOUS_STAGES,
     generate_nervous_month,
+    nervous_report_ok,
     nervous_sku_catalog,
     parse_nervous_seeds,
     run_freeze_insert_pair,
@@ -42,6 +43,7 @@ __all__ = [
     "duration_minutes_from_length",
     "generate_cable_instance",
     "generate_nervous_month",
+    "nervous_report_ok",
     "nervous_sku_catalog",
     "parse_nervous_seeds",
     "peak_processing_drums",

@@ -72,7 +72,7 @@ improvements / 14–22 iterations. Notary 0. Coverage 1.0. Hamming ≤0.006.
 | **C-R9** | P1 | 8-stage tardiness still 48k–164k after residual |
 | **C6c-R1** | P2 | Seed 3: makespan residual can beat PVC weights on the PVC scalar |
 | **C6c-R2** | P2 | 60 s / destroy 20 is a local box, not a quality frontier |
-| **C6-R1** | P2 | 8-stage weekly freeze waves still unrun (`waves=0` in C6a) |
+| **C6-R1** | P2 | 8-stage weekly freeze waves: plumbing shipped; stable all-green **not** claimed. `CABLE_C6R1_REDTEAM_2026_08_15.md` |
 | **S4** | P1 | Delta notary still not shipped |
 
 ## Forbidden claims
@@ -84,8 +84,9 @@ C5a, ATCS floor window, 50k/500k FIFO change.
 
 ## Next honest step
 
-C6-R1: `waves=4` freeze at 8/stage, seeds 1..2. Do not open C5a
+K2 ALNS MAB opt-in. Do not open C5a
 (occupancy 21 ≪ pool 48). Do not put `CABLE_PVC_WEIGHTS` into COVER.
+Do not claim C6-R1 freeze waves are stably FEASIBLE.
 
 Reproduce (local evidence, not CI):
 

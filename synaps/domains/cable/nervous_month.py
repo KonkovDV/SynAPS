@@ -188,12 +188,14 @@ def _select_steal_targets(
     return picked
 
 
-def _notary_count(problem: ScheduleProblem, assignments: list[Assignment]) -> int:
-    return len(
-        proven_hard_violations(
-            FeasibilityChecker().check(problem, assignments, exhaustive=True)
-        )
+def _notary_hits(problem: ScheduleProblem, assignments: list[Assignment]) -> list[Any]:
+    return proven_hard_violations(
+        FeasibilityChecker().check(problem, assignments, exhaustive=True)
     )
+
+
+def _notary_count(problem: ScheduleProblem, assignments: list[Assignment]) -> int:
+    return len(_notary_hits(problem, assignments))
 
 
 def _solve_month(
@@ -223,6 +225,7 @@ def _wave_meta(repaired: Any) -> dict[str, Any]:
     return {
         "neighbourhood_size": int(meta.get("neighbourhood_size", 0)),
         "frozen_count": int(meta.get("frozen_count", 0)),
+        "unrepaired_count": int(meta.get("unrepaired_count", 0)),
         "used_cpsat_fallback": bool(meta.get("used_cpsat_fallback", False)),
     }
 
@@ -270,6 +273,7 @@ def _run_wave(
         regime=SolveRegime.RUSH_ORDER,
     )
     repair_s = time.perf_counter() - started
+    hard = _notary_hits(problem, repaired.assignments)
     row: dict[str, Any] = {
         "wave": wave_index,
         "skipped": False,
@@ -277,6 +281,9 @@ def _run_wave(
         "disrupted": len(targets),
         "repair_s": round(repair_s, 3),
         "status": repaired.status.value,
+        "notary_hard_violations": len(hard),
+        "notary_kinds": sorted({item.kind for item in hard}),
+        "notary_sample": (hard[0].message[:240] if hard else None),
         "stability_hamming": assignment_hamming(assignments, repaired.assignments),
         "kpis": cable_kpis(problem, repaired.assignments, baseline=assignments),
         **_wave_meta(repaired),
@@ -332,6 +339,7 @@ def _new_rush_wave(
         regime=SolveRegime.RUSH_ORDER,
     )
     repair_s = time.perf_counter() - started
+    hard = _notary_hits(mutated, repaired.assignments)
     full, solver_name, full_s = _solve_month(
         mutated,
         cover_ready_rule=cover_ready_rule,
@@ -347,6 +355,8 @@ def _new_rush_wave(
         "full_resolve_s": round(full_s, 3),
         "full_resolve_status": full.status.value,
         "stability_hamming": assignment_hamming(assignments, repaired.assignments),
+        "notary_hard_violations": len(hard),
+        "notary_kinds": sorted({item.kind for item in hard}),
         "solver_config": solver_name,
     }
     if repair_s > 0:
@@ -382,9 +392,13 @@ def _run_reshuffle_waves(
         compared = compared or not row.get("skipped", False)
         _log(
             f"wave {wave_index} skipped={row.get('skipped')} "
-            f"status={row.get('status')} repair_s={row.get('repair_s')}"
+            f"status={row.get('status')} notary={row.get('notary_hard_violations')} "
+            f"ham={row.get('stability_hamming')} repair_s={row.get('repair_s')}"
         )
         if repaired is None:
+            break
+        if row.get("status") != "feasible" or int(row.get("notary_hard_violations", 1)) != 0:
+            _log(f"wave {wave_index} stop: dirty repair, later weeks not chained")
             break
         current = list(repaired.assignments)
     return wave_rows
@@ -927,6 +941,31 @@ def parse_nervous_seeds(raw: str | None, seed: int) -> tuple[int, ...]:
     return seeds
 
 
+def _wave_rows_feasible(waves: list[dict[str, Any]]) -> bool:
+    """Skipped is not infeasible. A skipped month is not freeze-quality proof."""
+
+    for row in waves:
+        if row.get("skipped"):
+            continue
+        if row.get("status") != "feasible":
+            return False
+        if int(row.get("notary_hard_violations", 1)) != 0:
+            return False
+    return True
+
+
+def nervous_report_ok(report: dict[str, Any]) -> bool:
+    """Cover + wave notary. Multiseed uses the aggregator's all_feasible."""
+
+    if "runs" in report:
+        return bool(report.get("all_feasible"))
+    return (
+        report.get("status") == "feasible"
+        and int(report.get("notary_hard_violations", 1)) == 0
+        and _wave_rows_feasible(report.get("waves") or [])
+    )
+
+
 def run_nervous_month_multiseed(seeds: tuple[int, ...], **kwargs: Any) -> dict[str, Any]:
     """Independent covers. Does not prove a confidence interval or freeze quality."""
 
@@ -934,7 +973,10 @@ def run_nervous_month_multiseed(seeds: tuple[int, ...], **kwargs: Any) -> dict[s
     runs = [run_nervous_month(seed=item, **kwargs) for item in seeds]
     kpis = [run["kpis"] for run in runs]
     feasible = all(
-        run["status"] == "feasible" and run["notary_hard_violations"] == 0 for run in runs
+        run["status"] == "feasible"
+        and run["notary_hard_violations"] == 0
+        and _wave_rows_feasible(run.get("waves") or [])
+        for run in runs
     )
     tardiness = [int(row["total_tardiness_minutes"]) for row in kpis]
     return {
@@ -947,6 +989,9 @@ def run_nervous_month_multiseed(seeds: tuple[int, ...], **kwargs: Any) -> dict[s
         "peak_wip_drums": [int(row["peak_wip_drums"]) for row in kpis],
         "solve_s": [run["solve_s"] for run in runs],
         "notary_hard_violations": [run["notary_hard_violations"] for run in runs],
+        "waves_all_feasible": [
+            _wave_rows_feasible(run.get("waves") or []) for run in runs
+        ],
         "runs": runs,
     }
 

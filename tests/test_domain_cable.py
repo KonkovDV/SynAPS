@@ -19,6 +19,7 @@ from synaps.domains.cable import (
     duration_minutes_from_length,
     generate_cable_instance,
     generate_nervous_month,
+    nervous_report_ok,
     nervous_sku_catalog,
     parse_nervous_seeds,
     peak_processing_drums,
@@ -578,8 +579,32 @@ def test_nervous_sku_catalog_and_tiny_month_feasible() -> None:
     assert report["temporal_stabilization_converged"] is None
     assert report["temporal_stabilization_note"] == "n/a (GREED)"
     assert report["waves"]
+    assert report["waves"][0]["notary_hard_violations"] == 0
+    assert report["waves"][0]["notary_kinds"] == []
+    assert report["waves"][0]["notary_sample"] is None
+    assert report["waves"][0]["unrepaired_count"] == 0
     assert report["new_rush"]["kind"] == "new_parent_insert"
     assert report["new_rush"]["n_new_parents"] == 2
+
+
+def test_nervous_report_ok_rejects_dirty_wave() -> None:
+    """C6-R1: an infeasible week must fail the CLI oracle. Skipped is not dirty."""
+
+    cover = {
+        "status": "feasible",
+        "notary_hard_violations": 0,
+        "waves": [
+            {"skipped": False, "status": "feasible", "notary_hard_violations": 0},
+            {"skipped": False, "status": "infeasible", "notary_hard_violations": 1},
+        ],
+    }
+    assert nervous_report_ok(cover) is False
+    skipped_only = {
+        "status": "feasible",
+        "notary_hard_violations": 0,
+        "waves": [{"skipped": True}],
+    }
+    assert nervous_report_ok(skipped_only) is True
 
 
 def test_parse_nervous_seeds_overrides_single_seed() -> None:

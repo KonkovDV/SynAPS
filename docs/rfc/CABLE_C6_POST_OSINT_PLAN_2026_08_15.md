@@ -98,6 +98,22 @@ OPTIMAL, weights-into-COVER.
 
 CLI: `--weighted-residual`. Tiny GREED CI. 20k tables are local.
 
+### C6-R1 — Weekly freeze waves at 8-stage — **DONE 2026-08-15 (plumbing; pass gate not stable)**
+
+CLI: `python -m synaps cable-nervous-month --orders 1600 --machines-per-stage 8 --drum-pool 48 --waves 4 --disruptions 20 --new-rush 0 --seeds 1,2`
+
+**Pass (stable):** all four weeks `feasible`, notary 0, both seeds, Hamming
+reported honestly. **Measured:** seed 1 passed every probe. Seed 2 failed
+weeks 3–4 once (`INFEASIBLE`, notary=1, tard 164 355→176 778) then passed
+seven later months. Typical all-green Hamming is **not** bitwise across
+repeats. Wave-1 \(R=0\) on seed 2 is a no-move. Occupancy stayed **21**.
+Dirty weeks no longer chain. CLI exit 1 if any week is dirty.
+
+**Fail / not claimed:** freeze works at 8-stage; PYTHONHASHSEED pins the
+month; C5a.
+
+RT: `CABLE_C6R1_REDTEAM_2026_08_15.md`.
+
 ### C6d — C5a gate note (still gated)
 
 C6b measured occupancy **21** ≪ pool **48** ≪ span **155–222**. Hold-until-successor
@@ -149,8 +165,9 @@ python -m synaps cable-nervous-month --weighted-residual --orders 1600 --machine
 
 ## Next session start here
 
-1. **C6-R1** 8-stage weekly freeze waves (`waves=4`, seeds 1..2). C6c did not run freeze.
+1. **K2** ALNS MAB opt-in (default stays roulette).
 2. Stop. Do not open C5a: occupancy 21 ≪ pool 48.
 3. Do not put `CABLE_PVC_WEIGHTS` into COVER. Do not ingest 1С.
+4. Do not claim C6-R1 freeze waves are stably FEASIBLE.
 
-C6a, C6b, and C6c are done. C6d stays gated.
+C6a, C6b, C6c, and C6-R1 plumbing are done. C6d stays gated.

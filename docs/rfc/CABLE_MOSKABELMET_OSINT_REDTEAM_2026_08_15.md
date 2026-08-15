@@ -167,7 +167,7 @@ defaults), `tests/test_cli.py` tiny GREED month.
 | C-R8 | P2 | RFID / blocking / AMR | Out of kernel |
 | C-R9 | P1 | 8-stage tardiness 48k–164k vs 16-stage 1 922 | C6c residual cut 25–478 min. Hole remains |
 | C-R10 | P2 | Exhaust stay can prefer a later hot machine | Unit test asserts that. Month-scale tardiness is the cost |
-| N-R6 | P2 | seed=1 only | **C6a closed** cover+notary 1..5. Freeze waves still C6-R1 |
+| N-R6 | P2 | seed=1 only | **C6a closed** cover+notary 1..5. C6-R1 freeze waves **run**; stable all-green not claimed |
 | N-R3 | P2 | Wave “full resolve” is the same instance | Not a new parent dump except `new_rush` |
 | OPS-WHEEL | P2 | cp312 vs cp313 native | Documented; probes used 3.13 |
 | PDM | P0 | No 1С/MES ingest | Encode-first by design |
@@ -183,12 +183,13 @@ measured on the generator”, “8-machine FIFO is FEASIBLE”.
 
 ## 9. Next honest step
 
-C6a (multiseed 1..5 @1600×8 cover+notary), C6b (freeze-pair), and C6c
-(weighted ALNS residual) are **done**. C6c cut tardiness 25–478 min on
-seeds 1..5; the 48k–164k hole remains. Occupancy 21 ≪ pool 48. Next is
-C6-R1 freeze waves at 8-stage. Do not open C5a. Do not ingest 1С.
-Plan: `CABLE_C6_POST_OSINT_PLAN_2026_08_15.md`. C6c RT:
-`CABLE_C6C_REDTEAM_2026_08_15.md`.
+C6a (multiseed 1..5 @1600×8 cover+notary), C6b (freeze-pair), C6c
+(weighted ALNS residual), and C6-R1 freeze-wave **plumbing** are **done**.
+C6c cut tardiness 25–478 min on seeds 1..5; the 48k–164k hole remains.
+C6-R1 seed 2 was `INFEASIBLE` once on weeks 3–4. Occupancy 21 ≪ pool 48.
+Next is K2. Do not open C5a. Do not ingest 1С. Do not claim weekly freeze
+holds at 8-stage. Plan: `CABLE_C6_POST_OSINT_PLAN_2026_08_15.md`.
+C6-R1 RT: `CABLE_C6R1_REDTEAM_2026_08_15.md`.
 
 ## Sources (retrieved 2026-08-15)
 

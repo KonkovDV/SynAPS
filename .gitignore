@@ -58,6 +58,9 @@ benchmark/results/
 benchmark/studies/
 !benchmark/studies/.gitkeep
 
+# Cursor / agent local probes (never publish)
+.cursor-*
+
 # Native wheel build directory (CI artifact)
 native-dist/
 

@@ -157,6 +157,8 @@ def test_cli_cable_nervous_month_tiny(capsys: pytest.CaptureFixture[str]) -> Non
     assert payload["temporal_stabilization_converged"] is None
     assert payload["temporal_stabilization_note"] == "n/a (GREED)"
     assert payload["waves"]
+    assert payload["waves"][0]["notary_hard_violations"] == 0
+    assert payload["waves"][0]["notary_kinds"] == []
     assert payload["new_rush"]["kind"] == "new_parent_insert"
 
 

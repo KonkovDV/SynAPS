@@ -406,6 +406,7 @@ def _run_weighted_residual_cli(
 
 def _run_cable_nervous(args: argparse.Namespace) -> int:
     from synaps.domains.cable import (
+        nervous_report_ok,
         parse_nervous_seeds,
         run_nervous_month,
         run_nervous_month_multiseed,
@@ -419,12 +420,10 @@ def _run_cable_nervous(args: argparse.Namespace) -> int:
         return _run_weighted_residual_cli(seeds, args, kwargs)
     if len(seeds) == 1:
         report = run_nervous_month(seed=seeds[0], **kwargs)
-        ok = report["status"] == "feasible" and report["notary_hard_violations"] == 0
     else:
         report = run_nervous_month_multiseed(seeds, **kwargs)
-        ok = bool(report["all_feasible"])
     _write_json_output(report, args.output_file)
-    return 0 if ok else 1
+    return 0 if nervous_report_ok(report) else 1
 
 
 def main(argv: list[str] | None = None) -> int:
