@@ -475,6 +475,41 @@ def run_nervous_month(
     )
 
 
+def parse_nervous_seeds(raw: str | None, seed: int) -> tuple[int, ...]:
+    """CLI `--seeds a,b` overrides `--seed`. Empty tokens are ignored."""
+
+    if raw is None or not str(raw).strip():
+        return (int(seed),)
+    seeds = tuple(int(part.strip()) for part in str(raw).split(",") if part.strip())
+    if not seeds:
+        raise ValueError("empty --seeds")
+    return seeds
+
+
+def run_nervous_month_multiseed(seeds: tuple[int, ...], **kwargs: Any) -> dict[str, Any]:
+    """Independent covers. Does not prove a confidence interval or freeze quality."""
+
+    kwargs.pop("seed", None)
+    runs = [run_nervous_month(seed=item, **kwargs) for item in seeds]
+    kpis = [run["kpis"] for run in runs]
+    feasible = all(
+        run["status"] == "feasible" and run["notary_hard_violations"] == 0 for run in runs
+    )
+    tardiness = [int(row["total_tardiness_minutes"]) for row in kpis]
+    return {
+        "claim": "synthetic nervous-month multiseed; not Moskabelmet MES; not INFIMUM",
+        "seeds": list(seeds),
+        "n_runs": len(runs),
+        "all_feasible": feasible,
+        "tardiness_minutes": tardiness,
+        "setup_minutes": [int(row["total_setup_minutes"]) for row in kpis],
+        "peak_wip_drums": [int(row["peak_wip_drums"]) for row in kpis],
+        "solve_s": [run["solve_s"] for run in runs],
+        "notary_hard_violations": [run["notary_hard_violations"] for run in runs],
+        "runs": runs,
+    }
+
+
 def _month_report(
     problem: ScheduleProblem,
     result: Any,

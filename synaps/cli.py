@@ -309,6 +309,7 @@ def _add_cable_nervous_parser(subparsers: Any) -> None:
         default=2,
         help="New parent orders inserted after cover (0 disables N-R3 wave)",
     )
+    parser.add_argument("--seeds", help="Comma-separated seeds; overrides --seed")
     parser.add_argument("--output-file", type=Path, help="Write JSON report here")
 
 
@@ -321,25 +322,35 @@ def _tri_state(on: bool, off: bool) -> bool | None:
 
 
 def _run_cable_nervous(args: argparse.Namespace) -> int:
-    from synaps.domains.cable import run_nervous_month
-
-    report = run_nervous_month(
-        n_orders=args.orders,
-        seed=args.seed,
-        waves=args.waves,
-        disruptions_per_wave=args.disruptions,
-        machines_per_stage=args.machines_per_stage,
-        drum_pool_size=args.drum_pool,
-        family_dedicated_lines=_tri_state(args.family_lines, args.no_family_lines),
-        colour_phase=_tri_state(args.colour_phase, args.no_colour_phase),
-        colour_dedicated_lines=_tri_state(args.colour_lines, args.no_colour_lines),
-        cover_ready_rule=args.cover_ready_rule,
-        cover_atcs_floor_window=args.cover_atcs_window,
-        cover_atcs_exhaust_window=args.cover_atcs_exhaust,
-        new_rush_orders=args.new_rush,
+    from synaps.domains.cable import (
+        parse_nervous_seeds,
+        run_nervous_month,
+        run_nervous_month_multiseed,
     )
+
+    seeds = parse_nervous_seeds(args.seeds, args.seed)
+    kwargs = {
+        "n_orders": args.orders,
+        "waves": args.waves,
+        "disruptions_per_wave": args.disruptions,
+        "machines_per_stage": args.machines_per_stage,
+        "drum_pool_size": args.drum_pool,
+        "family_dedicated_lines": _tri_state(args.family_lines, args.no_family_lines),
+        "colour_phase": _tri_state(args.colour_phase, args.no_colour_phase),
+        "colour_dedicated_lines": _tri_state(args.colour_lines, args.no_colour_lines),
+        "cover_ready_rule": args.cover_ready_rule,
+        "cover_atcs_floor_window": args.cover_atcs_window,
+        "cover_atcs_exhaust_window": args.cover_atcs_exhaust,
+        "new_rush_orders": args.new_rush,
+    }
+    if len(seeds) == 1:
+        report = run_nervous_month(seed=seeds[0], **kwargs)
+        ok = report["status"] == "feasible" and report["notary_hard_violations"] == 0
+    else:
+        report = run_nervous_month_multiseed(seeds, **kwargs)
+        ok = bool(report["all_feasible"])
     _write_json_output(report, args.output_file)
-    return 0 if report["status"] == "feasible" and report["notary_hard_violations"] == 0 else 1
+    return 0 if ok else 1
 
 
 def main(argv: list[str] | None = None) -> int:

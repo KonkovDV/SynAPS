@@ -215,12 +215,16 @@ C5 additionally: `feasibility_checker.py`, `cpsat_solver.py`, `native/synaps_nat
 
 ## Order of work for the next session
 
-1. C0 domain guide + example + 20-op fixture (no generator scale games).
-2. C2 KPI + pre-split on that fixture (so \(D_{\max}\) is visible before freeze).
-3. C1 freeze on repair API.
-4. C3 sort.
-5. C4 profile.
-6. Stop. Write the C5 gate note from numbers, or stop the cable track.
+C0–C4 and 8-stage cover are shipped. Next wave is C6, not a replay of C0.
+
+1. **C6a** multiseed 1..5 cover+notary @1600×8 — **done 2026-08-15**.
+2. **C6b** freeze vs insert \(D_{\max}\) on seeds 1 and 2.
+3. Stop. Gate note: freeze delta and occupancy vs span.
+4. **C6c** weighted residual/ALNS on a downscaled instance only if tardiness
+   is still the hole after C6b.
+5. **C6d / C5a** only if that gate opens. Do not ingest 1С.
+
+See `docs/rfc/CABLE_C6_POST_OSINT_PLAN_2026_08_15.md`.
 
 Estimated effort if executed continuously: C0 1–2 d, C1 2–4 d, C2 3–5 d, C3 2–3 d, C4 3–5 d, C5a 1–2 w after a written gate.
 
@@ -229,9 +233,10 @@ Estimated effort if executed continuously: C0 1–2 d, C1 2–4 d, C2 3–5 d, C
 Shipped encode-first: domain 9 + generator + KPIs + campaign windows +
 `CABLE_PVC_WEIGHTS` + IncrementalRepair freeze. Nervous-month evidence:
 20 316 ops `feasible` at 16 machines/stage (windowed ATCS, tardiness 1 922)
-and at 8/stage (family flex + 6-colour wheel + continuation exhaust stay,
-tardiness 87 134, 49.1 min/op vs budget 83). See
-`docs/rfc/CABLE_NERVOUS_MONTH_ACCEL_2026_08.md`. OSINT Red Team:
-`docs/rfc/CABLE_MOSKABELMET_OSINT_REDTEAM_2026_08_15.md`. Not shipped: C5a–d,
-live MES, Dmax inside CP-SAT, factory −24% drums as a measured effect.
+and at 8/stage (family flex + 6-colour wheel + continuation exhaust stay).
+C6a seeds 1..5 @8: all COVER-feasible, notary 0; tardiness 48 269–164 355
+(median 87 134). Next: C6b freeze-vs-insert \(D_{\max}\) pair, then C6c
+weighted residual. C5a still gated. Plan/RT:
+`docs/rfc/CABLE_C6_POST_OSINT_PLAN_2026_08_15.md`,
+`docs/rfc/CABLE_C6_PLAN_REDTEAM_2026_08_15.md`.
 

@@ -42,10 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ≤0.00064). Same mix at 8/stage overflowed under FIFO (coverage 0.50);
   with family flex + 6-colour wheel + continuation exhaust it is
   **FEASIBLE** (20 316/20 316, 4.3 s cover, 49.1 min/op, tardiness 87 134).
-  Evidence and acceleration plan:
+  **C6a multiseed 1..5** (2026-08-15, waves=0): all five COVER-feasible,
+  notary 0; tardiness min/median/max **48 269 / 87 134 / 164 355**.
+  `--seeds` overrides `--seed`. Evidence:
+  `docs/rfc/CABLE_C6_POST_OSINT_PLAN_2026_08_15.md`. Acceleration:
   `docs/rfc/CABLE_NERVOUS_MONTH_ACCEL_2026_08.md`. Red Team:
-  `docs/rfc/CABLE_NERVOUS_MONTH_REDTEAM_2026_08_14.md`. OSINT + plant/vendor
-  attack ledger (2026-08-15):
+  `docs/rfc/CABLE_NERVOUS_MONTH_REDTEAM_2026_08_14.md`,
+  `docs/rfc/CABLE_C6_PLAN_REDTEAM_2026_08_15.md`. OSINT ledger:
   `docs/rfc/CABLE_MOSKABELMET_OSINT_REDTEAM_2026_08_15.md`. Not Moskabelmet
   MES, not INFIMUM, not the 500k synthetic cover.
 

@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+import pytest
+
 from synaps.domains.cable import (
     CABLE_PVC_CPSAT_WEIGHTS,
     CABLE_PVC_WEIGHTS,
@@ -18,8 +20,10 @@ from synaps.domains.cable import (
     generate_cable_instance,
     generate_nervous_month,
     nervous_sku_catalog,
+    parse_nervous_seeds,
     peak_wip_drums,
     run_nervous_month,
+    run_nervous_month_multiseed,
     setup_transition,
     split_length_into_reels,
     state_code,
@@ -570,3 +574,28 @@ def test_nervous_sku_catalog_and_tiny_month_feasible() -> None:
     assert report["waves"]
     assert report["new_rush"]["kind"] == "new_parent_insert"
     assert report["new_rush"]["n_new_parents"] == 2
+
+
+def test_parse_nervous_seeds_overrides_single_seed() -> None:
+    assert parse_nervous_seeds(None, 7) == (7,)
+    assert parse_nervous_seeds(" 1, 2,3 ", 9) == (1, 2, 3)
+    with pytest.raises(ValueError):
+        parse_nervous_seeds(" , , ", 1)
+
+
+def test_nervous_multiseed_tiny_aggregates() -> None:
+    report = run_nervous_month_multiseed(
+        (1, 2),
+        n_orders=6,
+        waves=0,
+        new_rush_orders=0,
+        machines_per_stage=2,
+        drum_pool_size=24,
+    )
+    assert report["n_runs"] == 2
+    assert report["seeds"] == [1, 2]
+    assert report["all_feasible"] is True
+    assert report["notary_hard_violations"] == [0, 0]
+    assert len(report["tardiness_minutes"]) == 2
+    assert {run["seed"] for run in report["runs"]} == {1, 2}
+    assert all(run["solver_config"] == "GREED" for run in report["runs"])

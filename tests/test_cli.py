@@ -158,6 +158,31 @@ def test_cli_cable_nervous_month_tiny(capsys: pytest.CaptureFixture[str]) -> Non
     assert payload["new_rush"]["kind"] == "new_parent_insert"
 
 
+def test_cli_cable_nervous_month_multiseed_tiny(capsys: pytest.CaptureFixture[str]) -> None:
+    exit_code = main(
+        [
+            "cable-nervous-month",
+            "--orders",
+            "6",
+            "--waves",
+            "0",
+            "--new-rush",
+            "0",
+            "--machines-per-stage",
+            "2",
+            "--drum-pool",
+            "24",
+            "--seeds",
+            "1,2",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["all_feasible"] is True
+    assert payload["seeds"] == [1, 2]
+    assert payload["n_runs"] == 2
+
+
 def test_cli_list_solver_configs_emits_manifest(capsys: pytest.CaptureFixture[str]) -> None:
     exit_code = main(["list-solver-configs"])
     captured = capsys.readouterr()

@@ -183,13 +183,11 @@ measured on the generator”, “8-machine FIFO is FEASIBLE”.
 
 ## 9. Next honest step
 
-1. Multiseed 1..5 on 1600@8 exhaust-stay default + notary.
-2. If tardiness 87 134 is the remaining plant-shaped pain, search
-   `CABLE_PVC_WEIGHTS` **inside residual/ALNS**, not by reopening a
-   general ATCS floor window.
-3. Open C5a only if a freeze+campaign+stay cover still shows
-   \(D_{\max}\gg\) processing-pool **and** C4 cannot move it.
-4. Do not ingest 1С. Do not vendor GPL FJSSP-SDST.
+C6a (multiseed 1..5 @1600×8 cover+notary) is **done**. Next is C6b:
+freeze vs insert \(D_{\max}\) on seeds 1 and 2. Then C6c weighted
+residual/ALNS on a downscaled instance. Open C5a only if freeze+C4 leave
+span \(D_{\max}\gg\) occupancy. Do not ingest 1С. Do not vendor GPL
+FJSSP-SDST. Plan: `CABLE_C6_POST_OSINT_PLAN_2026_08_15.md`.
 
 ## Sources (retrieved 2026-08-15)
 

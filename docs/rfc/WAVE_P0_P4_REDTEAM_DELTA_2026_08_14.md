@@ -63,7 +63,7 @@ tardiness 87 134) with family + wheel + exhaust stay.
 | S4 delta notary | **not shipped** — one drum pool; exhaustive remains default |
 | S6 C5a | **gated** until a successor RFC + numbers |
 | N-R1 1600@8 | **closed COVER-feasible** (2026-08-15). Family flex + 6-colour wheel + continuation exhaust (ready-queue + hot-machine stay): 20 316/20 316, 49.1 min/op (budget 83), tardiness 87 134. Colour cells dropped coverage to 0.854. Extra drums 48→96 identical. C5a still gated. |
-| N-R6 seeds 1..5 | not run this wave; single seed=1 only |
+| N-R6 seeds 1..5 | **C6a closed cover+notary** (2026-08-15). Tardiness 48 269–164 355 (median 87 134). Freeze waves still seed=1. No CI. |
 | N-R4 Hamming 0 | still a no-move explanation, not freeze quality |
 | N-R7 | full notary on repair still dominates if cache miss |
 | K1 full pytest | **1120 passed, 2 skipped, 1 xfailed** in 2096 s (2026-08-14, this machine). Sentinel `test_guard_s3_bhk_bound_subset_monotone` remains xfail. |
@@ -88,9 +88,10 @@ tardiness 87 134) with family + wheel + exhaust stay.
 | 1600@8 ATCS 6-colour wheel | error | 13 901 (0.684) | 8.5 s | — | was 0.525 without wheel |
 | 1600@8 ATCS+family+wheel | error | 15 905 (0.783) | 7.8 s | 1 568 600 | without exhaust stay |
 | 1600@8 family+wheel+exhaust stay | **feasible** | 20 316/20 316 | 4.3 s | 997 600 | tardiness 87 134, 49.1 min/op; N-R1 closed |
+| 1600@8 C6a seeds 1..5 | **all feasible** | 19 860–20 316 | 4.28–4.46 s | 0.998–1.048e6 | tardiness 48 269–164 355, notary 0 |
 | tiny CLI GREED | feasible | — | — | — | notary 0, converged n/a (GREED), CI |
 
-N-R6 multiseed (1..5) is **not run** this wave; single seed=1 only. Do not
-quote INFIMUM, +78M ₽, Zhu −9.8%, Prysmian −25%, N-1, SAIDI, SOTA,
-or “repair 10×”. Plant/vendor OSINT ledger:
-`docs/rfc/CABLE_MOSKABELMET_OSINT_REDTEAM_2026_08_15.md`.
+C6a closed cover+notary across seeds 1..5. Freeze waves still seed=1.
+Do not quote INFIMUM, +78M ₽, Zhu −9.8%, Prysmian −25%, N-1, SAIDI, SOTA,
+or “repair 10×”. Plan/RT: `docs/rfc/CABLE_C6_POST_OSINT_PLAN_2026_08_15.md`,
+`docs/rfc/CABLE_C6_PLAN_REDTEAM_2026_08_15.md`.

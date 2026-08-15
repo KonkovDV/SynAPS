@@ -261,5 +261,11 @@ remains unpublished algebra. There is still no OSS cable APS.
 
 Tiny (CI): `python -m synaps cable-nervous-month --orders 6 --waves 1 --disruptions 2 --machines-per-stage 2 --drum-pool 24`
 
-Full (local): command at the top of this note. JSON under `benchmark/results/`
-is gitignored; this RFC is the tracked evidence.
+C6a multiseed (local): `python -m synaps cable-nervous-month --orders 1600 --machines-per-stage 8 --drum-pool 48 --waves 0 --new-rush 0 --seeds 1,2,3,4,5`
+
+Full 16-stage (local): command at the top of this note. JSON under
+`benchmark/results/` is gitignored; this RFC is the tracked evidence.
+
+C6a (2026-08-15, this machine): seeds 1..5 all COVER-feasible, notary 0,
+cover 4.28–4.46 s. Tardiness min/median/max 48 269 / 87 134 / 164 355.
+Plan: `CABLE_C6_POST_OSINT_PLAN_2026_08_15.md`.

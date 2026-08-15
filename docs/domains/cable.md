@@ -95,6 +95,7 @@ Generator: `synaps.domains.cable.generate_cable_instance`. CLI:
 `python -m synaps cable-demo` (tiny) and `python -m synaps cable-nervous-month`
 (30-day synthetic pack). Measured 20 316-op month:
 [CABLE_NERVOUS_MONTH_ACCEL_2026_08.md](../rfc/CABLE_NERVOUS_MONTH_ACCEL_2026_08.md).
+Next wave: [CABLE_C6_POST_OSINT_PLAN_2026_08_15.md](../rfc/CABLE_C6_POST_OSINT_PLAN_2026_08_15.md).
 
 ## 9. Market of solutions (August 2026)
 

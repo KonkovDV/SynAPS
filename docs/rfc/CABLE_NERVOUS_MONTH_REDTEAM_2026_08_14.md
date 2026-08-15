@@ -21,6 +21,7 @@ month, INFIMUM parity, or “repair is 10× faster”.
 | **N-P0-3** | P0 | Waves ran on an `error` cover | Waves skip unless cover is `feasible` and notary is empty |
 | **N-P1-1** | P1 | C-R6 “no 5k–40k cable FEASIBLE pack” | This pack is 20 316 cable ops. Still not 500k, still not INFIMUM |
 | **N-R1** | P1 | 8 machines/stage cannot cover this mix | **closed 2026-08-15**: family + wheel + exhaust stay → 20 316/20 316, 49.1 min/op, tardiness 87 134 |
+| **N-R6 cover** | P2 | Seed=1 only | **closed 2026-08-15 C6a**: seeds 1..5 all COVER-feasible, notary 0. Tardiness 48 269–164 355 (median 87 134). Freeze waves still seed=1 @16 only. |
 
 ## Live residuals (do not paper over)
 
@@ -30,7 +31,7 @@ month, INFIMUM parity, or “repair is 10× faster”.
 | **N-R3** | P1 | Repair vs full is **not** “new rush order vs reschedule” | Waves re-dispatch existing high-priority ops. `full_resolve_s` re-covers the **same** instance. Speedup 1.77× (5.24 s vs 9.25 s). Neighbourhood 20–28 |
 | **N-R4** | P1 | Wave 1 Hamming \(R=0\) | Freeze + greedy put the 20 ops back on the same `(wc, start)`. That is a no-move, not a proof of stability policy quality |
 | **N-R5** | P1 | `peak_wip_drums=265` vs pool 96 | Processing Cumulative frees the drum at op end. C5a still gated. Same as C-R2 |
-| **N-R6** | P2 | Seed=1 only | No distribution over seeds. Do not quote a confidence interval |
+| **N-R10** | P2 | Freeze waves still seed=1 @16 only | C6a did not run 8-stage freeze. C6b. No CI. |
 | **N-R7** | P2 | IncrementalRepair re-notaries all 20k ops | Honest, but it dominates repair wall time. Delta notary is A4, not shipped |
 | **N-R8** | P2 | `temporal_stabilization_converged` is false on the GREED CI path | Metadata key is RHC-only. Tiny `--orders 6` uses `GREED` |
 | **N-R9** | P2 | Colour-dedicated lines are not the 8-machine closer | Encoded as opt-in `--colour-lines`. At 8/stage they drop coverage to 0.854; the closer is wheel + exhaust stay, not cells |
@@ -54,7 +55,5 @@ SynAPS 499770/145s as cable evidence, N-1, SAIDI, SOTA, “we replaced INFIMUM�
 
 ## Next honest step
 
-Multiseed 1..5 on 1600@8 with the exhaust-stay default, plus independent
-exhaustive notary on that cover. Do not open C5a to make the month faster.
-Plant/vendor OSINT ledger:
-`docs/rfc/CABLE_MOSKABELMET_OSINT_REDTEAM_2026_08_15.md`.
+C6b freeze vs insert-anywhere on 1600@8 seeds 1 and 2. Do not open C5a
+to make the month faster. Plan: `CABLE_C6_POST_OSINT_PLAN_2026_08_15.md`.
