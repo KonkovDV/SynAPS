@@ -84,7 +84,7 @@ C5a, ATCS floor window, 50k/500k FIFO change.
 
 ## Next honest step
 
-S4 delta notary. Do not open C5a
+C-R2 docs. S4 is opt-in, not default. Do not open C5a.
 (occupancy 21 ≪ pool 48). Do not put `CABLE_PVC_WEIGHTS` into COVER.
 Do not claim C6-R1 freeze waves are stably FEASIBLE.
 

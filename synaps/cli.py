@@ -328,6 +328,13 @@ def _add_cable_nervous_experiment_flags(parser: Any) -> None:
         action="store_true",
         help="Greedy ALNS repair only (CI). Probe keeps micro-CP-SAT.",
     )
+    parser.add_argument(
+        "--repair-notary",
+        choices=("exhaustive", "delta", "shadow"),
+        default="exhaustive",
+        help="S4 IncrementalRepair notary. Default exhaustive. delta/shadow "
+        "are opt-in; wave-row notary stays exhaustive. Do not default-flip.",
+    )
     parser.add_argument("--output-file", type=Path, help="Write JSON report here")
 
 
@@ -353,6 +360,7 @@ def _nervous_shop_kwargs(args: argparse.Namespace) -> dict[str, Any]:
         "cover_atcs_floor_window": args.cover_atcs_window,
         "cover_atcs_exhaust_window": args.cover_atcs_exhaust,
         "new_rush_orders": args.new_rush,
+        "repair_notary": args.repair_notary,
     }
 
 
@@ -360,7 +368,7 @@ def _cover_only_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     return {
         key: kwargs[key]
         for key in kwargs
-        if key not in {"waves", "disruptions_per_wave", "new_rush_orders"}
+        if key not in {"waves", "disruptions_per_wave", "new_rush_orders", "repair_notary"}
     }
 
 

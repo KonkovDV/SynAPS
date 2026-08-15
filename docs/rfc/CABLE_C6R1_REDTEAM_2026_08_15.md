@@ -86,7 +86,7 @@ C5a, `allow_freeze_break` as the closer, PYTHONHASHSEED as a bitwise pin,
 
 ## Next honest step
 
-S4 (delta notary). Do not open C5a. Do not put weights into COVER.
+C-R2 docs. S4 delta notary is opt-in (`CABLE_S4_DELTA_NOTARY_REDTEAM_2026_08_15.md`); do not flip the default. Do not open C5a. Do not put weights into COVER.
 A gated IncrementalRepair determinism RFC is allowed only if a later
 kernel wave needs bitwise repair; it is not a C5a license.
 

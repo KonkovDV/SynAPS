@@ -64,5 +64,5 @@ Do not add: “UCB1 is now the ALNS default”, “MAB closed tardiness”, Hend
 
 ## Next honest step
 
-S4 delta notary (prove ≡ exhaustive before default).
+C-R2 docs. S4 is opt-in, not default. Do not open C5a.
 Do not change ALNS defaults.

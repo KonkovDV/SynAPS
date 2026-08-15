@@ -23,7 +23,7 @@ from synaps.solvers._dispatch_support import (
 )
 from synaps.solvers._time_windows import operation_earliest_offset_minutes
 from synaps.planning_policy import frozen_ids_for_repair
-from synaps.solvers.feasibility_checker import FeasibilityChecker, proven_hard_violations
+from synaps.solvers.delta_notary import notarize_repair
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -57,6 +57,71 @@ def _total_tardiness(
             0.0,
         )
         for order in problem.orders
+    )
+
+
+def _publish_repair_result(
+    *,
+    solver_name: str,
+    problem: ScheduleProblem,
+    all_assignments: list[Assignment],
+    remaining_repair: list[Operation],
+    neighbourhood: set[Any],
+    frozen: list[Assignment],
+    repaired: list[Assignment],
+    used_cpsat_fallback: bool,
+    cpsat_fallback_num_workers: int,
+    t0: float,
+    base_assignments: list[Assignment],
+    notary_mode: str,
+    freeze_horizon_end: Any,
+    total_setup: float,
+    total_material_loss: float,
+    makespan: float,
+    total_tardiness: float,
+) -> ScheduleResult:
+    """Final notary + ScheduleResult. Default notary is exhaustive (S4)."""
+
+    unrepaired_ids = [operation.id for operation in remaining_repair]
+    # Wave 11 / C2: never claim FEASIBLE while neighbourhood ops remain unrepaired.
+    # W16-P1: never claim FEASIBLE without a final notary pass — a timed-out
+    # CP-SAT fallback incumbent can overlap greedy-placed ops.
+    notary = notarize_repair(
+        problem,
+        all_assignments,
+        mode=notary_mode,
+        baseline=base_assignments,
+        freeze_horizon_end=freeze_horizon_end,
+    )
+    status = (
+        SolverStatus.FEASIBLE
+        if not unrepaired_ids and not notary.violations
+        else SolverStatus.INFEASIBLE
+    )
+    return ScheduleResult(
+        solver_name=solver_name,
+        status=status,
+        assignments=all_assignments,
+        objective=ObjectiveValues(
+            makespan_minutes=makespan,
+            total_setup_minutes=total_setup,
+            total_material_loss=total_material_loss,
+            total_tardiness_minutes=total_tardiness,
+        ),
+        duration_ms=int((time.monotonic() - t0) * 1000),
+        metadata={
+            "neighbourhood_size": len(neighbourhood),
+            "frozen_count": len(frozen),
+            "repaired_count": len(repaired),
+            "unrepaired_count": len(unrepaired_ids),
+            "cpsat_fallback_num_workers": cpsat_fallback_num_workers,
+            "used_cpsat_fallback": used_cpsat_fallback,
+            "notary_mode": notary.mode,
+            "notary_mismatch": notary.mismatch,
+            "notary_ms": notary.elapsed_ms,
+            "notary_delta_ops": notary.dirty_operations,
+            "notary_delta_machines": notary.dirty_machines,
+        },
     )
 
 
@@ -427,44 +492,22 @@ class IncrementalRepair(BaseSolver):
 
         # Per-order tardiness (F10-consistent with objective.evaluate)
         total_tardiness = _total_tardiness(problem, all_assignments, ops_by_id, horizon_start)
-
-        elapsed_ms = int((time.monotonic() - t0) * 1000)
-        unrepaired_ids = [operation.id for operation in remaining_repair]
-        # Wave 11 / C2: never claim FEASIBLE while neighbourhood ops remain unrepaired.
-        # W16-P1: never claim FEASIBLE without a final notary pass — a timed-out
-        # CP-SAT fallback incumbent can overlap greedy-placed ops.
-        final_violations = proven_hard_violations(
-            [
-                violation
-                for violation in FeasibilityChecker().check(
-                    problem, all_assignments, exhaustive=True
-                )
-                if violation.kind != "UNKNOWN_OPERATION"
-            ]
-        )
-        status = (
-            SolverStatus.FEASIBLE
-            if not unrepaired_ids and not final_violations
-            else SolverStatus.INFEASIBLE
-        )
-
-        return ScheduleResult(
+        return _publish_repair_result(
             solver_name=self.name,
-            status=status,
-            assignments=all_assignments,
-            objective=ObjectiveValues(
-                makespan_minutes=makespan,
-                total_setup_minutes=total_setup,
-                total_material_loss=total_material_loss,
-                total_tardiness_minutes=total_tardiness,
-            ),
-            duration_ms=elapsed_ms,
-            metadata={
-                "neighbourhood_size": len(neighbourhood),
-                "frozen_count": len(frozen),
-                "repaired_count": len(repaired),
-                "unrepaired_count": len(unrepaired_ids),
-                "cpsat_fallback_num_workers": cpsat_fallback_num_workers,
-                "used_cpsat_fallback": used_cpsat_fallback,
-            },
+            problem=problem,
+            all_assignments=all_assignments,
+            remaining_repair=remaining_repair,
+            neighbourhood=neighbourhood,
+            frozen=frozen,
+            repaired=repaired,
+            used_cpsat_fallback=used_cpsat_fallback,
+            cpsat_fallback_num_workers=cpsat_fallback_num_workers,
+            t0=t0,
+            base_assignments=base_assignments,
+            notary_mode=str(kwargs.get("notary", "exhaustive")),
+            freeze_horizon_end=kwargs.get("freeze_horizon_end"),
+            total_setup=total_setup,
+            total_material_loss=total_material_loss,
+            makespan=makespan,
+            total_tardiness=total_tardiness,
         )

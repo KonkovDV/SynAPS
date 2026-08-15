@@ -242,7 +242,7 @@ main cover loop. No DRL as the factory engine. No vendoring dmorill GPL-3.
 | **A1** | ATCS ready pop in native COVER | Unbounded ATCS falsified (2026-08-14). **Windowed (non-delay) ATCS FEASIBLE at 16/stage** (2026-08-15): tardiness 16 588 → 1 922. Floor window 240 collapsed 16-stage coverage. Continuation exhaust (not a general window) + hot-machine stay makes **1600@8 FEASIBLE**. Registry stays FIFO. | Yes — default on month CLI only |
 | **A2** | Family-dedicated `eligible_wc_ids` | Mix-sized + 1 flex: **FEASIBLE at 16/stage**, tardiness 3 670 > ATCS-only 1 922 (opt-in). At ≤8 default **on**: tardiness 87 134 vs 246 509 without family on the feasible cover. | No |
 | **A3** | Incremental aux calendar in IncrementalRepair | `MachineIndex.add` appends aux windows; `extend(frozen)` instead of per-row add. Wave repair 6.1–7.4 s vs cover 9.25 s (still ~1.4×, not <1 s). | Repair path |
-| **A4** | Delta notary | **Not shipped.** One drum pool ⇒ neighbourhood slice == full occupancy. Exhaustive remains default. | — |
+| **A4** | Delta notary | **Shipped opt-in 2026-08-15.** Full aux TimeTable always (one pool). `delta`/`shadow`; default **exhaustive**. 1600@8 shadow 8/8 match; not promoted. No segment tree. | Repair path |
 | **A5** | Colour-phase campaign | **Default on.** hash%3 at >8; 6-colour wheel at ≤8. Required for 8-stage cover (0.939 without wheel). `--colour-lines` opt-in (tardiness 154k at 16; coverage 0.854 at 8). | No |
 | **A6** | C5a hold-until-successor | Still gated. Algebra: leftover calendar was setup minutes; exhaust stay cut mean setup 98 → 49 min/op. Drum pool 48→96 did not move placement. | Gated C5 |
 

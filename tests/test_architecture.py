@@ -142,7 +142,7 @@ def test_no_dead_public_functions() -> None:
 _LONG_FUNCTION_RATCHET: dict[str, int] = {
     "solvers/rhc/_solver.py::solve": 2652,
     "solvers/alns_solver.py::_solve_core": 1558,
-    "solvers/feasibility_checker.py::check": 224,
+    "solvers/feasibility_checker.py::check": 217,
     "solvers/lbbd_hd_solver.py::solve": 433,
     "solvers/lbbd_solver.py::solve": 386,
     "solvers/cpsat_solver.py::solve": 453,
@@ -150,7 +150,7 @@ _LONG_FUNCTION_RATCHET: dict[str, int] = {
     "solvers/router.py::route_solver_config": 211,
     "solvers/lbbd_hd_solver.py::_solve_precedence_aware_master": 297,
     "solvers/alns_solver.py::_try_native_greedy_repair": 260,
-    "solvers/incremental_repair.py::_solve_core": 253,
+    "solvers/incremental_repair.py::_solve_core": 237,
     "solvers/cpsat_solver.py::_add_machine_order_and_adjacency": 241,
     "solvers/lbbd_solver.py::_solve_master": 176,
     "solvers/alns_solver.py::_try_native_initial_seed": 217,

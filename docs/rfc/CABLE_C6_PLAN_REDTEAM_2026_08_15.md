@@ -64,7 +64,7 @@ as cable, “5 seeds prove robustness”, “median tardiness is plant ATP”,
 
 ## Next honest step
 
-S4 delta notary. Do not open C5a:
+C-R2 docs. S4 is opt-in, not default. Do not open C5a:
 occupancy 21 ≪ pool 48. Do not quote ΔWIP −66 without the seed-2 +40.
 Do not quote C6c −478 tardiness without seeds 2–5 and the seed-3 scalar miss.
 Do not claim C6-R1 four-week freeze is stably FEASIBLE.

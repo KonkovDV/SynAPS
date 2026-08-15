@@ -32,7 +32,7 @@ month, INFIMUM parity, or “repair is 10× faster”.
 | **N-R4** | P1 | Wave 1 Hamming \(R=0\) | Freeze + greedy put the 20 ops back on the same `(wc, start)`. That is a no-move, not a proof of stability policy quality |
 | **N-R5** | P1 | `peak_wip_drums=265` vs pool 96 | Processing Cumulative frees the drum at op end. C5a still gated. Same as C-R2 |
 | **N-R10** | P2 | Freeze *waves* still seed=1 @16 only | **C6-R1 run** at 8-stage seeds 1..2. Plumbing shipped; stable all-green **not** claimed |
-| **N-R7** | P2 | IncrementalRepair re-notaries all 20k ops | Honest, but it dominates repair wall time. Delta notary is A4, not shipped |
+| **N-R7** | P2 | IncrementalRepair re-notaries all 20k ops | **S4 shipped opt-in.** On this machine notary is **not** the repair wall (shadow 0.37–0.48 s of 2.2–2.5 s). Default still exhaustive |
 | **N-R8** | P2 | `temporal_stabilization_converged` is false on the GREED CI path | Metadata key is RHC-only. Tiny `--orders 6` uses `GREED` |
 | **N-R9** | P2 | Colour-dedicated lines are not the 8-machine closer | Encoded as opt-in `--colour-lines`. At 8/stage they drop coverage to 0.854; the closer is wheel + exhaust stay, not cells |
 
@@ -55,6 +55,6 @@ SynAPS 499770/145s as cable evidence, N-1, SAIDI, SOTA, “we replaced INFIMUM�
 
 ## Next honest step
 
-S4 delta notary. Occupancy 21 ≪ pool 48.
+C-R2 docs (span vs occupancy vs Cumulative hold). Occupancy 21 ≪ pool 48.
 Do not open C5a. Do not claim C6-R1 four-week freeze is stably FEASIBLE.
-C6-R1 residual: `CABLE_C6R1_REDTEAM_2026_08_15.md`.
+Do not flip the notary default. S4: `CABLE_S4_DELTA_NOTARY_REDTEAM_2026_08_15.md`.

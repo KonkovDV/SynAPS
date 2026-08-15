@@ -60,12 +60,12 @@ tardiness 87 134) with family + wheel + exhaust stay.
 
 | ID | Status |
 |----|--------|
-| S4 delta notary | **not shipped** — one drum pool; exhaustive remains default |
+| S4 delta notary | **opt-in 2026-08-15** — full aux TimeTable; default exhaustive; 1600@8 shadow 8/8 match; not promoted |
 | S6 C5a | **gated** — C6b occupancy 21 ≪ pool 48 ≪ span 155–222. Hold would stress the pool. |
 | N-R1 1600@8 | **closed COVER-feasible** (2026-08-15). Family flex + 6-colour wheel + continuation exhaust (ready-queue + hot-machine stay): 20 316/20 316, 49.1 min/op (budget 83), tardiness 87 134. Colour cells dropped coverage to 0.854. Extra drums 48→96 identical. C5a still gated. |
 | N-R6 seeds 1..5 | **C6a closed cover+notary** (2026-08-15). Tardiness 48 269–164 355 (median 87 134). Freeze waves still seed=1. No CI. |
 | N-R4 Hamming 0 | still a no-move explanation, not freeze quality |
-| N-R7 | full notary on repair still dominates if cache miss |
+| N-R7 | **S4**: notary is not the repair wall on this machine (shadow 0.37–0.48 s of 2.2–2.5 s). Default exhaustive |
 | K1 full pytest | **1120 passed, 2 skipped, 1 xfailed** in 2096 s (2026-08-14, this machine). Sentinel `test_guard_s3_bhk_bound_subset_monotone` remains xfail. |
 | K3 A15-P2 | **K3 closed 2026-08-15**: `wall_clock_path_dependent` matches wall cut; no CI error. `K3_WALL_STAMP_REDTEAM_2026_08_15.md` |
 | K2 MAB | **K2 closed 2026-08-15**: UCB1 stays opt-in; seeded greedy determinism + registry roulette ratchet. `K2_ALNS_MAB_REDTEAM_2026_08_15.md` |

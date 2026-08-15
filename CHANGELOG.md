@@ -30,8 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   coverage; extra drums (48→96) did not move 8-stage placement; C5a
   stays gated (hold-until-successor does not add machine-minutes).
   `add_rush_orders`, `pin_issued_plan`, IncrementalRepair aux-window
-  append as before. Delta notary is **not** shipped. Not Moskabelmet
-  MES, not INFIMUM, not a 500k cable proof.
+  append as before. Not Moskabelmet MES, not INFIMUM, not a 500k
+  cable proof.
 
 - **Nervous-month cable benchmark:** `python -m synaps cable-nervous-month`.
   Synthetic 30-day high-mix MTO (1 600 parents, 36 SKUs, 15% rush, 6 stages).
@@ -76,6 +76,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pre-search ERROR. Not a CI error. Not bitwise identity. Repair still
   clamps to leftover wall on a max-iterations stop. Evidence:
   `docs/rfc/K3_WALL_STAMP_REDTEAM_2026_08_15.md`.
+
+- **Delta notary (S4, opt-in):** IncrementalRepair accepts
+  `notary="exhaustive"|"delta"|"shadow"` (CLI `--repair-notary`).
+  Default remains **exhaustive**. Aux Cumulative is always a full
+  TimeTable sweep (A4: one drum pool; neighbourhood aux is unsound).
+  Serial unary may skip unchanged machines; parallel machines never
+  skip. `shadow` fail-closes: the FEASIBLE claim uses exhaustive.
+  Lemma I (inherited frozen-machine overlap) is a CI attack: delta
+  misses, shadow mismatches. Local 1600@8 seeds 1–2, `waves=4`,
+  `--repair-notary shadow`: 8/8 `repair_notary_mismatch=False`,
+  independent wave notary 0; dirty 36–53 ops / 36–43 of 48 WCs;
+  shadow notary 0.37–0.48 s of a 2.2–2.5 s repair (placement
+  dominates; N-R7 “notary is the wall” falsified here). **Not** the
+  new default. No segment tree. Evidence:
+  `docs/rfc/CABLE_S4_DELTA_NOTARY_REDTEAM_2026_08_15.md`.
 
 - **Cable domain (encode-first, Moskabelmet-shaped):** `docs/domains/cable.md`
   is domain 9. Adapter writes metres→`base_duration_min`, pre-splits reels,

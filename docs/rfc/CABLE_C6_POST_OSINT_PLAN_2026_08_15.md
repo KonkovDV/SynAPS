@@ -165,9 +165,10 @@ python -m synaps cable-nervous-month --weighted-residual --orders 1600 --machine
 
 ## Next session start here
 
-1. **S4** delta notary (prove ≡ exhaustive before default).
+1. **C-R2** documentation accuracy (span vs occupancy vs Cumulative hold).
 2. Stop. Do not open C5a: occupancy 21 ≪ pool 48.
 3. Do not put `CABLE_PVC_WEIGHTS` into COVER. Do not ingest 1С.
 4. Do not claim C6-R1 freeze waves are stably FEASIBLE. Do not flip ALNS default to UCB1.
+5. Do not flip the S4 notary default (`CABLE_S4_DELTA_NOTARY_REDTEAM_2026_08_15.md`).
 
 C6a, C6b, C6c, and C6-R1 plumbing are done. C6d stays gated.

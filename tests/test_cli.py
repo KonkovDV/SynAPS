@@ -147,6 +147,8 @@ def test_cli_cable_nervous_month_tiny(capsys: pytest.CaptureFixture[str]) -> Non
             "2",
             "--drum-pool",
             "24",
+            "--repair-notary",
+            "shadow",
         ]
     )
     payload = json.loads(capsys.readouterr().out)
@@ -159,6 +161,8 @@ def test_cli_cable_nervous_month_tiny(capsys: pytest.CaptureFixture[str]) -> Non
     assert payload["waves"]
     assert payload["waves"][0]["notary_hard_violations"] == 0
     assert payload["waves"][0]["notary_kinds"] == []
+    assert payload["waves"][0]["repair_notary_mode"] == "shadow"
+    assert payload["waves"][0]["repair_notary_mismatch"] is False
     assert payload["new_rush"]["kind"] == "new_parent_insert"
 
 

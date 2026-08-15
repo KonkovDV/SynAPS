@@ -227,6 +227,11 @@ def _wave_meta(repaired: Any) -> dict[str, Any]:
         "frozen_count": int(meta.get("frozen_count", 0)),
         "unrepaired_count": int(meta.get("unrepaired_count", 0)),
         "used_cpsat_fallback": bool(meta.get("used_cpsat_fallback", False)),
+        "repair_notary_mode": str(meta.get("notary_mode", "exhaustive")),
+        "repair_notary_mismatch": bool(meta.get("notary_mismatch", False)),
+        "repair_notary_ms": meta.get("notary_ms"),
+        "notary_delta_ops": meta.get("notary_delta_ops"),
+        "notary_delta_machines": meta.get("notary_delta_machines"),
     }
 
 
@@ -253,6 +258,7 @@ def _run_wave(
     cover_ready_rule: str,
     cover_atcs_floor_window: float,
     cover_atcs_exhaust_window: float,
+    repair_notary: str = "exhaustive",
 ) -> tuple[Any, dict[str, Any]]:
     freeze_end = problem.planning_horizon_start + timedelta(days=3 + wave_index * 7)
     targets = _select_rush_targets(problem, assignments, freeze_end, disruptions)
@@ -271,6 +277,7 @@ def _run_wave(
         freeze_horizon_end=freeze_end,
         allow_freeze_break=False,
         regime=SolveRegime.RUSH_ORDER,
+        notary=repair_notary,
     )
     repair_s = time.perf_counter() - started
     hard = _notary_hits(problem, repaired.assignments)
@@ -313,6 +320,7 @@ def _new_rush_wave(
     cover_ready_rule: str,
     cover_atcs_floor_window: float,
     cover_atcs_exhaust_window: float,
+    repair_notary: str = "exhaustive",
 ) -> dict[str, Any]:
     """Insert new parent reels after cover; repair vs full re-solve on the mutant."""
 
@@ -337,6 +345,7 @@ def _new_rush_wave(
         freeze_horizon_end=release,
         allow_freeze_break=False,
         regime=SolveRegime.RUSH_ORDER,
+        notary=repair_notary,
     )
     repair_s = time.perf_counter() - started
     hard = _notary_hits(mutated, repaired.assignments)
@@ -373,6 +382,7 @@ def _run_reshuffle_waves(
     cover_ready_rule: str,
     cover_atcs_floor_window: float,
     cover_atcs_exhaust_window: float,
+    repair_notary: str = "exhaustive",
 ) -> list[dict[str, Any]]:
     wave_rows: list[dict[str, Any]] = []
     current = list(assignments)
@@ -387,6 +397,7 @@ def _run_reshuffle_waves(
             cover_ready_rule=cover_ready_rule,
             cover_atcs_floor_window=cover_atcs_floor_window,
             cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+            repair_notary=repair_notary,
         )
         wave_rows.append(row)
         compared = compared or not row.get("skipped", False)
@@ -418,6 +429,7 @@ def _post_cover_waves(
     cover_atcs_exhaust_window: float,
     waves: int,
     disruptions_per_wave: int,
+    repair_notary: str = "exhaustive",
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     if not feasible:
         _log("skipping waves: cover is not FEASIBLE")
@@ -434,6 +446,7 @@ def _post_cover_waves(
             cover_ready_rule=cover_ready_rule,
             cover_atcs_floor_window=cover_atcs_floor_window,
             cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+            repair_notary=repair_notary,
         )
     return _run_reshuffle_waves(
         problem,
@@ -443,6 +456,7 @@ def _post_cover_waves(
         cover_ready_rule=cover_ready_rule,
         cover_atcs_floor_window=cover_atcs_floor_window,
         cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+        repair_notary=repair_notary,
     ), new_rush
 
 
@@ -524,6 +538,7 @@ def run_nervous_month(
     cover_atcs_floor_window: float = _NERVOUS_ATCS_FLOOR_WINDOW,
     cover_atcs_exhaust_window: float | None = None,
     new_rush_orders: int = 2,
+    repair_notary: str = "exhaustive",
 ) -> dict[str, Any]:
     """Generate, cover-solve, then weekly freeze+rush repair. Returns JSON report."""
 
@@ -552,6 +567,7 @@ def run_nervous_month(
         cover_atcs_exhaust_window=shop["exhaust"],
         waves=waves,
         disruptions_per_wave=disruptions_per_wave,
+        repair_notary=repair_notary,
     )
     return _month_report(
         shop["problem"], shop["result"], solver_name=shop["solver_name"],

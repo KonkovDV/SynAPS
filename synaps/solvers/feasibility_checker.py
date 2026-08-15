@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -124,6 +125,31 @@ class FeasibilityViolation:
 
     def __repr__(self) -> str:
         return f"Violation({self.kind}: {self.message})"
+
+
+@dataclass(frozen=True)
+class NotaryScope:
+    """Delta-notary filter. ``None`` fields mean the full family.
+
+    Cardinality, referential integrity, and auxiliary TimeTable sweeps are
+    never scoped. An empty frozenset skips that family. Parallel machines
+    are never skipped even when absent from ``machine_ids``.
+    """
+
+    operation_ids: frozenset[Any] | None = None
+    machine_ids: frozenset[Any] | None = None
+
+
+def _op_in_scope(scope: NotaryScope | None, operation_id: Any) -> bool:
+    if scope is None or scope.operation_ids is None:
+        return True
+    return operation_id in scope.operation_ids
+
+
+def _skip_serial_unary(scope: NotaryScope | None, wc_id: Any, max_parallel: int) -> bool:
+    if scope is None or scope.machine_ids is None or max_parallel > 1:
+        return False
+    return wc_id not in scope.machine_ids
 
 
 def hard_violations(
@@ -681,6 +707,72 @@ class FeasibilityChecker:
             previous_assignment = assignment
         return False
 
+    @staticmethod
+    def _fill_serial_setup_windows_from_stamps(
+        machine_assignments: list[Assignment],
+        setup_window_start_by_op: dict[Any, Any],
+    ) -> None:
+        """Lemma A: skipped serial sequences still need F1 occupancy starts."""
+
+        ordered = sorted(machine_assignments, key=lambda item: item.start_time)
+        for index, assignment in enumerate(ordered):
+            if index == 0:
+                setup_window_start_by_op[assignment.operation_id] = assignment.start_time
+                continue
+            setup_window_start_by_op[assignment.operation_id] = (
+                assignment.start_time - timedelta(minutes=assignment.setup_minutes)
+            )
+
+    @staticmethod
+    def _check_aux_pools(
+        *,
+        assignments: list[Assignment],
+        resources_by_id: dict[Any, Any],
+        requirements_by_op: dict[Any, list[Any]],
+        setup_window_start_by_op: dict[Any, Any],
+        violations: list[FeasibilityViolation],
+        exhaustive: bool,
+    ) -> None:
+        """Full TimeTable sweep. Never scoped (accel RFC A4 / Lemma A)."""
+
+        for resource_id, resource in resources_by_id.items():
+            resource_events: list[tuple[Any, int, Any]] = []
+            for assignment in assignments:
+                for requirement in requirements_by_op.get(assignment.operation_id, []):
+                    if requirement.aux_resource_id != resource_id:
+                        continue
+                    resource_events.append(
+                        (
+                            setup_window_start_by_op.get(
+                                assignment.operation_id, assignment.start_time
+                            ),
+                            requirement.quantity_needed,
+                            assignment.operation_id,
+                        )
+                    )
+                    resource_events.append(
+                        (assignment.end_time, -requirement.quantity_needed, assignment.operation_id)
+                    )
+            in_use = 0
+            for timestamp, delta, operation_id in sorted(
+                resource_events, key=lambda item: (item[0], 0 if item[1] < 0 else 1)
+            ):
+                in_use += delta
+                if in_use > resource.pool_size:
+                    violations.append(
+                        FeasibilityViolation(
+                            "AUX_RESOURCE_CAPACITY_VIOLATION",
+                            (
+                                f"Auxiliary resource {resource.code} exceeds pool size "
+                                f"{resource.pool_size} "
+                                f"at {timestamp}: usage is {in_use}."
+                            ),
+                            operation_id=operation_id,
+                        )
+                    )
+                    if not exhaustive:
+                        break
+
     def check(
         self,
         problem: ScheduleProblem,
@@ -689,6 +781,7 @@ class FeasibilityChecker:
         exhaustive: bool = False,
         strict_setup_matrix: bool = False,
         strict_grain: bool = False,
+        scope: NotaryScope | None = None,
     ) -> list[FeasibilityViolation]:
         violations: list[FeasibilityViolation] = []
         ops_by_id = {op.id: op for op in problem.operations}
@@ -732,6 +825,8 @@ class FeasibilityChecker:
 
         # 2. Eligible machine
         for a in assignments:
+            if not _op_in_scope(scope, a.operation_id):
+                continue
             assigned_op = ops_by_id.get(a.operation_id)
             if (
                 assigned_op
@@ -750,6 +845,16 @@ class FeasibilityChecker:
 
         # 3. Precedence
         for op in problem.operations:
+            if (
+                scope is not None
+                and scope.operation_ids is not None
+                and op.id not in scope.operation_ids
+                and (
+                    op.predecessor_op_id is None
+                    or op.predecessor_op_id not in scope.operation_ids
+                )
+            ):
+                continue
             if op.predecessor_op_id and op.id in assigned and op.predecessor_op_id in assigned:
                 pred_end = assigned[op.predecessor_op_id].end_time
                 cur_start = assigned[op.id].start_time
@@ -777,6 +882,11 @@ class FeasibilityChecker:
         for wc_id, machine_assignments in by_machine.items():
             work_center = work_centers_by_id.get(wc_id)
             max_parallel = work_center.max_parallel if work_center is not None else 1
+            if _skip_serial_unary(scope, wc_id, max_parallel):
+                self._fill_serial_setup_windows_from_stamps(
+                    machine_assignments, setup_window_start_by_op
+                )
+                continue
 
             if max_parallel > 1:
                 lane_sequences, aborted = self._build_lane_sequences(
@@ -820,48 +930,20 @@ class FeasibilityChecker:
                     setup_window_start_by_op=setup_window_start_by_op,
                 )
 
-        # 5. Auxiliary resource pools
-        for resource_id, resource in resources_by_id.items():
-            resource_events: list[tuple[Any, int, Any]] = []
-            for assignment in assignments:
-                for requirement in requirements_by_op.get(assignment.operation_id, []):
-                    if requirement.aux_resource_id != resource_id:
-                        continue
-                    resource_events.append(
-                        (
-                            setup_window_start_by_op.get(
-                                assignment.operation_id, assignment.start_time
-                            ),
-                            requirement.quantity_needed,
-                            assignment.operation_id,
-                        )
-                    )
-                    resource_events.append(
-                        (assignment.end_time, -requirement.quantity_needed, assignment.operation_id)
-                    )
-
-            in_use = 0
-            for timestamp, delta, operation_id in sorted(
-                resource_events, key=lambda item: (item[0], 0 if item[1] < 0 else 1)
-            ):
-                in_use += delta
-                if in_use > resource.pool_size:
-                    violations.append(
-                        FeasibilityViolation(
-                            "AUX_RESOURCE_CAPACITY_VIOLATION",
-                            (
-                                f"Auxiliary resource {resource.code} exceeds pool size "
-                                f"{resource.pool_size} "
-                                f"at {timestamp}: usage is {in_use}."
-                            ),
-                            operation_id=operation_id,
-                        )
-                    )
-                    if not exhaustive:
-                        break
+        # 5. Auxiliary resource pools — full TimeTable, never scoped (Lemma A).
+        self._check_aux_pools(
+            assignments=assignments,
+            resources_by_id=resources_by_id,
+            requirements_by_op=requirements_by_op,
+            setup_window_start_by_op=setup_window_start_by_op,
+            violations=violations,
+            exhaustive=exhaustive,
+        )
 
         # 6. Horizon bounds
         for a in assignments:
+            if not _op_in_scope(scope, a.operation_id):
+                continue
             if a.start_time < problem.planning_horizon_start:
                 violations.append(
                     FeasibilityViolation(
@@ -885,12 +967,14 @@ class FeasibilityChecker:
                     )
                 )
 
+        scoped_ops = None if scope is None else scope.operation_ids
         self._check_release_and_op_windows(
             assignments=assignments,
             ops_by_id=ops_by_id,
             orders_by_id=orders_by_id,
             violations=violations,
             exhaustive=exhaustive,
+            operation_ids=scoped_ops,
         )
 
         # 8. Operation durations (P0-3; hardened by F2, audit v4 — see the
@@ -902,6 +986,7 @@ class FeasibilityChecker:
             violations=violations,
             exhaustive=exhaustive,
             strict_grain=strict_grain,
+            operation_ids=scoped_ops,
         )
 
         return violations
@@ -914,10 +999,13 @@ class FeasibilityChecker:
         orders_by_id: dict[Any, Any],
         violations: list[FeasibilityViolation],
         exhaustive: bool,
+        operation_ids: frozenset[Any] | None = None,
     ) -> None:
         """Order release_date plus optional per-op earliest_start / latest_finish."""
 
         for assignment in assignments:
+            if operation_ids is not None and assignment.operation_id not in operation_ids:
+                continue
             checked_op = ops_by_id.get(assignment.operation_id)
             if checked_op is None:
                 continue
@@ -1006,6 +1094,7 @@ class FeasibilityChecker:
         violations: list[FeasibilityViolation],
         exhaustive: bool,
         strict_grain: bool,
+        operation_ids: frozenset[Any] | None = None,
     ) -> None:
         """Duration adequacy check (P0-3; hardened by F2, audit v4).
 
@@ -1031,6 +1120,8 @@ class FeasibilityChecker:
         physical sufficiency is the checker's).
         """
         for a in assignments:
+            if operation_ids is not None and a.operation_id not in operation_ids:
+                continue
             checked_op = ops_by_id.get(a.operation_id)
             if checked_op is None:
                 continue

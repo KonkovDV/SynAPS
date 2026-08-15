@@ -54,5 +54,5 @@ Do not add: bitwise-identical ALNS/RHC under a wall timeout, OPTIMAL, SOTA,
 
 ## Next honest step
 
-S4 delta notary (prove ≡ exhaustive before default). Do not open C5a.
+C-R2 docs. S4 is opt-in, not default. Do not open C5a.
 Do not put weights into COVER. Do not flip ALNS to UCB1.

@@ -25,6 +25,7 @@
 | C6c weighted ALNS residual (search, not COVER) | 1600@8 seeds 1..5; PVC tard −478..−25; scalar 4/5 |
 | K2 MAB + native rank leftovers (P2) | UCB1 opt-in determinism + pulls; ALNS-300 stays roulette; ceil snap already tested; `p_{o,m}` ABI still deferred |
 | K3 wall-clock stamp | boolean matches wall cut; not a CI error; not bitwise identity |
+| S4 delta notary (opt-in) | `exhaustive`/`delta`/`shadow`; default exhaustive; 1600@8 shadow 8/8 match; no default flip |
 
 ## 1. Priority stack (do in this order)
 
@@ -62,15 +63,19 @@ starts with `wall_clock`), including ALNS pre-search ERROR. Informational:
 not a CI error. Max-iterations runs stamp False. Residual: in-flight repair
 still clamps to leftover wall. RT: `K3_WALL_STAMP_REDTEAM_2026_08_15.md`.
 
-### Wave S4 — Delta notary (P1, real engineering) — **next**
+### Wave S4 — Delta notary (P1, real engineering) — **DONE 2026-08-15**
 
-Repair re-notaries all ~20k ops; dominates repair wall. Design: per-resource
-occupancy segment tree keyed by drum pool; only re-check ops whose
-`(wc, interval, aux)` neighbourhood changed plus frozen-window boundary.
-Gate: prove delta ≡ exhaustive on the nervous month (both seeds) before
-making it default. Exhaustive stays the default until then.
+Opt-in `notary="exhaustive"|"delta"|"shadow"` on IncrementalRepair
+(`--repair-notary`). Default **exhaustive**. No segment tree: one-shot
+aux is already a TimeTable sweep (A4). Unary skip is serial-only;
+parallel never skipped. `shadow` fail-closes onto exhaustive. Lemma I
+(inherited frozen overlap) is a CI attack. Local 1600@8 seeds 1–2,
+`waves=4`, shadow: 8/8 mismatch False, wave notary 0. Dirty 36–53 ops /
+36–43 of 48 WCs — freeze-boundary inflates C even when Hamming is 0.
+Shadow notary 0.37–0.48 s; repair 2.2–2.5 s (placement dominates).
+**Not promoted to default.** RT: `CABLE_S4_DELTA_NOTARY_REDTEAM_2026_08_15.md`.
 
-### Wave C-R2 — Documentation accuracy only
+### Wave C-R2 — Documentation accuracy only — **next**
 
 `peak_wip_drums` (span) vs `peak_processing_drums` (occupancy) vs Cumulative
 aux (setup-hold): keep all three visible in `cable_kpis`; update
@@ -138,10 +143,7 @@ would stress the pool).
 
 ## 6. Immediate next command for the executor
 
-```
-python -m synaps cable-nervous-month --orders 1600 --machines-per-stage 8 \
-  --drum-pool 48 --waves 4 --disruptions 20 --new-rush 0 --seeds 1,2
-```
-
-S4 delta notary. Do not open C5a. Do not put weights into COVER.
+C-R2 documentation accuracy (`peak_wip_drums` vs occupancy vs Cumulative
+hold). No kernel. Do not open C5a. Do not put weights into COVER.
 Do not claim C6-R1 waves are stably FEASIBLE. Do not flip ALNS to UCB1.
+Do not flip the notary default.

@@ -583,6 +583,8 @@ def test_nervous_sku_catalog_and_tiny_month_feasible() -> None:
     assert report["waves"][0]["notary_kinds"] == []
     assert report["waves"][0]["notary_sample"] is None
     assert report["waves"][0]["unrepaired_count"] == 0
+    assert report["waves"][0]["repair_notary_mode"] == "exhaustive"
+    assert report["waves"][0]["repair_notary_mismatch"] is False
     assert report["new_rush"]["kind"] == "new_parent_insert"
     assert report["new_rush"]["n_new_parents"] == 2
 
