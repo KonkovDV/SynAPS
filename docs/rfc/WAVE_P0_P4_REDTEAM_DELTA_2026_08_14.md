@@ -67,7 +67,7 @@ tardiness 87 134) with family + wheel + exhaust stay.
 | N-R4 Hamming 0 | still a no-move explanation, not freeze quality |
 | N-R7 | full notary on repair still dominates if cache miss |
 | K1 full pytest | **1120 passed, 2 skipped, 1 xfailed** in 2096 s (2026-08-14, this machine). Sentinel `test_guard_s3_bhk_bound_subset_monotone` remains xfail. |
-| K3 A15-P2 | keep `wall_clock_path_dependent` stamp; **no** strict CI error |
+| K3 A15-P2 | **K3 closed 2026-08-15**: `wall_clock_path_dependent` matches wall cut; no CI error. `K3_WALL_STAMP_REDTEAM_2026_08_15.md` |
 | K2 MAB | **K2 closed 2026-08-15**: UCB1 stays opt-in; seeded greedy determinism + registry roulette ratchet. `K2_ALNS_MAB_REDTEAM_2026_08_15.md` |
 | K2 ALNS native rank | snaps `base/speed` to ceil grain after native (Wave 15 F2) — tests in `test_alns_native_grain.py` |
 | K2 full SDST native pack | not `p_{o,m}` ABI; leftover, not this wave |

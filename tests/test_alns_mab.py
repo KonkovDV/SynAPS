@@ -149,3 +149,4 @@ def test_mab_alns_seeded_determinism() -> None:
         "iterations_completed"
     )
     assert first.metadata.get("search_stop_reason") == "max_iterations"
+    assert first.metadata.get("wall_clock_path_dependent") is False

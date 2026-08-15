@@ -71,6 +71,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stay roulette. Default unchanged. Not Hendel α-UCB. Native `p_{o,m}` ABI
   still deferred. Evidence: `docs/rfc/K2_ALNS_MAB_REDTEAM_2026_08_15.md`.
 
+- **ALNS/RHC wall stamp (K3):** `wall_clock_path_dependent` now matches a
+  wall cut (`search_stop_reason` starts with `wall_clock`), including
+  pre-search ERROR. Not a CI error. Not bitwise identity. Repair still
+  clamps to leftover wall on a max-iterations stop. Evidence:
+  `docs/rfc/K3_WALL_STAMP_REDTEAM_2026_08_15.md`.
+
 - **Cable domain (encode-first, Moskabelmet-shaped):** `docs/domains/cable.md`
   is domain 9. Adapter writes metres→`base_duration_min`, pre-splits reels,
   parametric colour/section/compound SDST, drum aux, campaign

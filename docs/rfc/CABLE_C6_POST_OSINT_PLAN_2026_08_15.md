@@ -165,7 +165,7 @@ python -m synaps cable-nervous-month --weighted-residual --orders 1600 --machine
 
 ## Next session start here
 
-1. **K3** wall-stamp honesty (`search_stop_reason` vs hardcoded `wall_clock_path_dependent`).
+1. **S4** delta notary (prove ≡ exhaustive before default).
 2. Stop. Do not open C5a: occupancy 21 ≪ pool 48.
 3. Do not put `CABLE_PVC_WEIGHTS` into COVER. Do not ingest 1С.
 4. Do not claim C6-R1 freeze waves are stably FEASIBLE. Do not flip ALNS default to UCB1.

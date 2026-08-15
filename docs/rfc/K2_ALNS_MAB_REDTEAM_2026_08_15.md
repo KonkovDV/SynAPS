@@ -52,7 +52,7 @@ Wave 15 F2). `stress_200` 2–3 s is **not** claimed.
 |----|-----|---------|
 | **K2-R1** | P1 | Design D5 quality protocol unrun. Opt-in ≠ better |
 | **K2-R2** | P2 | Default ALNS still CP-SAT-repairs; MAB×CP-SAT not in the seed test |
-| **K3** | P2 | `wall_clock_path_dependent` is hardcoded `True`; `search_stop_reason` is the real stop |
+| **K3** | P2 | **closed**: boolean matches wall cut; repair clamp residual remains |
 | **K2 ABI** | P2 | Native pack is still not a duration matrix ABI |
 | **P4-M1** | P3 | `stress_200` ~8.1 s claim unchanged |
 
@@ -64,6 +64,5 @@ Do not add: “UCB1 is now the ALNS default”, “MAB closed tardiness”, Hend
 
 ## Next honest step
 
-K3: make `wall_clock_path_dependent` match a real wall cut
-(`search_stop_reason`), or test that field. Do not turn it into a CI error.
+S4 delta notary (prove ≡ exhaustive before default).
 Do not change ALNS defaults.

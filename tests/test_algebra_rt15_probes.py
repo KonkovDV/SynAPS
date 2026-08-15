@@ -233,13 +233,16 @@ def test_native_empty_eligible_does_not_pin_machine_zero() -> None:
 
 
 def test_alns_and_rhc_publish_wall_clock_path_dependence() -> None:
-    """A15-P2: do not claim bitwise-identical ALNS/RHC under a wall timeout."""
+    """A15-P2 / K3: stamp matches the stop reason. Not a bitwise certificate."""
     problem = make_simple_problem(n_orders=1, ops_per_order=1)
     alns = AlnsSolver().solve(
         problem, max_iterations=1, time_limit_s=30, random_seed=1
     )
-    assert alns.metadata["wall_clock_path_dependent"] is True
-    assert alns.metadata["search_stop_reason"] in {
+    alns_reason = str(alns.metadata["search_stop_reason"])
+    assert alns.metadata["wall_clock_path_dependent"] is alns_reason.startswith(
+        "wall_clock"
+    )
+    assert alns_reason in {
         "max_iterations",
         "wall_clock",
         "wall_clock_before_search",
@@ -250,8 +253,9 @@ def test_alns_and_rhc_publish_wall_clock_path_dependence() -> None:
     rhc = RhcSolver().solve(
         problem, time_limit_s=30, random_seed=1, inner_solver="greedy"
     )
-    assert rhc.metadata["wall_clock_path_dependent"] is True
-    assert rhc.metadata["search_stop_reason"] in {"wall_clock", "completed"}
+    rhc_reason = str(rhc.metadata["search_stop_reason"])
+    assert rhc.metadata["wall_clock_path_dependent"] is (rhc_reason == "wall_clock")
+    assert rhc_reason in {"wall_clock", "completed"}
 
 
 def test_alns_final_claim_respects_frozen_overlap() -> None:

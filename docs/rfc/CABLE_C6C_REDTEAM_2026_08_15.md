@@ -84,7 +84,7 @@ C5a, ATCS floor window, 50k/500k FIFO change.
 
 ## Next honest step
 
-K3 wall-stamp honesty. Do not open C5a
+S4 delta notary. Do not open C5a
 (occupancy 21 ≪ pool 48). Do not put `CABLE_PVC_WEIGHTS` into COVER.
 Do not claim C6-R1 freeze waves are stably FEASIBLE.
 

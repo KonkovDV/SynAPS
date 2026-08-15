@@ -24,6 +24,7 @@
 | Freeze vs insert pair + occupancy vs span | C6b (occupancy 21 ≪ pool 48) |
 | C6c weighted ALNS residual (search, not COVER) | 1600@8 seeds 1..5; PVC tard −478..−25; scalar 4/5 |
 | K2 MAB + native rank leftovers (P2) | UCB1 opt-in determinism + pulls; ALNS-300 stays roulette; ceil snap already tested; `p_{o,m}` ABI still deferred |
+| K3 wall-clock stamp | boolean matches wall cut; not a CI error; not bitwise identity |
 
 ## 1. Priority stack (do in this order)
 
@@ -54,16 +55,14 @@ already in `tests/test_alns_native_grain.py`. Full SDST `p_{o,m}` ABI stays
 deferred. `stress_200` 2–3 s not claimed.
 RT: `K2_ALNS_MAB_REDTEAM_2026_08_15.md`.
 
-### Wave K3 — Determinism stamps (P2) — **next**
+### Wave K3 — Determinism stamps (P2) — **DONE 2026-08-15**
 
-`wall_clock_path_dependent` is published and currently **hardcoded True**
-(K2 fixture: `search_stop_reason=max_iterations` still stamped dependent).
-Keep it informational. Do **not** add a strict CI error. Make the boolean
-match a wall cut (`search_stop_reason` starts with `wall_clock`) **or**
-add a regression on `search_stop_reason` when a wall timeout cuts a strict
-run. ALNS/RHC never claim bitwise identity under wall timeouts.
+`wall_clock_path_dependent` now matches a wall cut (`search_stop_reason`
+starts with `wall_clock`), including ALNS pre-search ERROR. Informational:
+not a CI error. Max-iterations runs stamp False. Residual: in-flight repair
+still clamps to leftover wall. RT: `K3_WALL_STAMP_REDTEAM_2026_08_15.md`.
 
-### Wave S4 — Delta notary (P1, real engineering)
+### Wave S4 — Delta notary (P1, real engineering) — **next**
 
 Repair re-notaries all ~20k ops; dominates repair wall. Design: per-resource
 occupancy segment tree keyed by drum pool; only re-check ops whose
@@ -144,5 +143,5 @@ python -m synaps cable-nervous-month --orders 1600 --machines-per-stage 8 \
   --drum-pool 48 --waves 4 --disruptions 20 --new-rush 0 --seeds 1,2
 ```
 
-K3 wall-stamp honesty. Do not open C5a. Do not put weights into COVER.
+S4 delta notary. Do not open C5a. Do not put weights into COVER.
 Do not claim C6-R1 waves are stably FEASIBLE. Do not flip ALNS to UCB1.

@@ -1634,7 +1634,13 @@ def _alns_wall_clock_honesty_meta(
     elapsed_s: float,
     time_limit_s: float,
 ) -> dict[str, Any]:
-    """ALNS search path depends on remaining wall budget (repair clamp, SA stop)."""
+    """Stamp how the ALNS loop stopped. Not a bitwise-identity certificate.
+
+    ``wall_clock_path_dependent`` is True only when the stop was a wall cut
+    (including exhaustion before search). Repair still clamps to remaining
+    wall budget on a ``max_iterations`` stop — that residual is not this flag.
+    ``determinism_violated`` stays informational: never a CI error.
+    """
     if time_limit_exhausted_before_search:
         stop = "wall_clock_before_search"
     elif elapsed_s >= time_limit_s and iterations_completed < max_iterations:
@@ -1643,10 +1649,11 @@ def _alns_wall_clock_honesty_meta(
         stop = "max_iterations"
     else:
         stop = "completed"
+    wall = stop.startswith("wall_clock")
     return {
         "determinism": determinism,
-        "determinism_violated": determinism == "strict" and stop.startswith("wall_clock"),
-        "wall_clock_path_dependent": True,
+        "determinism_violated": determinism == "strict" and wall,
+        "wall_clock_path_dependent": wall,
         "search_stop_reason": stop,
     }
 
@@ -3299,11 +3306,16 @@ class AlnsSolver(BaseSolver):
             reason_key: str | None = None,
             time_limit_exhausted_before_search: bool | None = None,
         ) -> ScheduleResult:
-            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            elapsed_s = time.monotonic() - t0
+            exhausted = (
+                bool(time_limit_exhausted_before_search)
+                if time_limit_exhausted_before_search is not None
+                else elapsed_s > time_limit_s
+            )
             return ScheduleResult(
                 solver_name=self.name,
                 status=SolverStatus.ERROR,
-                duration_ms=elapsed_ms,
+                duration_ms=int(elapsed_s * 1000),
                 metadata={
                     "error": error_message,
                     "initial_seed_fallback_reason": reason_key or error_message,
@@ -3322,18 +3334,22 @@ class AlnsSolver(BaseSolver):
                     "alns_warm_start_coverage": round(
                         warm_start_supplied_assignments / max(n_ops, 1), 6
                     ),
-                    "initial_solution_ms": elapsed_ms,
+                    "initial_solution_ms": int(elapsed_s * 1000),
                     "native_initial_seed_attempted": native_initial_seed_attempted,
                     "native_initial_seed_used": native_initial_seed_used,
                     "native_initial_seed_ms": native_initial_seed_ms,
                     "native_initial_seed_fallback_reason": native_initial_seed_fallback_reason,
                     **_native_repair_meta_from_skips(native_greedy_repair_skip_reasons),
-                    "time_limit_exhausted_before_search": (
-                        bool(time_limit_exhausted_before_search)
-                        if time_limit_exhausted_before_search is not None
-                        else (time.monotonic() - t0) > time_limit_s
-                    ),
+                    "time_limit_exhausted_before_search": exhausted,
                     "iterations_completed": 0,
+                    **_alns_wall_clock_honesty_meta(
+                        determinism,
+                        exhausted,
+                        0,
+                        max_iterations,
+                        elapsed_s,
+                        time_limit_s,
+                    ),
                 },
             )
 

@@ -2748,7 +2748,7 @@ class RhcSolver(BaseSolver):
                 "temporal_stabilization": temporal_stabilization,
                 **notary_meta,
                 "time_limit_reached": time_limit_reached,
-                "wall_clock_path_dependent": True,
+                "wall_clock_path_dependent": bool(time_limit_reached),
                 "determinism": determinism,
                 "determinism_violated": bool(time_limit_reached) and determinism == "strict",
                 "search_stop_reason": "wall_clock" if time_limit_reached else "completed",
