@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+import pytest
+
 from synaps.cli import main
 from synaps.contracts import RepairRequest, SolveRequest
 from synaps.solvers.greedy_dispatch import GreedyDispatch
@@ -205,6 +207,43 @@ def test_cli_cable_freeze_pair_tiny(capsys: pytest.CaptureFixture[str]) -> None:
     assert payload["all_feasible"] is True
     assert "rush" in payload
     assert "steal" in payload
+
+
+def test_cli_cable_weighted_residual_tiny(capsys: pytest.CaptureFixture[str]) -> None:
+    exit_code = main(
+        [
+            "cable-nervous-month",
+            "--orders",
+            "6",
+            "--machines-per-stage",
+            "2",
+            "--drum-pool",
+            "24",
+            "--weighted-residual",
+            "--residual-no-cpsat",
+            "--residual-time-limit",
+            "8",
+            "--residual-max-iterations",
+            "2",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["all_feasible"] is True
+    assert payload["cover"]["solver_config"] == "GREED"
+    assert "makespan_residual" in payload
+    assert "pvc_residual" in payload
+
+
+def test_cli_weighted_residual_excludes_freeze_pair() -> None:
+    with pytest.raises(SystemExit):
+        main(
+            [
+                "cable-nervous-month",
+                "--freeze-pair",
+                "--weighted-residual",
+            ]
+        )
 
 
 def test_cli_list_solver_configs_emits_manifest(capsys: pytest.CaptureFixture[str]) -> None:

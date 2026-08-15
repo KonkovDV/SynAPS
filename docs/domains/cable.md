@@ -147,7 +147,7 @@ Encoded:
 - Colour-dedicated lines: optional `colour_dedicated_lines` when a stage has ≥6 machines (2 flex at n≥8). Opt-in; tardiness at 16/stage is much worse than ATCS-only, and at 8/stage they drop coverage (0.854 vs FEASIBLE without cells).
 - COVER ready rule: nervous-month COVER defaults to **windowed** ATCS with floor window 0 (non-delay). Unbounded ATCS and a 240 min delay window on *any* job both collapsed month coverage. At ≤8/stage a separate `cover_atcs_exhaust_window` (default 240) waits only for a zero-setup continuation and stays on the hot machine (Mahmoodi/Dooley 1991; Flynn 1987). The 50k/500k registry path stays FIFO (`cover_ready_rule="fifo"`).
 - \(D_{\max}\) and Hamming \(R\) as **functionals**, not CP-SAT terms
-- CP-SAT/ALNS search may take `CABLE_PVC_CPSAT_WEIGHTS` (integer scale of `CABLE_PVC_WEIGHTS`). GREEDY default is unchanged.
+- CP-SAT/ALNS search may take `CABLE_PVC_CPSAT_WEIGHTS` / `CABLE_PVC_WEIGHTS`. GREEDY/COVER construction is unchanged. C6c: `--weighted-residual` seeds ALNS from COVER; 1600@8 PVC residual cut tardiness 25–478 min vs cover (not ATP).
 
 Gated (C5, separate RFC): hold-until-successor aux, blocking/no-wait, reel-split as a *decision*, cross-order material tokens. Blocking/no-wait/AMR/RFID stay out of the kernel; PyJobShop is the constraint-class reference.
 

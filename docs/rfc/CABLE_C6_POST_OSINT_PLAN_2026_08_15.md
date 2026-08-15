@@ -71,20 +71,32 @@ Insert-anywhere is **full COVER of the mutated shop**, not `allow_freeze_break=T
 
 Sign of rush WIP delta **flips by seed**. Do not claim freeze reduces drums. Do not claim −24%.
 
-### C6c — Tardiness quality without touching COVER defaults
+### C6c — Tardiness quality without touching COVER defaults — **DONE 2026-08-15**
 
-C6a shows tardiness varies **3.4×** across seeds (48k–164k). That is
-the remaining CFO-shaped hole.
+C6a tardiness varies **3.4×** across seeds (48k–164k). That remains the
+CFO-shaped hole. Construction still ignores `CABLE_PVC_WEIGHTS` (C-R1).
 
-**Do:** on a **downscaled** nervous instance (≤400 parents, GREED or
-COVER), pass `CABLE_PVC_WEIGHTS` / `CABLE_PVC_CPSAT_WEIGHTS` into
-**ALNS residual or CP-SAT**, never into list-schedule construction.
+**Do not** downscale to 400 parents for quality: 5148 ops miss the native
+10k COVER path. 80@8 GREED is slack (tardiness 0). Quality instance = C6a
+shop (1600@8).
 
-**Pass:** material+tardiness scalar improves vs makespan-only on the
-same instance; coverage stays 1.0.
+**Do:** COVER, then two ALNS residuals from the same seed: `DEFAULT_WEIGHTS`
+vs `CABLE_PVC_WEIGHTS`. Compare with `scalarize(evaluate(), CABLE_PVC_WEIGHTS)`.
+At ≥10k ops residual `max_destroy=24` (ALNS-300’s 300-op destroy did 1
+iter / 90 s). Registry unchanged.
 
-**Fail / stop:** if the only way to cut tardiness is a general ATCS
-floor window — that already collapsed 16-stage coverage. Leave it off.
+**Measured** (this machine, 60 s, destroy 20, seeds 1..5): all arms
+`feasible`, notary 0, coverage 1.0, warm start used. PVC tardiness
+**48 056 / 86 656 / 164 080** vs cover 48 269 / 87 134 / 164 355.
+Δ tard vs cover **−478 / −275 / −25 / −130 / −213**. PVC scalar beat
+makespan residual on **4/5** seeds; seed 3 makespan-arm won the scalar
+via Cmax 39 505→39 441. Relative cuts 0.02–0.55 %. Hamming ≤0.006.
+
+**Pass (plumbing + weak quality):** coverage 1.0; scalar improved on 4/5;
+tardiness dropped on 5/5 vs cover. **Fail / not claimed:** ATP closed,
+OPTIMAL, weights-into-COVER.
+
+CLI: `--weighted-residual`. Tiny GREED CI. 20k tables are local.
 
 ### C6d — C5a gate note (still gated)
 
@@ -109,10 +121,11 @@ Do not open C5a to “make 8 machines fit”. They already fit.
 | GPL FJSSP-SDST, AVX-512, DRL factory engine | Standing forbids |
 | CI for 1600@8×5 | ~27 s local, not a unit test |
 
-## Tooling shipped with C6a–C6b
+## Tooling shipped with C6a–C6c
 
 - `parse_nervous_seeds` / `run_nervous_month_multiseed` / `run_freeze_insert_pair`
-- CLI `--seeds`, `--freeze-pair` (`--new-rush` → n_rush, `--disruptions` → n_steal)
+- `run_weighted_residual_pair` / `run_weighted_residual_multiseed`
+- CLI `--seeds`, `--freeze-pair`, `--weighted-residual`
 - `peak_processing_drums` in `cable_kpis` (`[start, end)` occupancy, no setup-hold)
 - Tiny GREED tests only. 20k tables are **local evidence**, not CI.
 
@@ -128,10 +141,16 @@ Reproduce C6b:
 python -m synaps cable-nervous-month --freeze-pair --orders 1600 --machines-per-stage 8 --drum-pool 48 --new-rush 2 --disruptions 20 --seeds 1,2
 ```
 
+Reproduce C6c:
+
+```
+python -m synaps cable-nervous-month --weighted-residual --orders 1600 --machines-per-stage 8 --drum-pool 48 --seeds 1,2,3,4,5 --residual-time-limit 60 --residual-max-iterations 400
+```
+
 ## Next session start here
 
-1. **C6c** downscaled weighted residual/ALNS (`CABLE_PVC_WEIGHTS`). Tardiness is still the CFO-shaped hole; freeze did not close it.
+1. **C6-R1** 8-stage weekly freeze waves (`waves=4`, seeds 1..2). C6c did not run freeze.
 2. Stop. Do not open C5a: occupancy 21 ≪ pool 48.
-3. Do not ingest 1С.
+3. Do not put `CABLE_PVC_WEIGHTS` into COVER. Do not ingest 1С.
 
-C6a and C6b are done. C6d stays gated.
+C6a, C6b, and C6c are done. C6d stays gated.

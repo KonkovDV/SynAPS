@@ -51,7 +51,7 @@ tardiness 87 134) with family + wheel + exhaust stay.
 | S5 | `colour_phase` campaign; freeze as `pin_issued_plan` / IncrementalRepair (L-RHO analogue is policy, not GNN) |
 | N-R3 | `add_rush_orders` + `new_rush` report row (repair vs full on the **mutated** instance) |
 | N-R8 | GREED reports `n/a (GREED)` |
-| C-R1 | `CABLE_PVC_CPSAT_WEIGHTS` integer vector; CP-SAT test |
+| C-R1 | COVER construction ignores weights; C6c ALNS residual searches them (4/5 scalar vs makespan-arm) |
 | C-R3 | `solve_schedule(..., issued_assignments=, freeze_horizon_end=)` |
 | C-R5/C-R7/C-R8 | `docs/domains/cable.md` |
 | P4 M2/M4/M5 | LBBD out of scope; native CI already present; GPU refused in limitations |

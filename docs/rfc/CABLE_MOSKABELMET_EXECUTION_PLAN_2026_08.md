@@ -220,7 +220,8 @@ C0–C4 and 8-stage cover are shipped. Next wave is C6, not a replay of C0.
 1. **C6a** multiseed 1..5 cover+notary @1600×8 — **done 2026-08-15**.
 2. **C6b** freeze vs insert \(D_{\max}\) on seeds 1 and 2 — **done 2026-08-15**.
    Occupancy 21 ≪ pool 48; WIP Δ sign flips. C5a stays gated.
-3. **C6c** weighted residual/ALNS on a downscaled instance.
+3. **C6c** weighted residual/ALNS on 1600@8 — **done 2026-08-15**.
+   PVC tardiness 48 056–164 080; scalar beat makespan residual 4/5 seeds.
 4. **C6d / C5a** only if occupancy hits the pool. Do not ingest 1С.
 
 See `docs/rfc/CABLE_C6_POST_OSINT_PLAN_2026_08_15.md`.
@@ -235,8 +236,11 @@ Shipped encode-first: domain 9 + generator + KPIs + campaign windows +
 and at 8/stage (family flex + 6-colour wheel + continuation exhaust stay).
 C6a seeds 1..5 @8: all COVER-feasible, notary 0; tardiness 48 269–164 355
 (median 87 134). C6b freeze-pair seeds 1–2: freeze FEASIBLE; rush WIP Δ
-−66 / +40; occupancy 21 ≪ pool 48. Next: C6c weighted residual. C5a still
-gated. Plan/RT:
+−66 / +40; occupancy 21 ≪ pool 48. C6c weighted ALNS residual (60 s,
+destroy 20): PVC tardiness 48 056–164 080 (Δ −478..−25 vs cover); scalar
+beat makespan residual 4/5. Next: C6-R1 freeze waves. C5a still gated.
+Plan/RT:
 `docs/rfc/CABLE_C6_POST_OSINT_PLAN_2026_08_15.md`,
-`docs/rfc/CABLE_C6_PLAN_REDTEAM_2026_08_15.md`.
+`docs/rfc/CABLE_C6_PLAN_REDTEAM_2026_08_15.md`,
+`docs/rfc/CABLE_C6C_REDTEAM_2026_08_15.md`.
 

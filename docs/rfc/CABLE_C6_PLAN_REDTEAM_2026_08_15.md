@@ -47,10 +47,11 @@ a confidence interval, or due-date quality.
 | ID | Sev | Finding | Why it stays |
 |----|-----|---------|--------------|
 | **C6-R1** | P2 | Weekly freeze *waves* still seed=1 @16 | C6b is a rush-insert pair, not four weekly reshuffles at 8-stage |
-| **C6-R2** | P1 | Tardiness 3.4× across seeds; freeze does not close it | Seed 1 freeze tardiness 118 823 vs cover 87 134. C6c |
+| **C6-R2** | P1 | 8-stage tardiness still 48k–164k | C6c residual cut 25–478 min (0.02–0.55 %). Hole remains. `CABLE_C6C_REDTEAM_2026_08_15.md` |
 | **C6-R3** | P1 | Span 155–222 vs occupancy 21 vs pool 48 | Occupancy has slack. C5a would consume it. Gated |
 | **C6-R6** | P1 | Rush WIP delta flips sign | Two seeds only. Not a freeze-quality proof |
-| **C-R1** | P1 | COVER still ignores `CABLE_PVC_WEIGHTS` | Intentional. C6c |
+| **C-R1 construction** | P1 | COVER still ignores `CABLE_PVC_WEIGHTS` | Intentional. Search path closed in C6c |
+| **C6c-R1** | P2 | Seed 3 PVC scalar lost to makespan residual | Cmax/setup move. Weights are not a dominance theorem |
 | **C-R7** | P2 | `allow_freeze_break` is a boolean | Unchanged. No-op on new-parent-only neighbourhood |
 
 ## Forbidden claims (repeat)
@@ -63,5 +64,6 @@ as cable, “5 seeds prove robustness”, “median tardiness is plant ATP”,
 
 ## Next honest step
 
-C6c: downscaled `CABLE_PVC_WEIGHTS` in ALNS/CP-SAT. Do not open C5a:
+C6-R1: 8-stage `waves=4` freeze. Do not open C5a:
 occupancy 21 ≪ pool 48. Do not quote ΔWIP −66 without the seed-2 +40.
+Do not quote C6c −478 tardiness without seeds 2–5 and the seed-3 scalar miss.

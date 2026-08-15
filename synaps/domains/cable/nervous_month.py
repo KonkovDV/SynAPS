@@ -14,7 +14,9 @@ from uuid import UUID
 from synaps.domains.cable.adapter import STAGES, CableSku
 from synaps.domains.cable.instance import add_rush_orders, generate_cable_instance
 from synaps.domains.cable.kpis import assignment_hamming, cable_kpis
+from synaps.domains.cable.weights import CABLE_PVC_WEIGHTS
 from synaps.model import Assignment, ScheduleProblem
+from synaps.objective import DEFAULT_WEIGHTS, evaluate, scalarize
 from synaps.solvers.feasibility_checker import FeasibilityChecker, proven_hard_violations
 from synaps.solvers.incremental_repair import IncrementalRepair
 from synaps.solvers.registry import create_solver
@@ -210,6 +212,7 @@ def _solve_month(
             "cover_atcs_floor_window": cover_atcs_floor_window,
             "cover_atcs_exhaust_window": cover_atcs_exhaust_window,
         }
+    _log(f"cover {solver_name} starting ops={len(problem.operations)}")
     started = time.perf_counter()
     result = solver.solve(problem, **kwargs)
     return result, solver_name, time.perf_counter() - started
@@ -699,6 +702,217 @@ def run_freeze_insert_pair(
         "rush": rush,
         "steal": steal,
         "all_feasible": freeze_ok,
+    }
+
+
+def _residual_destroy_kwargs(n_ops: int, use_cpsat_repair: bool) -> dict[str, Any]:
+    """Destroy size the repair can iterate. 300-op destroy ate a 60 s 20k box."""
+
+    if not use_cpsat_repair:
+        return {
+            "min_destroy": 2,
+            "max_destroy": 8,
+            "destroy_fraction": 0.15,
+            "repair_time_limit_s": 1,
+        }
+    if n_ops >= 10_000:
+        return {
+            "min_destroy": 8,
+            "max_destroy": 24,
+            "destroy_fraction": 0.001,
+            "repair_time_limit_s": 2,
+            "cpsat_max_destroy_ops": 16,
+        }
+    return {}
+
+
+def _residual_alns_kwargs(
+    cover: list[Assignment],
+    weights: dict[str, float],
+    *,
+    time_limit_s: float,
+    max_iterations: int,
+    use_cpsat_repair: bool,
+    seed: int,
+) -> dict[str, Any]:
+    """ALNS residual kwargs. Construction COVER is not in this dict."""
+
+    kwargs: dict[str, Any] = {
+        "warm_start_assignments": [row.model_copy() for row in cover],
+        "objective_weights": dict(weights),
+        "time_limit_s": time_limit_s,
+        "max_iterations": max_iterations,
+        "use_cpsat_repair": use_cpsat_repair,
+        "random_seed": seed,
+        "repair_num_workers": 1,
+    }
+    kwargs.update(_residual_destroy_kwargs(len(cover), use_cpsat_repair))
+    return kwargs
+
+
+def _residual_arm(
+    problem: ScheduleProblem,
+    cover: list[Assignment],
+    weights: dict[str, float],
+    *,
+    time_limit_s: float,
+    max_iterations: int,
+    use_cpsat_repair: bool,
+    seed: int,
+) -> dict[str, Any]:
+    """One ALNS residual from the cover seed. Scores with canonical scalarize."""
+
+    from synaps.solvers.alns_solver import AlnsSolver
+
+    _log(
+        f"ALNS residual seed={seed} time={time_limit_s}s "
+        f"iters={max_iterations} cpsat={use_cpsat_repair} "
+        f"tardiness_w={weights.get('tardiness', 0)}"
+    )
+
+    started = time.perf_counter()
+    result = AlnsSolver().solve(
+        problem,
+        **_residual_alns_kwargs(
+            cover,
+            weights,
+            time_limit_s=time_limit_s,
+            max_iterations=max_iterations,
+            use_cpsat_repair=use_cpsat_repair,
+            seed=seed,
+        ),
+    )
+    wall_s = time.perf_counter() - started
+    row = _arm_kpis(problem, result, wall_s, cover)
+    objective = evaluate(problem, result.assignments)
+    meta = result.metadata or {}
+    row["scalar_cable_pvc"] = scalarize(objective, CABLE_PVC_WEIGHTS)
+    row["coverage"] = objective.coverage
+    row["warm_start_used"] = bool(meta.get("alns_warm_start_used", meta.get("warm_start_used")))
+    row["alns_warm_start_coverage"] = meta.get("alns_warm_start_coverage")
+    row["wall_clock_path_dependent"] = bool(meta.get("wall_clock_path_dependent"))
+    row["search_stop_reason"] = meta.get("search_stop_reason")
+    row["iterations_completed"] = int(meta.get("iterations_completed", 0))
+    row["max_destroy"] = int(
+        _residual_destroy_kwargs(len(cover), use_cpsat_repair).get("max_destroy", 0)
+    )
+    _log(
+        f"residual done wall={wall_s:.1f}s status={result.status.value} "
+        f"scalar={row['scalar_cable_pvc']:.1f} "
+        f"tard={row['kpis']['total_tardiness_minutes']}"
+    )
+    return row
+
+
+def _cover_scalar_row(shop: dict[str, Any]) -> dict[str, Any]:
+    problem = shop["problem"]
+    result = shop["result"]
+    objective = evaluate(problem, result.assignments)
+    return {
+        "status": result.status.value,
+        "notary_hard_violations": shop["hard"],
+        "kpis": cable_kpis(problem, result.assignments),
+        "scalar_cable_pvc": scalarize(objective, CABLE_PVC_WEIGHTS),
+        "coverage": objective.coverage,
+        "generate_s": shop["generate_s"],
+        "solve_s": shop["solve_s"],
+        "notary_s": shop["notary_s"],
+        "solver_config": shop["solver_name"],
+    }
+
+
+def run_weighted_residual_pair(
+    *,
+    n_orders: int = 400,
+    seed: int = 1,
+    machines_per_stage: int = 8,
+    drum_pool_size: int = 48,
+    family_dedicated_lines: bool | None = None,
+    colour_phase: bool | None = None,
+    colour_dedicated_lines: bool | None = None,
+    cover_ready_rule: str = "atcs",
+    cover_atcs_floor_window: float = _NERVOUS_ATCS_FLOOR_WINDOW,
+    cover_atcs_exhaust_window: float | None = None,
+    residual_time_limit_s: float = 120.0,
+    residual_max_iterations: int = 300,
+    residual_use_cpsat_repair: bool = True,
+) -> dict[str, Any]:
+    """C6c: COVER then two ALNS residuals. Weights never enter list-schedule."""
+
+    shop = _cover_nervous_shop(
+        n_orders=n_orders,
+        seed=seed,
+        machines_per_stage=machines_per_stage,
+        drum_pool_size=drum_pool_size,
+        family_dedicated_lines=family_dedicated_lines,
+        colour_phase=colour_phase,
+        colour_dedicated_lines=colour_dedicated_lines,
+        cover_ready_rule=cover_ready_rule,
+        cover_atcs_floor_window=cover_atcs_floor_window,
+        cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+    )
+    cover = list(shop["result"].assignments)
+    arm_kw = {
+        "time_limit_s": residual_time_limit_s,
+        "max_iterations": residual_max_iterations,
+        "use_cpsat_repair": residual_use_cpsat_repair,
+        "seed": seed,
+    }
+    makespan = _residual_arm(shop["problem"], cover, DEFAULT_WEIGHTS, **arm_kw)
+    pvc = _residual_arm(shop["problem"], cover, CABLE_PVC_WEIGHTS, **arm_kw)
+    cover_row = _cover_scalar_row(shop)
+    improved = pvc["scalar_cable_pvc"] < makespan["scalar_cable_pvc"]
+    feasible = (
+        cover_row["status"] == "feasible"
+        and cover_row["notary_hard_violations"] == 0
+        and makespan["status"] == "feasible"
+        and makespan["notary_hard_violations"] == 0
+        and pvc["status"] == "feasible"
+        and pvc["notary_hard_violations"] == 0
+        and float(cover_row["coverage"]) == 1.0
+        and float(makespan["coverage"]) == 1.0
+        and float(pvc["coverage"]) == 1.0
+    )
+    return {
+        "claim": (
+            "synthetic C6c cover-then-ALNS residual; not Moskabelmet MES; "
+            "not OPTIMAL; not INFIMUM"
+        ),
+        "seed": seed,
+        "residual_time_limit_s": residual_time_limit_s,
+        "residual_max_iterations": residual_max_iterations,
+        "residual_use_cpsat_repair": residual_use_cpsat_repair,
+        "cover": cover_row,
+        "makespan_residual": makespan,
+        "pvc_residual": pvc,
+        "scalar_improved": improved,
+        "tardiness_delta": (
+            int(pvc["kpis"]["total_tardiness_minutes"])
+            - int(cover_row["kpis"]["total_tardiness_minutes"])
+        ),
+        "all_feasible": feasible,
+    }
+
+
+def run_weighted_residual_multiseed(
+    seeds: tuple[int, ...], **kwargs: Any
+) -> dict[str, Any]:
+    """Independent C6c pairs. Not a confidence interval."""
+
+    kwargs.pop("seed", None)
+    runs = [run_weighted_residual_pair(seed=item, **kwargs) for item in seeds]
+    improved = [bool(run["scalar_improved"]) for run in runs]
+    tardiness = [
+        int(run["pvc_residual"]["kpis"]["total_tardiness_minutes"]) for run in runs
+    ]
+    return {
+        "claim": runs[0]["claim"] if runs else "synthetic C6c; empty seeds",
+        "seeds": list(seeds),
+        "n_runs": len(runs),
+        "all_feasible": all(run["all_feasible"] for run in runs),
+        "n_scalar_improved": sum(improved),
+        "tardiness_minutes_pvc": tardiness,
+        "runs": runs,
     }
 
 

@@ -38,7 +38,7 @@ Plant pain is a **stack**. APS sits near the top. Collapsing it into
 
 | Layer | Public fact | Source | SynAPS isomorphism | Honesty gap |
 |-------|-------------|--------|--------------------|-------------|
-| Margin | Standard SKU 2–3%; materials ≤80% of cost; specialised 10–15% after PDM | [CFO Russia 2025-10-08](https://www.cfo-russia.ru/stati/?article=94367) (Yan Anisov) | `material_loss` on SDST; `CABLE_PVC_WEIGHTS.material=1.0` | GREEDY/COVER **do not** search those weights (C-R1) |
+| Margin | Standard SKU 2–3%; materials ≤80% of cost; specialised 10–15% after PDM | [CFO Russia 2025-10-08](https://www.cfo-russia.ru/stati/?article=94367) (Yan Anisov) | `material_loss` on SDST; `CABLE_PVC_WEIGHTS.material=1.0` | GREEDY/COVER **do not** search those weights (C-R1 construction). C6c residual does |
 | Quote funnel | 10–15 of 100 enquiries become orders | same | not modelled | Sales/ATP, not FJSP |
 | PDM | 1С:КоМод: specs/routings in minutes; project sales ×4.6; registry №2023662428 | [Ruscable 2026-06-02](https://www.ruscable.ru/news/2026/06/02/_mositlab_poluchil_premiu_lidery_tsifrovizatsii_/) | `Order.quantity` stores metres; kernel ignores it | APS without PDM is blind (C0) |
 | Stages | 4–25 process stages; tens of thousands of SKUs; MTO only | CFO 2025; Moriyakov on GIA 2025 | 6-stage nervous month; `predecessor_op_id` inside one reel | Cross-order WIP feed illegal (C5d) |
@@ -159,15 +159,15 @@ defaults), `tests/test_cli.py` tiny GREED month.
 
 | ID | Sev | Finding | Why it stays |
 |----|-----|---------|--------------|
-| C-R1 | P1 | COVER/ATCS ignore `CABLE_PVC_WEIGHTS` | Wiring it in would change universal construction. Plant scrap pain is therefore **measured**, not **searched** |
+| C-R1 | P1 | COVER/ATCS ignore `CABLE_PVC_WEIGHTS` | Construction unchanged. C6c residual **searches** the vector; COVER still does not |
 | C-R2 | P1 | \(D_{\max}\) ≠ Cumulative | Hold-until-successor is C5a. 8-stage cover did not need it |
 | C-R4 | P2 | Campaign ≠ INFIMUM batching | Snap `earliest_start`. No foreign genealogy |
 | C-R5 | P2 | Additive parametric SDST | May over-penalise stacked SKU jumps vs one physical head change |
 | C-R7 | P2 | Freeze break is a flag | Policy, not cryptography |
 | C-R8 | P2 | RFID / blocking / AMR | Out of kernel |
-| C-R9 | P1 | 8-stage tardiness 87 134 vs 16-stage 1 922 | Coverage closed; due-date quality did not. Plant CFO pain is still tardiness |
+| C-R9 | P1 | 8-stage tardiness 48k–164k vs 16-stage 1 922 | C6c residual cut 25–478 min. Hole remains |
 | C-R10 | P2 | Exhaust stay can prefer a later hot machine | Unit test asserts that. Month-scale tardiness is the cost |
-| N-R6 | P2 | seed=1 only | No CI over 1..5 |
+| N-R6 | P2 | seed=1 only | **C6a closed** cover+notary 1..5. Freeze waves still C6-R1 |
 | N-R3 | P2 | Wave “full resolve” is the same instance | Not a new parent dump except `new_rush` |
 | OPS-WHEEL | P2 | cp312 vs cp313 native | Documented; probes used 3.13 |
 | PDM | P0 | No 1С/MES ingest | Encode-first by design |
@@ -183,10 +183,12 @@ measured on the generator”, “8-machine FIFO is FEASIBLE”.
 
 ## 9. Next honest step
 
-C6a (multiseed 1..5 @1600×8 cover+notary) and C6b (freeze-pair seeds 1–2)
-are **done**. Occupancy 21 ≪ pool 48 ≪ span 155–222; rush WIP Δ flips
-sign. Next is C6c weighted residual/ALNS on a downscaled instance. Do
-not open C5a. Do not ingest 1С. Plan: `CABLE_C6_POST_OSINT_PLAN_2026_08_15.md`.
+C6a (multiseed 1..5 @1600×8 cover+notary), C6b (freeze-pair), and C6c
+(weighted ALNS residual) are **done**. C6c cut tardiness 25–478 min on
+seeds 1..5; the 48k–164k hole remains. Occupancy 21 ≪ pool 48. Next is
+C6-R1 freeze waves at 8-stage. Do not open C5a. Do not ingest 1С.
+Plan: `CABLE_C6_POST_OSINT_PLAN_2026_08_15.md`. C6c RT:
+`CABLE_C6C_REDTEAM_2026_08_15.md`.
 
 ## Sources (retrieved 2026-08-15)
 

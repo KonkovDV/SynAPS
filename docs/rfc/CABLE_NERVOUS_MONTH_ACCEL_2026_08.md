@@ -268,4 +268,9 @@ Full 16-stage (local): command at the top of this note. JSON under
 
 C6a (2026-08-15, this machine): seeds 1..5 all COVER-feasible, notary 0,
 cover 4.28–4.46 s. Tardiness min/median/max 48 269 / 87 134 / 164 355.
-Plan: `CABLE_C6_POST_OSINT_PLAN_2026_08_15.md`.
+
+C6c weighted residual (local): `python -m synaps cable-nervous-month --weighted-residual --orders 1600 --machines-per-stage 8 --drum-pool 48 --seeds 1,2,3,4,5 --residual-time-limit 60 --residual-max-iterations 400`
+
+C6c (2026-08-15): PVC tardiness 48 056 / 86 656 / 164 080; Δ vs cover
+−478..−25; scalar vs makespan residual 4/5. Destroy 20 (not ALNS-300’s 300).
+Plan: `CABLE_C6_POST_OSINT_PLAN_2026_08_15.md`. RT: `CABLE_C6C_REDTEAM_2026_08_15.md`.

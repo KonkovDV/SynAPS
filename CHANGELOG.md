@@ -46,8 +46,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   notary 0; tardiness min/median/max **48 269 / 87 134 / 164 355**.
   **C6b freeze-pair** (seeds 1–2): freeze repair stays FEASIBLE, issued
   Hamming 0; rush WIP Δ **−66 / +40** (sign flips); processing occupancy
-  **21** vs pool 48 vs span 155–222. `--seeds`, `--freeze-pair`. Evidence:
-  `docs/rfc/CABLE_C6_POST_OSINT_PLAN_2026_08_15.md`. Acceleration:
+  **21** vs pool 48 vs span 155–222. **C6c weighted residual** (2026-08-15):
+  COVER then ALNS (`--weighted-residual`); 1600@8 seeds 1..5, 60 s,
+  destroy 20. PVC tardiness 48 056–164 080 (Δ −478..−25 vs cover);
+  PVC scalar beat makespan residual **4/5**. 400@8 is the native-dead
+  zone (5148 ops). `--seeds`, `--freeze-pair`, `--weighted-residual`.
+  Evidence: `docs/rfc/CABLE_C6_POST_OSINT_PLAN_2026_08_15.md`,
+  `docs/rfc/CABLE_C6C_REDTEAM_2026_08_15.md`. Acceleration:
   `docs/rfc/CABLE_NERVOUS_MONTH_ACCEL_2026_08.md`. Red Team:
   `docs/rfc/CABLE_NERVOUS_MONTH_REDTEAM_2026_08_14.md`,
   `docs/rfc/CABLE_C6_PLAN_REDTEAM_2026_08_15.md`. OSINT ledger:

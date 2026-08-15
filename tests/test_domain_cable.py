@@ -26,6 +26,7 @@ from synaps.domains.cable import (
     run_freeze_insert_pair,
     run_nervous_month,
     run_nervous_month_multiseed,
+    run_weighted_residual_pair,
     setup_transition,
     split_length_into_reels,
     state_code,
@@ -622,3 +623,39 @@ def test_freeze_insert_pair_tiny_keeps_freeze_feasible() -> None:
     freeze_h = float(report["steal"]["freeze"]["kpis"]["stability_hamming"])
     open_h = float(report["steal"]["open"]["kpis"]["stability_hamming"])
     assert freeze_h <= open_h
+
+
+def test_weighted_residual_pair_tiny_keeps_cover_and_notary() -> None:
+    """C6c plumbing: COVER stays GREED; ALNS residuals stay feasible. Quality is the probe."""
+
+    report = run_weighted_residual_pair(
+        n_orders=6,
+        seed=1,
+        machines_per_stage=2,
+        drum_pool_size=24,
+        residual_time_limit_s=8.0,
+        residual_max_iterations=2,
+        residual_use_cpsat_repair=False,
+    )
+    assert report["all_feasible"] is True
+    assert report["cover"]["solver_config"] == "GREED"
+    assert report["cover"]["coverage"] == 1.0
+    assert report["makespan_residual"]["coverage"] == 1.0
+    assert report["pvc_residual"]["coverage"] == 1.0
+    assert report["makespan_residual"]["notary_hard_violations"] == 0
+    assert report["pvc_residual"]["notary_hard_violations"] == 0
+    assert "scalar_cable_pvc" in report["cover"]
+    assert isinstance(report["scalar_improved"], bool)
+    assert isinstance(report["tardiness_delta"], int)
+
+
+def test_residual_destroy_shrinks_on_large_cover() -> None:
+    """300-op destroy on 20k ops completed one ALNS iteration in 90 s (0 improvements)."""
+
+    from synaps.domains.cable.nervous_month import _residual_destroy_kwargs
+
+    large = _residual_destroy_kwargs(20_316, True)
+    assert large["max_destroy"] == 24
+    assert large["min_destroy"] == 8
+    tiny = _residual_destroy_kwargs(70, False)
+    assert tiny["max_destroy"] == 8

@@ -303,6 +303,10 @@ def _add_cable_nervous_parser(subparsers: Any) -> None:
         action="store_true",
         help="Disable colour campaign wheel",
     )
+    _add_cable_nervous_experiment_flags(parser)
+
+
+def _add_cable_nervous_experiment_flags(parser: Any) -> None:
     parser.add_argument(
         "--new-rush",
         type=int,
@@ -310,7 +314,20 @@ def _add_cable_nervous_parser(subparsers: Any) -> None:
         help="New parent orders inserted after cover (0 disables N-R3 wave)",
     )
     parser.add_argument("--seeds", help="Comma-separated seeds; overrides --seed")
-    parser.add_argument("--freeze-pair", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--freeze-pair", action="store_true")
+    mode.add_argument(
+        "--weighted-residual",
+        action="store_true",
+        help="C6c: COVER then ALNS makespan vs CABLE_PVC_WEIGHTS residual",
+    )
+    parser.add_argument("--residual-time-limit", type=float, default=120.0)
+    parser.add_argument("--residual-max-iterations", type=int, default=300)
+    parser.add_argument(
+        "--residual-no-cpsat",
+        action="store_true",
+        help="Greedy ALNS repair only (CI). Probe keeps micro-CP-SAT.",
+    )
     parser.add_argument("--output-file", type=Path, help="Write JSON report here")
 
 
@@ -322,16 +339,8 @@ def _tri_state(on: bool, off: bool) -> bool | None:
     return None
 
 
-def _run_cable_nervous(args: argparse.Namespace) -> int:
-    from synaps.domains.cable import (
-        parse_nervous_seeds,
-        run_freeze_insert_pair,
-        run_nervous_month,
-        run_nervous_month_multiseed,
-    )
-
-    seeds = parse_nervous_seeds(args.seeds, args.seed)
-    kwargs = {
+def _nervous_shop_kwargs(args: argparse.Namespace) -> dict[str, Any]:
+    return {
         "n_orders": args.orders,
         "waves": args.waves,
         "disruptions_per_wave": args.disruptions,
@@ -345,24 +354,69 @@ def _run_cable_nervous(args: argparse.Namespace) -> int:
         "cover_atcs_exhaust_window": args.cover_atcs_exhaust,
         "new_rush_orders": args.new_rush,
     }
+
+
+def _cover_only_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: kwargs[key]
+        for key in kwargs
+        if key not in {"waves", "disruptions_per_wave", "new_rush_orders"}
+    }
+
+
+def _run_freeze_pair_cli(
+    seeds: tuple[int, ...], args: argparse.Namespace, kwargs: dict[str, Any]
+) -> int:
+    from synaps.domains.cable import run_freeze_insert_pair
+
+    pair_kwargs = _cover_only_kwargs(kwargs)
+    pair_kwargs["n_rush"] = args.new_rush
+    pair_kwargs["n_steal"] = args.disruptions
+    reports = [run_freeze_insert_pair(seed=item, **pair_kwargs) for item in seeds]
+    report: dict[str, Any] = reports[0] if len(reports) == 1 else {
+        "claim": reports[0]["claim"],
+        "seeds": list(seeds),
+        "runs": reports,
+        "all_feasible": all(item["all_feasible"] for item in reports),
+    }
+    ok = bool(report["all_feasible"])
+    _write_json_output(report, args.output_file)
+    return 0 if ok else 1
+
+
+def _run_weighted_residual_cli(
+    seeds: tuple[int, ...], args: argparse.Namespace, kwargs: dict[str, Any]
+) -> int:
+    from synaps.domains.cable import (
+        run_weighted_residual_multiseed,
+        run_weighted_residual_pair,
+    )
+
+    residual_kwargs = _cover_only_kwargs(kwargs)
+    residual_kwargs["residual_time_limit_s"] = args.residual_time_limit
+    residual_kwargs["residual_max_iterations"] = args.residual_max_iterations
+    residual_kwargs["residual_use_cpsat_repair"] = not args.residual_no_cpsat
+    if len(seeds) == 1:
+        report = run_weighted_residual_pair(seed=seeds[0], **residual_kwargs)
+    else:
+        report = run_weighted_residual_multiseed(seeds, **residual_kwargs)
+    _write_json_output(report, args.output_file)
+    return 0 if report["all_feasible"] else 1
+
+
+def _run_cable_nervous(args: argparse.Namespace) -> int:
+    from synaps.domains.cable import (
+        parse_nervous_seeds,
+        run_nervous_month,
+        run_nervous_month_multiseed,
+    )
+
+    seeds = parse_nervous_seeds(args.seeds, args.seed)
+    kwargs = _nervous_shop_kwargs(args)
     if args.freeze_pair:
-        pair_kwargs = {
-            key: kwargs[key]
-            for key in kwargs
-            if key not in {"waves", "disruptions_per_wave", "new_rush_orders"}
-        }
-        pair_kwargs["n_rush"] = args.new_rush
-        pair_kwargs["n_steal"] = args.disruptions
-        reports = [run_freeze_insert_pair(seed=item, **pair_kwargs) for item in seeds]
-        report = reports[0] if len(reports) == 1 else {
-            "claim": reports[0]["claim"],
-            "seeds": list(seeds),
-            "runs": reports,
-            "all_feasible": all(item["all_feasible"] for item in reports),
-        }
-        ok = bool(report["all_feasible"]) if len(seeds) > 1 else bool(reports[0]["all_feasible"])
-        _write_json_output(report, args.output_file)
-        return 0 if ok else 1
+        return _run_freeze_pair_cli(seeds, args, kwargs)
+    if args.weighted_residual:
+        return _run_weighted_residual_cli(seeds, args, kwargs)
     if len(seeds) == 1:
         report = run_nervous_month(seed=seeds[0], **kwargs)
         ok = report["status"] == "feasible" and report["notary_hard_violations"] == 0

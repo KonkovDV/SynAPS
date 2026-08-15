@@ -24,6 +24,8 @@ from synaps.domains.cable.nervous_month import (
     run_freeze_insert_pair,
     run_nervous_month,
     run_nervous_month_multiseed,
+    run_weighted_residual_multiseed,
+    run_weighted_residual_pair,
 )
 from synaps.domains.cable.weights import CABLE_PVC_CPSAT_WEIGHTS, CABLE_PVC_WEIGHTS
 
@@ -47,6 +49,8 @@ __all__ = [
     "run_freeze_insert_pair",
     "run_nervous_month",
     "run_nervous_month_multiseed",
+    "run_weighted_residual_multiseed",
+    "run_weighted_residual_pair",
     "setup_transition",
     "split_length_into_reels",
     "state_code",
