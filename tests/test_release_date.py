@@ -26,7 +26,7 @@ from synaps.model import (
 from synaps.solvers.cpsat_solver import CpSatSolver
 from synaps.solvers.feasibility_checker import FeasibilityChecker
 from synaps.solvers.greedy_dispatch import GreedyDispatch
-from synaps.timegrain import ceil_datetime_to_minute
+from synaps.timegrain import ceil_datetime_to_minute, floor_datetime_to_minute
 
 H0 = datetime(2026, 1, 1, tzinfo=UTC)
 HE = H0 + timedelta(days=10)
@@ -37,6 +37,13 @@ def test_ceil_datetime_to_minute_is_idempotent_on_grid() -> None:
     assert ceil_datetime_to_minute(H0 + timedelta(minutes=1), H0) == H0 + timedelta(minutes=1)
     assert ceil_datetime_to_minute(H0 + timedelta(seconds=90), H0) == H0 + timedelta(minutes=2)
     assert ceil_datetime_to_minute(H0 - timedelta(seconds=30), H0) == H0 - timedelta(seconds=30)
+
+
+def test_floor_datetime_to_minute_is_idempotent_on_grid() -> None:
+    """C7-R1: exact minutes stay put; 90s floors to 1, not 2 (ceil would relax LFT)."""
+    assert floor_datetime_to_minute(H0 + timedelta(minutes=2), H0) == H0 + timedelta(minutes=2)
+    assert floor_datetime_to_minute(H0 + timedelta(seconds=90), H0) == H0 + timedelta(minutes=1)
+    assert floor_datetime_to_minute(H0 - timedelta(seconds=30), H0) == H0 - timedelta(seconds=30)
 
 
 def _released_problem() -> ScheduleProblem:
@@ -150,10 +157,11 @@ def test_greedy_honors_release_date() -> None:
 
 
 def test_ingest_ceils_subminute_release_and_leaves_due_date() -> None:
-    """C7: published EST is the minute grid; due_date is not retimed."""
+    """C7: published EST ceils, LFT floors; due_date is not retimed."""
     due = H0 + timedelta(days=9, seconds=90)
     release = H0 + timedelta(seconds=90)
     earliest = H0 + timedelta(seconds=30)
+    latest = H0 + timedelta(minutes=5, seconds=30)  # 5.5 min → floor 5; 90s would be 6.5
     state = State(code="s")
     wc = WorkCenter(code="M", capability_group="G")
     order = Order(external_ref="O1", due_date=due, release_date=release)
@@ -164,6 +172,7 @@ def test_ingest_ceils_subminute_release_and_leaves_due_date() -> None:
         base_duration_min=60,
         eligible_wc_ids=[wc.id],
         earliest_start=earliest,
+        latest_finish=latest,
     )
     problem = ScheduleProblem(
         states=[state], orders=[order], operations=[op], work_centers=[wc],
@@ -171,6 +180,7 @@ def test_ingest_ceils_subminute_release_and_leaves_due_date() -> None:
     )
     assert problem.orders[0].release_date == H0 + timedelta(minutes=2)
     assert problem.operations[0].earliest_start == H0 + timedelta(minutes=1)
+    assert problem.operations[0].latest_finish == H0 + timedelta(minutes=5)
     assert problem.orders[0].due_date == due
 
 
@@ -227,3 +237,56 @@ def test_greedy_honors_subminute_release_on_minute_grid() -> None:
     snapped = H0 + timedelta(minutes=2)
     assert result.assignments[0].start_time >= snapped
     assert not FeasibilityChecker().check(problem, result.assignments, exhaustive=True)
+
+
+def _one_minute_lft_problem(*, latest: datetime) -> ScheduleProblem:
+    state = State(code="s")
+    wc = WorkCenter(code="M", capability_group="G")
+    order = Order(external_ref="O1", due_date=H0 + timedelta(days=9))
+    op = Operation(
+        order_id=order.id,
+        seq_in_order=1,
+        state_id=state.id,
+        base_duration_min=1,
+        eligible_wc_ids=[wc.id],
+        latest_finish=latest,
+    )
+    return ScheduleProblem(
+        states=[state], orders=[order], operations=[op], work_centers=[wc],
+        setup_matrix=[], planning_horizon_start=H0, planning_horizon_end=HE,
+    )
+
+
+def test_checker_rejects_finish_inside_floored_lft_gap() -> None:
+    """C7-R1: a finish at the raw 90s instant is late vs the ingested 1-minute LFT."""
+    problem = _one_minute_lft_problem(latest=H0 + timedelta(seconds=90))
+    assert problem.operations[0].latest_finish == H0 + timedelta(minutes=1)
+    op = problem.operations[0]
+    gap = [
+        Assignment(
+            operation_id=op.id,
+            work_center_id=problem.work_centers[0].id,
+            start_time=H0,
+            end_time=H0 + timedelta(seconds=90),
+        )
+    ]
+    violations = FeasibilityChecker().check(problem, gap, exhaustive=True)
+    assert any(v.kind == "HORIZON_BOUND_VIOLATION" for v in violations), (
+        f"90s finish must miss the ingested 1-minute LFT: {[v.kind for v in violations]}"
+    )
+
+
+def test_greedy_and_cpsat_honor_floored_latest_finish() -> None:
+    """C7-R1: solvers finish on the same floored LFT as the checker."""
+    problem = _one_minute_lft_problem(latest=H0 + timedelta(seconds=90))
+    snapped = H0 + timedelta(minutes=1)
+    greedy = GreedyDispatch().solve(problem)
+    assert greedy.assignments
+    assert greedy.assignments[0].end_time <= snapped
+    assert not FeasibilityChecker().check(problem, greedy.assignments, exhaustive=True)
+    cpsat = CpSatSolver().solve(
+        problem, time_limit_s=5, num_workers=1, auto_greedy_warm_start=False
+    )
+    assert cpsat.assignments
+    assert cpsat.assignments[0].end_time <= snapped
+    assert not FeasibilityChecker().check(problem, cpsat.assignments, exhaustive=True)

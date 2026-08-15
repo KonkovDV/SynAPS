@@ -93,8 +93,9 @@ gitignored. RT: `OPS_WHEEL_REDTEAM_2026_08_15.md`.
 From the 11.08 algebra ledger, not a cable feature. RT:
 `CABLE_C7_KERNEL_LEFTOVERS_REDTEAM_2026_08_15.md`.
 
-- Ingest ceils order `release_date` and operation `earliest_start` to
-  the minute grid. `due_date` / `latest_finish` not retimed (C7-R1).
+- Ingest ceils order `release_date` and operation `earliest_start`, and
+  floors `latest_finish`, onto the minute grid. `due_date` not retimed
+  (tardiness, not a hard window).
 - `epsilon_primary` overflow guard: **already F5**; not re-implemented.
 - `sat_parameters` cannot override `num_workers` (already F9) or
   `random_seed` under `strict`. `fast` remains the opt-out.
@@ -122,7 +123,7 @@ From the 11.08 algebra ledger, not a cable feature. RT:
 | `evaluate()` phantom setup on lane-less parallel machines | Closed W14/W15 (lane-aware evaluator, `_build_lane_sequences`) | Regression tests only |
 | Checker greedy lane inference incomplete (false rejects) | Mitigated: `LANE_INFERENCE_UNPROVEN` = hard UNKNOWN (W16b-1) | Keep; do not demote |
 | DURATION_MISMATCH 1-min inter-solver tolerance | Intentional (commit 46a8ed3) | Do not remove without cross-solver parity run |
-| CP-SAT sub-minute release truncation vs checker datetime compare | Closed C7 | Ingest ceils EST; greedy offset ceils; due_date untouched |
+| CP-SAT sub-minute release truncation vs checker datetime compare | Closed C7 | Ingest ceils EST, floors LFT; greedy offsets match; due_date untouched |
 | `epsilon_primary` big-M lacks the overflow guard | Closed F5 (C7 confirmed) | `tests/test_bigm_overflow_guard.py`; do not re-implement |
 | `sat_parameters` override can set `num_workers` → breaks strict determinism | Closed F9 + C7 | Workers already denied; C7 also denies `random_seed` under `strict` |
 | `weighted_sum` units diverge (CP-SAT big-M vs 0.0 ALNS/LBBD) | Closed F4 wrap + C7 sort | `objective_sort_key` / Pareto use `scalarize()`; inversion test |
@@ -153,6 +154,5 @@ From the 11.08 algebra ledger, not a cable feature. RT:
 
 ## 6. Immediate next command for the executor
 
-Standing forbids only. Optional residual C7-R1: floor `latest_finish` at
-ingest. Do not open C5a. Do not put weights into COVER. Do not flip the
-notary default. Do not flip ALNS to UCB1.
+Standing forbids only. Do not open C5a. Do not put weights into COVER.
+Do not flip the notary default. Do not flip ALNS to UCB1.

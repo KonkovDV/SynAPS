@@ -37,7 +37,13 @@ def operation_earliest_offset_minutes(
 
 
 def operation_latest_finish_offset_minutes(operation: Any, horizon_start: Any) -> float | None:
+    """Minutes from horizon start; floored onto the integer-minute grid (C7-R1).
+
+    A 90s latest_finish is offset 1, matching CP-SAT. Ingest also snaps the
+    published datetime. ``None`` means no per-op LFT.
+    """
     latest = getattr(operation, "latest_finish", None)
     if latest is None:
         return None
-    return (latest - horizon_start).total_seconds() / 60.0
+    offset = (latest - horizon_start).total_seconds() / 60.0
+    return float(math.floor(offset + 1e-12))

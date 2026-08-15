@@ -13,10 +13,11 @@ time, yielding a schedule that is not physically executable and a lower bound
 that is too optimistic (final brief, P0-4). An operation always takes at least
 one minute.
 
-EST windows (order ``release_date``, operation ``earliest_start``) use the same
-minute grid: :func:`ceil_datetime_to_minute` at ingest so the published model,
-CP-SAT, greedy, and the checker share one lower bound (C7 / F8). Due dates
-and ``latest_finish`` are not ceiled (LFT must floor).
+EST windows (order ``release_date``, operation ``earliest_start``) ceil onto
+the minute grid; LFT (``latest_finish``) floors. Ingest
+(:func:`snap_schedule_windows_to_minute_grain`) is the published SSOT so
+CP-SAT, greedy, and the checker share one window (C7 / F8 / C7-R1).
+``due_date`` is tardiness, not a hard window, and is not retimed.
 """
 
 from __future__ import annotations
@@ -88,13 +89,28 @@ def ceil_datetime_to_minute(value: datetime, origin: datetime) -> datetime:
     Release / earliest_start are lower bounds: rounding down admits a start
     up to 59.999s early on the integer-minute CP-SAT grid (F8). Exact minute
     offsets are unchanged. Instants at or before *origin* stay put; solvers
-    already clamp negative offsets to 0. Due dates and latest_finish are
-    not ceiled here (LFT must floor; C7 does not retarget tardiness).
+    already clamp negative offsets to 0. ``due_date`` is not a hard window
+    (tardiness) and is not ceiled. ``latest_finish`` uses
+    :func:`floor_datetime_to_minute`.
     """
     seconds = (value - origin).total_seconds()
     if seconds <= 0:
         return value
     minutes = math.ceil((seconds / 60.0) - 1e-12)
+    return origin + timedelta(minutes=int(minutes))
+
+
+def floor_datetime_to_minute(value: datetime, origin: datetime) -> datetime:
+    """Last minute-grid instant that is not after *value* (Baptiste LFT floor).
+
+    ``latest_finish`` is an upper bound: rounding up would admit a finish
+    after the declared deadline on the integer-minute CP-SAT grid. Exact
+    minute offsets are unchanged. Instants at or before *origin* stay put.
+    """
+    seconds = (value - origin).total_seconds()
+    if seconds <= 0:
+        return value
+    minutes = math.floor((seconds / 60.0) + 1e-12)
     return origin + timedelta(minutes=int(minutes))
 
 
@@ -119,25 +135,31 @@ def _copy_record(item: Any) -> dict[str, Any] | None:
     return dict(dumped) if isinstance(dumped, dict) else None
 
 
-def snap_schedule_windows_to_minute_grain(data: dict[str, Any]) -> dict[str, Any]:
-    """Ceil order.release_date and operation.earliest_start onto the minute grid.
+def _snap_record_field(
+    record: dict[str, Any],
+    field: str,
+    origin: datetime,
+    snapper: Any,
+) -> bool:
+    raw = _coerce_datetime(record.get(field))
+    if raw is None:
+        return False
+    snapped = snapper(raw, origin)
+    if snapped == raw:
+        return False
+    record[field] = snapped
+    return True
 
-    Called from ScheduleProblem ingest so the published model, CP-SAT, greedy,
-    and the checker share one EST. Does not touch due_date or latest_finish.
+
+def snap_schedule_windows_to_minute_grain(data: dict[str, Any]) -> dict[str, Any]:
+    """Snap hard windows onto the minute grid at ingest (C7 / C7-R1).
+
+    EST (``release_date``, ``earliest_start``) ceils; LFT (``latest_finish``)
+    floors. ``due_date`` is tardiness and is not retimed.
     """
     origin = _coerce_datetime(data.get("planning_horizon_start"))
     if origin is None:
         return data
-
-    def _snap_field(record: dict[str, Any], field: str) -> bool:
-        raw = _coerce_datetime(record.get(field))
-        if raw is None:
-            return False
-        snapped = ceil_datetime_to_minute(raw, origin)
-        if snapped == raw:
-            return False
-        record[field] = snapped
-        return True
 
     changed = False
     out = dict(data)
@@ -150,7 +172,7 @@ def snap_schedule_windows_to_minute_grain(data: dict[str, Any]) -> dict[str, Any
             if record is None:
                 orders.append(item)
                 continue
-            if _snap_field(record, "release_date"):
+            if _snap_record_field(record, "release_date", origin, ceil_datetime_to_minute):
                 orders_changed = True
             orders.append(record)
         if orders_changed:
@@ -165,7 +187,9 @@ def snap_schedule_windows_to_minute_grain(data: dict[str, Any]) -> dict[str, Any
             if record is None:
                 operations.append(item)
                 continue
-            if _snap_field(record, "earliest_start"):
+            if _snap_record_field(record, "earliest_start", origin, ceil_datetime_to_minute):
+                ops_changed = True
+            if _snap_record_field(record, "latest_finish", origin, floor_datetime_to_minute):
                 ops_changed = True
             operations.append(record)
         if ops_changed:

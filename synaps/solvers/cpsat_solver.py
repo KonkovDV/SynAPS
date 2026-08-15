@@ -20,7 +20,10 @@ from synaps.model import (
     SolverStatus,
 )
 from synaps.solvers import BaseSolver
-from synaps.solvers._time_windows import operation_earliest_offset_minutes
+from synaps.solvers._time_windows import (
+    operation_earliest_offset_minutes,
+    operation_latest_finish_offset_minutes,
+)
 from synaps.timegrain import duration_minutes_for
 
 # N3 (audit v3): time limits are owned by ``time_limit_s`` and may not be set
@@ -1187,12 +1190,11 @@ class CpSatSolver(BaseSolver):
             release_offset = release_offset_by_op.get(operation.id)
             if release_offset is not None:
                 model.add(selected_starts[operation.id] >= release_offset)
-            latest = getattr(operation, "latest_finish", None)
-            if latest is not None:
-                latest_offset = math.floor(
-                    (latest - solve_problem.planning_horizon_start).total_seconds() / 60.0
-                )
-                model.add(selected_ends[operation.id] <= latest_offset)
+            latest_offset = operation_latest_finish_offset_minutes(
+                operation, solve_problem.planning_horizon_start
+            )
+            if latest_offset is not None:
+                model.add(selected_ends[operation.id] <= int(latest_offset))
 
         setup_terms, material_terms, energy_terms, setup_intervals_by_op = (
             self._add_machine_order_and_adjacency(

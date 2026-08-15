@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Kernel leftovers (C7):** ingest ceils `release_date` /
-  `earliest_start` onto the integer-minute grid (due_date untouched);
+  `earliest_start` and floors `latest_finish` onto the integer-minute
+  grid (`due_date` untouched — tardiness, not a hard window);
   `sat_parameters` cannot override `random_seed` under `determinism="strict"`
   (workers were already F9); `objective_sort_key` and Pareto slice pick
   use `scalarize()`, ignoring leftover CP-SAT big-M `weighted_sum`.
