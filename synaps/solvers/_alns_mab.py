@@ -65,4 +65,12 @@ def charge_pair_reject(bandit: PairBandit | None, pair_idx: int) -> None:
     bandit.update(pair_idx, pair_reward(cost_before=1.0, cost_after=1.0, accepted=False))
 
 
-__all__ = ["PairBandit", "charge_pair_reject", "pair_reward"]
+def pair_pulls(bandit: PairBandit | None, labels: list[str]) -> dict[str, int]:
+    """Per-arm pull counts for ALNS metadata. Empty when MAB is off."""
+
+    if bandit is None:
+        return {}
+    return {label: int(bandit.pulls[idx]) for idx, label in enumerate(labels)}
+
+
+__all__ = ["PairBandit", "charge_pair_reject", "pair_pulls", "pair_reward"]

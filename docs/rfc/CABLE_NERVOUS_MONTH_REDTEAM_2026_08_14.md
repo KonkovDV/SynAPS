@@ -55,6 +55,6 @@ SynAPS 499770/145s as cable evidence, N-1, SAIDI, SOTA, “we replaced INFIMUM�
 
 ## Next honest step
 
-K2 ALNS MAB opt-in. Occupancy 21 ≪ pool 48.
+K3 wall-stamp honesty. Occupancy 21 ≪ pool 48.
 Do not open C5a. Do not claim C6-R1 four-week freeze is stably FEASIBLE.
 C6-R1 residual: `CABLE_C6R1_REDTEAM_2026_08_15.md`.

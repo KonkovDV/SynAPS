@@ -165,9 +165,9 @@ python -m synaps cable-nervous-month --weighted-residual --orders 1600 --machine
 
 ## Next session start here
 
-1. **K2** ALNS MAB opt-in (default stays roulette).
+1. **K3** wall-stamp honesty (`search_stop_reason` vs hardcoded `wall_clock_path_dependent`).
 2. Stop. Do not open C5a: occupancy 21 ≪ pool 48.
 3. Do not put `CABLE_PVC_WEIGHTS` into COVER. Do not ingest 1С.
-4. Do not claim C6-R1 freeze waves are stably FEASIBLE.
+4. Do not claim C6-R1 freeze waves are stably FEASIBLE. Do not flip ALNS default to UCB1.
 
 C6a, C6b, C6c, and C6-R1 plumbing are done. C6d stays gated.

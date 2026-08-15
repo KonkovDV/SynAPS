@@ -1,8 +1,11 @@
 # Design note: MAB selection of ALNS destroy/repair pairs (T-34)
 
-- **Status:** Implemented (Wave 6) — UCB1 over destroy×repair pairs
-  (`cpsat|greedy`) via `mab_pair_selection`; default remains legacy roulette
-- **Date:** 2026-08-11
+- **Status:** Implemented (Wave 6) + K2 determinism gate (2026-08-15).
+  UCB1 over destroy×repair pairs (`cpsat|greedy`) via `mab_pair_selection`.
+  Default remains legacy roulette (ALNS-300/500/1000 kwargs omit the flag).
+  Seeded greedy-repair test: `tests/test_alns_mab.py`.
+  Not Hendel (2022) α-UCB. D5 quality DOE is **not** this wave.
+- **Date:** 2026-08-11; K2 2026-08-15
 
 ## Current behavior
 
@@ -30,6 +33,7 @@ fallback prior for cold start.
   `--repeats ≥ 5` and 95% CI on makespan / coverage.
 - Success: mean makespan improvement with CI not overlapping zero on
   `medium_stress_20x4` and one industrial smoke, without timebox overshoot.
+- **K2 did not run D5.** Seeded determinism ≠ quality. Residual **K2-R1**.
 
 ## Non-goals
 

@@ -65,6 +65,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docs/rfc/CABLE_MOSKABELMET_OSINT_REDTEAM_2026_08_15.md`. Not Moskabelmet
   MES, not INFIMUM, not the 500k synthetic cover.
 
+- **ALNS MAB UCB1 (opt-in, K2):** Wave 6 already selected destroy×repair
+  pairs via `mab_pair_selection`. K2 adds `mab_pair_pulls`, a seeded
+  greedy-repair determinism test, and a registry ratchet: ALNS-300/500/1000
+  stay roulette. Default unchanged. Not Hendel α-UCB. Native `p_{o,m}` ABI
+  still deferred. Evidence: `docs/rfc/K2_ALNS_MAB_REDTEAM_2026_08_15.md`.
+
 - **Cable domain (encode-first, Moskabelmet-shaped):** `docs/domains/cable.md`
   is domain 9. Adapter writes metres→`base_duration_min`, pre-splits reels,
   parametric colour/section/compound SDST, drum aux, campaign

@@ -23,7 +23,7 @@
 | 8-stage seed distribution | C6a (5 seeds, all feasible, notary 0) |
 | Freeze vs insert pair + occupancy vs span | C6b (occupancy 21 ≪ pool 48) |
 | C6c weighted ALNS residual (search, not COVER) | 1600@8 seeds 1..5; PVC tard −478..−25; scalar 4/5 |
-| C6-R1 weekly freeze-wave plumbing | stop-on-dirty, notary kinds, CLI oracle; stable 8-stage pass **not** claimed |
+| K2 MAB + native rank leftovers (P2) | UCB1 opt-in determinism + pulls; ALNS-300 stays roulette; ceil snap already tested; `p_{o,m}` ABI still deferred |
 
 ## 1. Priority stack (do in this order)
 
@@ -45,21 +45,23 @@ green on seven later months. Hamming path-dependent. Occupancy 21.
 **Not claimed:** freeze works at 8-stage.
 RT: `CABLE_C6R1_REDTEAM_2026_08_15.md`.
 
-### Wave K2 — ALNS MAB + native rank leftovers (P2) — **next**
+### Wave K2 — ALNS MAB + native rank leftovers (P2) — **DONE 2026-08-15**
 
-- `DESIGN_ALNS_MAB_OPERATOR_SELECTION.md` exists; selection default is still
-  roulette. Ship UCB1 as **opt-in** flag with a seeded determinism test;
-  do not change the default in the same wave.
-- K2 full SDST native pack (`p_{o,m}` ABI) stays **deferred permanently**
-  unless a measured kernel gap forces an RFC.
-- P4-M1: `stress_200` ~8.1 s — claim stays "no 2–3 s".
+UCB1 already existed (`mab_pair_selection`, Wave 6). K2 ships the seeded
+greedy-repair determinism test, `mab_pair_pulls`, and a registry ratchet
+(ALNS-300/500/1000 stay roulette). Default unchanged. Native ceil snap
+already in `tests/test_alns_native_grain.py`. Full SDST `p_{o,m}` ABI stays
+deferred. `stress_200` 2–3 s not claimed.
+RT: `K2_ALNS_MAB_REDTEAM_2026_08_15.md`.
 
-### Wave K3 — Determinism stamps (P2)
+### Wave K3 — Determinism stamps (P2) — **next**
 
-`wall_clock_path_dependent` is published; keep it informational. Do **not**
-add a strict CI error. Add one regression test that the stamp appears when a
-wall timeout cuts a strict run. ALNS/RHC never claim bitwise identity under
-wall timeouts.
+`wall_clock_path_dependent` is published and currently **hardcoded True**
+(K2 fixture: `search_stop_reason=max_iterations` still stamped dependent).
+Keep it informational. Do **not** add a strict CI error. Make the boolean
+match a wall cut (`search_stop_reason` starts with `wall_clock`) **or**
+add a regression on `search_stop_reason` when a wall timeout cuts a strict
+run. ALNS/RHC never claim bitwise identity under wall timeouts.
 
 ### Wave S4 — Delta notary (P1, real engineering)
 
@@ -142,5 +144,5 @@ python -m synaps cable-nervous-month --orders 1600 --machines-per-stage 8 \
   --drum-pool 48 --waves 4 --disruptions 20 --new-rush 0 --seeds 1,2
 ```
 
-K2 ALNS MAB opt-in. Do not open C5a. Do not put weights into COVER.
-Do not claim C6-R1 waves are stably FEASIBLE.
+K3 wall-stamp honesty. Do not open C5a. Do not put weights into COVER.
+Do not claim C6-R1 waves are stably FEASIBLE. Do not flip ALNS to UCB1.

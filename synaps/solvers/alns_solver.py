@@ -4447,6 +4447,8 @@ class AlnsSolver(BaseSolver):
 
         elapsed_ms = int((time.monotonic() - t0) * 1000)
 
+        from synaps.solvers._alns_mab import pair_pulls
+
         logger.info(
             "ALNS finished: %d iterations, %d improvements, cost=%.1f, "
             "makespan=%.1f min, %d cpsat repairs, %d greedy repairs, "
@@ -4542,6 +4544,7 @@ class AlnsSolver(BaseSolver):
                 "mab_pair_selection": mab_pair_selection,
                 "mab_pair_count": len(mab_pair_labels),
                 "mab_repair_modes": list(mab_repair_modes),
+                "mab_pair_pulls": pair_pulls(pair_bandit, mab_pair_labels),
                 "repair_num_workers": repair_num_workers,
                 "initial_solution_ms": initial_solution_ms,
                 "native_initial_seed_attempted": native_initial_seed_attempted,

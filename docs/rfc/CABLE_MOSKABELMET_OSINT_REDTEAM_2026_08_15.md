@@ -187,7 +187,7 @@ C6a (multiseed 1..5 @1600×8 cover+notary), C6b (freeze-pair), C6c
 (weighted ALNS residual), and C6-R1 freeze-wave **plumbing** are **done**.
 C6c cut tardiness 25–478 min on seeds 1..5; the 48k–164k hole remains.
 C6-R1 seed 2 was `INFEASIBLE` once on weeks 3–4. Occupancy 21 ≪ pool 48.
-Next is K2. Do not open C5a. Do not ingest 1С. Do not claim weekly freeze
+Next is K3 (wall stamp). Do not open C5a. Do not ingest 1С. Do not claim weekly freeze
 holds at 8-stage. Plan: `CABLE_C6_POST_OSINT_PLAN_2026_08_15.md`.
 C6-R1 RT: `CABLE_C6R1_REDTEAM_2026_08_15.md`.
 
