@@ -2876,6 +2876,35 @@ def _try_greedy_repair_lane(
     return repaired, stats
 
 
+def _alns_repair_attempt_result(
+    *,
+    assignments: list[Assignment] | None,
+    repair_used: str,
+    abort_iteration: bool,
+    rejection_reasons: dict[str, int],
+    cpsat_stats: Mapping[str, int],
+    greedy_stats: Mapping[str, int],
+) -> _AlnsRepairAttemptResult:
+    c, g = cpsat_stats.get, greedy_stats.get
+    return _AlnsRepairAttemptResult(
+        assignments=assignments,
+        repair_used=repair_used,
+        abort_iteration=abort_iteration,
+        rejection_reasons=rejection_reasons,
+        cpsat_repair_attempts=c("cpsat_repair_attempts", 0),
+        cpsat_repair_ms_total=c("cpsat_repair_ms_total", 0),
+        cpsat_repair_total_destroy_size=c("cpsat_repair_total_destroy_size", 0),
+        cpsat_repair_timeouts=c("cpsat_repair_timeouts", 0),
+        cpsat_repairs=c("cpsat_repairs", 0),
+        cpsat_repair_skips_large_destroy=c("cpsat_repair_skips_large_destroy", 0),
+        greedy_repair_attempts=g("greedy_repair_attempts", 0),
+        greedy_repair_ms_total=g("greedy_repair_ms_total", 0),
+        greedy_repair_total_destroy_size=g("greedy_repair_total_destroy_size", 0),
+        greedy_repair_timeouts=g("greedy_repair_timeouts", 0),
+        greedy_repairs=g("greedy_repairs", 0),
+    )
+
+
 def _attempt_alns_pair_repair(
     *,
     problem: ScheduleProblem,
@@ -2941,23 +2970,13 @@ def _attempt_alns_pair_repair(
         if new_assignments is not None:
             repair_used = "greedy"
 
-    c, g = cpsat_stats.get, greedy_stats.get
-    return _AlnsRepairAttemptResult(
+    return _alns_repair_attempt_result(
         assignments=None if abort else new_assignments,
         repair_used="none" if abort else repair_used,
         abort_iteration=abort,
         rejection_reasons=rejection_reasons,
-        cpsat_repair_attempts=c("cpsat_repair_attempts", 0),
-        cpsat_repair_ms_total=c("cpsat_repair_ms_total", 0),
-        cpsat_repair_total_destroy_size=c("cpsat_repair_total_destroy_size", 0),
-        cpsat_repair_timeouts=c("cpsat_repair_timeouts", 0),
-        cpsat_repairs=c("cpsat_repairs", 0),
-        cpsat_repair_skips_large_destroy=c("cpsat_repair_skips_large_destroy", 0),
-        greedy_repair_attempts=g("greedy_repair_attempts", 0),
-        greedy_repair_ms_total=g("greedy_repair_ms_total", 0),
-        greedy_repair_total_destroy_size=g("greedy_repair_total_destroy_size", 0),
-        greedy_repair_timeouts=g("greedy_repair_timeouts", 0),
-        greedy_repairs=g("greedy_repairs", 0),
+        cpsat_stats=cpsat_stats,
+        greedy_stats=greedy_stats,
     )
 
 

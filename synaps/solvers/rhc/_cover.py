@@ -439,46 +439,31 @@ def _run_python_cover_loop(
             cover_atcs_floor_window=cover_atcs_floor_window,
             cover_atcs_exhaust_window=cover_atcs_exhaust_window,
         )
-        op = ops_by_id[op_id]
-        pred_end = 0.0
-        if op.predecessor_op_id:
-            pred_assignment = assignment_by_op.get(op.predecessor_op_id)
-            if pred_assignment is None:
-                continue
-            pred_end = (pred_assignment.end_time - horizon_start).total_seconds() / 60.0
-        allow_gap = gap_attempts < _MAX_LIST_SCHEDULE_GAP_INSERTS and (
-            len(operations) < _MAX_LIST_SCHEDULE_GAP_OPS
-        )
-        placed_one, inserted, end = _place_ready_list_operation(
-            op=op,
-            floor=max(pred_end, op_earliest.get(op.id, 0.0)),
+        step = _place_cover_heap_item(
+            op=ops_by_id[op_id],
+            operations=operations,
             dispatch_context=dispatch_context,
             assignments=assignments,
             assignment_by_op=assignment_by_op,
             scheduled_ids=scheduled_ids,
             tails=tails,
             aux_windows=aux_windows,
-            default_wc_ids=default_wc_ids,
+            successors=successors,
+            heap=heap,
             horizon_start=horizon_start,
             horizon_minutes=horizon_minutes,
-            allow_gap=allow_gap,
-            cover_atcs_exhaust_window=cover_atcs_exhaust_window,
-        )
-        if inserted:
-            gap_inserted += 1
-        if allow_gap and (inserted or not placed_one):
-            gap_attempts += 1
-        if not placed_one:
-            clipped += 1
-            continue
-        placed += 1
-        _enqueue_cover_successors(
-            heap,
-            successors[op.id],
-            end=end,
             op_earliest=op_earliest,
-            as_list=cover_ready_rule == "atcs",
+            default_wc_ids=default_wc_ids,
+            cover_ready_rule=cover_ready_rule,
+            cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+            gap_attempts=gap_attempts,
         )
+        if step is None:
+            continue
+        gap_inserted += step[0]
+        gap_attempts += step[1]
+        clipped += step[2]
+        placed += step[3]
     return GreedyCoverStats(
         placed=placed,
         clipped=clipped,
@@ -486,6 +471,64 @@ def _run_python_cover_loop(
         time_limited=time_limited,
         gap_inserted=gap_inserted,
     )
+
+
+def _place_cover_heap_item(
+    *,
+    op: Operation,
+    operations: Sequence[Operation],
+    dispatch_context: DispatchContext,
+    assignments: list[Assignment],
+    assignment_by_op: dict[UUID, Assignment],
+    scheduled_ids: set[UUID],
+    tails: dict[UUID, tuple[float, UUID | None]],
+    aux_windows: dict[UUID, list[tuple[float, float, int]]],
+    successors: dict[UUID, list[Operation]],
+    heap: list[tuple[float, int, str, UUID]],
+    horizon_start: datetime,
+    horizon_minutes: float,
+    op_earliest: Mapping[UUID, float],
+    default_wc_ids: Sequence[UUID],
+    cover_ready_rule: str,
+    cover_atcs_exhaust_window: float,
+    gap_attempts: int,
+) -> tuple[int, int, int, int] | None:
+    pred_end = 0.0
+    if op.predecessor_op_id:
+        pred_assignment = assignment_by_op.get(op.predecessor_op_id)
+        if pred_assignment is None:
+            return None
+        pred_end = (pred_assignment.end_time - horizon_start).total_seconds() / 60.0
+    allow_gap = gap_attempts < _MAX_LIST_SCHEDULE_GAP_INSERTS and (
+        len(operations) < _MAX_LIST_SCHEDULE_GAP_OPS
+    )
+    placed_one, inserted, end = _place_ready_list_operation(
+        op=op,
+        floor=max(pred_end, op_earliest.get(op.id, 0.0)),
+        dispatch_context=dispatch_context,
+        assignments=assignments,
+        assignment_by_op=assignment_by_op,
+        scheduled_ids=scheduled_ids,
+        tails=tails,
+        aux_windows=aux_windows,
+        default_wc_ids=default_wc_ids,
+        horizon_start=horizon_start,
+        horizon_minutes=horizon_minutes,
+        allow_gap=allow_gap,
+        cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+    )
+    gap_ins = 1 if inserted else 0
+    gap_att = 1 if allow_gap and (inserted or not placed_one) else 0
+    if not placed_one:
+        return (gap_ins, gap_att, 1, 0)
+    _enqueue_cover_successors(
+        heap,
+        successors[op.id],
+        end=end,
+        op_earliest=op_earliest,
+        as_list=cover_ready_rule == "atcs",
+    )
+    return (gap_ins, gap_att, 0, 1)
 
 
 def _enqueue_cover_successors(

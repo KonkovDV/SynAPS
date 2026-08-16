@@ -195,7 +195,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mypy 2.3 `--strict` are green. Fastify/AJV `coerceTypes` mapped schema
   default `num_workers: null` to `0`; the BFF now treats coerced 0/null as
   unset and returns 422 (`AdmissionError`) for real out-of-range values
-  instead of 500.
+  instead of 500. Function-length ratchet: split `_attempt_alns_pair_repair`
+  and `_run_python_cover_loop` after ruff wrap exceeded 80 lines.
 
 - **Wave 16 (Red Team atomicity close):**
   - **W16-P0-1** RHC `sealed_window_op_ids` no longer retains rewound ops;
