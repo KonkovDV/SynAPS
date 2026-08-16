@@ -198,7 +198,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of 500. Function-length ratchet: split `_attempt_alns_pair_repair`
   and `_run_python_cover_loop` after ruff wrap exceeded 80 lines. The
   `build-distributions` lock check now installs `uv` before `uv pip compile`
-  (the job was previously unreachable behind red test-fast).
+  (the job was previously unreachable behind red test-fast). Linux compile
+  does not emit Windows-only `tzdata`; the lockfile matches that.
 
 - **Wave 16 (Red Team atomicity close):**
   - **W16-P0-1** RHC `sealed_window_op_ids` no longer retains rewound ops;
