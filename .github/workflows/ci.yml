@@ -308,6 +308,7 @@ jobs:
 
       - name: Verify lock files are up to date
         run: |
+          python -m pip install uv
           python -m uv pip compile pyproject.toml --output-file requirements-lock.txt --no-annotate --quiet
           git diff --exit-code -- requirements-lock.txt || (echo "Lock file out of date. Run: uv pip compile pyproject.toml --output-file requirements-lock.txt"; exit 1)
 
