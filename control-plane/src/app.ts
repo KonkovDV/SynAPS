@@ -201,26 +201,61 @@ function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+function readOptionalBoundedInt(
+  raw: unknown,
+  min: number,
+  max: number,
+  label: string,
+): number | undefined {
+  if (raw === null || raw === undefined) {
+    return undefined;
+  }
+  if (typeof raw !== "number" || !Number.isFinite(raw)) {
+    return undefined;
+  }
+  const value = Math.floor(raw);
+  // Fastify/AJV coerceTypes maps JSON Schema default `null` (integer|null) to 0.
+  if (value === 0) {
+    return undefined;
+  }
+  if (value < min || value > max) {
+    throw new AdmissionError(`${label} must be in [${min}, ${max}], got ${raw}`, [
+      {
+        code: "invalid_solve_option",
+        message: `${label} must be in [${min}, ${max}], got ${raw}`,
+      },
+    ]);
+  }
+  return value;
+}
+
 function normalizeSolvePayload(payload: Record<string, unknown>): Record<string, unknown> {
   const rawOptions =
     typeof payload.solve_options === "object" && payload.solve_options !== null
       ? { ...(payload.solve_options as Record<string, unknown>) }
       : {};
 
-  if (typeof rawOptions.num_workers === "number" && Number.isFinite(rawOptions.num_workers)) {
-    const workers = Math.floor(rawOptions.num_workers);
-    if (workers < 1 || workers > 8) {
-      throw new Error(`solve_options.num_workers must be in [1, 8], got ${rawOptions.num_workers}`);
-    }
+  const workers = readOptionalBoundedInt(
+    rawOptions.num_workers,
+    1,
+    8,
+    "solve_options.num_workers",
+  );
+  if (workers === undefined) {
+    delete rawOptions.num_workers;
+  } else {
     rawOptions.num_workers = workers;
   }
-  if (typeof rawOptions.time_limit_s === "number" && Number.isFinite(rawOptions.time_limit_s)) {
-    const limit = Math.floor(rawOptions.time_limit_s);
-    // Wave 12 / H12-4: match Python SolveOptions honesty ([1, 7200], no silent 600 clamp).
-    if (limit < 1 || limit > 7200) {
-      throw new Error(`solve_options.time_limit_s must be in [1, 7200], got ${rawOptions.time_limit_s}`);
-    }
-    rawOptions.time_limit_s = limit;
+  const timeLimit = readOptionalBoundedInt(
+    rawOptions.time_limit_s,
+    1,
+    7200,
+    "solve_options.time_limit_s",
+  );
+  if (timeLimit === undefined) {
+    delete rawOptions.time_limit_s;
+  } else {
+    rawOptions.time_limit_s = timeLimit;
   }
 
   return {

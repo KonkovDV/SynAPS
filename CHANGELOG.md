@@ -192,7 +192,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repair records `aux_requirements` / `parallel_machines` skip reasons
   even when the Rust wheel is absent; ALNS seed-feasibility stub accepts
   `exhaustive=`; solve/repair OpenAPI schemas include 429; ruff 0.16 and
-  mypy 2.3 `--strict` are green.
+  mypy 2.3 `--strict` are green. Fastify/AJV `coerceTypes` mapped schema
+  default `num_workers: null` to `0`; the BFF now treats coerced 0/null as
+  unset and returns 422 (`AdmissionError`) for real out-of-range values
+  instead of 500.
 
 - **Wave 16 (Red Team atomicity close):**
   - **W16-P0-1** RHC `sealed_window_op_ids` no longer retains rewound ops;
