@@ -12,8 +12,7 @@ import itertools
 from uuid import uuid4
 
 import pytest
-from hypothesis import given, settings
-from hypothesis import strategies as st
+from hypothesis import given, settings, strategies as st
 
 from synaps.solvers._lbbd_cuts import (
     compute_machine_tsp_lower_bound,
@@ -34,7 +33,7 @@ def _brute_path_optimum(
     best = float("inf")
     for order in itertools.permutations(range(n)):
         cost = 0.0
-        for a, b in zip(order, order[1:], strict=False):
+        for a, b in itertools.pairwise(order):
             cost += float(lookup.get((wc_id, distinct[a], distinct[b]), 0.0))
         best = min(best, cost)
     return 0.0 if best == float("inf") else best

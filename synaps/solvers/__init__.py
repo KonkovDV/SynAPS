@@ -45,9 +45,7 @@ def _attach_coverage(result: ScheduleResult, problem: ScheduleProblem) -> None:
         return
     total = len(problem.operations)
     scheduled = len({assignment.operation_id for assignment in result.assignments})
-    objective.coverage = coverage_fraction(
-        total_operations=total, scheduled_operations=scheduled
-    )
+    objective.coverage = coverage_fraction(total_operations=total, scheduled_operations=scheduled)
     objective.unscheduled_operations = max(0, total - scheduled)
 
 
@@ -78,8 +76,6 @@ def _attach_canonical_objective(
     result.objective = canonical.model_copy(
         update={"weighted_sum": scalarize(canonical, publish_weights)}
     )
-    if result.metadata is None:
-        result.metadata = {}
     result.metadata["published_objective_weights"] = dict(publish_weights)
 
 

@@ -42,9 +42,7 @@ def test_lbbd_is_reproducible_at_fixed_seed() -> None:
     """D2: two LBBD runs at the same seed must yield identical schedules."""
     problem = _medium()
     prints = {
-        _fingerprint(
-            LbbdSolver().solve(problem, time_limit_s=8, random_seed=42, max_iterations=8)
-        )
+        _fingerprint(LbbdSolver().solve(problem, time_limit_s=8, random_seed=42, max_iterations=8))
         for _ in range(2)
     }
     assert len(prints) == 1, f"LBBD non-reproducible at fixed seed: {prints}"

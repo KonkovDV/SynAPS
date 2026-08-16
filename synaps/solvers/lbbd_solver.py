@@ -42,6 +42,7 @@ from synaps.model import (
     WorkCenter,
 )
 from synaps.solvers import BaseSolver
+from synaps.solvers._lbbd_assembly import LaneGroupResolver, enforce_lane_gaps
 from synaps.solvers._lbbd_cuts import (
     compute_assignment_setup_lb_total,
     compute_machine_transition_floor,
@@ -51,7 +52,6 @@ from synaps.solvers._lbbd_cuts import (
     reported_lower_bound,
 )
 from synaps.solvers.cpsat_solver import CpSatSolver
-from synaps.solvers._lbbd_assembly import LaneGroupResolver, enforce_lane_gaps
 from synaps.timegrain import duration_minutes_for
 
 if TYPE_CHECKING:
@@ -1229,9 +1229,7 @@ def _greedy_warm_start(
     greedy_result = GreedyDispatch().solve(problem)
     if greedy_result.status != SolverStatus.FEASIBLE or not greedy_result.assignments:
         return None, None, None, None
-    warm_map = {
-        a.operation_id: a.work_center_id for a in greedy_result.assignments
-    }
+    warm_map = {a.operation_id: a.work_center_id for a in greedy_result.assignments}
     greedy_makespan = greedy_result.objective.makespan_minutes
     if greedy_makespan < best_ub:
         return (
@@ -1360,8 +1358,7 @@ def _add_benders_cut_rows(
             )
         else:
             raise ValueError(
-                f"Unknown LBBD cut kind {cut.kind!r}; refusing silent no-op "
-                "(Wave 12 / M12-1)."
+                f"Unknown LBBD cut kind {cut.kind!r}; refusing silent no-op (Wave 12 / M12-1)."
             )
 
 

@@ -529,9 +529,7 @@ def main() -> None:
     args = parser.parse_args()
     path: Path = args.path
 
-    instances = (
-        sorted([*path.glob("*.json"), *path.glob("*.fjs")]) if path.is_dir() else [path]
-    )
+    instances = sorted([*path.glob("*.json"), *path.glob("*.fjs")]) if path.is_dir() else [path]
 
     all_reports: list[dict[str, Any]] = []
     for inst in instances:

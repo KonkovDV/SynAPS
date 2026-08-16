@@ -31,13 +31,20 @@ def _problem(base_min: int, speed: float) -> ScheduleProblem:
     wc = WorkCenter(code="M", capability_group="G", speed_factor=speed)
     order = Order(external_ref="O1", due_date=_H0 + timedelta(days=1))
     op = Operation(
-        order_id=order.id, seq_in_order=1, state_id=state.id,
-        base_duration_min=base_min, eligible_wc_ids=[wc.id],
+        order_id=order.id,
+        seq_in_order=1,
+        state_id=state.id,
+        base_duration_min=base_min,
+        eligible_wc_ids=[wc.id],
     )
     return ScheduleProblem(
-        states=[state], orders=[order], operations=[op], work_centers=[wc],
+        states=[state],
+        orders=[order],
+        operations=[op],
+        work_centers=[wc],
         setup_matrix=[],
-        planning_horizon_start=_H0, planning_horizon_end=_H0 + timedelta(days=1),
+        planning_horizon_start=_H0,
+        planning_horizon_end=_H0 + timedelta(days=1),
     )
 
 

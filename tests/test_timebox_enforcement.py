@@ -43,9 +43,7 @@ def test_alns_honors_time_limit() -> None:
     """D3: ALNS wall time must not exceed 1.2x the budget (was 5x)."""
     problem = _medium()
     t0 = time.monotonic()
-    result = AlnsSolver().solve(
-        problem, time_limit_s=BUDGET_S, random_seed=42, max_iterations=500
-    )
+    result = AlnsSolver().solve(problem, time_limit_s=BUDGET_S, random_seed=42, max_iterations=500)
     wall = time.monotonic() - t0
     assert result.assignments, "ALNS returned no schedule within the budget"
     assert wall <= MAX_WALL_S, f"ALNS wall {wall:.1f}s exceeds {MAX_WALL_S:.1f}s cap"
@@ -55,9 +53,7 @@ def test_lbbd_honors_time_limit() -> None:
     """D3: LBBD must clamp per-cluster budgets to the remaining deadline."""
     problem = _medium()
     t0 = time.monotonic()
-    result = LbbdSolver().solve(
-        problem, time_limit_s=BUDGET_S, random_seed=42, max_iterations=8
-    )
+    result = LbbdSolver().solve(problem, time_limit_s=BUDGET_S, random_seed=42, max_iterations=8)
     wall = time.monotonic() - t0
     assert result.assignments, "LBBD returned no schedule within the budget"
     assert wall <= MAX_WALL_S, f"LBBD wall {wall:.1f}s exceeds {MAX_WALL_S:.1f}s cap"
@@ -68,9 +64,7 @@ def test_lbbd_hd_honors_time_limit() -> None:
     """D3: LBBD-HD must clamp per-cluster budgets to the remaining deadline."""
     problem = _medium()
     t0 = time.monotonic()
-    result = LbbdHdSolver().solve(
-        problem, time_limit_s=BUDGET_S, random_seed=42, max_iterations=8
-    )
+    result = LbbdHdSolver().solve(problem, time_limit_s=BUDGET_S, random_seed=42, max_iterations=8)
     wall = time.monotonic() - t0
     assert result.assignments, "LBBD-HD returned no schedule within the budget"
     assert wall <= MAX_WALL_S, f"LBBD-HD wall {wall:.1f}s exceeds {MAX_WALL_S:.1f}s cap"

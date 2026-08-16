@@ -47,9 +47,7 @@ def test_overflow_predicate_boundary() -> None:
 
 def test_normal_solve_is_not_degraded() -> None:
     """A normal small instance stays on the exact big-M objective (flag False)."""
-    problem = ScheduleProblem.model_validate(
-        json.loads((_INSTANCES / "tiny_3x3.json").read_text())
-    )
+    problem = ScheduleProblem.model_validate(json.loads((_INSTANCES / "tiny_3x3.json").read_text()))
     result = CpSatSolver().solve(
         problem, time_limit_s=5, num_workers=1, auto_greedy_warm_start=False
     )
@@ -80,19 +78,28 @@ def _overflow_instance() -> ScheduleProblem:
     order = Order(external_ref="O1", due_date=_H0 + timedelta(days=7))
     ops = [
         Operation(
-            order_id=order.id, seq_in_order=i, state_id=s1.id,
-            base_duration_min=10, eligible_wc_ids=[wc.id],
+            order_id=order.id,
+            seq_in_order=i,
+            state_id=s1.id,
+            base_duration_min=10,
+            eligible_wc_ids=[wc.id],
         )
         for i in (1, 2)
     ]
     setup = SetupEntry(
-        work_center_id=wc.id, from_state_id=s1.id, to_state_id=s2.id,
+        work_center_id=wc.id,
+        from_state_id=s1.id,
+        to_state_id=s2.id,
         setup_minutes=10**15,
     )
     return ScheduleProblem(
-        states=[s1, s2], orders=[order], operations=ops, work_centers=[wc],
+        states=[s1, s2],
+        orders=[order],
+        operations=ops,
+        work_centers=[wc],
         setup_matrix=[setup],
-        planning_horizon_start=_H0, planning_horizon_end=_H0 + timedelta(days=7),
+        planning_horizon_start=_H0,
+        planning_horizon_end=_H0 + timedelta(days=7),
     )
 
 
@@ -112,9 +119,7 @@ def test_epsilon_primary_overflow_degrades_instead_of_corrupting() -> None:
 
 
 def test_epsilon_primary_normal_instance_not_degraded() -> None:
-    problem = ScheduleProblem.model_validate(
-        json.loads((_INSTANCES / "tiny_3x3.json").read_text())
-    )
+    problem = ScheduleProblem.model_validate(json.loads((_INSTANCES / "tiny_3x3.json").read_text()))
     result = CpSatSolver().solve(
         problem,
         time_limit_s=5,

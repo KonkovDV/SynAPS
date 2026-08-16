@@ -29,9 +29,7 @@ def test_objective_cost_prefers_lower_energy_when_weighted() -> None:
     high = ObjectiveValues(makespan_minutes=10.0, total_energy_kwh=9.0)
     weights = {"makespan": 1.0, "energy": 2.0}
     assert _objective_cost(low, weights) < _objective_cost(high, weights)
-    assert _objective_cost(low, {"makespan": 1.0}) == _objective_cost(
-        high, {"makespan": 1.0}
-    )
+    assert _objective_cost(low, {"makespan": 1.0}) == _objective_cost(high, {"makespan": 1.0})
 
 
 def test_attach_canonical_objective_replaces_full_vector() -> None:

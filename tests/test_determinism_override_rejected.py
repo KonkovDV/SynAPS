@@ -25,12 +25,20 @@ def _tiny_problem() -> ScheduleProblem:
     wc = WorkCenter(code="M", capability_group="G")
     order = Order(external_ref="O1", due_date=_H0 + timedelta(days=1))
     op = Operation(
-        order_id=order.id, seq_in_order=1, state_id=state.id,
-        base_duration_min=10, eligible_wc_ids=[wc.id],
+        order_id=order.id,
+        seq_in_order=1,
+        state_id=state.id,
+        base_duration_min=10,
+        eligible_wc_ids=[wc.id],
     )
     return ScheduleProblem(
-        states=[state], orders=[order], operations=[op], work_centers=[wc], setup_matrix=[],
-        planning_horizon_start=_H0, planning_horizon_end=_H0 + timedelta(days=1),
+        states=[state],
+        orders=[order],
+        operations=[op],
+        work_centers=[wc],
+        setup_matrix=[],
+        planning_horizon_start=_H0,
+        planning_horizon_end=_H0 + timedelta(days=1),
     )
 
 
@@ -39,7 +47,9 @@ def test_worker_override_rejected_in_strict_mode(worker_key: str) -> None:
     problem = _tiny_problem()
     with pytest.raises(ValueError, match="determinism='fast'"):
         CpSatSolver().solve(
-            problem, time_limit_s=5, determinism="strict",
+            problem,
+            time_limit_s=5,
+            determinism="strict",
             auto_greedy_warm_start=False,
             sat_parameters={worker_key: 8},
         )
@@ -49,7 +59,9 @@ def test_worker_override_allowed_in_fast_mode() -> None:
     """The fast lane keeps full override freedom (it never claimed reproducibility)."""
     problem = _tiny_problem()
     result = CpSatSolver().solve(
-        problem, time_limit_s=5, determinism="fast",
+        problem,
+        time_limit_s=5,
+        determinism="fast",
         auto_greedy_warm_start=False,
         sat_parameters={"num_workers": 2},
     )
@@ -62,7 +74,10 @@ def test_random_seed_override_rejected_in_strict_mode() -> None:
     problem = _tiny_problem()
     with pytest.raises(ValueError, match="random_seed"):
         CpSatSolver().solve(
-            problem, time_limit_s=5, determinism="strict", random_seed=42,
+            problem,
+            time_limit_s=5,
+            determinism="strict",
+            random_seed=42,
             auto_greedy_warm_start=False,
             sat_parameters={"random_seed": 99},
         )
@@ -72,7 +87,10 @@ def test_random_seed_override_allowed_in_fast_mode() -> None:
     """Fast mode may still override the seed; the published seed must follow."""
     problem = _tiny_problem()
     result = CpSatSolver().solve(
-        problem, time_limit_s=5, determinism="fast", random_seed=42,
+        problem,
+        time_limit_s=5,
+        determinism="fast",
+        random_seed=42,
         auto_greedy_warm_start=False,
         sat_parameters={"random_seed": 99},
     )

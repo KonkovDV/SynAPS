@@ -79,7 +79,16 @@ def test_attach_canonical_objective_honors_caller_weights() -> None:
     )
     weights = {"makespan": 1.0, "setup": 2.0}
     _attach_canonical_objective(result, problem, weights=weights)
-    expected = scalarize(result.objective, {"makespan": 1.0, "setup": 2.0, "material": 0.0, "tardiness": 0.0, "energy": 0.0})
+    expected = scalarize(
+        result.objective,
+        {
+            "makespan": 1.0,
+            "setup": 2.0,
+            "material": 0.0,
+            "tardiness": 0.0,
+            "energy": 0.0,
+        },
+    )
     assert result.objective.weighted_sum == pytest.approx(expected)
     assert result.metadata["published_objective_weights"]["setup"] == 2.0
 
@@ -189,5 +198,5 @@ def test_rhc_builds_offsets_before_pred_clear() -> None:
             pytest.fail("missing frozen pred must be detected before clear")
         import math
 
-        offsets[op_id] = int(math.ceil((frozen[pred] - _H0).total_seconds() / 60.0))
+        offsets[op_id] = math.ceil((frozen[pred] - _H0).total_seconds() / 60.0)
     assert offsets[child_id] == 12

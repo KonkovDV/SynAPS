@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from synaps.timegrain import duration_minutes_for, physical_processing_minutes_for
 
 
-class _LaneSearchBudgetExceeded(Exception):
+class _LaneSearchBudgetExceeded(Exception):  # noqa: N818
     """Internal control flow: the exact lane search hit its state budget (F7)."""
 
 
@@ -79,6 +79,7 @@ def _exact_lane_assignment(
     for lane_idx, op_idx in chosen:
         lane_of[op_idx] = lane_idx
     return lane_of
+
 
 if TYPE_CHECKING:
     from synaps.model import (
@@ -384,9 +385,7 @@ class FeasibilityChecker:
             )
             if required_setup is None:
                 return None, True
-            available_at = lane_previous_assignment.end_time + timedelta(
-                minutes=required_setup
-            )
+            available_at = lane_previous_assignment.end_time + timedelta(minutes=required_setup)
             if available_at <= assignment.start_time and (
                 chosen_available_at is None or available_at > chosen_available_at
             ):
@@ -701,8 +700,8 @@ class FeasibilityChecker:
                     )
                 )
 
-            setup_window_start_by_op[assignment.operation_id] = (
-                assignment.start_time - timedelta(minutes=required_setup)
+            setup_window_start_by_op[assignment.operation_id] = assignment.start_time - timedelta(
+                minutes=required_setup
             )
             previous_assignment = assignment
         return False
@@ -719,8 +718,8 @@ class FeasibilityChecker:
             if index == 0:
                 setup_window_start_by_op[assignment.operation_id] = assignment.start_time
                 continue
-            setup_window_start_by_op[assignment.operation_id] = (
-                assignment.start_time - timedelta(minutes=assignment.setup_minutes)
+            setup_window_start_by_op[assignment.operation_id] = assignment.start_time - timedelta(
+                minutes=assignment.setup_minutes
             )
 
     @staticmethod
@@ -850,8 +849,7 @@ class FeasibilityChecker:
                 and scope.operation_ids is not None
                 and op.id not in scope.operation_ids
                 and (
-                    op.predecessor_op_id is None
-                    or op.predecessor_op_id not in scope.operation_ids
+                    op.predecessor_op_id is None or op.predecessor_op_id not in scope.operation_ids
                 )
             ):
                 continue

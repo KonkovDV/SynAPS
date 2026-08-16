@@ -84,17 +84,13 @@ class SolveOptions(BaseModel):
         if isinstance(raw_workers, int):
             # Wave 13 / M13-2: reject OOB workers (match BFF honesty).
             if raw_workers < 1 or raw_workers > 8:
-                raise ValueError(
-                    f"SolveOptions.num_workers must be in [1, 8], got {raw_workers}"
-                )
+                raise ValueError(f"SolveOptions.num_workers must be in [1, 8], got {raw_workers}")
             payload["num_workers"] = raw_workers
         raw_limit = payload.get("time_limit_s")
         if isinstance(raw_limit, int):
             # Wave 11 / H5: reject out-of-range limits instead of silently clamping to 600.
             if raw_limit < 1 or raw_limit > 7200:
-                raise ValueError(
-                    f"SolveOptions.time_limit_s must be in [1, 7200], got {raw_limit}"
-                )
+                raise ValueError(f"SolveOptions.time_limit_s must be in [1, 7200], got {raw_limit}")
             payload["time_limit_s"] = raw_limit
         return payload
 
@@ -291,8 +287,7 @@ def _resolve_problem_instance_path(
         raise FileNotFoundError(f"Problem instance file not found: {resolved_path}")
     if resolved_path.stat().st_size > MAX_PROBLEM_INSTANCE_FILE_BYTES:
         raise ValueError(
-            "problem_instance_ref exceeds max file size "
-            f"({MAX_PROBLEM_INSTANCE_FILE_BYTES} bytes)"
+            f"problem_instance_ref exceeds max file size ({MAX_PROBLEM_INSTANCE_FILE_BYTES} bytes)"
         )
     return resolved_path
 

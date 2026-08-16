@@ -60,9 +60,7 @@ def _profile_to_features(profile: dict[str, Any]) -> list[float] | None:
         precedence_depth = float(profile.get("precedence_depth", 0.0))
         resource_contention = float(profile.get("resource_contention", 0.0))
         aux_requirement_count = float(profile.get("aux_requirement_count", 0.0))
-        aux_utilization = (
-            aux_requirement_count / operation_count if operation_count > 0 else 0.0
-        )
+        aux_utilization = aux_requirement_count / operation_count if operation_count > 0 else 0.0
         setup_entry_count = float(profile.get("setup_entry_count", 0.0))
         setup_nonzero = float(profile.get("setup_nonzero_entry_count", 0.0))
         sdst_ratio = setup_nonzero / setup_entry_count if setup_entry_count > 0 else 0.0

@@ -217,9 +217,7 @@ def test_native_empty_eligible_does_not_pin_machine_zero() -> None:
     )
     assert seed is not None
     assert seed[0].work_center_id == fast.id
-    start_offset = (
-        seed[0].start_time - problem.planning_horizon_start
-    ).total_seconds() / 60.0
+    start_offset = (seed[0].start_time - problem.planning_horizon_start).total_seconds() / 60.0
     assert start_offset < 1_000.0
 
     repaired = _try_native_greedy_repair(
@@ -235,13 +233,9 @@ def test_native_empty_eligible_does_not_pin_machine_zero() -> None:
 def test_alns_and_rhc_publish_wall_clock_path_dependence() -> None:
     """A15-P2 / K3: stamp matches the stop reason. Not a bitwise certificate."""
     problem = make_simple_problem(n_orders=1, ops_per_order=1)
-    alns = AlnsSolver().solve(
-        problem, max_iterations=1, time_limit_s=30, random_seed=1
-    )
+    alns = AlnsSolver().solve(problem, max_iterations=1, time_limit_s=30, random_seed=1)
     alns_reason = str(alns.metadata["search_stop_reason"])
-    assert alns.metadata["wall_clock_path_dependent"] is alns_reason.startswith(
-        "wall_clock"
-    )
+    assert alns.metadata["wall_clock_path_dependent"] is alns_reason.startswith("wall_clock")
     assert alns_reason in {
         "max_iterations",
         "wall_clock",
@@ -250,9 +244,7 @@ def test_alns_and_rhc_publish_wall_clock_path_dependence() -> None:
     }
     assert "determinism_violated" in alns.metadata
 
-    rhc = RhcSolver().solve(
-        problem, time_limit_s=30, random_seed=1, inner_solver="greedy"
-    )
+    rhc = RhcSolver().solve(problem, time_limit_s=30, random_seed=1, inner_solver="greedy")
     rhc_reason = str(rhc.metadata["search_stop_reason"])
     assert rhc.metadata["wall_clock_path_dependent"] is (rhc_reason == "wall_clock")
     assert rhc_reason in {"wall_clock", "completed"}
@@ -261,7 +253,7 @@ def test_alns_and_rhc_publish_wall_clock_path_dependence() -> None:
 def test_alns_final_claim_respects_frozen_overlap() -> None:
     """W16-P0-2: ALNS must not return FEASIBLE when the incumbent overlaps
     frozen assignments (RHC poisons all later windows on a frozen-overlap)."""
-    from datetime import UTC, datetime, timedelta
+    from datetime import timedelta
     from uuid import uuid4
 
     from synaps.model import Assignment
@@ -377,9 +369,7 @@ def test_native_repair_validation_ignores_foreign_frozen_ops() -> None:
         start_time=horizon,
         end_time=horizon + timedelta(minutes=10),
     )
-    assert (
-        _native_repair_blocking_violations(problem, [frozen], [repaired], [op.id]) == []
-    )
+    assert _native_repair_blocking_violations(problem, [frozen], [repaired], [op.id]) == []
 
 
 def test_stabilize_refuses_horizon_ceiling() -> None:
@@ -520,12 +510,10 @@ def test_native_seed_tournament_prefers_cheaper_greedy() -> None:
     )
     greedy_ms = greedy.objective.makespan_minutes
     native_ms = max(
-        (a.end_time - problem.planning_horizon_start).total_seconds() / 60.0
-        for a in native
+        (a.end_time - problem.planning_horizon_start).total_seconds() / 60.0 for a in native
     )
     chosen_ms = max(
-        (a.end_time - problem.planning_horizon_start).total_seconds() / 60.0
-        for a in chosen
+        (a.end_time - problem.planning_horizon_start).total_seconds() / 60.0 for a in chosen
     )
     if native_ms > greedy_ms + 1e-9:
         assert name == "greedy"

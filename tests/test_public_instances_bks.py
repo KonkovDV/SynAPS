@@ -52,9 +52,7 @@ def _assert_bks_invariants(stem: str, *, time_limit_s: int) -> None:
     problem = _load(stem)
     bks = BRANDIMARTE_BKS[stem]
 
-    cpsat = CpSatSolver().solve(
-        problem, time_limit_s=time_limit_s, auto_greedy_warm_start=False
-    )
+    cpsat = CpSatSolver().solve(problem, time_limit_s=time_limit_s, auto_greedy_warm_start=False)
     assert cpsat.status in (SolverStatus.OPTIMAL, SolverStatus.FEASIBLE, SolverStatus.TIMEOUT)
     if cpsat.status is SolverStatus.OPTIMAL:
         # T-30/KI-F16a: with machine_duration_overrides the loaded instance is
@@ -72,9 +70,7 @@ def _assert_bks_invariants(stem: str, *, time_limit_s: int) -> None:
     if cpsat.assignments:
         assert not hard_violations(
             FeasibilityChecker().check(problem, cpsat.assignments, exhaustive=True)
-        ), (
-            f"{stem}: CP-SAT schedule failed the independent feasibility check"
-        )
+        ), f"{stem}: CP-SAT schedule failed the independent feasibility check"
     # The CP-SAT dual bound (when published in makespan minutes) is a lower
     # bound on the relaxed optimum, hence must also sit below BKS.
     if cpsat.metadata.get("objective_bound_units") == "makespan_minutes":
@@ -82,9 +78,7 @@ def _assert_bks_invariants(stem: str, *, time_limit_s: int) -> None:
             f"{stem}: CP-SAT makespan bound above BKS (invalid bound)"
         )
 
-    lbbd = LbbdSolver().solve(
-        problem, time_limit_s=time_limit_s, max_iterations=5, random_seed=42
-    )
+    lbbd = LbbdSolver().solve(problem, time_limit_s=time_limit_s, max_iterations=5, random_seed=42)
     lower_bound = float(lbbd.metadata.get("lower_bound", 0.0))
     assert lower_bound <= bks + 1e-6, (
         f"{stem}: LBBD lower_bound {lower_bound} > BKS {bks} (S1-class invalid bound)"

@@ -47,6 +47,5 @@ def test_no_adhoc_duration_formula_in_solvers() -> None:
             if pattern.search(line):
                 offenders.append(f"{path.name}:{lineno}: {line.strip()}")
     assert not offenders, (
-        "ad-hoc duration formula found (use timegrain.duration_minutes):\n"
-        + "\n".join(offenders)
+        "ad-hoc duration formula found (use timegrain.duration_minutes):\n" + "\n".join(offenders)
     )

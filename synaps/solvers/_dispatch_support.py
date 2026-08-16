@@ -475,7 +475,7 @@ def find_earliest_feasible_slot(
     earliest_start: float,
     machine_index: MachineIndex | None = None,
 ) -> SlotCandidate | None:
-    work_center = context.wc_by_id.get(work_center_id)
+    work_center: Any = context.wc_by_id.get(work_center_id)
     if work_center is None:
         from types import SimpleNamespace
 

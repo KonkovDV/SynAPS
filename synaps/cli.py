@@ -194,7 +194,12 @@ def _add_cable_demo_parser(subparsers: Any) -> None:
         "cable-demo",
         help="Synthetic cable instance → GREEDY → cable KPIs (not a factory plan)",
     )
-    parser.add_argument("--orders", type=int, default=4, help="Parent sales orders before reel split")
+    parser.add_argument(
+        "--orders",
+        type=int,
+        default=4,
+        help="Parent sales orders before reel split",
+    )
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument(
         "--output-file",
@@ -273,7 +278,7 @@ def _add_cable_nervous_parser(subparsers: Any) -> None:
         action="store_true",
         help="Dedicate machine subsets per family (PVC vs XLPE), sized by "
         "SKU-catalog share, with one flex overflow machine when n≥3 "
-        "(default on when machines/stage is 3–8)",
+        "(default on when machines/stage is 3-8)",
     )
     family.add_argument(
         "--no-family-lines",
@@ -381,12 +386,16 @@ def _run_freeze_pair_cli(
     pair_kwargs["n_rush"] = args.new_rush
     pair_kwargs["n_steal"] = args.disruptions
     reports = [run_freeze_insert_pair(seed=item, **pair_kwargs) for item in seeds]
-    report: dict[str, Any] = reports[0] if len(reports) == 1 else {
-        "claim": reports[0]["claim"],
-        "seeds": list(seeds),
-        "runs": reports,
-        "all_feasible": all(item["all_feasible"] for item in reports),
-    }
+    report: dict[str, Any] = (
+        reports[0]
+        if len(reports) == 1
+        else {
+            "claim": reports[0]["claim"],
+            "seeds": list(seeds),
+            "runs": reports,
+            "all_feasible": all(item["all_feasible"] for item in reports),
+        }
+    )
     ok = bool(report["all_feasible"])
     _write_json_output(report, args.output_file)
     return 0 if ok else 1

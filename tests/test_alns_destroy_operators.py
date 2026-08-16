@@ -1244,7 +1244,7 @@ class TestDuePressureUnit:
             due_offset_min=5,
             external_ref="TARDY",
         )
-        op_a, op_b, op_c = ops
+        _op_a, _op_b, op_c = ops
 
         problem = ScheduleProblem(
             operations=ops,

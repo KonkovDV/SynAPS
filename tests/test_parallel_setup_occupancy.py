@@ -23,7 +23,7 @@ _H0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _op_at(op_idx: int, start: int, end: int) -> Assignment:
-    from uuid import uuid5, NAMESPACE_DNS
+    from uuid import NAMESPACE_DNS, uuid5
 
     return Assignment(
         operation_id=uuid5(NAMESPACE_DNS, f"f1-op-{op_idx}"),
@@ -38,8 +38,8 @@ def _sweep(setup_windows: dict[object, object] | None) -> list[str]:
     checker = FeasibilityChecker()
     violations: list[FeasibilityViolation] = []
     assignments = [
-        _op_at(1, 0, 10),   # processing [0,10)
-        _op_at(2, 0, 10),   # processing [0,10)
+        _op_at(1, 0, 10),  # processing [0,10)
+        _op_at(2, 0, 10),  # processing [0,10)
         _op_at(3, 10, 20),  # processing [10,20); setup window may start at 0
     ]
     windows: dict[object, object] = {}

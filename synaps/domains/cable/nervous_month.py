@@ -8,19 +8,22 @@ from __future__ import annotations
 import sys
 import time
 from datetime import timedelta
-from typing import Any
-from uuid import UUID
+from typing import TYPE_CHECKING, Any
 
 from synaps.domains.cable.adapter import STAGES, CableSku
 from synaps.domains.cable.instance import add_rush_orders, generate_cable_instance
 from synaps.domains.cable.kpis import assignment_hamming, cable_kpis
 from synaps.domains.cable.weights import CABLE_PVC_WEIGHTS
-from synaps.model import Assignment, ScheduleProblem
 from synaps.objective import DEFAULT_WEIGHTS, evaluate, scalarize
 from synaps.solvers.feasibility_checker import FeasibilityChecker, proven_hard_violations
 from synaps.solvers.incremental_repair import IncrementalRepair
 from synaps.solvers.registry import create_solver
 from synaps.solvers.router import SolveRegime
+
+if TYPE_CHECKING:
+    from uuid import UUID
+
+    from synaps.model import Assignment, ScheduleProblem
 
 # Bounded ATCS delay for the nervous month. Window 0 is non-delay
 # (Kolisch parallel SGS). One colour SMED (240) on *any* ready job
@@ -59,7 +62,10 @@ def _resolve_tight_shop_levers(
     else:
         exhaust = max(0.0, float(cover_atcs_exhaust_window))
     return family, colour, phase, exhaust
-NERVOUS_STAGES: tuple[tuple[str, str, float], ...] = STAGES + (
+
+
+NERVOUS_STAGES: tuple[tuple[str, str, float], ...] = (
+    *STAGES,
     ("test", "testing", 50.0),
     ("pack", "packing", 70.0),
 )
@@ -70,7 +76,7 @@ _FAMILIES = (("Cu", "PVC"), ("Cu", "XLPE"), ("Al", "XLPE"))
 
 
 def nervous_sku_catalog() -> tuple[CableSku, ...]:
-    """36 SKUs: 3 families × 6 colours × 2 sections."""
+    """36 SKUs: 3 families x 6 colours x 2 sections."""
 
     return tuple(
         CableSku(conductor, insulation, color, section)
@@ -90,7 +96,7 @@ def generate_nervous_month(
     colour_phase: bool = True,
     colour_dedicated_lines: bool = False,
 ) -> ScheduleProblem:
-    """30-day high-mix make-to-order month. Default ~2×10⁴ ops after reel split.
+    """30-day high-mix make-to-order month. Default ~2x10^4 ops after reel split.
 
     16 machines/stage is the measured COVER-feasible shop for this mix
     with ATCS, no family/colour split (tardiness 1 922). At ≤8/stage,
@@ -189,9 +195,7 @@ def _select_steal_targets(
 
 
 def _notary_hits(problem: ScheduleProblem, assignments: list[Assignment]) -> list[Any]:
-    return proven_hard_violations(
-        FeasibilityChecker().check(problem, assignments, exhaustive=True)
-    )
+    return proven_hard_violations(FeasibilityChecker().check(problem, assignments, exhaustive=True))
 
 
 def _notary_count(problem: ScheduleProblem, assignments: list[Assignment]) -> int:
@@ -570,15 +574,23 @@ def run_nervous_month(
         repair_notary=repair_notary,
     )
     return _month_report(
-        shop["problem"], shop["result"], solver_name=shop["solver_name"],
+        shop["problem"],
+        shop["result"],
+        solver_name=shop["solver_name"],
         cover_ready_rule=shop["cover_ready_rule"],
         cover_atcs_floor_window=shop["cover_atcs_floor_window"],
         cover_atcs_exhaust_window=shop["exhaust"],
         family_dedicated_lines=shop["family"],
-        colour_phase=shop["colour_phase"], colour_dedicated_lines=shop["colour"],
-        n_orders=n_orders, seed=seed, generate_s=shop["generate_s"],
-        solve_s=shop["solve_s"], notary_s=shop["notary_s"], hard=shop["hard"],
-        wave_rows=wave_rows, new_rush=new_rush,
+        colour_phase=shop["colour_phase"],
+        colour_dedicated_lines=shop["colour"],
+        n_orders=n_orders,
+        seed=seed,
+        generate_s=shop["generate_s"],
+        solve_s=shop["solve_s"],
+        notary_s=shop["notary_s"],
+        hard=shop["hard"],
+        wave_rows=wave_rows,
+        new_rush=new_rush,
     )
 
 
@@ -662,9 +674,7 @@ def _c6b_steal_arms(shop: dict[str, Any], n_steal: int) -> dict[str, Any]:
     steal_f, steal_f_s = _repair_disrupted(
         problem, result.assignments, steal_ids, freeze_end, False
     )
-    steal_o, steal_o_s = _repair_disrupted(
-        problem, result.assignments, steal_ids, freeze_end, True
-    )
+    steal_o, steal_o_s = _repair_disrupted(problem, result.assignments, steal_ids, freeze_end, True)
     freeze_row = _arm_kpis(problem, steal_f, steal_f_s, result.assignments)
     open_row = _arm_kpis(problem, steal_o, steal_o_s, result.assignments)
     return {
@@ -882,7 +892,7 @@ def run_weighted_residual_pair(
         cover_atcs_exhaust_window=cover_atcs_exhaust_window,
     )
     cover = list(shop["result"].assignments)
-    arm_kw = {
+    arm_kw: dict[str, Any] = {
         "time_limit_s": residual_time_limit_s,
         "max_iterations": residual_max_iterations,
         "use_cpsat_repair": residual_use_cpsat_repair,
@@ -905,8 +915,7 @@ def run_weighted_residual_pair(
     )
     return {
         "claim": (
-            "synthetic C6c cover-then-ALNS residual; not Moskabelmet MES; "
-            "not OPTIMAL; not INFIMUM"
+            "synthetic C6c cover-then-ALNS residual; not Moskabelmet MES; not OPTIMAL; not INFIMUM"
         ),
         "seed": seed,
         "residual_time_limit_s": residual_time_limit_s,
@@ -924,17 +933,13 @@ def run_weighted_residual_pair(
     }
 
 
-def run_weighted_residual_multiseed(
-    seeds: tuple[int, ...], **kwargs: Any
-) -> dict[str, Any]:
+def run_weighted_residual_multiseed(seeds: tuple[int, ...], **kwargs: Any) -> dict[str, Any]:
     """Independent C6c pairs. Not a confidence interval."""
 
     kwargs.pop("seed", None)
     runs = [run_weighted_residual_pair(seed=item, **kwargs) for item in seeds]
     improved = [bool(run["scalar_improved"]) for run in runs]
-    tardiness = [
-        int(run["pvc_residual"]["kpis"]["total_tardiness_minutes"]) for run in runs
-    ]
+    tardiness = [int(run["pvc_residual"]["kpis"]["total_tardiness_minutes"]) for run in runs]
     return {
         "claim": runs[0]["claim"] if runs else "synthetic C6c; empty seeds",
         "seeds": list(seeds),
@@ -1005,9 +1010,7 @@ def run_nervous_month_multiseed(seeds: tuple[int, ...], **kwargs: Any) -> dict[s
         "peak_wip_drums": [int(row["peak_wip_drums"]) for row in kpis],
         "solve_s": [run["solve_s"] for run in runs],
         "notary_hard_violations": [run["notary_hard_violations"] for run in runs],
-        "waves_all_feasible": [
-            _wave_rows_feasible(run.get("waves") or []) for run in runs
-        ],
+        "waves_all_feasible": [_wave_rows_feasible(run.get("waves") or []) for run in runs],
         "runs": runs,
     }
 

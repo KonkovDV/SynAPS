@@ -38,26 +38,45 @@ def _setup_problem() -> tuple[ScheduleProblem, list[Assignment]]:
     s1, s2 = State(code="s1"), State(code="s2")
     wc = WorkCenter(code="M", capability_group="G")
     o1, o2 = uuid4(), uuid4()
-    op1 = Operation(order_id=o1, seq_in_order=1, state_id=s1.id, base_duration_min=60,
-                    eligible_wc_ids=[wc.id])
-    op2 = Operation(order_id=o2, seq_in_order=1, state_id=s2.id, base_duration_min=60,
-                    eligible_wc_ids=[wc.id])
+    op1 = Operation(
+        order_id=o1, seq_in_order=1, state_id=s1.id, base_duration_min=60, eligible_wc_ids=[wc.id]
+    )
+    op2 = Operation(
+        order_id=o2, seq_in_order=1, state_id=s2.id, base_duration_min=60, eligible_wc_ids=[wc.id]
+    )
     problem = ScheduleProblem(
         states=[s1, s2],
-        orders=[Order(id=o1, external_ref="O1", due_date=_H0 + timedelta(minutes=100)),
-                Order(id=o2, external_ref="O2", due_date=_H0 + timedelta(minutes=100))],
-        operations=[op1, op2], work_centers=[wc],
-        setup_matrix=[
-            SetupEntry(work_center_id=wc.id, from_state_id=s1.id, to_state_id=s2.id,
-                       setup_minutes=30, material_loss=4.0),
+        orders=[
+            Order(id=o1, external_ref="O1", due_date=_H0 + timedelta(minutes=100)),
+            Order(id=o2, external_ref="O2", due_date=_H0 + timedelta(minutes=100)),
         ],
-        planning_horizon_start=_H0, planning_horizon_end=_H0 + timedelta(days=1),
+        operations=[op1, op2],
+        work_centers=[wc],
+        setup_matrix=[
+            SetupEntry(
+                work_center_id=wc.id,
+                from_state_id=s1.id,
+                to_state_id=s2.id,
+                setup_minutes=30,
+                material_loss=4.0,
+            ),
+        ],
+        planning_horizon_start=_H0,
+        planning_horizon_end=_H0 + timedelta(days=1),
     )
     assignments = [
-        Assignment(operation_id=op1.id, work_center_id=wc.id,
-                   start_time=_H0, end_time=_H0 + timedelta(minutes=60)),
-        Assignment(operation_id=op2.id, work_center_id=wc.id,
-                   start_time=_H0 + timedelta(minutes=90), end_time=_H0 + timedelta(minutes=150)),
+        Assignment(
+            operation_id=op1.id,
+            work_center_id=wc.id,
+            start_time=_H0,
+            end_time=_H0 + timedelta(minutes=60),
+        ),
+        Assignment(
+            operation_id=op2.id,
+            work_center_id=wc.id,
+            start_time=_H0 + timedelta(minutes=90),
+            end_time=_H0 + timedelta(minutes=150),
+        ),
     ]
     return problem, assignments
 
@@ -86,25 +105,44 @@ def test_parallel_lanes_incur_no_phantom_setup() -> None:
     s1, s2 = State(code="s1"), State(code="s2")
     wc = WorkCenter(code="M2", capability_group="G", max_parallel=2)
     o1, o2 = uuid4(), uuid4()
-    op1 = Operation(order_id=o1, seq_in_order=1, state_id=s1.id, base_duration_min=60,
-                    eligible_wc_ids=[wc.id])
-    op2 = Operation(order_id=o2, seq_in_order=1, state_id=s2.id, base_duration_min=60,
-                    eligible_wc_ids=[wc.id])
+    op1 = Operation(
+        order_id=o1, seq_in_order=1, state_id=s1.id, base_duration_min=60, eligible_wc_ids=[wc.id]
+    )
+    op2 = Operation(
+        order_id=o2, seq_in_order=1, state_id=s2.id, base_duration_min=60, eligible_wc_ids=[wc.id]
+    )
     problem = ScheduleProblem(
         states=[s1, s2],
-        orders=[Order(id=o1, external_ref="O1", due_date=_H0 + timedelta(days=1)),
-                Order(id=o2, external_ref="O2", due_date=_H0 + timedelta(days=1))],
-        operations=[op1, op2], work_centers=[wc],
-        setup_matrix=[SetupEntry(work_center_id=wc.id, from_state_id=s1.id, to_state_id=s2.id,
-                                 setup_minutes=600)],
-        planning_horizon_start=_H0, planning_horizon_end=_H0 + timedelta(days=1),
+        orders=[
+            Order(id=o1, external_ref="O1", due_date=_H0 + timedelta(days=1)),
+            Order(id=o2, external_ref="O2", due_date=_H0 + timedelta(days=1)),
+        ],
+        operations=[op1, op2],
+        work_centers=[wc],
+        setup_matrix=[
+            SetupEntry(
+                work_center_id=wc.id, from_state_id=s1.id, to_state_id=s2.id, setup_minutes=600
+            )
+        ],
+        planning_horizon_start=_H0,
+        planning_horizon_end=_H0 + timedelta(days=1),
     )
     lane_a, lane_b = uuid4(), uuid4()
     concurrent = [
-        Assignment(operation_id=op1.id, work_center_id=wc.id, lane_id=lane_a,
-                   start_time=_H0, end_time=_H0 + timedelta(minutes=60)),
-        Assignment(operation_id=op2.id, work_center_id=wc.id, lane_id=lane_b,
-                   start_time=_H0, end_time=_H0 + timedelta(minutes=60)),
+        Assignment(
+            operation_id=op1.id,
+            work_center_id=wc.id,
+            lane_id=lane_a,
+            start_time=_H0,
+            end_time=_H0 + timedelta(minutes=60),
+        ),
+        Assignment(
+            operation_id=op2.id,
+            work_center_id=wc.id,
+            lane_id=lane_b,
+            start_time=_H0,
+            end_time=_H0 + timedelta(minutes=60),
+        ),
     ]
     obj = evaluate(problem, concurrent)
     assert obj.total_setup_minutes == 0.0, "parallel lanes must not incur a changeover"
@@ -114,13 +152,15 @@ def test_parallel_lanes_incur_no_phantom_setup() -> None:
 @pytest.mark.parametrize("config", ["GREED", "BEAM-3", "CPSAT-10", "LBBD-5", "ALNS-300"])
 def test_solver_objective_matches_canonical_evaluator(config: str) -> None:
     """Every solver's reported objective must match evaluate() on its schedule."""
-    problem = ScheduleProblem.model_validate(
-        json.loads((_INSTANCES / "tiny_3x3.json").read_text())
-    )
+    problem = ScheduleProblem.model_validate(json.loads((_INSTANCES / "tiny_3x3.json").read_text()))
     solver, kwargs = create_solver(config)
-    kwargs.update({"CPSAT-10": {"time_limit_s": 5, "num_workers": 1},
-                   "LBBD-5": {"time_limit_s": 5, "max_iterations": 3},
-                   "ALNS-300": {"time_limit_s": 5, "max_iterations": 40}}.get(config, {}))
+    kwargs.update(
+        {
+            "CPSAT-10": {"time_limit_s": 5, "num_workers": 1},
+            "LBBD-5": {"time_limit_s": 5, "max_iterations": 3},
+            "ALNS-300": {"time_limit_s": 5, "max_iterations": 40},
+        }.get(config, {})
+    )
     result = solver.solve(problem, **kwargs)
     canonical = evaluate(problem, result.assignments)
     assert result.objective.makespan_minutes == pytest.approx(canonical.makespan_minutes, abs=1e-6)

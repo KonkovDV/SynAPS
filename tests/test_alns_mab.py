@@ -1,4 +1,4 @@
-"""T-34 / Wave 5–6 / K2: UCB1 pair bandit smoke + seeded determinism."""
+"""T-34 / Wave 5-6 / K2: UCB1 pair bandit smoke + seeded determinism."""
 
 from __future__ import annotations
 
@@ -145,8 +145,6 @@ def test_mab_alns_seeded_determinism() -> None:
     assert isinstance(pulls, dict) and pulls
     assert second.metadata.get("mab_pair_pulls") == pulls
     assert first.objective.makespan_minutes == second.objective.makespan_minutes
-    assert first.metadata.get("iterations_completed") == second.metadata.get(
-        "iterations_completed"
-    )
+    assert first.metadata.get("iterations_completed") == second.metadata.get("iterations_completed")
     assert first.metadata.get("search_stop_reason") == "max_iterations"
     assert first.metadata.get("wall_clock_path_dependent") is False

@@ -377,7 +377,7 @@ class GreedyDispatch(BaseSolver):
                     if slot is None:
                         continue
 
-                    work_center = wc_by_id.get(wc_id)
+                    work_center: Any = wc_by_id.get(wc_id)
                     if work_center is None:
                         from types import SimpleNamespace
 
@@ -501,7 +501,6 @@ class GreedyDispatch(BaseSolver):
 
             # Assign best
             work_center = wc_by_id.get(best_wc_id)
-            speed = work_center.speed_factor if work_center is not None else 1.0
             end_offset = best_slot.end_offset
 
             new_assignment = Assignment(
@@ -606,9 +605,7 @@ def _greedy_complete(
 
     while todo:
         ready = [
-            op
-            for op in todo
-            if op.predecessor_op_id is None or op.predecessor_op_id in scheduled
+            op for op in todo if op.predecessor_op_id is None or op.predecessor_op_id in scheduled
         ]
         if not ready:
             return None  # precedence cycle / dead partial
@@ -622,9 +619,7 @@ def _greedy_complete(
                 operation_earliest_offset_minutes(op, order, horizon_start),
             )
             eligible = (
-                op.eligible_wc_ids
-                if op.eligible_wc_ids
-                else list(dispatch_context.wc_by_id.keys())
+                op.eligible_wc_ids if op.eligible_wc_ids else list(dispatch_context.wc_by_id.keys())
             )
             for wc_id in eligible:
                 slot = find_earliest_feasible_slot(
@@ -752,8 +747,7 @@ class BeamSearchDispatch(BaseSolver):
                     # it update the incumbent.
                     completed_mk = (
                         max(
-                            (a.end_time - horizon_start).total_seconds() / 60.0
-                            for a in assignments
+                            (a.end_time - horizon_start).total_seconds() / 60.0 for a in assignments
                         )
                         if assignments
                         else 0.0
@@ -826,7 +820,7 @@ class BeamSearchDispatch(BaseSolver):
                         if slot is None:
                             continue
 
-                        work_center = wc_by_id.get(wc_id)
+                        work_center: Any = wc_by_id.get(wc_id)
                         if work_center is None:
                             from types import SimpleNamespace
 

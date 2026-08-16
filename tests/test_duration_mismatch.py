@@ -31,12 +31,20 @@ def _speed3_problem() -> tuple[ScheduleProblem, Operation, WorkCenter]:
     wc = WorkCenter(code="M", capability_group="G", speed_factor=3.0)
     order = Order(external_ref="O1", due_date=HE)
     op = Operation(
-        order_id=order.id, seq_in_order=1, state_id=state.id,
-        base_duration_min=10, eligible_wc_ids=[wc.id],
+        order_id=order.id,
+        seq_in_order=1,
+        state_id=state.id,
+        base_duration_min=10,
+        eligible_wc_ids=[wc.id],
     )
     problem = ScheduleProblem(
-        states=[state], orders=[order], operations=[op], work_centers=[wc],
-        setup_matrix=[], planning_horizon_start=H0, planning_horizon_end=HE,
+        states=[state],
+        orders=[order],
+        operations=[op],
+        work_centers=[wc],
+        setup_matrix=[],
+        planning_horizon_start=H0,
+        planning_horizon_end=HE,
     )
     return problem, op, wc
 
@@ -46,8 +54,10 @@ def test_checker_flags_too_short_duration() -> None:
     problem, op, wc = _speed3_problem()
     impossible = [
         Assignment(
-            operation_id=op.id, work_center_id=wc.id,
-            start_time=H0, end_time=H0 + timedelta(minutes=1),
+            operation_id=op.id,
+            work_center_id=wc.id,
+            start_time=H0,
+            end_time=H0 + timedelta(minutes=1),
         )
     ]
     violations = FeasibilityChecker().check(problem, impossible, exhaustive=True)
@@ -62,8 +72,10 @@ def test_checker_accepts_canonical_ceil_duration() -> None:
     for minutes in (4.0, 5.0):
         ok = [
             Assignment(
-                operation_id=op.id, work_center_id=wc.id,
-                start_time=H0, end_time=H0 + timedelta(minutes=minutes),
+                operation_id=op.id,
+                work_center_id=wc.id,
+                start_time=H0,
+                end_time=H0 + timedelta(minutes=minutes),
             )
         ]
         violations = FeasibilityChecker().check(problem, ok, exhaustive=True)
@@ -79,8 +91,10 @@ def test_checker_flags_material_underrun_below_tolerance() -> None:
     problem, op, wc = _speed3_problem()
     under = [
         Assignment(
-            operation_id=op.id, work_center_id=wc.id,
-            start_time=H0, end_time=H0 + timedelta(minutes=2.0),
+            operation_id=op.id,
+            work_center_id=wc.id,
+            start_time=H0,
+            end_time=H0 + timedelta(minutes=2.0),
         )
     ]
     violations = FeasibilityChecker().check(problem, under, exhaustive=True)
@@ -98,8 +112,10 @@ def test_checker_rejects_below_physical_floor() -> None:
     problem, op, wc = _speed3_problem()
     under_physical = [
         Assignment(
-            operation_id=op.id, work_center_id=wc.id,
-            start_time=H0, end_time=H0 + timedelta(minutes=3.0),
+            operation_id=op.id,
+            work_center_id=wc.id,
+            start_time=H0,
+            end_time=H0 + timedelta(minutes=3.0),
         )
     ]
     violations = FeasibilityChecker().check(problem, under_physical, exhaustive=True)
@@ -113,8 +129,10 @@ def test_checker_accepts_exact_physical_span() -> None:
     problem, op, wc = _speed3_problem()
     near = [
         Assignment(
-            operation_id=op.id, work_center_id=wc.id,
-            start_time=H0, end_time=H0 + timedelta(minutes=10.0 / 3.0),
+            operation_id=op.id,
+            work_center_id=wc.id,
+            start_time=H0,
+            end_time=H0 + timedelta(minutes=10.0 / 3.0),
         )
     ]
     violations = FeasibilityChecker().check(problem, near, exhaustive=True)

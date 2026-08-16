@@ -34,9 +34,7 @@ _TIMEBOX_PARAMETERS = frozenset({"max_time_in_seconds", "max_deterministic_time"
 # random_seed are what make a run reproducible; overriding either via
 # sat_parameters silently races the portfolio or swaps the published seed.
 # Reject both in strict mode, same as the timebox keys (N3).
-_STRICT_MODE_DENIED_PARAMETERS = frozenset(
-    {"num_workers", "num_search_workers", "random_seed"}
-)
+_STRICT_MODE_DENIED_PARAMETERS = frozenset({"num_workers", "num_search_workers", "random_seed"})
 
 # N1 (audit v3, ADR-0001): strict determinism runs CP-SAT single-threaded and
 # stops on MACHINE-INDEPENDENT deterministic time — the SOLE binding limit — so
@@ -211,9 +209,7 @@ def _scaled_transition_lookups(
         for e in problem.setup_matrix
     }
     energy = {
-        (e.work_center_id, e.from_state_id, e.to_state_id): round(
-            e.energy_kwh * energy_kwh_scale
-        )
+        (e.work_center_id, e.from_state_id, e.to_state_id): round(e.energy_kwh * energy_kwh_scale)
         for e in problem.setup_matrix
     }
     return minutes, material, energy
@@ -487,11 +483,7 @@ class CpSatSolver(BaseSolver):
                 start_offset = max(0, min(raw_start, horizon))
                 end_offset = max(0, min(raw_end, horizon))
                 # Wave 12 / C12-4: refuse silently dropped frozen intervals.
-                if (
-                    start_offset != raw_start
-                    or end_offset != raw_end
-                    or end_offset <= start_offset
-                ):
+                if start_offset != raw_start or end_offset != raw_end or end_offset <= start_offset:
                     raise ValueError(
                         "frozen_assignment collapses or clamps outside the CP-SAT horizon "
                         f"(op={frozen_assignment.operation_id}, start={raw_start}, "
@@ -619,9 +611,7 @@ class CpSatSolver(BaseSolver):
                         model.add(
                             su_start == starts[(op_j.id, work_center.id)] - setup_minutes
                         ).only_enforce_if(lit)
-                        model.add(
-                            su_start >= ends[(op_i.id, work_center.id)]
-                        ).only_enforce_if(lit)
+                        model.add(su_start >= ends[(op_i.id, work_center.id)]).only_enforce_if(lit)
                         setup_interval = model.new_optional_interval_var(
                             su_start,
                             setup_minutes,
@@ -699,42 +689,28 @@ class CpSatSolver(BaseSolver):
                     demands.append(demand)
 
             # Wave 12 / C12-2: reserve aux capacity held by frozen work.
-            if (
-                frozen_assignments
-                and planning_horizon_start is not None
-                and horizon is not None
-            ):
+            if frozen_assignments and planning_horizon_start is not None and horizon is not None:
                 frozen_reqs_by_op: dict[Any, list[Any]] = {}
                 for requirement in frozen_aux_requirements or []:
-                    frozen_reqs_by_op.setdefault(requirement.operation_id, []).append(
-                        requirement
-                    )
+                    frozen_reqs_by_op.setdefault(requirement.operation_id, []).append(requirement)
                 for frozen_index, frozen_assignment in enumerate(frozen_assignments):
                     demand = sum(
                         requirement.quantity_needed
-                        for requirement in frozen_reqs_by_op.get(
-                            frozen_assignment.operation_id, []
-                        )
+                        for requirement in frozen_reqs_by_op.get(frozen_assignment.operation_id, [])
                         if requirement.aux_resource_id == resource.id
                     )
                     if demand <= 0:
                         continue
                     start_offset = round(
-                        (
-                            frozen_assignment.start_time - planning_horizon_start
-                        ).total_seconds()
+                        (frozen_assignment.start_time - planning_horizon_start).total_seconds()
                         / 60.0
                     )
                     end_offset = round(
-                        (
-                            frozen_assignment.end_time - planning_horizon_start
-                        ).total_seconds()
-                        / 60.0
+                        (frozen_assignment.end_time - planning_horizon_start).total_seconds() / 60.0
                     )
                     if end_offset <= start_offset:
                         raise ValueError(
-                            "frozen aux interval collapses "
-                            f"(op={frozen_assignment.operation_id})"
+                            f"frozen aux interval collapses (op={frozen_assignment.operation_id})"
                         )
                     frozen_start = model.new_int_var(
                         start_offset,
@@ -1050,9 +1026,7 @@ class CpSatSolver(BaseSolver):
             for op_id, offset in dict(kwargs.get("frozen_predecessor_end_offsets", {})).items()
         }
         frozen_context_operations = list(kwargs.get("frozen_context_operations") or [])
-        frozen_aux_requirements = list(
-            kwargs.get("frozen_aux_requirements") or []
-        )
+        frozen_aux_requirements = list(kwargs.get("frozen_aux_requirements") or [])
         enable_symmetry_breaking = bool(kwargs.get("enable_symmetry_breaking", False))
 
         t0 = time.monotonic()
@@ -1086,7 +1060,8 @@ class CpSatSolver(BaseSolver):
             if missing_frozen_ops:
                 raise ValueError(
                     "frozen_assignments require frozen_context_operations covering "
-                    f"missing ops {missing_frozen_ops[:5]}{'...' if len(missing_frozen_ops) > 5 else ''} "
+                    f"missing ops {missing_frozen_ops[:5]}"
+                    f"{'...' if len(missing_frozen_ops) > 5 else ''} "
                     "(Wave 12 / C12-1)."
                 )
 
@@ -1222,8 +1197,7 @@ class CpSatSolver(BaseSolver):
             planning_horizon_start=solve_problem.planning_horizon_start,
             horizon=horizon,
             frozen_assignments=frozen_assignments,
-            frozen_aux_requirements=frozen_aux_requirements
-            or list(solve_problem.aux_requirements),
+            frozen_aux_requirements=frozen_aux_requirements or list(solve_problem.aux_requirements),
         )
 
         makespan = model.new_int_var(0, horizon, "makespan")
@@ -1292,9 +1266,7 @@ class CpSatSolver(BaseSolver):
                     sorted(
                         (str(operation.id), int(minutes))
                         for operation in solve_problem.operations
-                        for minutes in (
-                            operation.machine_duration_overrides.get(work_center.id),
-                        )
+                        for minutes in (operation.machine_duration_overrides.get(work_center.id),)
                         if minutes is not None
                     )
                 )

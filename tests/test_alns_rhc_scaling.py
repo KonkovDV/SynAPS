@@ -817,7 +817,7 @@ class TestAlnsSolver:
         def fake_beam_solve(self, problem, **kwargs):
             return valid_seed
 
-        def fake_check(self, problem, assignments):
+        def fake_check(self, problem, assignments, **kwargs):
             check_calls["count"] += 1
             if check_calls["count"] == 1:
                 return ["forced_seed_violation"]

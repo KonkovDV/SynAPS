@@ -58,14 +58,25 @@ def _parallel_lane_problem() -> ScheduleProblem:
     """The M2 instance: max_parallel=2, two ops, optimum is concurrent (mk 60)."""
     s1, s2 = State(code="s1"), State(code="s2")
     wc = WorkCenter(code="M2LANE", capability_group="G", max_parallel=2)
-    o1, o2 = Order(external_ref="O1", due_date=_H0 + timedelta(days=9)), Order(
-        external_ref="O2", due_date=_H0 + timedelta(days=9)
+    o1, o2 = (
+        Order(external_ref="O1", due_date=_H0 + timedelta(days=9)),
+        Order(external_ref="O2", due_date=_H0 + timedelta(days=9)),
     )
     ops = [
-        Operation(order_id=o1.id, seq_in_order=1, state_id=s1.id, base_duration_min=60,
-                  eligible_wc_ids=[wc.id]),
-        Operation(order_id=o2.id, seq_in_order=1, state_id=s2.id, base_duration_min=60,
-                  eligible_wc_ids=[wc.id]),
+        Operation(
+            order_id=o1.id,
+            seq_in_order=1,
+            state_id=s1.id,
+            base_duration_min=60,
+            eligible_wc_ids=[wc.id],
+        ),
+        Operation(
+            order_id=o2.id,
+            seq_in_order=1,
+            state_id=s2.id,
+            base_duration_min=60,
+            eligible_wc_ids=[wc.id],
+        ),
     ]
     # Setup exists in the SynAPS instance but is not transferred to the oracle;
     # the shared optimum (concurrent lanes) incurs no changeover either way.
@@ -74,8 +85,13 @@ def _parallel_lane_problem() -> ScheduleProblem:
         SetupEntry(work_center_id=wc.id, from_state_id=s2.id, to_state_id=s1.id, setup_minutes=600),
     ]
     return ScheduleProblem(
-        states=[s1, s2], orders=[o1, o2], operations=ops, work_centers=[wc], setup_matrix=setups,
-        planning_horizon_start=_H0, planning_horizon_end=_H0 + timedelta(days=10),
+        states=[s1, s2],
+        orders=[o1, o2],
+        operations=ops,
+        work_centers=[wc],
+        setup_matrix=setups,
+        planning_horizon_start=_H0,
+        planning_horizon_end=_H0 + timedelta(days=10),
     )
 
 

@@ -30,7 +30,7 @@ def test_stabilize_temporal_batch_python_fallback() -> None:
     predecessor_ids = [-1, 0, -1]
     sdst_setup = _make_sdst(n_wc, n_states)
 
-    passes, precedence_shifts, machine_shifts = stabilize_temporal_batch(
+    passes, _precedence_shifts, _machine_shifts = stabilize_temporal_batch(
         start_offsets=start_offsets,
         end_offsets=end_offsets,
         wc_indices=wc_indices,

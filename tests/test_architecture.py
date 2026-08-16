@@ -58,9 +58,7 @@ def test_duration_division_only_in_timegrain() -> None:
         if count:
             found[rel] = count
     new_offenders = {
-        rel: n
-        for rel, n in found.items()
-        if n > _RAW_DURATION_DIVISION_RATCHET.get(rel, 0)
+        rel: n for rel, n in found.items() if n > _RAW_DURATION_DIVISION_RATCHET.get(rel, 0)
     }
     assert not new_offenders, (
         f"new raw base/speed division outside timegrain.py: {new_offenders}; "
@@ -71,17 +69,13 @@ def test_duration_division_only_in_timegrain() -> None:
         for rel, allowed in _RAW_DURATION_DIVISION_RATCHET.items()
         if found.get(rel, 0) < allowed
     }
-    assert not gone, (
-        f"ratchet is stale (sites were cleaned up - tighten the list): {gone}"
-    )
+    assert not gone, f"ratchet is stale (sites were cleaned up - tighten the list): {gone}"
 
 
 def _top_level_function_names(path: Path) -> list[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     return [
-        node.name
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        node.name for node in tree.body if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
     ]
 
 
@@ -101,9 +95,9 @@ def test_validation_predicates_have_single_implementation() -> None:
             # A same-named def is an outright duplicate; a `_name`-style local
             # mirror (the N4 pattern: _setup_matrix_is_metric) also counts.
             for canonical in validation_functions:
-                if name == canonical or name.lstrip("_") == canonical.lstrip(
-                    "_"
-                ).replace("is_", "", 1):
+                if name == canonical or name.lstrip("_") == canonical.lstrip("_").replace(
+                    "is_", "", 1
+                ):
                     offenders.append(f"{rel}::{name} duplicates validation.{canonical}")
     assert not offenders, f"duplicate validation predicate(s): {offenders}"
 
@@ -131,8 +125,7 @@ def test_no_dead_public_functions() -> None:
             if references == 0:
                 offenders.append(f"{rel}::{node.name}")
     assert not offenders, (
-        f"public function(s) with no production caller (dead fix, N4 pattern): "
-        f"{offenders}"
+        f"public function(s) with no production caller (dead fix, N4 pattern): {offenders}"
     )
 
 
@@ -225,13 +218,11 @@ def test_function_length_ratchet() -> None:
     for key in _LONG_FUNCTION_RATCHET:
         if key not in seen:
             stale.append(key)
-    assert not offenders, (
-        "function(s) exceed the 80-line limit beyond the ratchet: "
-        + "; ".join(offenders)
+    assert not offenders, "function(s) exceed the 80-line limit beyond the ratchet: " + "; ".join(
+        offenders
     )
     assert not stale, (
-        "ratchet is stale (functions were decomposed - remove them from the "
-        f"list): {stale}"
+        f"ratchet is stale (functions were decomposed - remove them from the list): {stale}"
     )
 
 
@@ -269,9 +260,7 @@ def test_objective_values_ctor_ratchet() -> None:
         if count:
             found[rel] = count
     new_offenders = {
-        rel: n
-        for rel, n in found.items()
-        if n > _OBJECTIVE_VALUES_CTOR_RATCHET.get(rel, 0)
+        rel: n for rel, n in found.items() if n > _OBJECTIVE_VALUES_CTOR_RATCHET.get(rel, 0)
     }
     assert not new_offenders, (
         f"new ObjectiveValues( constructions outside the ratchet: {new_offenders}; "
@@ -282,9 +271,7 @@ def test_objective_values_ctor_ratchet() -> None:
         for rel, allowed in _OBJECTIVE_VALUES_CTOR_RATCHET.items()
         if found.get(rel, 0) < allowed
     }
-    assert not stale, (
-        f"ObjectiveValues ctor ratchet is stale (shrink the allowed counts): {stale}"
-    )
+    assert not stale, f"ObjectiveValues ctor ratchet is stale (shrink the allowed counts): {stale}"
 
 
 # --- Rule 6 (T-40 / F6): public lower-bound helpers need a validity test -----
@@ -314,14 +301,9 @@ def test_public_lower_bound_helpers_have_validity_tests() -> None:
 
     tests_root = Path(__file__).resolve().parent
     corpus = "\n".join(
-        p.read_text(encoding="utf-8", errors="ignore")
-        for p in tests_root.rglob("test_*.py")
+        p.read_text(encoding="utf-8", errors="ignore") for p in tests_root.rglob("test_*.py")
     )
-    missing = [
-        f"{rel}::{name}"
-        for rel, name in public_lbs
-        if name not in corpus
-    ]
+    missing = [f"{rel}::{name}" for rel, name in public_lbs if name not in corpus]
     assert not missing, (
         "public lower-bound helper(s) lack a test reference "
         f"(add a property/validity test): {missing}"

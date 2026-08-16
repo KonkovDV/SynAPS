@@ -1,6 +1,6 @@
 """HD port of F3/F12/F10 (audit v4 follow-up).
 
-Standard LBBD was fixed in Wave 1–2; LBBD-HD initially kept serial null-lane
+Standard LBBD was fixed in Wave 1-2; LBBD-HD initially kept serial null-lane
 post-assembly, master None→INFEASIBLE, and completion=0.0 tardiness. These
 tests pin the ports.
 """
@@ -8,14 +8,12 @@ tests pin the ports.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
 
 from synaps.model import (
     Assignment,
     Operation,
     Order,
     ScheduleProblem,
-    SetupEntry,
     State,
     WorkCenter,
 )
@@ -38,11 +36,17 @@ def _parallel_no_setup_problem() -> tuple[ScheduleProblem, list[Assignment]]:
     # Unscheduled third order — F10: must charge horizon tardiness.
     o3 = Order(external_ref="O3", due_date=_H0 + timedelta(minutes=30))
     op1 = Operation(
-        order_id=o1.id, seq_in_order=1, state_id=st.id, base_duration_min=10,
+        order_id=o1.id,
+        seq_in_order=1,
+        state_id=st.id,
+        base_duration_min=10,
         eligible_wc_ids=[wc.id],
     )
     op2 = Operation(
-        order_id=o2.id, seq_in_order=1, state_id=st.id, base_duration_min=10,
+        order_id=o2.id,
+        seq_in_order=1,
+        state_id=st.id,
+        base_duration_min=10,
         eligible_wc_ids=[wc.id],
     )
     problem = ScheduleProblem(

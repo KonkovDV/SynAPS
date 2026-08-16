@@ -29,14 +29,23 @@ def _speed3_problem(n_ops: int = 3) -> ScheduleProblem:
     wc = WorkCenter(code="M", capability_group="G", speed_factor=3.0)
     orders = [Order(external_ref=f"O{i}", due_date=_H0 + timedelta(days=1)) for i in range(n_ops)]
     ops = [
-        Operation(order_id=orders[i].id, seq_in_order=1, state_id=state.id,
-                  base_duration_min=10, eligible_wc_ids=[wc.id])
+        Operation(
+            order_id=orders[i].id,
+            seq_in_order=1,
+            state_id=state.id,
+            base_duration_min=10,
+            eligible_wc_ids=[wc.id],
+        )
         for i in range(n_ops)
     ]
     return ScheduleProblem(
-        states=[state], orders=orders, operations=ops, work_centers=[wc],
+        states=[state],
+        orders=orders,
+        operations=ops,
+        work_centers=[wc],
         setup_matrix=[],
-        planning_horizon_start=_H0, planning_horizon_end=_H0 + timedelta(days=1),
+        planning_horizon_start=_H0,
+        planning_horizon_end=_H0 + timedelta(days=1),
     )
 
 

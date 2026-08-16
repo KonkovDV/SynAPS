@@ -1,7 +1,7 @@
 """Loader for the tiny Wave-5 ``*.sdstfjs`` FJSP-SDST slice.
 
 Extends :func:`benchmark.fjs_loader.load_fjs_problem` with trailing per-machine
-job×job setup matrices (see ``benchmark/instances/public/sdst/README.md``).
+job-by-job setup matrices (see ``benchmark/instances/public/sdst/README.md``).
 States are one-per-job so SDST maps to SynAPS ``SetupEntry`` cells.
 """
 
@@ -39,9 +39,7 @@ def load_sdst_fjs_problem(path: str | Path):
     except ValueError as exc:
         raise FjsParseError(f"{path}: setup matrix must be integers") from exc
 
-    with tempfile.NamedTemporaryFile(
-        "w", suffix=".fjs", delete=False, encoding="utf-8"
-    ) as handle:
+    with tempfile.NamedTemporaryFile("w", suffix=".fjs", delete=False, encoding="utf-8") as handle:
         handle.write(" ".join(fjs_tokens))
         tmp_path = Path(handle.name)
     try:

@@ -147,7 +147,9 @@ class RhcSolver(BaseSolver):
         )
         cover_ready_rule: str = str(kwargs.get("cover_ready_rule", "fifo"))
         cover_atcs_floor_window: float = max(0.0, float(kwargs.get("cover_atcs_floor_window", 0.0)))
-        cover_atcs_exhaust_window: float = max(0.0, float(kwargs.get("cover_atcs_exhaust_window", 0.0)))
+        cover_atcs_exhaust_window: float = max(
+            0.0, float(kwargs.get("cover_atcs_exhaust_window", 0.0))
+        )
         inner_kwargs: dict[str, Any] = dict(kwargs.get("inner_kwargs", {}))
         # Prevent double-passing time_limit_s to inner solver.
         # RHC computes its own per-window budget.
@@ -414,9 +416,7 @@ class RhcSolver(BaseSolver):
 
         horizon_start = problem.planning_horizon_start
         original_horizon_end = problem.planning_horizon_end
-        original_horizon_minutes = (
-            original_horizon_end - horizon_start
-        ).total_seconds() / 60.0
+        original_horizon_minutes = (original_horizon_end - horizon_start).total_seconds() / 60.0
         horizon_minutes = original_horizon_minutes * coverage_horizon_extension_factor
         horizon_end = horizon_start + timedelta(minutes=horizon_minutes)
         planning_horizon_extended = coverage_horizon_extension_factor > 1.0 + 1e-12
@@ -471,7 +471,7 @@ class RhcSolver(BaseSolver):
             eligible_ids = op_eligible_wc_ids[op.id]
             effective_durations = []
             for wc_id in eligible_ids:
-                wc = wc_by_id.get(wc_id)
+                wc: Any = wc_by_id.get(wc_id)
                 if wc is None:
                     from types import SimpleNamespace
 
@@ -958,8 +958,7 @@ class RhcSolver(BaseSolver):
             if window_budget_exceeded():
                 time_limit_reached = True
                 logger.warning(
-                    "RHC window budget reached at window %d "
-                    "(reserve=%.1fs for coverage fallback)",
+                    "RHC window budget reached at window %d (reserve=%.1fs for coverage fallback)",
                     window_count,
                     coverage_reserve_s,
                 )
@@ -1490,10 +1489,8 @@ class RhcSolver(BaseSolver):
                 if frozen_pred is None:
                     missing_frozen_predecessor = True
                     break
-                frozen_predecessor_end_offsets[op.id] = int(
-                    math.ceil(
-                        (frozen_pred.end_time - horizon_start).total_seconds() / 60.0
-                    )
+                frozen_predecessor_end_offsets[op.id] = math.ceil(
+                    (frozen_pred.end_time - horizon_start).total_seconds() / 60.0
                 )
 
             # Clear predecessor links that point to committed (frozen) operations
@@ -1557,9 +1554,7 @@ class RhcSolver(BaseSolver):
             if (
                 coverage_pace_guard_enabled
                 and selected_inner_solver_name != "greedy"
-                and coverage_pace_controller.should_intervene(
-                    time.monotonic() - time_budget_t0
-                )
+                and coverage_pace_controller.should_intervene(time.monotonic() - time_budget_t0)
             ):
                 # Coverage pace below threshold: spend this window on the
                 # cheap greedy commit path instead of inner search so the
@@ -1571,10 +1566,7 @@ class RhcSolver(BaseSolver):
                     "RHC coverage pace guard: window %d switched to greedy "
                     "(pace_ratio=%.3f < threshold=%.3f)",
                     window_count,
-                    coverage_pace_controller.pace_ratio(
-                        time.monotonic() - time_budget_t0
-                    )
-                    or 0.0,
+                    coverage_pace_controller.pace_ratio(time.monotonic() - time_budget_t0) or 0.0,
                     coverage_pace_threshold,
                 )
 
@@ -1621,16 +1613,11 @@ class RhcSolver(BaseSolver):
                     # Bound inner subproblem horizon to the commit band so ALNS/CPSAT
                     # placements land inside the freeze window instead of spilling past
                     # commit_boundary on the full planning horizon (coverage yield).
-                    if (
-                        window_bound_inner_horizon
-                        and window_end_offset + 1e-9 < horizon_minutes
-                    ):
+                    if window_bound_inner_horizon and window_end_offset + 1e-9 < horizon_minutes:
                         sub_horizon_end = min(
                             horizon_end,
                             horizon_start
-                            + timedelta(
-                                minutes=window_end_offset + window_horizon_slack_minutes
-                            ),
+                            + timedelta(minutes=window_end_offset + window_horizon_slack_minutes),
                         )
                     else:
                         sub_horizon_end = horizon_end
@@ -1986,12 +1973,12 @@ class RhcSolver(BaseSolver):
                             if variable_fixing_enabled:
                                 for assignment in boundary_aware_assignments:
                                     oid = assignment.operation_id
-                                    wc = assignment.work_center_id
+                                    assigned_wc_id = assignment.work_center_id
                                     prev = op_machine_stability.get(oid)
-                                    if prev is not None and prev[0] == wc:
-                                        op_machine_stability[oid] = (wc, prev[1] + 1)
+                                    if prev is not None and prev[0] == assigned_wc_id:
+                                        op_machine_stability[oid] = (assigned_wc_id, prev[1] + 1)
                                     else:
-                                        op_machine_stability[oid] = (wc, 1)
+                                        op_machine_stability[oid] = (assigned_wc_id, 1)
 
                             # C3 (Task 3a.3): Compute and append cross-window
                             # quality summary after each successful window solve.
@@ -2066,17 +2053,15 @@ class RhcSolver(BaseSolver):
                                     "alns_estimated_repair_s_per_destroyed_op"
                                 ] = round(
                                     float(
-                                        alns_budget_profile[
-                                            "estimated_repair_s_per_destroyed_op"
-                                        ]
+                                        alns_budget_profile["estimated_repair_s_per_destroyed_op"]
                                     ),
                                     4,
                                 )
-                                inner_window_summaries[-1][
-                                    "alns_effective_repair_time_limit_s"
-                                ] = round(
-                                    float(alns_budget_profile["effective_repair_time_limit_s"]),
-                                    4,
+                                inner_window_summaries[-1]["alns_effective_repair_time_limit_s"] = (
+                                    round(
+                                        float(alns_budget_profile["effective_repair_time_limit_s"]),
+                                        4,
+                                    )
                                 )
                             if rewound_assignments:
                                 inner_window_summaries[-1]["backtracking_rewind_ops"] = len(
@@ -2177,8 +2162,7 @@ class RhcSolver(BaseSolver):
                         pred_id = original_op.predecessor_op_id
                         # Check predecessor constraint
                         if pred_id and (
-                            pred_id not in committed_op_ids
-                            and pred_id not in window_scheduled_ids
+                            pred_id not in committed_op_ids and pred_id not in window_scheduled_ids
                         ):
                             continue  # predecessor not yet scheduled
 

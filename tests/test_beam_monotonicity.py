@@ -57,7 +57,9 @@ def _random_problem(seed: int) -> ScheduleProblem:
     ]
     setups = [
         SetupEntry(
-            work_center_id=wc.id, from_state_id=a.id, to_state_id=b.id,
+            work_center_id=wc.id,
+            from_state_id=a.id,
+            to_state_id=b.id,
             setup_minutes=rng.randint(1, 20),
         )
         for wc in machines
@@ -75,7 +77,9 @@ def _random_problem(seed: int) -> ScheduleProblem:
         prev = None
         for seq in range(rng.randint(1, 3)):
             op = Operation(
-                order_id=order_id, seq_in_order=seq, state_id=rng.choice(states).id,
+                order_id=order_id,
+                seq_in_order=seq,
+                state_id=rng.choice(states).id,
                 base_duration_min=rng.randint(10, 40),
                 eligible_wc_ids=rng.sample([m.id for m in machines], rng.randint(1, len(machines))),
                 predecessor_op_id=prev,
@@ -83,7 +87,11 @@ def _random_problem(seed: int) -> ScheduleProblem:
             ops.append(op)
             prev = op.id
     return ScheduleProblem(
-        states=states, orders=orders, operations=ops, work_centers=machines, setup_matrix=setups,
+        states=states,
+        orders=orders,
+        operations=ops,
+        work_centers=machines,
+        setup_matrix=setups,
         planning_horizon_start=datetime(2026, 1, 1, tzinfo=UTC),
         planning_horizon_end=datetime(2026, 1, 11, tzinfo=UTC),
     )

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from synaps.domains.cable.adapter import (
     CABLE_COLORS,
@@ -179,7 +179,7 @@ def _eligible_ids_for_sku(
     family_dedicated: bool,
     pvc_line_count: int | None = None,
     colour_dedicated: bool = False,
-) -> list:
+) -> list[UUID]:
     centers = centers_by_group[group]
     family_ids = _family_ids_for_sku(
         sku, centers, family_dedicated=family_dedicated, pvc_line_count=pvc_line_count
@@ -196,24 +196,21 @@ def _family_ids_for_sku(
     *,
     family_dedicated: bool,
     pvc_line_count: int | None,
-) -> list:
+) -> list[UUID]:
     if not family_dedicated or len(centers) < 2:
         return [center.id for center in centers]
     flex_n = 0 if len(centers) < 3 else 1
     flex = centers[-flex_n:] if flex_n else []
     dedicated = centers[:-flex_n] if flex_n else centers
     split = pvc_line_count if pvc_line_count is not None else (len(dedicated) + 1) // 2
-    if len(dedicated) >= 2:
-        split = min(max(1, split), len(dedicated) - 1)
-    else:
-        split = len(dedicated)
+    split = min(max(1, split), len(dedicated) - 1) if len(dedicated) >= 2 else len(dedicated)
     chosen = dedicated[:split] if sku.insulation == "PVC" else dedicated[split:]
     if not chosen:
         chosen = dedicated
     return [center.id for center in chosen + flex]
 
 
-def _colour_ids_for_sku(sku: CableSku, centers: list[WorkCenter]) -> list:
+def _colour_ids_for_sku(sku: CableSku, centers: list[WorkCenter]) -> list[UUID]:
     """One colour per dedicated machine when n≥6; leftover machines are flex."""
 
     if len(centers) < 6:
@@ -225,9 +222,7 @@ def _colour_ids_for_sku(sku: CableSku, centers: list[WorkCenter]) -> list:
         index = CABLE_COLORS.index(sku.color)
     except ValueError:
         index = 0
-    chosen = [
-        center for i, center in enumerate(dedicated) if i % len(CABLE_COLORS) == index
-    ]
+    chosen = [center for i, center in enumerate(dedicated) if i % len(CABLE_COLORS) == index]
     if not chosen:
         chosen = [dedicated[index % len(dedicated)]]
     return [center.id for center in chosen + flex]
@@ -371,7 +366,9 @@ def generate_cable_instance(
         planning_horizon_end=horizon_end,
     )
     return apply_campaign_windows(
-        problem, slot_hours=campaign_slot_hours, colour_phase=colour_phase,
+        problem,
+        slot_hours=campaign_slot_hours,
+        colour_phase=colour_phase,
         colour_cycle=6 if colour_phase and machines_per_stage <= 8 else 3,
     )
 
@@ -398,9 +395,7 @@ def _fill_reel_orders(
     operations: list[Operation],
     aux_requirements: list[OperationAuxRequirement],
 ) -> None:
-    pvc_lines = (
-        _pvc_lines_by_group(by_group, chosen_skus) if family_dedicated_lines else None
-    )
+    pvc_lines = _pvc_lines_by_group(by_group, chosen_skus) if family_dedicated_lines else None
     for sku, length_m, release, due, priority, parent_ref in _parent_jobs(
         rng,
         n_orders=n_orders,

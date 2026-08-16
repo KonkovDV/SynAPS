@@ -28,14 +28,27 @@ def _non_metric_problem() -> ScheduleProblem:
     for i, st in enumerate((s1, s2, s3, s1, s3)):
         order = Order(external_ref=f"O{i}", due_date=_H0 + timedelta(days=2))
         orders.append(order)
-        ops.append(Operation(order_id=order.id, seq_in_order=1, state_id=st.id,
-                              base_duration_min=10, eligible_wc_ids=[wc.id]))
+        ops.append(
+            Operation(
+                order_id=order.id,
+                seq_in_order=1,
+                state_id=st.id,
+                base_duration_min=10,
+                eligible_wc_ids=[wc.id],
+            )
+        )
     pairs = [(s1, s2, 1), (s2, s3, 1), (s1, s3, 100), (s3, s1, 1), (s2, s1, 1), (s3, s2, 1)]
-    setups = [SetupEntry(work_center_id=wc.id, from_state_id=a.id, to_state_id=b.id,
-                         setup_minutes=v) for a, b, v in pairs]
+    setups = [
+        SetupEntry(work_center_id=wc.id, from_state_id=a.id, to_state_id=b.id, setup_minutes=v)
+        for a, b, v in pairs
+    ]
     return ScheduleProblem(
-        states=[s1, s2, s3], orders=orders, operations=ops, work_centers=[wc],
-        setup_matrix=setups, planning_horizon_start=_H0,
+        states=[s1, s2, s3],
+        orders=orders,
+        operations=ops,
+        work_centers=[wc],
+        setup_matrix=setups,
+        planning_horizon_start=_H0,
         planning_horizon_end=_H0 + timedelta(days=5),
     )
 
@@ -65,11 +78,21 @@ def test_metric_matrix_keeps_single_rule() -> None:
     st = State(code="s")
     wc = WorkCenter(code="M", capability_group="G")
     order = Order(external_ref="O", due_date=_H0 + timedelta(days=1))
-    op = Operation(order_id=order.id, seq_in_order=1, state_id=st.id, base_duration_min=10,
-                   eligible_wc_ids=[wc.id])
+    op = Operation(
+        order_id=order.id,
+        seq_in_order=1,
+        state_id=st.id,
+        base_duration_min=10,
+        eligible_wc_ids=[wc.id],
+    )
     problem = ScheduleProblem(
-        states=[st], orders=[order], operations=[op], work_centers=[wc], setup_matrix=[],
-        planning_horizon_start=_H0, planning_horizon_end=_H0 + timedelta(days=1),
+        states=[st],
+        orders=[order],
+        operations=[op],
+        work_centers=[wc],
+        setup_matrix=[],
+        planning_horizon_start=_H0,
+        planning_horizon_end=_H0 + timedelta(days=1),
     )
     result = GreedyDispatch().solve(problem)
     assert result.metadata.get("priority_rule_sweep") is False

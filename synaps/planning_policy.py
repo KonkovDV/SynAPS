@@ -8,12 +8,15 @@ must not move unless ``allow_freeze_break`` is set (breakdown of that op).
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any
-from uuid import UUID
+from typing import TYPE_CHECKING, Any
 
-from synaps.model import Assignment
 from synaps.solvers.router import SolveRegime
+
+if TYPE_CHECKING:
+    from datetime import datetime
+    from uuid import UUID
+
+    from synaps.model import Assignment
 
 
 def _frozen_operation_ids(
@@ -48,7 +51,7 @@ def frozen_ids_for_repair(
     regime = kwargs.get("regime")
     regime_value = getattr(regime, "value", regime)
     if regime_value in {SolveRegime.BREAKDOWN, SolveRegime.BREAKDOWN.value, None}:
-        disrupted = {item for item in kwargs.get("disrupted_op_ids", [])}
+        disrupted = set(kwargs.get("disrupted_op_ids", []))
         return locked - disrupted
     return locked
 

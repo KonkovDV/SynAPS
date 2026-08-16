@@ -14,6 +14,7 @@ from synaps.model import (
     ScheduleResult,
     SolverStatus,
 )
+from synaps.planning_policy import frozen_ids_for_repair
 from synaps.solvers import BaseSolver
 from synaps.solvers._dispatch_support import (
     MachineIndex,
@@ -22,7 +23,6 @@ from synaps.solvers._dispatch_support import (
     recompute_assignment_setups,
 )
 from synaps.solvers._time_windows import operation_earliest_offset_minutes
-from synaps.planning_policy import frozen_ids_for_repair
 from synaps.solvers.delta_notary import notarize_repair
 
 if TYPE_CHECKING:
@@ -31,10 +31,10 @@ if TYPE_CHECKING:
 
 
 def _total_tardiness(
-    problem: "ScheduleProblem",
+    problem: ScheduleProblem,
     assignments: list[Assignment],
     ops_by_id: dict[Any, Operation],
-    horizon_start: "datetime",
+    horizon_start: datetime,
 ) -> float:
     """Per-order tardiness; F10-consistent with ``objective.evaluate``: an
     order with no scheduled operations completes at the horizon END."""
@@ -47,9 +47,7 @@ def _total_tardiness(
         order_completion[operation.order_id] = max(
             order_completion.get(operation.order_id, 0.0), end
         )
-    horizon_span = (
-        problem.planning_horizon_end - horizon_start
-    ).total_seconds() / 60.0
+    horizon_span = (problem.planning_horizon_end - horizon_start).total_seconds() / 60.0
     return sum(
         max(
             order_completion.get(order.id, horizon_span)
@@ -152,14 +150,13 @@ class IncrementalRepair(BaseSolver):
         Only ``remaining_op_ids`` are free decision variables — predecessors that
         are already scheduled must not be re-timed inside the subproblem.
         """
-        from synaps.solvers.cpsat_solver import CpSatSolver
         import math
+
+        from synaps.solvers.cpsat_solver import CpSatSolver
 
         op_positions = {operation.id: index for index, operation in enumerate(problem.operations)}
         ops_by_id = {operation.id: operation for operation in problem.operations}
-        frozen_by_op = {
-            assignment.operation_id: assignment for assignment in frozen_assignments
-        }
+        frozen_by_op = {assignment.operation_id: assignment for assignment in frozen_assignments}
         _ = already_scheduled_ids  # reserved for future readiness diagnostics
 
         sub_operations = [
@@ -179,14 +176,10 @@ class IncrementalRepair(BaseSolver):
                 frozen_pred = frozen_by_op.get(pred_id)
                 if frozen_pred is None:
                     return None
-                frozen_predecessor_end_offsets[operation.id] = int(
-                    math.ceil(
-                        (frozen_pred.end_time - horizon_start).total_seconds() / 60.0
-                    )
+                frozen_predecessor_end_offsets[operation.id] = math.ceil(
+                    (frozen_pred.end_time - horizon_start).total_seconds() / 60.0
                 )
-                free_operations.append(
-                    operation.model_copy(update={"predecessor_op_id": None})
-                )
+                free_operations.append(operation.model_copy(update={"predecessor_op_id": None}))
             else:
                 free_operations.append(operation)
 
@@ -238,12 +231,12 @@ class IncrementalRepair(BaseSolver):
         fallback_assignments.sort(key=lambda assignment: op_positions[assignment.operation_id])
         # Defensive precedence check vs frozen predecessors (C1 fail-closed).
         for assignment in fallback_assignments:
-            operation = ops_by_id.get(assignment.operation_id)
-            if operation is None or operation.predecessor_op_id is None:
+            scheduled_op = ops_by_id.get(assignment.operation_id)
+            if scheduled_op is None or scheduled_op.predecessor_op_id is None:
                 continue
-            if operation.predecessor_op_id in remaining_op_ids:
+            if scheduled_op.predecessor_op_id in remaining_op_ids:
                 continue
-            frozen_pred = frozen_by_op.get(operation.predecessor_op_id)
+            frozen_pred = frozen_by_op.get(scheduled_op.predecessor_op_id)
             if frozen_pred is not None and assignment.start_time < frozen_pred.end_time:
                 return None
         return fallback_assignments
@@ -269,8 +262,6 @@ class IncrementalRepair(BaseSolver):
         )
         result = self._solve_core(virtual_problem, **mapped_kwargs)
         _unroll_lane_assignments(result, virtual_to_original)
-        if result.metadata is None:
-            result.metadata = {}
         result.metadata["parallel_virtualization"] = True
         return result
 

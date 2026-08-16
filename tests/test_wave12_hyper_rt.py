@@ -134,7 +134,7 @@ def test_incremental_repair_refuses_missing_frozen_predecessor() -> None:
 
 def test_cpsat_material_alias_weight() -> None:
     """H12-2: canonical `material` key is accepted."""
-    from synaps.solvers.cpsat_solver import CpSatSolver as _S
+    from synaps.solvers.cpsat_solver import CpSatSolver as Solver
 
     # Smoke: building weights path does not KeyError on material-only dict.
     s = State(code="s")
@@ -156,14 +156,16 @@ def test_cpsat_material_alias_weight() -> None:
         planning_horizon_start=_H0,
         planning_horizon_end=_HE,
     )
-    result = _S().solve(
+    result = Solver().solve(
         problem,
         time_limit_s=2,
         num_workers=1,
         auto_greedy_warm_start=False,
         objective_weights={"makespan": 1, "material": 3},
     )
-    assert result.status.value in {"OPTIMAL", "FEASIBLE", "optimal", "feasible"} or result.assignments
+    assert (
+        result.status.value in {"OPTIMAL", "FEASIBLE", "optimal", "feasible"} or result.assignments
+    )
 
 
 def test_cpsat_refuses_collapsed_frozen() -> None:
@@ -200,7 +202,7 @@ def test_cpsat_refuses_collapsed_frozen() -> None:
         start_time=_H0,
         end_time=_H0,  # zero-length
     )
-    with pytest.raises(ValueError, match="collapses|clamps"):
+    with pytest.raises(ValueError, match=r"collapses|clamps"):
         CpSatSolver().solve(
             problem,
             time_limit_s=2,

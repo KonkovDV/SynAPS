@@ -7,7 +7,6 @@ from pathlib import Path
 from uuid import uuid4
 
 from synaps.model import (
-    Assignment,
     ObjectiveValues,
     Operation,
     Order,
@@ -25,13 +24,7 @@ from synaps.solvers.sdst_matrix import SdstMatrix
 
 _H0 = datetime(2026, 1, 1, tzinfo=UTC)
 _HE = _H0 + timedelta(days=1)
-_SDST_DIR = (
-    Path(__file__).resolve().parent.parent
-    / "benchmark"
-    / "instances"
-    / "public"
-    / "sdst"
-)
+_SDST_DIR = Path(__file__).resolve().parent.parent / "benchmark" / "instances" / "public" / "sdst"
 
 
 def test_ops_have_machine_duration_overrides_detects_field() -> None:
@@ -43,9 +36,7 @@ def test_ops_have_machine_duration_overrides_detects_field() -> None:
         machine_duration_overrides={uuid4(): 7},
     )
     assert _ops_have_machine_duration_overrides([op])
-    bare = Operation(
-        order_id=uuid4(), seq_in_order=1, state_id=uuid4(), base_duration_min=10
-    )
+    bare = Operation(order_id=uuid4(), seq_in_order=1, state_id=uuid4(), base_duration_min=10)
     assert not _ops_have_machine_duration_overrides([bare])
 
 
@@ -70,9 +61,7 @@ def test_native_greedy_repair_skips_when_overrides_present() -> None:
         planning_horizon_start=_H0,
         planning_horizon_end=_HE,
     )
-    outcome = _try_native_greedy_repair(
-        problem, [], [op.id], {op.id: 0}
-    )
+    outcome = _try_native_greedy_repair(problem, [], [op.id], {op.id: 0})
     assert outcome is None
 
 
@@ -87,7 +76,10 @@ def test_sdst_matrix_get_energy() -> None:
     wc = WorkCenter(code="M", capability_group="G")
     order = Order(external_ref="O", due_date=_HE)
     op = Operation(
-        order_id=order.id, seq_in_order=1, state_id=s1.id, base_duration_min=1,
+        order_id=order.id,
+        seq_in_order=1,
+        state_id=s1.id,
+        base_duration_min=1,
         eligible_wc_ids=[wc.id],
     )
     problem = ScheduleProblem(
@@ -130,12 +122,18 @@ def test_alns_mab_pair_metadata_and_runs() -> None:
     orders = [Order(external_ref="O1", due_date=_HE), Order(external_ref="O2", due_date=_HE)]
     ops = [
         Operation(
-            order_id=orders[0].id, seq_in_order=1, state_id=s1.id,
-            base_duration_min=5, eligible_wc_ids=[wc.id],
+            order_id=orders[0].id,
+            seq_in_order=1,
+            state_id=s1.id,
+            base_duration_min=5,
+            eligible_wc_ids=[wc.id],
         ),
         Operation(
-            order_id=orders[1].id, seq_in_order=1, state_id=s2.id,
-            base_duration_min=5, eligible_wc_ids=[wc.id],
+            order_id=orders[1].id,
+            seq_in_order=1,
+            state_id=s2.id,
+            base_duration_min=5,
+            eligible_wc_ids=[wc.id],
         ),
     ]
     problem = ScheduleProblem(
@@ -145,8 +143,11 @@ def test_alns_mab_pair_metadata_and_runs() -> None:
         work_centers=[wc],
         setup_matrix=[
             SetupEntry(
-                work_center_id=wc.id, from_state_id=s1.id, to_state_id=s2.id,
-                setup_minutes=2, energy_kwh=1.0,
+                work_center_id=wc.id,
+                from_state_id=s1.id,
+                to_state_id=s2.id,
+                setup_minutes=2,
+                energy_kwh=1.0,
             )
         ],
         planning_horizon_start=_H0,

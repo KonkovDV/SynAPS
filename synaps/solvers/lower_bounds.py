@@ -285,9 +285,7 @@ def compute_relaxed_makespan_lower_bound(problem: ScheduleProblem) -> MakespanLo
 
     precedence_critical_path_lb = max(longest_path_to.values(), default=0.0)
 
-    head_tail_lb = _compute_head_tail_lb(
-        problem, topo_order, successors_by_op, min_duration_by_op
-    )
+    head_tail_lb = _compute_head_tail_lb(problem, topo_order, successors_by_op, min_duration_by_op)
     total_parallel_capacity = max(
         1,
         sum(max(1, work_center.max_parallel) for work_center in problem.work_centers),

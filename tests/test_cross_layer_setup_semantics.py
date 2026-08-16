@@ -10,10 +10,8 @@ property keeps the three layers from drifting apart again.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
 
-from hypothesis import given, settings
-from hypothesis import strategies as st
+from hypothesis import given, settings, strategies as st
 
 from synaps.model import (
     Operation,
@@ -111,7 +109,6 @@ def test_feasible_solver_schedules_pass_checker(
             continue
         violations = checker.check(problem, result.assignments, exhaustive=True)
         blocking = [v for v in violations if v.kind in _BLOCKING]
-        assert not blocking, (
-            f"{solver.name} returned a schedule the checker rejects: "
-            + "; ".join(f"{v.kind}: {v.message}" for v in blocking[:3])
+        assert not blocking, f"{solver.name} returned a schedule the checker rejects: " + "; ".join(
+            f"{v.kind}: {v.message}" for v in blocking[:3]
         )

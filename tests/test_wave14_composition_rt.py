@@ -9,7 +9,7 @@ from uuid import uuid4
 import pytest
 
 from synaps.model import Assignment, Operation, Order, ScheduleProblem, State, WorkCenter
-from synaps.solvers.alns_solver import _repair_cpsat_outcome, RepairStatus
+from synaps.solvers.alns_solver import RepairStatus, _repair_cpsat_outcome
 from synaps.solvers.lbbd_solver import _add_benders_cut_rows
 
 _H0 = datetime(2026, 1, 1, tzinfo=UTC)
@@ -75,6 +75,8 @@ def test_lbbd_empty_nogood_refused() -> None:
 def test_rhc_per_window_limit_always_defined() -> None:
     """C14-crash: early-greedy path must not UnboundLocal per_window_limit."""
     # Contract smoke: the window loop initializes per_window_limit before branching.
-    src = open("synaps/solvers/rhc/_solver.py", encoding="utf-8").read()
+    from pathlib import Path
+
+    src = Path("synaps/solvers/rhc/_solver.py").read_text(encoding="utf-8")
     assert "per_window_limit = 0.0" in src
     assert "missing_frozen_predecessor" in src

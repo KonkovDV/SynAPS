@@ -43,7 +43,7 @@ O(n log n) for aux. A segment tree would pay off for repeated insert/delete
 during search, not this call site. We do not fake one.
 
 Oracle: McKeeman, *Differential testing for software*, Digital Technical
-Journal 10(1):100–107, 1998. Exhaustive ``FeasibilityChecker.check`` is the
+Journal 10(1):100-107, 1998. Exhaustive ``FeasibilityChecker.check`` is the
 reference implementation.
 """
 
@@ -52,15 +52,17 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from synaps.model import Assignment, ScheduleProblem
 from synaps.solvers.feasibility_checker import (
     FeasibilityChecker,
     FeasibilityViolation,
     NotaryScope,
     proven_hard_violations,
 )
+
+if TYPE_CHECKING:
+    from synaps.model import Assignment, ScheduleProblem
 
 NOTARY_MODES: frozenset[str] = frozenset({"exhaustive", "delta", "shadow"})
 
@@ -133,9 +135,7 @@ def _violation_fingerprint(
     violations: list[FeasibilityViolation],
 ) -> tuple[tuple[str, str, str], ...]:
     return tuple(
-        sorted(
-            (item.kind, str(item.operation_id), str(item.work_center_id)) for item in violations
-        )
+        sorted((item.kind, str(item.operation_id), str(item.work_center_id)) for item in violations)
     )
 
 
@@ -145,9 +145,7 @@ def _claim_violations(
     scope: NotaryScope | None,
 ) -> list[FeasibilityViolation]:
     raw = FeasibilityChecker().check(problem, assignments, exhaustive=True, scope=scope)
-    return proven_hard_violations(
-        [item for item in raw if item.kind != "UNKNOWN_OPERATION"]
-    )
+    return proven_hard_violations([item for item in raw if item.kind != "UNKNOWN_OPERATION"])
 
 
 def notarize_repair(
@@ -167,9 +165,7 @@ def notarize_repair(
     if resolved == "delta" and not baseline_list:
         resolved = "exhaustive"
     scope = (
-        _build_notary_scope(
-            baseline_list, assignments, freeze_horizon_end=freeze_horizon_end
-        )
+        _build_notary_scope(baseline_list, assignments, freeze_horizon_end=freeze_horizon_end)
         if use_delta
         else None
     )

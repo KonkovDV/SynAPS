@@ -43,21 +43,31 @@ def _greedy_trap_problem() -> tuple[ScheduleProblem, list[Assignment]]:
     # One order per op: ops of the same order auto-chain via seq_in_order.
     orders = [Order(external_ref=f"O{name}", due_date=_HE) for name, _s, _a, _b in specs]
     ops = [
-        Operation(order_id=orders[i].id, seq_in_order=1, state_id=st.id,
-                  base_duration_min=1, eligible_wc_ids=[wc.id])
+        Operation(
+            order_id=orders[i].id,
+            seq_in_order=1,
+            state_id=st.id,
+            base_duration_min=1,
+            eligible_wc_ids=[wc.id],
+        )
         for i, (_name, st, _start, _end) in enumerate(specs)
     ]
     setup = [
-        SetupEntry(work_center_id=wc.id, from_state_id=s1.id, to_state_id=s2.id,
-                   setup_minutes=100),
+        SetupEntry(work_center_id=wc.id, from_state_id=s1.id, to_state_id=s2.id, setup_minutes=100),
     ]
     problem = ScheduleProblem(
-        states=[s1, s2], orders=orders, operations=ops, work_centers=[wc],
-        setup_matrix=setup, planning_horizon_start=_H0, planning_horizon_end=_HE,
+        states=[s1, s2],
+        orders=orders,
+        operations=ops,
+        work_centers=[wc],
+        setup_matrix=setup,
+        planning_horizon_start=_H0,
+        planning_horizon_end=_HE,
     )
     assignments = [
         Assignment(
-            operation_id=op.id, work_center_id=wc.id,
+            operation_id=op.id,
+            work_center_id=wc.id,
             start_time=_H0 + timedelta(minutes=start),
             end_time=_H0 + timedelta(minutes=end),
         )
@@ -79,17 +89,31 @@ def test_exact_inference_still_proves_real_infeasibility() -> None:
     wc = WorkCenter(code="M", capability_group="G", max_parallel=2)
     orders = [Order(external_ref=f"O{i}", due_date=_HE) for i in (1, 2, 3)]
     ops = [
-        Operation(order_id=orders[i].id, seq_in_order=1, state_id=s1.id,
-                  base_duration_min=10, eligible_wc_ids=[wc.id])
+        Operation(
+            order_id=orders[i].id,
+            seq_in_order=1,
+            state_id=s1.id,
+            base_duration_min=10,
+            eligible_wc_ids=[wc.id],
+        )
         for i in (0, 1, 2)
     ]
     problem = ScheduleProblem(
-        states=[s1], orders=orders, operations=ops, work_centers=[wc],
-        setup_matrix=[], planning_horizon_start=_H0, planning_horizon_end=_HE,
+        states=[s1],
+        orders=orders,
+        operations=ops,
+        work_centers=[wc],
+        setup_matrix=[],
+        planning_horizon_start=_H0,
+        planning_horizon_end=_HE,
     )
     assignments = [
-        Assignment(operation_id=op.id, work_center_id=wc.id,
-                   start_time=_H0, end_time=_H0 + timedelta(minutes=10))
+        Assignment(
+            operation_id=op.id,
+            work_center_id=wc.id,
+            start_time=_H0,
+            end_time=_H0 + timedelta(minutes=10),
+        )
         for op in ops
     ]
     violations = FeasibilityChecker().check(problem, assignments, exhaustive=True)
@@ -104,10 +128,7 @@ def test_explicit_lane_metadata_path_unchanged() -> None:
     lane_ids = [uuid4(), uuid4()]
     lane_by_seq = {1: lane_ids[0], 2: lane_ids[1], 3: lane_ids[1], 4: lane_ids[0]}
     for a in assignments:
-        seq = next(
-            i for i, op in enumerate(problem.operations, start=1)
-            if op.id == a.operation_id
-        )
+        seq = next(i for i, op in enumerate(problem.operations, start=1) if op.id == a.operation_id)
         a.lane_id = lane_by_seq[seq]
     violations = FeasibilityChecker().check(problem, assignments, exhaustive=True)
     assert not violations, [f"{v.kind}: {v.message}" for v in violations]

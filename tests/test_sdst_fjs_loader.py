@@ -6,13 +6,7 @@ from pathlib import Path
 
 from benchmark.sdst_fjs_loader import load_sdst_fjs_problem
 
-_SDST_DIR = (
-    Path(__file__).resolve().parent.parent
-    / "benchmark"
-    / "instances"
-    / "public"
-    / "sdst"
-)
+_SDST_DIR = Path(__file__).resolve().parent.parent / "benchmark" / "instances" / "public" / "sdst"
 
 
 def test_sdst_pack_fixtures_parse() -> None:

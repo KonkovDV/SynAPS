@@ -50,8 +50,8 @@ def test_rhc_never_places_op_before_order_release() -> None:
     release-propagated earliest start, not just by the predecessor's end."""
     from datetime import timedelta as _td
 
-    from synaps.solvers.feasibility_checker import FeasibilityChecker as _FC
-    from synaps.solvers.rhc import RhcSolver  # noqa: PLC0415
+    from synaps.solvers.feasibility_checker import FeasibilityChecker as Checker
+    from synaps.solvers.rhc import RhcSolver
 
     problem = make_simple_problem(n_orders=2, ops_per_order=2)
     release = HORIZON_START + _td(minutes=500)
@@ -67,7 +67,7 @@ def test_rhc_never_places_op_before_order_release() -> None:
                 f"RHC placed op {assignment.operation_id} at "
                 f"{assignment.start_time} before release {release}"
             )
-    assert _FC().check(problem, result.assignments) == []
+    assert Checker().check(problem, result.assignments) == []
 
 
 def test_repair_schedule_rejects_identity_override_via_kwargs() -> None:
@@ -105,7 +105,7 @@ def test_resource_capacity_zip_is_strict() -> None:
 
     from synaps.accelerators import resource_capacity_window_is_feasible
 
-    with pytest.raises(ValueError, match="zip|identical lengths"):
+    with pytest.raises(ValueError, match=r"zip|identical lengths"):
         resource_capacity_window_is_feasible(
             window_starts=[0.0, 10.0],
             window_ends=[5.0],  # shorter — must not truncate

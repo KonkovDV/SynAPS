@@ -15,22 +15,16 @@ def test_alns_wall_stamp_matches_stop_reason() -> None:
     assert max_iter["wall_clock_path_dependent"] is False
     assert max_iter["determinism_violated"] is False
 
-    wall = _alns_wall_clock_honesty_meta(
-        "strict", False, 3, 12, elapsed_s=20.0, time_limit_s=20.0
-    )
+    wall = _alns_wall_clock_honesty_meta("strict", False, 3, 12, elapsed_s=20.0, time_limit_s=20.0)
     assert wall["search_stop_reason"] == "wall_clock"
     assert wall["wall_clock_path_dependent"] is True
     assert wall["determinism_violated"] is True
 
-    before = _alns_wall_clock_honesty_meta(
-        "strict", True, 0, 12, elapsed_s=1.0, time_limit_s=0.5
-    )
+    before = _alns_wall_clock_honesty_meta("strict", True, 0, 12, elapsed_s=1.0, time_limit_s=0.5)
     assert before["search_stop_reason"] == "wall_clock_before_search"
     assert before["wall_clock_path_dependent"] is True
 
-    fast = _alns_wall_clock_honesty_meta(
-        "fast", False, 3, 12, elapsed_s=20.0, time_limit_s=20.0
-    )
+    fast = _alns_wall_clock_honesty_meta("fast", False, 3, 12, elapsed_s=20.0, time_limit_s=20.0)
     assert fast["wall_clock_path_dependent"] is True
     assert fast["determinism_violated"] is False
 
@@ -56,9 +50,7 @@ def test_alns_zero_budget_stamps_wall_cut() -> None:
 
 def test_rhc_completed_run_is_not_wall_stamped() -> None:
     problem = make_simple_problem(n_orders=1, ops_per_order=1)
-    result = RhcSolver().solve(
-        problem, time_limit_s=30, random_seed=1, inner_solver="greedy"
-    )
+    result = RhcSolver().solve(problem, time_limit_s=30, random_seed=1, inner_solver="greedy")
     reason = str(result.metadata["search_stop_reason"])
     assert result.metadata["wall_clock_path_dependent"] is (reason == "wall_clock")
     if reason == "completed":

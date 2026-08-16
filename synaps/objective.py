@@ -113,9 +113,7 @@ def evaluate(problem: ScheduleProblem, assignments: list[Assignment]) -> Objecti
         total_material_loss=total_material,
         total_tardiness_minutes=total_tardiness,
         total_energy_kwh=total_energy,
-        coverage=coverage_fraction(
-            total_operations=total_ops, scheduled_operations=scheduled
-        ),
+        coverage=coverage_fraction(total_operations=total_ops, scheduled_operations=scheduled),
         unscheduled_operations=max(0, total_ops - scheduled),
     )
 

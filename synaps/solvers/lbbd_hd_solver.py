@@ -327,9 +327,7 @@ class LbbdHdSolver(BaseSolver):
             assert sub_assignments is not None  # narrowed by the `sub_result[0] is None` guard
 
             # ---- Measure 5: Accelerated post-assembly (F3 lane-aware) ----
-            assembled, horizon_ok = _topological_post_assembly(
-                problem, sub_assignments, ops_by_id
-            )
+            assembled, horizon_ok = _topological_post_assembly(problem, sub_assignments, ops_by_id)
             if assembled is None or not horizon_ok:
                 # Horizon overflow / assembly failure is unproven (S2) — do not
                 # emit a cut and do not track as an incumbent.
@@ -674,7 +672,7 @@ def _solve_precedence_aware_master(
         coeffs = [1.0, -1.0]
 
         for wc_id in eligible_by_op[op.id]:
-            wc = wc_by_id.get(wc_id)
+            wc: Any = wc_by_id.get(wc_id)
             if wc is None:
                 from types import SimpleNamespace
 
@@ -802,8 +800,7 @@ def _solve_precedence_aware_master(
                 )
         else:
             raise ValueError(
-                f"Unknown LBBD-HD cut kind {cut.kind!r}; refusing silent no-op "
-                "(Wave 12 / M12-1)."
+                f"Unknown LBBD-HD cut kind {cut.kind!r}; refusing silent no-op (Wave 12 / M12-1)."
             )
 
     # ---- Solve ----
@@ -1150,7 +1147,6 @@ def _assignment_sequence_key(assignment: Assignment) -> tuple[UUID, UUID | None]
     return assignment.work_center_id, assignment.lane_id
 
 
-
 def _find_earliest_machine_slot(
     timeline: list[tuple[float, float, UUID, UUID]],
     *,
@@ -1234,9 +1230,7 @@ def _topological_post_assembly(
     if not assignments:
         return assignments, True
 
-    stamp_parallel_lane_ids(
-        problem, assignments, ops_by_id, lane_tag_prefix="lbbd-hd-lane"
-    )
+    stamp_parallel_lane_ids(problem, assignments, ops_by_id, lane_tag_prefix="lbbd-hd-lane")
 
     setup_lookup: dict[tuple[UUID, UUID, UUID], timedelta] = {
         (e.work_center_id, e.from_state_id, e.to_state_id): timedelta(minutes=e.setup_minutes)
@@ -1332,7 +1326,6 @@ def topological_post_assembly(
     if assembled is None or not horizon_ok:
         return None
     return assembled
-
 
 
 # ---------------------------------------------------------------------------

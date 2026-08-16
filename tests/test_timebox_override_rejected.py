@@ -24,12 +24,20 @@ def _tiny_problem() -> ScheduleProblem:
     wc = WorkCenter(code="M", capability_group="G")
     order = Order(external_ref="O1", due_date=_H0 + timedelta(days=1))
     op = Operation(
-        order_id=order.id, seq_in_order=1, state_id=state.id,
-        base_duration_min=10, eligible_wc_ids=[wc.id],
+        order_id=order.id,
+        seq_in_order=1,
+        state_id=state.id,
+        base_duration_min=10,
+        eligible_wc_ids=[wc.id],
     )
     return ScheduleProblem(
-        states=[state], orders=[order], operations=[op], work_centers=[wc], setup_matrix=[],
-        planning_horizon_start=_H0, planning_horizon_end=_H0 + timedelta(days=1),
+        states=[state],
+        orders=[order],
+        operations=[op],
+        work_centers=[wc],
+        setup_matrix=[],
+        planning_horizon_start=_H0,
+        planning_horizon_end=_H0 + timedelta(days=1),
     )
 
 
@@ -38,7 +46,10 @@ def test_time_limit_override_via_sat_parameters_is_rejected(limit_key: str) -> N
     problem = _tiny_problem()
     with pytest.raises(ValueError, match="time_limit_s"):
         CpSatSolver().solve(
-            problem, time_limit_s=5, num_workers=1, auto_greedy_warm_start=False,
+            problem,
+            time_limit_s=5,
+            num_workers=1,
+            auto_greedy_warm_start=False,
             sat_parameters={limit_key: 8000.0},
         )
 
@@ -47,7 +58,10 @@ def test_benign_sat_parameter_override_still_allowed() -> None:
     """A non-timebox override must still be accepted."""
     problem = _tiny_problem()
     result = CpSatSolver().solve(
-        problem, time_limit_s=5, num_workers=1, auto_greedy_warm_start=False,
+        problem,
+        time_limit_s=5,
+        num_workers=1,
+        auto_greedy_warm_start=False,
         sat_parameters={"log_search_progress": False},
     )
     assert result.assignments

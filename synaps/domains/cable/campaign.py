@@ -24,13 +24,14 @@ Hold-until-successor drums do not add machine-minutes (C5a stays gated).
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from synaps.domains.cable.adapter import CABLE_COLORS
-from synaps.model import Operation, Order, ScheduleProblem
 
 if TYPE_CHECKING:
-    from synaps.model import State
+    from collections.abc import Mapping
+
+    from synaps.model import Operation, Order, ScheduleProblem, State
 
 
 def _first_stage_ops(problem: ScheduleProblem) -> dict[object, Operation]:
@@ -49,7 +50,7 @@ def apply_campaign_windows(
     colour_phase: bool = False,
     colour_cycle: int = 3,
 ) -> ScheduleProblem:
-    """Open a shared start gate per SKU×due slot at the group's earliest release."""
+    """Open a shared start gate per SKU x due slot at the group's earliest release."""
 
     if slot_hours <= 0:
         return problem
@@ -60,9 +61,7 @@ def apply_campaign_windows(
     groups: dict[tuple[object, int], list[tuple[Operation, Order]]] = {}
     for operation in _first_stage_ops(problem).values():
         order = orders_by_id[operation.order_id]
-        due_bucket = max(
-            0, int((order.due_date - horizon).total_seconds() // slot.total_seconds())
-        )
+        due_bucket = max(0, int((order.due_date - horizon).total_seconds() // slot.total_seconds()))
         groups.setdefault((operation.state_id, due_bucket), []).append((operation, order))
     for members in groups.values():
         gate_seconds = min(
@@ -72,8 +71,14 @@ def apply_campaign_windows(
         gate = horizon + slot * int(gate_seconds // slot.total_seconds())
         for operation, order in members:
             operation.earliest_start = _colour_stagger_gate(
-                gate, slot, horizon, order, operation, states_by_id,
-                colour_phase, colour_cycle,
+                gate,
+                slot,
+                horizon,
+                order,
+                operation,
+                states_by_id,
+                colour_phase,
+                colour_cycle,
             )
     return problem
 
@@ -84,7 +89,7 @@ def _colour_stagger_gate(
     horizon: datetime,
     order: Order,
     operation: Operation,
-    states_by_id: dict[object, State],
+    states_by_id: Mapping[Any, State],
     colour_phase: bool,
     colour_cycle: int,
 ) -> datetime:
@@ -98,12 +103,11 @@ def _colour_stagger_gate(
             index = CABLE_COLORS.index(color)
         except ValueError:
             return gate
-        gate_slot = int(round((gate - horizon).total_seconds() / slot.total_seconds()))
+        gate_slot = round((gate - horizon).total_seconds() / slot.total_seconds())
         wait = (index - gate_slot) % len(CABLE_COLORS)
     else:
-        wait = (
-            sum(ord(char) for char in f"{attrs.get('insulation', '')}-{attrs.get('color', '')}")
-            % max(colour_cycle, 1)
-        )
+        wait = sum(
+            ord(char) for char in f"{attrs.get('insulation', '')}-{attrs.get('color', '')}"
+        ) % max(colour_cycle, 1)
     shifted = gate + slot * wait
     return shifted if shifted <= order.due_date else gate

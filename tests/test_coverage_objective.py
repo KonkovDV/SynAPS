@@ -39,9 +39,7 @@ def test_higher_coverage_ranks_first_even_with_worse_makespan() -> None:
 
 def test_solver_populates_full_coverage() -> None:
     """A solver that schedules every operation reports coverage 1.0."""
-    problem = ScheduleProblem.model_validate(
-        json.loads((_INSTANCES / "tiny_3x3.json").read_text())
-    )
+    problem = ScheduleProblem.model_validate(json.loads((_INSTANCES / "tiny_3x3.json").read_text()))
     result = GreedyDispatch().solve(problem)
     assert result.objective.coverage == 1.0
     assert result.objective.unscheduled_operations == 0

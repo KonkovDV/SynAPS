@@ -165,8 +165,7 @@ def test_native_override_seed_fallback_reason_in_metadata() -> None:
     )
     assert result.metadata.get("native_initial_seed_attempted") is True
     assert (
-        result.metadata.get("native_initial_seed_fallback_reason")
-        == "machine_duration_overrides"
+        result.metadata.get("native_initial_seed_fallback_reason") == "machine_duration_overrides"
     )
     # Repair reason is observe-only (not problem-wide pretension).
     assert result.metadata.get("native_greedy_repair_override_skips", 0) >= 0

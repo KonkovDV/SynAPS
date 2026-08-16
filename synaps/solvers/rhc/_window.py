@@ -455,6 +455,8 @@ def _ceiling_end_for_op(operation: Any, horizon_end: datetime | None) -> datetim
     latest = getattr(operation, "latest_finish", None) if operation is not None else None
     if latest is None:
         return horizon_end
+    if not isinstance(latest, datetime):
+        return horizon_end
     if horizon_end is None:
         return latest
     return min(latest, horizon_end)
@@ -844,9 +846,7 @@ def finalize_rhc_claim_status(
 
     from synaps.solvers.feasibility_checker import FeasibilityChecker, proven_hard_violations
 
-    hard = proven_hard_violations(
-        FeasibilityChecker().check(problem, assignments, exhaustive=True)
-    )
+    hard = proven_hard_violations(FeasibilityChecker().check(problem, assignments, exhaustive=True))
     converged = int(stabilization.get("converged", 1)) == 1
     feasible = scheduled_count == total_ops and not hard and converged
     extra = {

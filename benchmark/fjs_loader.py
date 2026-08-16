@@ -145,8 +145,7 @@ def load_fjs_problem(path: Path | str) -> ScheduleProblem:
                 machine_refs.append(
                     stream.next_int(
                         context=(
-                            f"machine id of job {job_idx + 1} op {op_idx + 1} "
-                            f"alt {alt_idx + 1}"
+                            f"machine id of job {job_idx + 1} op {op_idx + 1} alt {alt_idx + 1}"
                         )
                     )
                 )
@@ -201,18 +200,12 @@ def load_fjs_problem(path: Path | str) -> ScheduleProblem:
             eligible_wc_ids = []
             for alt_idx in range(n_alternatives):
                 machine_ref = stream.next_int(
-                    context=(
-                        f"machine id of job {job_idx + 1} op {op_idx + 1} alt {alt_idx + 1}"
-                    )
+                    context=(f"machine id of job {job_idx + 1} op {op_idx + 1} alt {alt_idx + 1}")
                 )
                 duration = stream.next_int(
-                    context=(
-                        f"duration of job {job_idx + 1} op {op_idx + 1} alt {alt_idx + 1}"
-                    )
+                    context=(f"duration of job {job_idx + 1} op {op_idx + 1} alt {alt_idx + 1}")
                 )
-                if not machine_index_base <= machine_ref <= (
-                    n_machines - 1 + machine_index_base
-                ):
+                if not machine_index_base <= machine_ref <= (n_machines - 1 + machine_index_base):
                     raise FjsParseError(
                         f"machine id {machine_ref} out of range "
                         f"{machine_index_base}..{n_machines - 1 + machine_index_base} "

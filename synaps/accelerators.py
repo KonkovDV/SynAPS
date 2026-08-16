@@ -209,9 +209,7 @@ def get_acceleration_status() -> dict[str, Any]:
         "atcs_log_score_backend": "native" if kernels["atcs_log_score"] else "python",
         "atcs_log_score_batch_backend": "native" if kernels["atcs_log_score_batch"] else "python",
         "resource_capacity_backend": "native" if kernels["resource_capacity"] else "python",
-        "rhc_candidate_metrics_backend": "native"
-        if kernels["rhc_candidate_metrics"]
-        else "python",
+        "rhc_candidate_metrics_backend": "native" if kernels["rhc_candidate_metrics"] else "python",
         "rhc_candidate_metrics_np_backend": "native"
         if kernels["rhc_candidate_metrics_np"]
         else "python",
@@ -223,9 +221,7 @@ def get_acceleration_status() -> dict[str, Any]:
         if kernels["stabilize_temporal_batch"]
         else "python",
         "sdst_batch_lookup_backend": "native" if kernels["sdst_batch_lookup"] else "python",
-        "destroy_worst_scores_backend": "native"
-        if kernels["destroy_worst_scores"]
-        else "python",
+        "destroy_worst_scores_backend": "native" if kernels["destroy_worst_scores"] else "python",
         "greedy_repair_batch_backend": "native" if kernels["greedy_repair_batch"] else "python",
         "list_schedule_cover_backend": "native" if kernels["list_schedule_cover"] else "python",
     }
@@ -948,9 +944,7 @@ def list_schedule_cover_native(
             if weights is not None:
                 extra["weights"] = np.ascontiguousarray(weights, dtype=np.float64)
             if material_loss is not None:
-                extra["material_loss"] = np.ascontiguousarray(
-                    material_loss, dtype=np.float64
-                )
+                extra["material_loss"] = np.ascontiguousarray(material_loss, dtype=np.float64)
         starts, ends, machines, setups = _native_list_schedule_cover(
             np.ascontiguousarray(base_durations, dtype=np.float64),
             np.ascontiguousarray(predecessor_indices, dtype=np.int64),

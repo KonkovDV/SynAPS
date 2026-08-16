@@ -86,8 +86,11 @@ def _get_rss_mb() -> int | None:
                     ("PeakPagefileUsage", ctypes.c_size_t),
                 ]
 
-            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            psapi = ctypes.WinDLL("psapi", use_last_error=True)
+            win_dll = getattr(ctypes, "WinDLL", None)
+            if win_dll is None:
+                return None
+            kernel32 = win_dll("kernel32", use_last_error=True)
+            psapi = win_dll("psapi", use_last_error=True)
             kernel32.GetCurrentProcess.restype = ctypes.wintypes.HANDLE
             psapi.GetProcessMemoryInfo.argtypes = [
                 ctypes.wintypes.HANDLE,

@@ -48,7 +48,7 @@ _COVER_ATCS_K3 = 0.5
 # than min(ready floors) + window. Window 0 is Kolisch parallel SGS
 # (non-delay). Unbounded ATCS collapsed month coverage (2026-08-14).
 # Nervous month uses one colour SMED (240 min) as a bounded delay
-# (Artigues 2005: non-delay is not dominant under SDST; Lee–Pinedo k2
+# (Artigues 2005: non-delay is not dominant under SDST; Lee-Pinedo k2
 # look-ahead is a wait/setup tradeoff at setup-duration scale).
 _COVER_ATCS_FLOOR_WINDOW = 0.0
 
@@ -473,11 +473,19 @@ def _run_python_cover_loop(
             continue
         placed += 1
         _enqueue_cover_successors(
-            heap, successors[op.id], end=end, op_earliest=op_earliest,
+            heap,
+            successors[op.id],
+            end=end,
+            op_earliest=op_earliest,
             as_list=cover_ready_rule == "atcs",
         )
-    return GreedyCoverStats(placed=placed, clipped=clipped, passes=1,
-        time_limited=time_limited, gap_inserted=gap_inserted)
+    return GreedyCoverStats(
+        placed=placed,
+        clipped=clipped,
+        passes=1,
+        time_limited=time_limited,
+        gap_inserted=gap_inserted,
+    )
 
 
 def _enqueue_cover_successors(
@@ -630,9 +638,7 @@ def _seed_list_schedule_state(
     default_wc_ids: Sequence[UUID],
     horizon_start: datetime,
 ) -> tuple[dict[UUID, tuple[float, UUID | None]], dict[UUID, list[tuple[float, float, int]]]]:
-    tails: dict[UUID, tuple[float, UUID | None]] = {
-        wc_id: (0.0, None) for wc_id in default_wc_ids
-    }
+    tails: dict[UUID, tuple[float, UUID | None]] = dict.fromkeys(default_wc_ids, (0.0, None))
     aux_windows: dict[UUID, list[tuple[float, float, int]]] = {}
     for assignment in assignments:
         end = (assignment.end_time - horizon_start).total_seconds() / 60.0
@@ -702,14 +708,10 @@ def _min_cover_setup_and_p(
         scrap = 0.0
         if last_state is not None:
             setup = int(
-                dispatch_context.setup_minutes.get(
-                    (wc_id, last_state, operation.state_id), 0
-                )
+                dispatch_context.setup_minutes.get((wc_id, last_state, operation.state_id), 0)
             )
             scrap = float(
-                dispatch_context.material_loss.get(
-                    (wc_id, last_state, operation.state_id), 0.0
-                )
+                dispatch_context.material_loss.get((wc_id, last_state, operation.state_id), 0.0)
             )
         duration = float(duration_minutes_for(operation, work_center))
         if setup < min_setup:
@@ -737,9 +739,7 @@ def _atcs_pick_index(
     stats: list[tuple[float, float, float, float]] = []
     for item in heap:
         operation = ops_by_id[item[3]]
-        setup, processing, material = _min_cover_setup_and_p(
-            operation, tails, dispatch_context
-        )
+        setup, processing, material = _min_cover_setup_and_p(operation, tails, dispatch_context)
         p_sum += processing
         if setup > 0:
             setup_sum += setup
@@ -751,9 +751,7 @@ def _atcs_pick_index(
     p_bar = max(p_sum / len(heap), 0.1)
     s_bar = max(setup_sum / setup_n, 1.0) if setup_n else 1.0
     m_bar = max(mat_sum / mat_n, 1.0) if mat_n else 1.0
-    eligible = _atcs_window_indices(
-        stats, cover_atcs_floor_window, cover_atcs_exhaust_window
-    )
+    eligible = _atcs_window_indices(stats, cover_atcs_floor_window, cover_atcs_exhaust_window)
     best_i = eligible[0]
     best_numeric = (float("-inf"), float("inf"), 0)
     best_sid = ""
@@ -801,9 +799,7 @@ def _atcs_window_indices(
     if exhaust_window > 0.0:
         cap = min_floor + exhaust_window
         continuations = [
-            index
-            for index, row in enumerate(stats)
-            if row[0] <= cap + 1e-9 and row[1] <= 1e-9
+            index for index, row in enumerate(stats) if row[0] <= cap + 1e-9 and row[1] <= 1e-9
         ]
         if continuations:
             return continuations
@@ -880,9 +876,7 @@ def _best_list_schedule_slot(
             earliest_start=floor,
             setup_minutes=dispatch_context.setup_minutes,
         )
-        latest = operation_latest_finish_offset_minutes(
-            op, dispatch_context.horizon_start
-        )
+        latest = operation_latest_finish_offset_minutes(op, dispatch_context.horizon_start)
         cap = horizon_minutes if latest is None else min(horizon_minutes, latest)
         delayed = _delay_start_for_aux(
             start=start,
@@ -901,7 +895,7 @@ def _best_list_schedule_slot(
         take = best is None
         if not take and cover_atcs_exhaust_window > 0.0 and cont != best_cont:
             take = cont
-        elif not take:
+        elif best is not None:
             take = end < best[1] or (end == best[1] and str(wc_id) < str(best[3]))
         if take:
             best = (delayed, end, setup, wc_id, aux_ids)
@@ -998,7 +992,7 @@ def _pack_list_schedule_native(
     if n == 0 or not default_wc_ids:
         return None
     idx_to_wc = list(default_wc_ids)
-    maps = {
+    maps: dict[str, Any] = {
         "wc": {wc_id: idx for idx, wc_id in enumerate(idx_to_wc)},
         "op": {op.id: i for i, op in enumerate(operations)},
         "state": {},
@@ -1006,9 +1000,7 @@ def _pack_list_schedule_native(
         "all_wc": idx_to_wc,
     }
     rows = _empty_native_cover_rows(n)
-    id_strings = _fill_native_cover_rows(
-        operations, dispatch_context, op_earliest, maps, rows
-    )
+    id_strings = _fill_native_cover_rows(operations, dispatch_context, op_earliest, maps, rows)
     n_wc = len(idx_to_wc)
     n_states = max(len(maps["state"]), 1)
     uuid_rank = np.empty(n, dtype=np.int32)
@@ -1031,17 +1023,11 @@ def _pack_list_schedule_native(
     if cover_ready_rule == "atcs":
         arrays["ready_rule"] = 1
         arrays["weights"] = np.array(
-            [
-                float((order_priority_by_id or {}).get(op.order_id, 1))
-                for op in operations
-            ],
+            [float((order_priority_by_id or {}).get(op.order_id, 1)) for op in operations],
             dtype=np.float64,
         )
         arrays["material_loss"] = np.array(
-            [
-                float(getattr(op, "material_loss", 0.0) or 0.0)
-                for op in operations
-            ],
+            [float(getattr(op, "material_loss", 0.0) or 0.0) for op in operations],
             dtype=np.float64,
         )
         arrays["floor_window"] = float(max(0.0, cover_atcs_floor_window))
@@ -1092,9 +1078,7 @@ def _fill_native_cover_rows(
         if op.predecessor_op_id is not None:
             rows["preds"][i] = int(maps["op"].get(op.predecessor_op_id, -1))
         eligible = op.eligible_wc_ids if op.eligible_wc_ids else maps["all_wc"]
-        rows["elig_flat"].extend(
-            wc_id_to_idx[wc_id] for wc_id in eligible if wc_id in wc_id_to_idx
-        )
+        rows["elig_flat"].extend(wc_id_to_idx[wc_id] for wc_id in eligible if wc_id in wc_id_to_idx)
         rows["elig_off"][i + 1] = len(rows["elig_flat"])
         for requirement in dispatch_context.requirements_by_op.get(op.id, []):
             aux_idx = maps["aux"].get(requirement.aux_resource_id)
@@ -1205,4 +1189,3 @@ def _materialize_native_cover(
         scheduled_ids.add(op.id)
         placed += 1
     return placed, clipped
-

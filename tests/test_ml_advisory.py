@@ -132,7 +132,7 @@ def test_select_solver_ignores_advisory_when_none() -> None:
     """Without advisory, select_solver behaves as before."""
     problem = make_simple_problem()
 
-    solver, kwargs, decision = select_solver(problem)
+    _solver, _kwargs, decision = select_solver(problem)
 
     assert decision.solver_config == "CPSAT-10"
     assert "ML advisory" not in decision.reason
@@ -185,7 +185,7 @@ def test_select_solver_falls_back_when_advisory_low_confidence() -> None:
     problem = make_simple_problem()
 
     predictor = RuntimePredictor.heuristic()
-    solver, kwargs, decision = select_solver(
+    _solver, _kwargs, decision = select_solver(
         problem,
         advisory_predictor=predictor,
         advisory_confidence_threshold=0.99,  # very high — heuristic won't reach
@@ -199,7 +199,7 @@ def test_select_solver_handles_non_predictor_gracefully() -> None:
     """Passing a non-RuntimePredictor object should not crash."""
     problem = make_simple_problem()
 
-    solver, kwargs, decision = select_solver(
+    _solver, _kwargs, decision = select_solver(
         problem,
         advisory_predictor="not_a_predictor",
     )

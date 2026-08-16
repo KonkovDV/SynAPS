@@ -40,21 +40,26 @@ def _tiny_problem() -> ScheduleProblem:
     wc = WorkCenter(code="M", capability_group="G")
     order = Order(external_ref="O1", due_date=_H0 + timedelta(days=1))
     op = Operation(
-        order_id=order.id, seq_in_order=1, state_id=state.id,
-        base_duration_min=10, eligible_wc_ids=[wc.id],
+        order_id=order.id,
+        seq_in_order=1,
+        state_id=state.id,
+        base_duration_min=10,
+        eligible_wc_ids=[wc.id],
     )
     return ScheduleProblem(
-        states=[state], orders=[order], operations=[op], work_centers=[wc],
+        states=[state],
+        orders=[order],
+        operations=[op],
+        work_centers=[wc],
         setup_matrix=[],
-        planning_horizon_start=_H0, planning_horizon_end=_H0 + timedelta(days=1),
+        planning_horizon_start=_H0,
+        planning_horizon_end=_H0 + timedelta(days=1),
     )
 
 
 def test_cpsat_weighted_sum_is_canonical_not_bigm() -> None:
     """CP-SAT's published weighted_sum must equal scalarize(evaluate(...))."""
-    problem = ScheduleProblem.model_validate(
-        json.loads((_INSTANCES / "tiny_3x3.json").read_text())
-    )
+    problem = ScheduleProblem.model_validate(json.loads((_INSTANCES / "tiny_3x3.json").read_text()))
     result = CpSatSolver().solve(
         problem, time_limit_s=5, num_workers=1, auto_greedy_warm_start=False
     )

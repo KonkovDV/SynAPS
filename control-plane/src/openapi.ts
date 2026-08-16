@@ -260,6 +260,14 @@ export function buildOpenApiDocument(schemas: SynapsContractSchemas): JsonObject
                 },
               },
             },
+            429: {
+              description: "Concurrent solve capacity exhausted",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+                },
+              },
+            },
             503: {
               description: "Bridge resource guard reached (OOM/output limit)",
               content: {
@@ -390,6 +398,14 @@ export function buildOpenApiDocument(schemas: SynapsContractSchemas): JsonObject
             },
             422: {
               description: "ACL validation rejected the incoming graph",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+                },
+              },
+            },
+            429: {
+              description: "Concurrent solve capacity exhausted",
               content: {
                 "application/json": {
                   schema: { $ref: "#/components/schemas/ErrorEnvelope" },

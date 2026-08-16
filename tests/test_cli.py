@@ -16,8 +16,6 @@ from tests.conftest import make_simple_problem
 if TYPE_CHECKING:
     from pathlib import Path
 
-    import pytest
-
 
 def _write_instance(tmp_path: Path) -> str:
     problem = make_simple_problem()

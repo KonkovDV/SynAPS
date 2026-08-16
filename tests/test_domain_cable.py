@@ -557,9 +557,7 @@ def test_pin_issued_plan_blocks_rush_on_first_solve() -> None:
 
 
 def test_cpsat_cable_weights_do_not_increase_material() -> None:
-    problem = generate_cable_instance(
-        n_orders=3, seed=1, machines_per_stage=1, horizon_hours=240
-    )
+    problem = generate_cable_instance(n_orders=3, seed=1, machines_per_stage=1, horizon_hours=240)
     makespan_only = CpSatSolver().solve(
         problem,
         time_limit_s=8,

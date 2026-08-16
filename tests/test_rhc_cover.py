@@ -74,9 +74,7 @@ def _two_op_problem(*, duration: int, horizon_minutes: int) -> ScheduleProblem:
 
 
 def test_should_use_global_greedy_cover_only_for_large_greedy() -> None:
-    assert should_use_global_greedy_cover(
-        inner_solver_name="greedy", n_ops=10_000, min_ops=10_000
-    )
+    assert should_use_global_greedy_cover(inner_solver_name="greedy", n_ops=10_000, min_ops=10_000)
     assert not should_use_global_greedy_cover(
         inner_solver_name="greedy", n_ops=9_999, min_ops=10_000
     )
@@ -217,9 +215,7 @@ def test_list_schedule_respects_latest_finish() -> None:
     tight = problem.operations[1].model_copy(
         update={"latest_finish": HORIZON_START + timedelta(minutes=40)}
     )
-    problem = problem.model_copy(
-        update={"operations": [problem.operations[0], tight]}
-    )
+    problem = problem.model_copy(update={"operations": [problem.operations[0], tight]})
     context = build_dispatch_context(problem)
     assignments: list[Assignment] = []
     by_op: dict = {}
@@ -555,15 +551,11 @@ def test_cover_atcs_does_not_jump_future_floor() -> None:
     state_a = State(id=uuid4(), code="A", label="A")
     state_b = State(id=uuid4(), code="B", label="B")
     wc = WorkCenter(id=uuid4(), code="M1", capability_group="g", speed_factor=1.0)
-    order_seed = Order(
-        id=uuid4(), external_ref="SEED", due_date=HORIZON_START + timedelta(days=1)
-    )
+    order_seed = Order(id=uuid4(), external_ref="SEED", due_date=HORIZON_START + timedelta(days=1))
     order_early = Order(
         id=uuid4(), external_ref="EARLY", due_date=HORIZON_START + timedelta(days=1)
     )
-    order_late = Order(
-        id=uuid4(), external_ref="LATE", due_date=HORIZON_START + timedelta(days=1)
-    )
+    order_late = Order(id=uuid4(), external_ref="LATE", due_date=HORIZON_START + timedelta(days=1))
     seeded = Operation(
         id=uuid4(),
         order_id=order_seed.id,
@@ -641,15 +633,11 @@ def test_cover_atcs_bounded_delay_waits_for_same_state() -> None:
     state_a = State(id=uuid4(), code="A", label="A")
     state_b = State(id=uuid4(), code="B", label="B")
     wc = WorkCenter(id=uuid4(), code="M1", capability_group="g", speed_factor=1.0)
-    order_seed = Order(
-        id=uuid4(), external_ref="SEED", due_date=HORIZON_START + timedelta(days=1)
-    )
+    order_seed = Order(id=uuid4(), external_ref="SEED", due_date=HORIZON_START + timedelta(days=1))
     order_early = Order(
         id=uuid4(), external_ref="EARLY", due_date=HORIZON_START + timedelta(days=1)
     )
-    order_late = Order(
-        id=uuid4(), external_ref="LATE", due_date=HORIZON_START + timedelta(days=1)
-    )
+    order_late = Order(id=uuid4(), external_ref="LATE", due_date=HORIZON_START + timedelta(days=1))
     seeded = Operation(
         id=uuid4(),
         order_id=order_seed.id,
@@ -742,15 +730,11 @@ def test_cover_atcs_exhaust_window_waits_for_same_state() -> None:
     state_a = State(id=uuid4(), code="A", label="A")
     state_b = State(id=uuid4(), code="B", label="B")
     wc = WorkCenter(id=uuid4(), code="M1", capability_group="g", speed_factor=1.0)
-    order_seed = Order(
-        id=uuid4(), external_ref="SEED", due_date=HORIZON_START + timedelta(days=1)
-    )
+    order_seed = Order(id=uuid4(), external_ref="SEED", due_date=HORIZON_START + timedelta(days=1))
     order_early = Order(
         id=uuid4(), external_ref="EARLY", due_date=HORIZON_START + timedelta(days=1)
     )
-    order_late = Order(
-        id=uuid4(), external_ref="LATE", due_date=HORIZON_START + timedelta(days=1)
-    )
+    order_late = Order(id=uuid4(), external_ref="LATE", due_date=HORIZON_START + timedelta(days=1))
     seeded = Operation(
         id=uuid4(),
         order_id=order_seed.id,
@@ -831,15 +815,9 @@ def test_cover_atcs_exhaust_stays_on_hot_machine() -> None:
     state_b = State(id=uuid4(), code="B", label="B")
     hot = WorkCenter(id=uuid4(), code="HOT", capability_group="g", speed_factor=1.0)
     cold = WorkCenter(id=uuid4(), code="COLD", capability_group="g", speed_factor=1.0)
-    order_hot = Order(
-        id=uuid4(), external_ref="HOT", due_date=HORIZON_START + timedelta(days=1)
-    )
-    order_cold = Order(
-        id=uuid4(), external_ref="COLD", due_date=HORIZON_START + timedelta(days=1)
-    )
-    order_job = Order(
-        id=uuid4(), external_ref="JOB", due_date=HORIZON_START + timedelta(days=1)
-    )
+    order_hot = Order(id=uuid4(), external_ref="HOT", due_date=HORIZON_START + timedelta(days=1))
+    order_cold = Order(id=uuid4(), external_ref="COLD", due_date=HORIZON_START + timedelta(days=1))
+    order_job = Order(id=uuid4(), external_ref="JOB", due_date=HORIZON_START + timedelta(days=1))
     seed_hot = Operation(
         id=uuid4(),
         order_id=order_hot.id,
@@ -926,5 +904,3 @@ def test_cover_atcs_exhaust_stays_on_hot_machine() -> None:
     assert jumped[job.id].setup_minutes == 100
     assert stayed[job.id].work_center_id == hot.id
     assert stayed[job.id].setup_minutes == 0
-
-

@@ -131,20 +131,35 @@ def test_guard_s4_setup_interval_allows_idle() -> None:
     o1 = Order(external_ref="O1", due_date=H0 + timedelta(days=9))
     o2 = Order(external_ref="O2", due_date=H0 + timedelta(days=9))
     a = Operation(
-        order_id=o1.id, seq_in_order=1, state_id=st.id, base_duration_min=10,
+        order_id=o1.id,
+        seq_in_order=1,
+        state_id=st.id,
+        base_duration_min=10,
         eligible_wc_ids=[m1.id],
     )
     c = Operation(
-        order_id=o1.id, seq_in_order=2, state_id=st.id, base_duration_min=60,
-        eligible_wc_ids=[m2.id], predecessor_op_id=a.id,
+        order_id=o1.id,
+        seq_in_order=2,
+        state_id=st.id,
+        base_duration_min=60,
+        eligible_wc_ids=[m2.id],
+        predecessor_op_id=a.id,
     )
     b = Operation(
-        order_id=o2.id, seq_in_order=1, state_id=st.id, base_duration_min=10,
+        order_id=o2.id,
+        seq_in_order=1,
+        state_id=st.id,
+        base_duration_min=10,
         eligible_wc_ids=[m1.id],
     )
     problem = ScheduleProblem(
-        states=[st], orders=[o1, o2], operations=[a, c, b], work_centers=[m1, m2],
-        setup_matrix=[], planning_horizon_start=H0, planning_horizon_end=HE,
+        states=[st],
+        orders=[o1, o2],
+        operations=[a, c, b],
+        work_centers=[m1, m2],
+        setup_matrix=[],
+        planning_horizon_start=H0,
+        planning_horizon_end=HE,
     )
     r = CpSatSolver().solve(problem, time_limit_s=20, num_workers=1, auto_greedy_warm_start=False)
     assert r.objective.makespan_minutes <= 70.0 + 1e-6
@@ -157,28 +172,48 @@ def test_guard_s5_symmetry_breaking_keeps_optimum() -> None:
     orders = [Order(external_ref=f"O{i}", due_date=H0 + timedelta(days=5)) for i in range(3)]
     ops = [
         Operation(
-            order_id=orders[0].id, seq_in_order=1, state_id=st.id, base_duration_min=100,
+            order_id=orders[0].id,
+            seq_in_order=1,
+            state_id=st.id,
+            base_duration_min=100,
             eligible_wc_ids=[m1.id],
         ),
         Operation(
-            order_id=orders[1].id, seq_in_order=1, state_id=st.id, base_duration_min=10,
+            order_id=orders[1].id,
+            seq_in_order=1,
+            state_id=st.id,
+            base_duration_min=10,
             eligible_wc_ids=[m1.id, m2.id],
         ),
         Operation(
-            order_id=orders[2].id, seq_in_order=1, state_id=st.id, base_duration_min=10,
+            order_id=orders[2].id,
+            seq_in_order=1,
+            state_id=st.id,
+            base_duration_min=10,
             eligible_wc_ids=[m1.id, m2.id],
         ),
     ]
     problem = ScheduleProblem(
-        states=[st], orders=orders, operations=ops, work_centers=[m1, m2], setup_matrix=[],
-        planning_horizon_start=H0, planning_horizon_end=HE,
+        states=[st],
+        orders=orders,
+        operations=ops,
+        work_centers=[m1, m2],
+        setup_matrix=[],
+        planning_horizon_start=H0,
+        planning_horizon_end=HE,
     )
     off = CpSatSolver().solve(
-        problem, time_limit_s=10, num_workers=1, auto_greedy_warm_start=False,
+        problem,
+        time_limit_s=10,
+        num_workers=1,
+        auto_greedy_warm_start=False,
         enable_symmetry_breaking=False,
     )
     on = CpSatSolver().solve(
-        problem, time_limit_s=10, num_workers=1, auto_greedy_warm_start=False,
+        problem,
+        time_limit_s=10,
+        num_workers=1,
+        auto_greedy_warm_start=False,
         enable_symmetry_breaking=True,
     )
     assert on.objective.makespan_minutes == off.objective.makespan_minutes
@@ -188,16 +223,25 @@ def test_guard_m1_release_date_honored_by_portfolio() -> None:
     st = State(code="s")
     wc = WorkCenter(code="M", capability_group="G")
     order = Order(
-        external_ref="O1", due_date=H0 + timedelta(days=9),
+        external_ref="O1",
+        due_date=H0 + timedelta(days=9),
         release_date=H0 + timedelta(minutes=500),
     )
     op = Operation(
-        order_id=order.id, seq_in_order=1, state_id=st.id, base_duration_min=60,
+        order_id=order.id,
+        seq_in_order=1,
+        state_id=st.id,
+        base_duration_min=60,
         eligible_wc_ids=[wc.id],
     )
     problem = ScheduleProblem(
-        states=[st], orders=[order], operations=[op], work_centers=[wc], setup_matrix=[],
-        planning_horizon_start=H0, planning_horizon_end=HE,
+        states=[st],
+        orders=[order],
+        operations=[op],
+        work_centers=[wc],
+        setup_matrix=[],
+        planning_horizon_start=H0,
+        planning_horizon_end=HE,
     )
     offenders: list[str] = []
     for name, solver, kwargs in _portfolio():
@@ -213,9 +257,7 @@ def test_guard_m1_release_date_honored_by_portfolio() -> None:
 def test_guard_d2_lbbd_deterministic_fingerprints() -> None:
     problem = _load("medium_stress_20x4")
     prints = {
-        _fingerprint(
-            LbbdSolver().solve(problem, time_limit_s=8, random_seed=42, max_iterations=8)
-        )
+        _fingerprint(LbbdSolver().solve(problem, time_limit_s=8, random_seed=42, max_iterations=8))
         for _ in range(2)
     }
     assert len(prints) == 1, f"fingerprints differ: {prints}"
@@ -225,7 +267,7 @@ def test_guard_d2_lbbd_deterministic_fingerprints() -> None:
 def test_guard_d3_timebox_within_tolerance() -> None:
     """Wall budget honesty for long-running solvers (repro GUARD-D3 / Wave 9).
 
-    Slow-marked and load-sensitive. Soft cushion is 1.5× so CI under CPU
+    Slow-marked and load-sensitive. Soft cushion is 1.5x so CI under CPU
     contention does not false-fail; solvers must still stop near the budget.
     ALNS skips starting a new repair when remaining wall < 1s (budget accounting).
     """

@@ -49,9 +49,7 @@ class TestFjsParsing:
             key=lambda op: op.seq_in_order,
         )
         first = next(
-            op
-            for op in problem.operations
-            if op.seq_in_order == 1 and len(op.eligible_wc_ids) == 2
+            op for op in problem.operations if op.seq_in_order == 1 and len(op.eligible_wc_ids) == 2
         )
         # J1 op1: alternatives M1:3, M2:5 → base = 3, eligible {M1, M2}.
         assert first.base_duration_min == 3

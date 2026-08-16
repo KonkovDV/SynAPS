@@ -54,12 +54,12 @@ class TestOverrides:
 
 class TestResolvePolicy:
     def test_defaults_to_balanced(self) -> None:
-        spec, kwargs = resolve_policy()
+        spec, _kwargs = resolve_policy()
         assert spec.admission.window_minutes == 480
 
     def test_deprecated_kwargs_warns_once(self) -> None:
         with pytest.warns(DeprecationWarning, match="raw kwargs"):
-            spec, kwargs = resolve_policy(window_minutes=600)
+            _spec, kwargs = resolve_policy(window_minutes=600)
         assert kwargs["window_minutes"] == 600
 
     def test_no_warning_when_policy_given(self) -> None:

@@ -162,6 +162,7 @@ def _run_guarded_solve(
             metadata={"guard_error": str(exc), "guard_kind": "memory"},
         )
 
+
 def _attach_portfolio_metadata(
     result: ScheduleResult,
     *,
@@ -284,7 +285,7 @@ def solve_schedule(
     if issued and freeze_end:
         from synaps.planning_policy import pin_issued_plan
 
-        problem = pin_issued_plan(problem, list(issued), freeze_end)  # type: ignore[arg-type]
+        problem = pin_issued_plan(problem, list(issued), freeze_end)  # type: ignore[arg-type,call-overload]
     limits = resolve_portfolio_resource_limits(
         preferred_max_latency_s=ctx.preferred_max_latency_s,
         solve_kwargs=merged_kwargs,

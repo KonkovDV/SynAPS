@@ -15,10 +15,12 @@ Hamming R is canonical schedule stability from ``02_CANONICAL_FORM.md``.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from synaps.model import Assignment, ScheduleProblem
 from synaps.objective import evaluate
+
+if TYPE_CHECKING:
+    from synaps.model import Assignment, ScheduleProblem
 
 
 def _reel_id_for(operation: Any) -> str:

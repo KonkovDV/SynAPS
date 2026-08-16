@@ -721,4 +721,3 @@ def test_native_list_schedule_cover_uses_ceil_grain() -> None:
     _starts, ends, machines, _setups = result
     assert int(machines[0]) == 0
     assert ends[0] == pytest.approx(4.0)
-

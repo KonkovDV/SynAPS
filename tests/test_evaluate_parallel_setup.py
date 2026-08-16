@@ -31,25 +31,52 @@ def _problem(setup_minutes: int) -> tuple[ScheduleProblem, list[Assignment]]:
     wc = WorkCenter(code="M", capability_group="G", max_parallel=2)
     orders = [Order(external_ref=f"O{i}", due_date=_H0 + timedelta(days=1)) for i in (1, 2)]
     ops = [
-        Operation(order_id=orders[0].id, seq_in_order=1, state_id=s1.id,
-                  base_duration_min=10, eligible_wc_ids=[wc.id]),
-        Operation(order_id=orders[1].id, seq_in_order=1, state_id=s2.id,
-                  base_duration_min=10, eligible_wc_ids=[wc.id]),
+        Operation(
+            order_id=orders[0].id,
+            seq_in_order=1,
+            state_id=s1.id,
+            base_duration_min=10,
+            eligible_wc_ids=[wc.id],
+        ),
+        Operation(
+            order_id=orders[1].id,
+            seq_in_order=1,
+            state_id=s2.id,
+            base_duration_min=10,
+            eligible_wc_ids=[wc.id],
+        ),
     ]
     problem = ScheduleProblem(
-        states=[s1, s2], orders=orders, operations=ops, work_centers=[wc],
+        states=[s1, s2],
+        orders=orders,
+        operations=ops,
+        work_centers=[wc],
         setup_matrix=[
-            SetupEntry(work_center_id=wc.id, from_state_id=s1.id, to_state_id=s2.id,
-                       setup_minutes=setup_minutes, material_loss=2.0),
+            SetupEntry(
+                work_center_id=wc.id,
+                from_state_id=s1.id,
+                to_state_id=s2.id,
+                setup_minutes=setup_minutes,
+                material_loss=2.0,
+            ),
         ],
-        planning_horizon_start=_H0, planning_horizon_end=_H0 + timedelta(days=1),
+        planning_horizon_start=_H0,
+        planning_horizon_end=_H0 + timedelta(days=1),
     )
     # Fully concurrent: physically separate lanes, no setup exists.
     assignments = [
-        Assignment(operation_id=ops[0].id, work_center_id=wc.id,
-                   start_time=_H0, end_time=_H0 + timedelta(minutes=10)),
-        Assignment(operation_id=ops[1].id, work_center_id=wc.id,
-                   start_time=_H0, end_time=_H0 + timedelta(minutes=10)),
+        Assignment(
+            operation_id=ops[0].id,
+            work_center_id=wc.id,
+            start_time=_H0,
+            end_time=_H0 + timedelta(minutes=10),
+        ),
+        Assignment(
+            operation_id=ops[1].id,
+            work_center_id=wc.id,
+            start_time=_H0,
+            end_time=_H0 + timedelta(minutes=10),
+        ),
     ]
     return problem, assignments
 

@@ -29,11 +29,7 @@ def _xfail_test_names(path: Path) -> list[str]:
 
 def test_every_redteam_xfail_has_known_issues_entry() -> None:
     registry = _REGISTRY.read_text(encoding="utf-8")
-    missing = [
-        name
-        for name in _xfail_test_names(_GUARDS)
-        if name not in registry
-    ]
+    missing = [name for name in _xfail_test_names(_GUARDS) if name not in registry]
     assert not missing, (
         "xfail sentinel(s) in test_redteam_guards.py lack a KNOWN_ISSUES.md "
         f"entry (T-41 / F15): {missing}"

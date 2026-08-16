@@ -345,7 +345,7 @@ class TestNativeDestroyScoreParity:
 
     def test_fallback_when_native_unavailable(self) -> None:
         """When native is disabled, compute_destroy_worst_scores_native returns None."""
-        problem, assignments, ops_by_id = _build_deterministic_problem(
+        problem, assignments, _ops_by_id = _build_deterministic_problem(
             n_machines=5, n_states=4, ops_per_machine=10, seed=42
         )
         sdst = SdstMatrix.from_problem(problem)

@@ -215,9 +215,7 @@ class JsonKnnRuntimeModel:
         samples: list[dict[str, Any]],
     ) -> None:
         if len(feature_means) != _FEATURE_DIM or len(feature_stds) != _FEATURE_DIM:
-            raise ValueError(
-                f"feature_means/feature_stds must have length {_FEATURE_DIM}"
-            )
+            raise ValueError(f"feature_means/feature_stds must have length {_FEATURE_DIM}")
         if k < 1:
             raise ValueError("k must be >= 1")
         if not samples:
@@ -271,9 +269,7 @@ class JsonKnnRuntimeModel:
         scored: list[tuple[float, dict[str, Any]]] = []
         for sample in self.samples:
             point = self._normalize([float(value) for value in sample["features"]])
-            distance = math.sqrt(
-                sum((q - p) ** 2 for q, p in zip(query, point, strict=True))
-            )
+            distance = math.sqrt(sum((q - p) ** 2 for q, p in zip(query, point, strict=True)))
             scored.append((distance, sample))
         scored.sort(key=lambda item: item[0])
         neighbours = scored[: self.k]
@@ -287,9 +283,7 @@ class JsonKnnRuntimeModel:
             runtime_ms = sample.get("runtime_ms")
             if isinstance(runtime_ms, dict):
                 for solver_name, value in runtime_ms.items():
-                    predicted_ms_acc.setdefault(str(solver_name), []).append(
-                        (weight, float(value))
-                    )
+                    predicted_ms_acc.setdefault(str(solver_name), []).append((weight, float(value)))
 
         recommended = max(sorted(vote_weights), key=lambda name: vote_weights[name])
         total_weight = sum(vote_weights.values())

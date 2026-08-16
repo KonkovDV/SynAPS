@@ -37,30 +37,49 @@ def _problem_with_setups(
         order = Order(external_ref=f"O{i}", due_date=_H0 + timedelta(days=1))
         orders.append(order)
         ops.append(
-            Operation(order_id=order.id, seq_in_order=1, state_id=st.id,
-                      base_duration_min=10, eligible_wc_ids=[wc.id])
+            Operation(
+                order_id=order.id,
+                seq_in_order=1,
+                state_id=st.id,
+                base_duration_min=10,
+                eligible_wc_ids=[wc.id],
+            )
         )
     setup_entries = [
-        SetupEntry(work_center_id=wc.id, from_state_id=states[a].id, to_state_id=states[b].id,
-                   setup_minutes=int(v))
+        SetupEntry(
+            work_center_id=wc.id,
+            from_state_id=states[a].id,
+            to_state_id=states[b].id,
+            setup_minutes=int(v),
+        )
         for (a, b), v in setups.items()
     ]
     problem = ScheduleProblem(
-        states=states, orders=orders, operations=ops, work_centers=[wc],
-        setup_matrix=setup_entries, planning_horizon_start=_H0,
+        states=states,
+        orders=orders,
+        operations=ops,
+        work_centers=[wc],
+        setup_matrix=setup_entries,
+        planning_horizon_start=_H0,
         planning_horizon_end=_H0 + timedelta(days=1),
     )
-    lookup = {(e.work_center_id, e.from_state_id, e.to_state_id): float(e.setup_minutes)
-              for e in setup_entries}
+    lookup = {
+        (e.work_center_id, e.from_state_id, e.to_state_id): float(e.setup_minutes)
+        for e in setup_entries
+    }
     return problem, wc, lookup
 
 
 def test_floor_is_zero_when_same_state_changeover_is_free() -> None:
     """Distinct-state setups positive, same-state 0 -> floor must be 0 (valid)."""
-    problem, wc, lookup = _problem_with_setups({
-        (0, 1): 30.0, (1, 0): 30.0,  # distinct-state transitions positive
-        (0, 0): 0.0, (1, 1): 0.0,    # same-state free
-    })
+    problem, wc, lookup = _problem_with_setups(
+        {
+            (0, 1): 30.0,
+            (1, 0): 30.0,  # distinct-state transitions positive
+            (0, 0): 0.0,
+            (1, 1): 0.0,  # same-state free
+        }
+    )
     eligible = {op.id: [wc.id] for op in problem.operations}
     floor = compute_machine_transition_floor(problem, eligible, wc.id, lookup)
     assert floor == 0.0, "a free same-state changeover makes any positive floor unsafe"
@@ -68,10 +87,14 @@ def test_floor_is_zero_when_same_state_changeover_is_free() -> None:
 
 def test_floor_positive_only_when_all_transitions_positive() -> None:
     """Every transition (same-state included) positive -> floor = min positive."""
-    problem, wc, lookup = _problem_with_setups({
-        (0, 1): 30.0, (1, 0): 20.0,
-        (0, 0): 5.0, (1, 1): 7.0,  # even same-state reprocessing costs > 0
-    })
+    problem, wc, lookup = _problem_with_setups(
+        {
+            (0, 1): 30.0,
+            (1, 0): 20.0,
+            (0, 0): 5.0,
+            (1, 1): 7.0,  # even same-state reprocessing costs > 0
+        }
+    )
     eligible = {op.id: [wc.id] for op in problem.operations}
     floor = compute_machine_transition_floor(problem, eligible, wc.id, lookup)
     assert floor == 5.0, "floor is the min over ALL transitions incl same-state"

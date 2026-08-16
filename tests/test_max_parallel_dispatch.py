@@ -33,11 +33,17 @@ def _parallel_problem() -> ScheduleProblem:
     o1, o2 = uuid4(), uuid4()
     ops = [
         Operation(
-            order_id=o1, seq_in_order=1, state_id=s1.id, base_duration_min=60,
+            order_id=o1,
+            seq_in_order=1,
+            state_id=s1.id,
+            base_duration_min=60,
             eligible_wc_ids=[wc.id],
         ),
         Operation(
-            order_id=o2, seq_in_order=1, state_id=s2.id, base_duration_min=60,
+            order_id=o2,
+            seq_in_order=1,
+            state_id=s2.id,
+            base_duration_min=60,
             eligible_wc_ids=[wc.id],
         ),
     ]

@@ -39,8 +39,9 @@ def test_aux_quantity_needed_at_least_one(bad_qty: int) -> None:
     from uuid import uuid4
 
     with pytest.raises(ValidationError):
-        OperationAuxRequirement(operation_id=uuid4(), aux_resource_id=uuid4(),
-                                quantity_needed=bad_qty)
+        OperationAuxRequirement(
+            operation_id=uuid4(), aux_resource_id=uuid4(), quantity_needed=bad_qty
+        )
 
 
 @pytest.mark.parametrize("bad_quantity", [0.0, -5.0])

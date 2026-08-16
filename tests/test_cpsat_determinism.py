@@ -69,7 +69,10 @@ def test_cpsat_fast_mode_is_opt_out() -> None:
     """The fast (non-deterministic) mode remains available and is recorded."""
     problem = _medium()
     result = CpSatSolver().solve(
-        problem, time_limit_s=5, random_seed=42, determinism="fast",
+        problem,
+        time_limit_s=5,
+        random_seed=42,
+        determinism="fast",
         auto_greedy_warm_start=False,
     )
     assert result.metadata["determinism"] == "fast"

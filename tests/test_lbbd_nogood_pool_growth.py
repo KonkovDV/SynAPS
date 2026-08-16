@@ -31,14 +31,17 @@ def test_nogood_fingerprint_distinguishes_assignments() -> None:
     from uuid import uuid4
 
     op_a, op_b, wc_1, wc_2 = uuid4(), uuid4(), uuid4(), uuid4()
-    cut_1 = _BendersCut(assignment_map={op_a: wc_1, op_b: wc_2}, kind="nogood", rhs=0.0,
-                        bottleneck_ops=set())
-    cut_2 = _BendersCut(assignment_map={op_a: wc_2, op_b: wc_1}, kind="nogood", rhs=0.0,
-                        bottleneck_ops=set())
+    cut_1 = _BendersCut(
+        assignment_map={op_a: wc_1, op_b: wc_2}, kind="nogood", rhs=0.0, bottleneck_ops=set()
+    )
+    cut_2 = _BendersCut(
+        assignment_map={op_a: wc_2, op_b: wc_1}, kind="nogood", rhs=0.0, bottleneck_ops=set()
+    )
     assert cut_pool_fingerprint(cut_1) != cut_pool_fingerprint(cut_2)
     # An identical assignment still deduplicates.
-    cut_1_again = _BendersCut(assignment_map={op_a: wc_1, op_b: wc_2}, kind="nogood", rhs=0.0,
-                             bottleneck_ops=set())
+    cut_1_again = _BendersCut(
+        assignment_map={op_a: wc_1, op_b: wc_2}, kind="nogood", rhs=0.0, bottleneck_ops=set()
+    )
     assert cut_pool_fingerprint(cut_1) == cut_pool_fingerprint(cut_1_again)
 
 

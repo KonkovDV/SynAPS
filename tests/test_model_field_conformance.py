@@ -22,7 +22,7 @@ Documented explicit gaps (no hard cross-solver invariant to assert):
   makes ignoring it *infeasible*; covered instead by heuristic-level tests.
 - ``energy_kwh`` is aggregated into ``ObjectiveValues.total_energy_kwh`` by
   ``evaluate`` / the BaseSolver boundary (Wave 5 / T-35) with default scalar
-  weight 0; CP-SAT still does not optimize an energy term. A solver×energy
+  weight 0; CP-SAT still does not optimize an energy term. A solver x energy
   optimization row can land when a non-zero energy weight enters the portfolio.
 """
 
@@ -72,13 +72,21 @@ def _release_date_instance() -> tuple[ScheduleProblem, str]:
     wc = WorkCenter(code="M", capability_group="G")
     order = Order(external_ref="O", due_date=HE, release_date=H0 + timedelta(minutes=500))
     op = Operation(
-        order_id=order.id, seq_in_order=1, state_id=state.id,
-        base_duration_min=60, eligible_wc_ids=[wc.id],
+        order_id=order.id,
+        seq_in_order=1,
+        state_id=state.id,
+        base_duration_min=60,
+        eligible_wc_ids=[wc.id],
     )
     return (
         ScheduleProblem(
-            states=[state], orders=[order], operations=[op], work_centers=[wc],
-            setup_matrix=[], planning_horizon_start=H0, planning_horizon_end=HE,
+            states=[state],
+            orders=[order],
+            operations=[op],
+            work_centers=[wc],
+            setup_matrix=[],
+            planning_horizon_start=H0,
+            planning_horizon_end=HE,
         ),
         "release_date",
     )
@@ -89,10 +97,20 @@ def _max_parallel_instance() -> tuple[ScheduleProblem, str]:
     wc = WorkCenter(code="M2", capability_group="G", max_parallel=2)
     o1, o2 = uuid4(), uuid4()
     ops = [
-        Operation(order_id=o1, seq_in_order=1, state_id=s1.id, base_duration_min=60,
-                  eligible_wc_ids=[wc.id]),
-        Operation(order_id=o2, seq_in_order=1, state_id=s2.id, base_duration_min=60,
-                  eligible_wc_ids=[wc.id]),
+        Operation(
+            order_id=o1,
+            seq_in_order=1,
+            state_id=s1.id,
+            base_duration_min=60,
+            eligible_wc_ids=[wc.id],
+        ),
+        Operation(
+            order_id=o2,
+            seq_in_order=1,
+            state_id=s2.id,
+            base_duration_min=60,
+            eligible_wc_ids=[wc.id],
+        ),
     ]
     setups = [
         SetupEntry(work_center_id=wc.id, from_state_id=s1.id, to_state_id=s2.id, setup_minutes=600),
@@ -101,10 +119,15 @@ def _max_parallel_instance() -> tuple[ScheduleProblem, str]:
     return (
         ScheduleProblem(
             states=[s1, s2],
-            orders=[Order(id=o1, external_ref="O1", due_date=HE),
-                    Order(id=o2, external_ref="O2", due_date=HE)],
-            operations=ops, work_centers=[wc], setup_matrix=setups,
-            planning_horizon_start=H0, planning_horizon_end=HE,
+            orders=[
+                Order(id=o1, external_ref="O1", due_date=HE),
+                Order(id=o2, external_ref="O2", due_date=HE),
+            ],
+            operations=ops,
+            work_centers=[wc],
+            setup_matrix=setups,
+            planning_horizon_start=H0,
+            planning_horizon_end=HE,
         ),
         "max_parallel",
     )
@@ -115,13 +138,21 @@ def _speed_factor_instance() -> tuple[ScheduleProblem, str]:
     wc = WorkCenter(code="FAST", capability_group="G", speed_factor=2.0)
     order = Order(external_ref="O", due_date=HE)
     op = Operation(
-        order_id=order.id, seq_in_order=1, state_id=state.id,
-        base_duration_min=60, eligible_wc_ids=[wc.id],
+        order_id=order.id,
+        seq_in_order=1,
+        state_id=state.id,
+        base_duration_min=60,
+        eligible_wc_ids=[wc.id],
     )
     return (
         ScheduleProblem(
-            states=[state], orders=[order], operations=[op], work_centers=[wc],
-            setup_matrix=[], planning_horizon_start=H0, planning_horizon_end=HE,
+            states=[state],
+            orders=[order],
+            operations=[op],
+            work_centers=[wc],
+            setup_matrix=[],
+            planning_horizon_start=H0,
+            planning_horizon_end=HE,
         ),
         "speed_factor",
     )
@@ -131,15 +162,30 @@ def _predecessor_instance() -> tuple[ScheduleProblem, str]:
     state = State(code="s")
     wc = WorkCenter(code="M", capability_group="G")
     order = Order(external_ref="O", due_date=HE)
-    op1 = Operation(order_id=order.id, seq_in_order=1, state_id=state.id,
-                    base_duration_min=60, eligible_wc_ids=[wc.id])
-    op2 = Operation(order_id=order.id, seq_in_order=2, state_id=state.id,
-                    base_duration_min=60, eligible_wc_ids=[wc.id],
-                    predecessor_op_id=op1.id)
+    op1 = Operation(
+        order_id=order.id,
+        seq_in_order=1,
+        state_id=state.id,
+        base_duration_min=60,
+        eligible_wc_ids=[wc.id],
+    )
+    op2 = Operation(
+        order_id=order.id,
+        seq_in_order=2,
+        state_id=state.id,
+        base_duration_min=60,
+        eligible_wc_ids=[wc.id],
+        predecessor_op_id=op1.id,
+    )
     return (
         ScheduleProblem(
-            states=[state], orders=[order], operations=[op1, op2], work_centers=[wc],
-            setup_matrix=[], planning_horizon_start=H0, planning_horizon_end=HE,
+            states=[state],
+            orders=[order],
+            operations=[op1, op2],
+            work_centers=[wc],
+            setup_matrix=[],
+            planning_horizon_start=H0,
+            planning_horizon_end=HE,
         ),
         "predecessor_op_id",
     )
@@ -150,10 +196,20 @@ def _setup_minutes_instance() -> tuple[ScheduleProblem, str]:
     wc = WorkCenter(code="M", capability_group="G")
     o1, o2 = uuid4(), uuid4()
     ops = [
-        Operation(order_id=o1, seq_in_order=1, state_id=s1.id, base_duration_min=60,
-                  eligible_wc_ids=[wc.id]),
-        Operation(order_id=o2, seq_in_order=1, state_id=s2.id, base_duration_min=60,
-                  eligible_wc_ids=[wc.id]),
+        Operation(
+            order_id=o1,
+            seq_in_order=1,
+            state_id=s1.id,
+            base_duration_min=60,
+            eligible_wc_ids=[wc.id],
+        ),
+        Operation(
+            order_id=o2,
+            seq_in_order=1,
+            state_id=s2.id,
+            base_duration_min=60,
+            eligible_wc_ids=[wc.id],
+        ),
     ]
     setups = [
         SetupEntry(work_center_id=wc.id, from_state_id=s1.id, to_state_id=s2.id, setup_minutes=30),
@@ -162,10 +218,15 @@ def _setup_minutes_instance() -> tuple[ScheduleProblem, str]:
     return (
         ScheduleProblem(
             states=[s1, s2],
-            orders=[Order(id=o1, external_ref="O1", due_date=HE),
-                    Order(id=o2, external_ref="O2", due_date=HE)],
-            operations=ops, work_centers=[wc], setup_matrix=setups,
-            planning_horizon_start=H0, planning_horizon_end=HE,
+            orders=[
+                Order(id=o1, external_ref="O1", due_date=HE),
+                Order(id=o2, external_ref="O2", due_date=HE),
+            ],
+            operations=ops,
+            work_centers=[wc],
+            setup_matrix=setups,
+            planning_horizon_start=H0,
+            planning_horizon_end=HE,
         ),
         "setup_minutes",
     )
@@ -183,10 +244,20 @@ def _pool_size_instance() -> tuple[ScheduleProblem, str]:
     tool = AuxiliaryResource(code="JIG", resource_type="fixture", pool_size=1)
     o1, o2 = uuid4(), uuid4()
     ops = [
-        Operation(order_id=o1, seq_in_order=1, state_id=state.id, base_duration_min=60,
-                  eligible_wc_ids=[m1.id]),
-        Operation(order_id=o2, seq_in_order=1, state_id=state.id, base_duration_min=60,
-                  eligible_wc_ids=[m2.id]),
+        Operation(
+            order_id=o1,
+            seq_in_order=1,
+            state_id=state.id,
+            base_duration_min=60,
+            eligible_wc_ids=[m1.id],
+        ),
+        Operation(
+            order_id=o2,
+            seq_in_order=1,
+            state_id=state.id,
+            base_duration_min=60,
+            eligible_wc_ids=[m2.id],
+        ),
     ]
     reqs = [
         OperationAuxRequirement(operation_id=ops[0].id, aux_resource_id=tool.id),
@@ -195,11 +266,17 @@ def _pool_size_instance() -> tuple[ScheduleProblem, str]:
     return (
         ScheduleProblem(
             states=[state],
-            orders=[Order(id=o1, external_ref="O1", due_date=HE),
-                    Order(id=o2, external_ref="O2", due_date=HE)],
-            operations=ops, work_centers=[m1, m2], setup_matrix=[],
-            auxiliary_resources=[tool], aux_requirements=reqs,
-            planning_horizon_start=H0, planning_horizon_end=HE,
+            orders=[
+                Order(id=o1, external_ref="O1", due_date=HE),
+                Order(id=o2, external_ref="O2", due_date=HE),
+            ],
+            operations=ops,
+            work_centers=[m1, m2],
+            setup_matrix=[],
+            auxiliary_resources=[tool],
+            aux_requirements=reqs,
+            planning_horizon_start=H0,
+            planning_horizon_end=HE,
         ),
         "pool_size",
     )
@@ -213,25 +290,39 @@ def _quantity_needed_instance() -> tuple[ScheduleProblem, str]:
     tool = AuxiliaryResource(code="OPR", resource_type="operator", pool_size=2)
     o1, o2 = uuid4(), uuid4()
     ops = [
-        Operation(order_id=o1, seq_in_order=1, state_id=state.id, base_duration_min=60,
-                  eligible_wc_ids=[m1.id]),
-        Operation(order_id=o2, seq_in_order=1, state_id=state.id, base_duration_min=60,
-                  eligible_wc_ids=[m2.id]),
+        Operation(
+            order_id=o1,
+            seq_in_order=1,
+            state_id=state.id,
+            base_duration_min=60,
+            eligible_wc_ids=[m1.id],
+        ),
+        Operation(
+            order_id=o2,
+            seq_in_order=1,
+            state_id=state.id,
+            base_duration_min=60,
+            eligible_wc_ids=[m2.id],
+        ),
     ]
     reqs = [
-        OperationAuxRequirement(operation_id=ops[0].id, aux_resource_id=tool.id,
-                                quantity_needed=2),
-        OperationAuxRequirement(operation_id=ops[1].id, aux_resource_id=tool.id,
-                                quantity_needed=2),
+        OperationAuxRequirement(operation_id=ops[0].id, aux_resource_id=tool.id, quantity_needed=2),
+        OperationAuxRequirement(operation_id=ops[1].id, aux_resource_id=tool.id, quantity_needed=2),
     ]
     return (
         ScheduleProblem(
             states=[state],
-            orders=[Order(id=o1, external_ref="O1", due_date=HE),
-                    Order(id=o2, external_ref="O2", due_date=HE)],
-            operations=ops, work_centers=[m1, m2], setup_matrix=[],
-            auxiliary_resources=[tool], aux_requirements=reqs,
-            planning_horizon_start=H0, planning_horizon_end=HE,
+            orders=[
+                Order(id=o1, external_ref="O1", due_date=HE),
+                Order(id=o2, external_ref="O2", due_date=HE),
+            ],
+            operations=ops,
+            work_centers=[m1, m2],
+            setup_matrix=[],
+            auxiliary_resources=[tool],
+            aux_requirements=reqs,
+            planning_horizon_start=H0,
+            planning_horizon_end=HE,
         ),
         "quantity_needed",
     )
@@ -244,17 +335,31 @@ def _planning_horizon_instance() -> tuple[ScheduleProblem, str]:
     horizon_end = H0 + timedelta(minutes=240)
     o1 = uuid4()
     ops = [
-        Operation(order_id=o1, seq_in_order=1, state_id=state.id, base_duration_min=60,
-                  eligible_wc_ids=[wc.id]),
-        Operation(order_id=o1, seq_in_order=2, state_id=state.id, base_duration_min=60,
-                  eligible_wc_ids=[wc.id]),
+        Operation(
+            order_id=o1,
+            seq_in_order=1,
+            state_id=state.id,
+            base_duration_min=60,
+            eligible_wc_ids=[wc.id],
+        ),
+        Operation(
+            order_id=o1,
+            seq_in_order=2,
+            state_id=state.id,
+            base_duration_min=60,
+            eligible_wc_ids=[wc.id],
+        ),
     ]
     ops[1].predecessor_op_id = ops[0].id
     return (
         ScheduleProblem(
-            states=[state], orders=[Order(id=o1, external_ref="O1", due_date=horizon_end)],
-            operations=ops, work_centers=[wc], setup_matrix=[],
-            planning_horizon_start=H0, planning_horizon_end=horizon_end,
+            states=[state],
+            orders=[Order(id=o1, external_ref="O1", due_date=horizon_end)],
+            operations=ops,
+            work_centers=[wc],
+            setup_matrix=[],
+            planning_horizon_start=H0,
+            planning_horizon_end=horizon_end,
         ),
         "planning_horizon",
     )
@@ -266,24 +371,49 @@ def _material_loss_instance() -> tuple[ScheduleProblem, str]:
     wc = WorkCenter(code="M", capability_group="G")
     o1, o2 = uuid4(), uuid4()
     ops = [
-        Operation(order_id=o1, seq_in_order=1, state_id=s1.id, base_duration_min=60,
-                  eligible_wc_ids=[wc.id]),
-        Operation(order_id=o2, seq_in_order=1, state_id=s2.id, base_duration_min=60,
-                  eligible_wc_ids=[wc.id]),
+        Operation(
+            order_id=o1,
+            seq_in_order=1,
+            state_id=s1.id,
+            base_duration_min=60,
+            eligible_wc_ids=[wc.id],
+        ),
+        Operation(
+            order_id=o2,
+            seq_in_order=1,
+            state_id=s2.id,
+            base_duration_min=60,
+            eligible_wc_ids=[wc.id],
+        ),
     ]
     setups = [
-        SetupEntry(work_center_id=wc.id, from_state_id=s1.id, to_state_id=s2.id,
-                   setup_minutes=30, material_loss=5.0),
-        SetupEntry(work_center_id=wc.id, from_state_id=s2.id, to_state_id=s1.id,
-                   setup_minutes=30, material_loss=5.0),
+        SetupEntry(
+            work_center_id=wc.id,
+            from_state_id=s1.id,
+            to_state_id=s2.id,
+            setup_minutes=30,
+            material_loss=5.0,
+        ),
+        SetupEntry(
+            work_center_id=wc.id,
+            from_state_id=s2.id,
+            to_state_id=s1.id,
+            setup_minutes=30,
+            material_loss=5.0,
+        ),
     ]
     return (
         ScheduleProblem(
             states=[s1, s2],
-            orders=[Order(id=o1, external_ref="O1", due_date=HE),
-                    Order(id=o2, external_ref="O2", due_date=HE)],
-            operations=ops, work_centers=[wc], setup_matrix=setups,
-            planning_horizon_start=H0, planning_horizon_end=HE,
+            orders=[
+                Order(id=o1, external_ref="O1", due_date=HE),
+                Order(id=o2, external_ref="O2", due_date=HE),
+            ],
+            operations=ops,
+            work_centers=[wc],
+            setup_matrix=setups,
+            planning_horizon_start=H0,
+            planning_horizon_end=HE,
         ),
         "material_loss",
     )
@@ -333,8 +463,13 @@ def _earliest_start_instance() -> tuple[ScheduleProblem, str]:
     )
     return (
         ScheduleProblem(
-            states=[state], orders=[order], operations=[op], work_centers=[wc],
-            setup_matrix=[], planning_horizon_start=H0, planning_horizon_end=HE,
+            states=[state],
+            orders=[order],
+            operations=[op],
+            work_centers=[wc],
+            setup_matrix=[],
+            planning_horizon_start=H0,
+            planning_horizon_end=HE,
         ),
         "earliest_start",
     )

@@ -26,13 +26,20 @@ def _problem_with_unscheduled() -> tuple[ScheduleProblem, float]:
     wc = WorkCenter(code="M", capability_group="G")
     order = Order(external_ref="O1", due_date=_H0 + timedelta(minutes=60))
     op = Operation(
-        order_id=order.id, seq_in_order=1, state_id=state.id,
-        base_duration_min=10, eligible_wc_ids=[wc.id],
+        order_id=order.id,
+        seq_in_order=1,
+        state_id=state.id,
+        base_duration_min=10,
+        eligible_wc_ids=[wc.id],
     )
     problem = ScheduleProblem(
-        states=[state], orders=[order], operations=[op], work_centers=[wc],
+        states=[state],
+        orders=[order],
+        operations=[op],
+        work_centers=[wc],
         setup_matrix=[],
-        planning_horizon_start=_H0, planning_horizon_end=_H0 + timedelta(minutes=_HORIZON_MIN),
+        planning_horizon_start=_H0,
+        planning_horizon_end=_H0 + timedelta(minutes=_HORIZON_MIN),
     )
     expected = float(_HORIZON_MIN - 60)  # horizon-end completion minus due
     return problem, expected

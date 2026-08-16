@@ -32,9 +32,7 @@ def _tiny() -> ScheduleProblem:
 def test_best_objective_bound_is_in_makespan_minutes() -> None:
     """Q3: best_objective_bound must be a makespan bound (<= horizon), with units."""
     problem = _tiny()
-    horizon = (
-        problem.planning_horizon_end - problem.planning_horizon_start
-    ).total_seconds() / 60.0
+    horizon = (problem.planning_horizon_end - problem.planning_horizon_start).total_seconds() / 60.0
     result = CpSatSolver().solve(
         problem, time_limit_s=30, num_workers=1, auto_greedy_warm_start=False
     )

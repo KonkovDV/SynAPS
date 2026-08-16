@@ -115,8 +115,13 @@ def test_cpsat_honors_subminute_release_date() -> None:
         eligible_wc_ids=[wc.id],
     )
     problem = ScheduleProblem(
-        states=[state], orders=[order], operations=[op], work_centers=[wc],
-        setup_matrix=[], planning_horizon_start=H0, planning_horizon_end=HE,
+        states=[state],
+        orders=[order],
+        operations=[op],
+        work_centers=[wc],
+        setup_matrix=[],
+        planning_horizon_start=H0,
+        planning_horizon_end=HE,
     )
     result = CpSatSolver().solve(
         problem, time_limit_s=5, num_workers=1, auto_greedy_warm_start=False
@@ -175,8 +180,13 @@ def test_ingest_ceils_subminute_release_and_leaves_due_date() -> None:
         latest_finish=latest,
     )
     problem = ScheduleProblem(
-        states=[state], orders=[order], operations=[op], work_centers=[wc],
-        setup_matrix=[], planning_horizon_start=H0, planning_horizon_end=HE,
+        states=[state],
+        orders=[order],
+        operations=[op],
+        work_centers=[wc],
+        setup_matrix=[],
+        planning_horizon_start=H0,
+        planning_horizon_end=HE,
     )
     assert problem.orders[0].release_date == H0 + timedelta(minutes=2)
     assert problem.operations[0].earliest_start == H0 + timedelta(minutes=1)
@@ -194,12 +204,20 @@ def test_checker_rejects_start_inside_ceiled_release_gap() -> None:
         release_date=H0 + timedelta(seconds=90),
     )
     op = Operation(
-        order_id=order.id, seq_in_order=1, state_id=state.id,
-        base_duration_min=60, eligible_wc_ids=[wc.id],
+        order_id=order.id,
+        seq_in_order=1,
+        state_id=state.id,
+        base_duration_min=60,
+        eligible_wc_ids=[wc.id],
     )
     problem = ScheduleProblem(
-        states=[state], orders=[order], operations=[op], work_centers=[wc],
-        setup_matrix=[], planning_horizon_start=H0, planning_horizon_end=HE,
+        states=[state],
+        orders=[order],
+        operations=[op],
+        work_centers=[wc],
+        setup_matrix=[],
+        planning_horizon_start=H0,
+        planning_horizon_end=HE,
     )
     gap = [
         Assignment(
@@ -225,12 +243,20 @@ def test_greedy_honors_subminute_release_on_minute_grid() -> None:
         release_date=H0 + timedelta(seconds=90),
     )
     op = Operation(
-        order_id=order.id, seq_in_order=1, state_id=state.id,
-        base_duration_min=60, eligible_wc_ids=[wc.id],
+        order_id=order.id,
+        seq_in_order=1,
+        state_id=state.id,
+        base_duration_min=60,
+        eligible_wc_ids=[wc.id],
     )
     problem = ScheduleProblem(
-        states=[state], orders=[order], operations=[op], work_centers=[wc],
-        setup_matrix=[], planning_horizon_start=H0, planning_horizon_end=HE,
+        states=[state],
+        orders=[order],
+        operations=[op],
+        work_centers=[wc],
+        setup_matrix=[],
+        planning_horizon_start=H0,
+        planning_horizon_end=HE,
     )
     result = GreedyDispatch().solve(problem)
     assert result.assignments
@@ -252,8 +278,13 @@ def _one_minute_lft_problem(*, latest: datetime) -> ScheduleProblem:
         latest_finish=latest,
     )
     return ScheduleProblem(
-        states=[state], orders=[order], operations=[op], work_centers=[wc],
-        setup_matrix=[], planning_horizon_start=H0, planning_horizon_end=HE,
+        states=[state],
+        orders=[order],
+        operations=[op],
+        work_centers=[wc],
+        setup_matrix=[],
+        planning_horizon_start=H0,
+        planning_horizon_end=HE,
     )
 
 

@@ -20,8 +20,8 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import timedelta
-from enum import Enum
-from typing import TYPE_CHECKING, Any, Mapping
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
 
 from synaps.model import (
     Assignment,
@@ -52,12 +52,13 @@ from synaps.solvers.sdst_matrix import SdstMatrix
 from synaps.timegrain import duration_minutes_for
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
     from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
 
-class RepairStatus(str, Enum):
+class RepairStatus(StrEnum):
     """Structured repair status for ALNS repair operators."""
 
     FEASIBLE = "feasible"
@@ -140,17 +141,14 @@ def _evaluate_objective(
 ) -> ObjectiveValues:
     """Compute multi-objective values from a set of assignments."""
     horizon_start = problem.planning_horizon_start
-    horizon_span = (
-        problem.planning_horizon_end - horizon_start
-    ).total_seconds() / 60.0
+    horizon_span = (problem.planning_horizon_end - horizon_start).total_seconds() / 60.0
     if not assignments:
         # F10: with nothing scheduled, every order completes at the horizon
         # end (maximally late) — not for free at t=0.
         return ObjectiveValues(
             total_tardiness_minutes=sum(
                 max(
-                    horizon_span
-                    - (order.due_date - horizon_start).total_seconds() / 60.0,
+                    horizon_span - (order.due_date - horizon_start).total_seconds() / 60.0,
                     0.0,
                 )
                 for order in problem.orders
@@ -170,7 +168,7 @@ def _evaluate_objective(
     by_machine: dict[Any, list[Assignment]] = {}
     for a in assignments:
         by_machine.setdefault(a.work_center_id, []).append(a)
-    for wc_id, machine_assignments in by_machine.items():
+    for _wc_id, machine_assignments in by_machine.items():
         machine_assignments.sort(key=lambda a: a.start_time)
         setup, loss, energy = _sum_machine_transitions(sdst, ops_by_id, machine_assignments)
         total_setup += setup
@@ -356,9 +354,7 @@ def _build_machine_objective_cache(
         }
 
     # F10: an order with no scheduled ops completes at the horizon end.
-    horizon_span = (
-        problem.planning_horizon_end - horizon_start
-    ).total_seconds() / 60.0
+    horizon_span = (problem.planning_horizon_end - horizon_start).total_seconds() / 60.0
     total_tardiness = 0.0
     for order in problem.orders:
         completion = order_completion.get(order.id, horizon_span)
@@ -448,9 +444,7 @@ def _evaluate_objective_incremental(
             if end > new_order_completion.get(op.order_id, 0.0):
                 new_order_completion[op.order_id] = end
 
-    horizon_span = (
-        problem.planning_horizon_end - horizon_start
-    ).total_seconds() / 60.0
+    horizon_span = (problem.planning_horizon_end - horizon_start).total_seconds() / 60.0
     total_tardiness = 0.0
     order_due_offsets = base_cache.order_due_offsets
     for order in problem.orders:
@@ -750,7 +744,7 @@ def _destroy_machine_segment(
     if not valid_machines:
         return _destroy_random(assignments, problem, sdst, destroy_size, rng)
 
-    wc_id, machine_seq = rng.choice(valid_machines)
+    _wc_id, machine_seq = rng.choice(valid_machines)
     seg_size = min(destroy_size, len(machine_seq))
     start_idx = rng.randint(0, len(machine_seq) - seg_size)
     return {machine_seq[i].operation_id for i in range(start_idx, start_idx + seg_size)}
@@ -795,11 +789,11 @@ def _destroy_precedence_chain(
         (oid, oids) for oid, oids in ops_by_order.items() if 1 <= len(oids) <= destroy_size
     ]
     if valid_orders:
-        order_id, op_ids = rng.choice(valid_orders)
+        _order_id, op_ids = rng.choice(valid_orders)
         return set(op_ids)
 
     # Fall back to largest order, capped at destroy_size
-    order_id, op_ids = max(ops_by_order.items(), key=lambda x: len(x[1]))
+    _order_id, op_ids = max(ops_by_order.items(), key=lambda x: len(x[1]))
     return set(rng.sample(op_ids, min(destroy_size, len(op_ids))))
 
 
@@ -1151,7 +1145,7 @@ def _destroy_due_pressure(
 #  precedence_chain: R8 order-based ejection for work-order level re-sequencing;
 #  critical_path: Kelley/Walker & Adams-Balas-Zawack bottleneck-chain removal;
 #  due_pressure: Pinedo weighted-tardiness order-tail removal with slack fallback)
-DESTROY_OPERATORS = [
+DESTROY_OPERATORS: list[tuple[str, Callable[..., Any]]] = [
     ("random", _destroy_random),
     ("worst", _destroy_worst),
     ("related", _destroy_related),
@@ -1229,8 +1223,8 @@ def _repair_cpsat_outcome(
     destroyed_op_ids: set[UUID],
     time_limit_s: int = 10,
     num_workers: int = 1,
-    ops_by_id: dict[UUID, Any] | None = None,
-    op_positions: dict[UUID, int] | None = None,
+    ops_by_id: Mapping[Any, Any] | None = None,
+    op_positions: Mapping[Any, int] | None = None,
     frozen_predecessor_end_offsets: Mapping[Any, float] | None = None,
     frozen_context_operations: list[Any] | None = None,
 ) -> RepairOutcome:
@@ -1297,8 +1291,7 @@ def _repair_cpsat_outcome(
     }
     # Wave 14 / C14-1: start from caller offsets (survive pred clear).
     offsets: dict[Any, int] = {
-        op_id: int(offset)
-        for op_id, offset in dict(frozen_predecessor_end_offsets or {}).items()
+        op_id: int(offset) for op_id, offset in dict(frozen_predecessor_end_offsets or {}).items()
     }
     for op_id in destroyed_op_ids:
         operation = ops_by_id.get(op_id)
@@ -1319,11 +1312,9 @@ def _repair_cpsat_outcome(
 
         offsets[op_id] = max(
             0,
-            int(
-                math.ceil(
-                    (frozen_predecessor.end_time - problem.planning_horizon_start).total_seconds()
-                    / 60.0
-                )
+            math.ceil(
+                (frozen_predecessor.end_time - problem.planning_horizon_start).total_seconds()
+                / 60.0
             ),
         )
 
@@ -1351,9 +1342,7 @@ def _repair_cpsat_outcome(
             enable_symmetry_breaking=False,
             frozen_assignments=relevant_frozen_assignments,
             frozen_predecessor_end_offsets=offsets,
-            frozen_context_operations=list(
-                frozen_context_operations or problem.operations
-            ),
+            frozen_context_operations=list(frozen_context_operations or problem.operations),
             frozen_aux_requirements=list(problem.aux_requirements),
         )
     except ValueError as exc:
@@ -1403,8 +1392,8 @@ def _repair_cpsat(
     frozen_assignments: list[Assignment],
     destroyed_op_ids: set[UUID],
     time_limit_s: int = 10,
-    ops_by_id: dict[UUID, Any] | None = None,
-    op_positions: dict[UUID, int] | None = None,
+    ops_by_id: Mapping[Any, Any] | None = None,
+    op_positions: Mapping[Any, int] | None = None,
 ) -> list[Assignment] | None:
     """Compatibility wrapper preserving legacy Optional[List[Assignment]] API."""
 
@@ -1592,9 +1581,7 @@ def _native_repair_blocking_violations(
 def _native_repair_meta_from_skips(skip_reasons: list[str]) -> dict[str, Any]:
     """ALNS metadata for observe-only native greedy override skips (Wave 7.2 / RT H1)."""
     return {
-        "native_greedy_repair_fallback_reason": (
-            skip_reasons[-1] if skip_reasons else None
-        ),
+        "native_greedy_repair_fallback_reason": (skip_reasons[-1] if skip_reasons else None),
         "native_greedy_repair_override_skips": sum(
             1 for reason in skip_reasons if reason == "machine_duration_overrides"
         ),
@@ -1675,13 +1662,13 @@ def _try_native_greedy_repair(
     """
     from synaps.accelerators import _native_greedy_repair_batch, greedy_repair_batch_native
 
-    # Early exit: if native function is not available, don't waste time building arrays
-    if _native_greedy_repair_batch is None:
-        return None
+    # Record aux/parallel skips even when the native wheel is absent (CI test-fast).
     skip = _native_repair_skip_reason(problem)
     if skip is not None:
         if skip_reasons is not None:
             skip_reasons.append(skip)
+        return None
+    if _native_greedy_repair_batch is None:
         return None
 
     try:
@@ -1767,9 +1754,7 @@ def _try_native_greedy_repair(
                     # This is a simplification — we'll validate the result afterward.
                     pass
 
-            eligible_wc_indices = _native_eligible_machine_indices(
-                op, wc_id_to_idx, all_wc_ids
-            )
+            eligible_wc_indices = _native_eligible_machine_indices(op, wc_id_to_idx, all_wc_ids)
             if not eligible_wc_indices:
                 if skip_reasons is not None:
                     skip_reasons.append("empty_eligible_machines")
@@ -1930,10 +1915,9 @@ def _try_native_initial_seed(
     """
     from synaps.accelerators import _native_greedy_repair_batch, greedy_repair_batch_native
 
-    # Early exit: if native function is not available, don't waste time building arrays
-    if _native_greedy_repair_batch is None:
-        return None
     if _native_repair_skip_reason(problem) is not None:
+        return None
+    if _native_greedy_repair_batch is None:
         return None
     if _ops_have_machine_duration_overrides(list(ops_by_id.values())):
         return None
@@ -2011,9 +1995,7 @@ def _try_native_initial_seed(
                     predecessor_indices[i] = local_pred
                 # else: predecessor is in frozen set — handled in post-processing
 
-            eligible_wc_indices = _native_eligible_machine_indices(
-                op, wc_id_to_idx, all_wc_ids
-            )
+            eligible_wc_indices = _native_eligible_machine_indices(op, wc_id_to_idx, all_wc_ids)
             if not eligible_wc_indices:
                 return None
             eligible_flat.extend(eligible_wc_indices)
@@ -2213,8 +2195,8 @@ def _occupancy_conflict_violations(
 
 def _violates_frozen_precedence(
     repaired_assignments: list[Assignment],
-    frozen_assignments_by_op: dict[UUID, Assignment],
-    ops_by_id: dict[UUID, Any],
+    frozen_assignments_by_op: Mapping[Any, Assignment],
+    ops_by_id: Mapping[Any, Any],
     *,
     frozen_predecessor_end_offsets: Mapping[Any, float] | None = None,
     horizon_start: Any | None = None,
@@ -2585,18 +2567,14 @@ def _reanchor_against_frozen(
 
     original_by_op = {assignment.operation_id: assignment for assignment in assignments}
     scheduled_assignments = [
-        assignment
-        for assignment in frozen_assignments
-        if assignment.operation_id in ops_by_id
+        assignment for assignment in frozen_assignments if assignment.operation_id in ops_by_id
     ]
     external_frozen_blockers = sorted(
         [
             (
                 assignment,
-                (assignment.start_time - problem.planning_horizon_start).total_seconds()
-                / 60.0,
-                (assignment.end_time - problem.planning_horizon_start).total_seconds()
-                / 60.0,
+                (assignment.start_time - problem.planning_horizon_start).total_seconds() / 60.0,
+                (assignment.end_time - problem.planning_horizon_start).total_seconds() / 60.0,
                 set(assignment.aux_resource_ids),
             )
             for assignment in frozen_assignments
@@ -2696,10 +2674,8 @@ def _reanchor_against_frozen(
             anchored_assignment = Assignment(
                 operation_id=operation.id,
                 work_center_id=assignment.work_center_id,
-                start_time=problem.planning_horizon_start
-                + timedelta(minutes=slot.start_offset),
-                end_time=problem.planning_horizon_start
-                + timedelta(minutes=slot.end_offset),
+                start_time=problem.planning_horizon_start + timedelta(minutes=slot.start_offset),
+                end_time=problem.planning_horizon_start + timedelta(minutes=slot.end_offset),
                 setup_minutes=slot.setup_minutes,
                 aux_resource_ids=slot.aux_resource_ids,
             )
@@ -2721,8 +2697,7 @@ def _reanchor_against_frozen(
         for assignment in reanchored_assignments
         if original_by_op[assignment.operation_id].start_time != assignment.start_time
         or original_by_op[assignment.operation_id].end_time != assignment.end_time
-        or original_by_op[assignment.operation_id].work_center_id
-        != assignment.work_center_id
+        or original_by_op[assignment.operation_id].work_center_id != assignment.work_center_id
     )
     return sorted(
         reanchored_assignments,
@@ -2756,9 +2731,7 @@ class _AlnsRepairAttemptResult:
     rejection_reasons: Mapping[str, int] = field(default_factory=dict)
 
 
-def _record_repair_reject(
-    rejection_reasons: dict[str, int], outcome: RepairOutcome
-) -> None:
+def _record_repair_reject(rejection_reasons: dict[str, int], outcome: RepairOutcome) -> None:
     if outcome.status == RepairStatus.FEASIBLE:
         return
     reason = outcome.reason or outcome.status.value
@@ -2934,11 +2907,16 @@ def _attempt_alns_pair_repair(
 
     if try_cpsat:
         new_assignments, cpsat_stats = _try_cpsat_repair_lane(
-            problem=problem, frozen=frozen, frozen_by_op=frozen_by_op,
-            destroyed_ids=destroyed_ids, ops_by_id=ops_by_id,
-            op_positions=op_positions, cpsat_max_destroy_ops=cpsat_max_destroy_ops,
+            problem=problem,
+            frozen=frozen,
+            frozen_by_op=frozen_by_op,
+            destroyed_ids=destroyed_ids,
+            ops_by_id=ops_by_id,
+            op_positions=op_positions,
+            cpsat_max_destroy_ops=cpsat_max_destroy_ops,
             repair_time_limit_s=repair_time_limit_s,
-            repair_num_workers=repair_num_workers, remaining_s=remaining_s,
+            repair_num_workers=repair_num_workers,
+            remaining_s=remaining_s,
             rejection_reasons=rejection_reasons,
             frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
             frozen_context_operations=frozen_context_operations,
@@ -2950,8 +2928,11 @@ def _attempt_alns_pair_repair(
     abort = new_assignments is None and forced_repair_mode == "cpsat" and pair_bandit_active
     if not abort and new_assignments is None and try_greedy:
         new_assignments, greedy_stats = _try_greedy_repair_lane(
-            problem=problem, frozen=frozen, frozen_by_op=frozen_by_op,
-            destroyed_ids=destroyed_ids, ops_by_id=ops_by_id,
+            problem=problem,
+            frozen=frozen,
+            frozen_by_op=frozen_by_op,
+            destroyed_ids=destroyed_ids,
+            ops_by_id=ops_by_id,
             rejection_reasons=rejection_reasons,
             native_skip_reasons=native_skip_reasons,
             frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
@@ -3027,8 +3008,6 @@ class AlnsSolver(BaseSolver):
         # still branding RHC-ALNS.
         if frozen_raw and virtual_to_original:
             result = self._solve_core(problem, **kwargs)
-            if result.metadata is None:
-                result.metadata = {}
             result.metadata["parallel_virtualization_skipped_due_to_frozen"] = True
             return result
         result = self._solve_core(virtual_problem, **kwargs)
@@ -3047,7 +3026,7 @@ class AlnsSolver(BaseSolver):
         sdst: Any,
         ops_by_id: Any,
         objective_weights: Any,
-    ) -> tuple[list[Assignment], Any, float, list[Any], bool, bool, str | None]:
+    ) -> tuple[list[Assignment], Any, float, list[Any], list[Any], bool, bool, str | None]:
         """Final feasibility validation + recovery (extracted from _solve_core)."""
         recompute_assignment_setups(best_assignments, dispatch_context)
         final_obj = _evaluate_objective(problem, best_assignments, sdst, ops_by_id=ops_by_id)
@@ -3087,7 +3066,9 @@ class AlnsSolver(BaseSolver):
                     len(violations_before_recovery),
                 )
                 best_assignments = recovered_assignments
-                final_obj = _evaluate_objective(problem, best_assignments, sdst, ops_by_id=ops_by_id)
+                final_obj = _evaluate_objective(
+                    problem, best_assignments, sdst, ops_by_id=ops_by_id
+                )
                 final_cost = _objective_cost(final_obj, objective_weights)
                 violations = recovered_violations
                 recovered = True
@@ -4145,9 +4126,7 @@ class AlnsSolver(BaseSolver):
                     rng,
                     ops_by_id=ops_by_id,
                     energy_weight=float(
-                        objective_weights.get(
-                            "energy", objective_weights.get("energy_kwh", 0.0)
-                        )
+                        objective_weights.get("energy", objective_weights.get("energy_kwh", 0.0))
                     ),
                 )
 
@@ -4212,19 +4191,13 @@ class AlnsSolver(BaseSolver):
                 )
                 cpsat_repair_attempts += repair_attempt.cpsat_repair_attempts
                 cpsat_repair_ms_total += repair_attempt.cpsat_repair_ms_total
-                cpsat_repair_total_destroy_size += (
-                    repair_attempt.cpsat_repair_total_destroy_size
-                )
+                cpsat_repair_total_destroy_size += repair_attempt.cpsat_repair_total_destroy_size
                 cpsat_repair_timeouts += repair_attempt.cpsat_repair_timeouts
                 cpsat_repairs += repair_attempt.cpsat_repairs
-                cpsat_repair_skips_large_destroy += (
-                    repair_attempt.cpsat_repair_skips_large_destroy
-                )
+                cpsat_repair_skips_large_destroy += repair_attempt.cpsat_repair_skips_large_destroy
                 greedy_repair_attempts += repair_attempt.greedy_repair_attempts
                 greedy_repair_ms_total += repair_attempt.greedy_repair_ms_total
-                greedy_repair_total_destroy_size += (
-                    repair_attempt.greedy_repair_total_destroy_size
-                )
+                greedy_repair_total_destroy_size += repair_attempt.greedy_repair_total_destroy_size
                 greedy_repair_timeouts += repair_attempt.greedy_repair_timeouts
                 greedy_repairs += repair_attempt.greedy_repairs
                 for reason, count in repair_attempt.rejection_reasons.items():
@@ -4459,7 +4432,11 @@ class AlnsSolver(BaseSolver):
         final_violations_before_recovery = len(violations_before_recovery)
         final_violation_recovery_attempted = final_violations_before_recovery > 0
 
-        status = SolverStatus.FEASIBLE if not violations and not frozen_precedence_bad else SolverStatus.ERROR
+        status = (
+            SolverStatus.FEASIBLE
+            if not violations and not frozen_precedence_bad
+            else SolverStatus.ERROR
+        )
 
         elapsed_ms = int((time.monotonic() - t0) * 1000)
 
@@ -4569,9 +4546,12 @@ class AlnsSolver(BaseSolver):
                 "native_initial_seed_fallback_reason": native_initial_seed_fallback_reason,
                 **_native_repair_meta_from_skips(native_greedy_repair_skip_reasons),
                 **_alns_wall_clock_honesty_meta(
-                    determinism, bool(time_limit_exhausted_before_search),
-                    iterations_completed, max_iterations,
-                    time.monotonic() - t0, time_limit_s,
+                    determinism,
+                    bool(time_limit_exhausted_before_search),
+                    iterations_completed,
+                    max_iterations,
+                    time.monotonic() - t0,
+                    time_limit_s,
                 ),
                 "time_limit_exhausted_before_search": time_limit_exhausted_before_search,
                 "max_no_improve_iters": max_no_improve_iters,
