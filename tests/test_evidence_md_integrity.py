@@ -42,6 +42,52 @@ def _parse_hashes(text: str) -> dict[str, str]:
     return found
 
 
+def _parse_sha256sums(path: Path) -> dict[str, str]:
+    rows: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        digest, fname = line.split(None, 1)
+        rows[fname] = digest.lower()
+    return rows
+
+
+def _assert_md_table_matches_sums(
+    md_name: str, sums: dict[str, str], listed: dict[str, str]
+) -> None:
+    root_listed = {key: digest for key, digest in listed.items() if "/" not in key}
+    missing = [fname for fname in sums if fname not in root_listed]
+    mismatch = [
+        fname
+        for fname, digest in sums.items()
+        if fname in root_listed and root_listed[fname] != digest
+    ]
+    assert not missing, f"{md_name}: SHA256SUMS rows missing from MD table: {missing}"
+    assert not mismatch, f"{md_name}: MD digest != SHA256SUMS for {mismatch}"
+
+
+def test_artifact_sha256_table_matches_sha256sums_txt() -> None:
+    """F0.5: MD Artifact/SHA-256 table matches SHA256SUMS.txt line for line."""
+    for name, study in _STUDY.items():
+        sums = _parse_sha256sums(_BENCH / "evidence" / study / "SHA256SUMS.txt")
+        listed = _parse_hashes((_BENCH / name).read_text(encoding="utf-8"))
+        _assert_md_table_matches_sums(name, sums, listed)
+
+
+def test_artifact_sha256_table_fails_on_planted_mismatch() -> None:
+    try:
+        _assert_md_table_matches_sums(
+            "PLANTED.md",
+            {"environment.json": "a" * 64},
+            {"environment.json": "b" * 64},
+        )
+    except AssertionError as exc:
+        assert "PLANTED.md" in str(exc)
+        assert "MD digest" in str(exc)
+    else:
+        raise AssertionError("hash table gate accepted a planted MD/SHA256SUMS mismatch")
+
+
 def test_current_evidence_markdown_files_have_matching_hashes() -> None:
     for name in _CURRENT:
         md = _BENCH / name

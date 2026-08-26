@@ -153,9 +153,25 @@ Do not cite “100k COVER is feasible on three seeds”.
 
 Directory `benchmark/evidence/cover-ladder-2026-08-25/`. Hashes from
 `SHA256SUMS.txt` (SHA-256 of that file itself is listed last).
+
+## Hash provenance
+
+Canonical digest is the **git blob** (LF), not a Windows working-tree hash.
+
 On `fe1c6a8` the published checksum for `run_100k_at_200_seed42.json` was
-`e5caad9a…` while the committed JSON hashed `da100734…` (A1). JSON bytes
-were not rewritten; the sums table was stale. This table follows the files.
+`e5caad9a…`. That row was the **correct LF-blob** digest. On `7a4083e` the
+table was rewritten to the Windows-CRLF working-tree digest `da100734…`.
+Ubuntu CI failed (`tests/test_evidence_sha256sums.py::test_cover_ladder_sha256sums_match_files`).
+On `515488b` the LF-blob digest `e5caad9a…` was restored. JSON bytes were
+never rewritten.
+
+Reproduce (must equal the table row):
+
+```bash
+git show HEAD:benchmark/evidence/cover-ladder-2026-08-25/run_100k_at_200_seed42.json | python -c "import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())"
+```
+
+`benchmark/evidence/**` is `-text` in `.gitattributes`.
 
 | File | SHA-256 |
 |------|---------|

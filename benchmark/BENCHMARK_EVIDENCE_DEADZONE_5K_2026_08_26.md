@@ -159,9 +159,33 @@ is unknown (old isolate may have dropped stderr).
 | `run_5000ops_8m_RHC_ALNS_SEARCH_COVER_seed1.json` | `00d8c9aec9f3432fa587daa5495d0c8797c87b1c422c5049ced8c18498b1bd1c` |
 | `run_5000ops_8m_RHC_ALNS_SEARCH_COVER_seed42.json` | `f6d5a86a713ec65e34df0f3f839032f03689251236241a7e7adf2febc6982968` |
 | `run_5000ops_8m_RHC_ALNS_SEARCH_COVER_seed999.json` | `6e3f535589be54971401fc1d81f6c2ecaacdf251b3d1ac7464af7547f0373ed1` |
+| `run_3000ops_12m_RHC_GREEDY_seed1.json` | `bfd5a53155b1ea73b297991e58acb78e1ab86fb6221692b0bd993f71942f57f9` |
+| `run_3000ops_12m_RHC_GREEDY_seed42.json` | `61bf9db501fa712adb1d962f8dc1af8f6c283599ca490326d52b5da2127b419f` |
+| `run_3000ops_12m_RHC_GREEDY_seed999.json` | `34a0f141849dfca61e4943dbeedc5c0d32cd14ba26f01636040d1553a01e8b97` |
+| `run_3000ops_4m_GREED_seed1.json` | `4978269481fd0388b97122c45a4eabc41917c254e34f75659ea1817f46265f41` |
+| `run_3000ops_4m_RHC_GREEDY_seed1.json` | `f78b669033e3ec8005e5619921b579bfda15652e59f06d2324b30867dbfc062e` |
+| `run_3000ops_4m_RHC_GREEDY_seed42.json` | `01d17739fdc29bb0f0c6bae3abf383908c8e6289c4a6400abb54a3586efe9b7a` |
+| `run_3000ops_4m_RHC_GREEDY_seed999.json` | `c930c09681036ed407aa883da9fd162739d8d5405c95d978c45dd93496b78b6f` |
+| `run_3000ops_8m_RHC_GREEDY_seed1.json` | `3e80173b3c2b234cc249034ad4cb88922d3bf74a6f45e74d2c035e52e33a3bdb` |
+| `run_3000ops_8m_RHC_GREEDY_seed42.json` | `3c293464ed6bef3598b179c6dc81197c187daf24868badc70dcfd66c56d91f01` |
+| `run_3000ops_8m_RHC_GREEDY_seed999.json` | `4ede6956b7e536534abdc760bdb2109f67af3782dfd63092933f0ab2de52fb12` |
+| `run_5000ops_12m_RHC_GREEDY_seed1.json` | `bbc1cbf1573350bbb53c8068ba5d2668458f71134158cf4dc0d34ef5267882ae` |
+| `run_5000ops_12m_RHC_GREEDY_seed42.json` | `87f8a6391c123f0d8fe26946953aff1faa7f58115335992303fa58553d23ac7d` |
+| `run_5000ops_12m_RHC_GREEDY_seed999.json` | `7b1f0aca4a4bc9da729fe72e908cc04343c1fb301dc5c862ec8a365df262a666` |
+| `run_5000ops_4m_RHC_GREEDY_seed1.json` | `335d4359c70531c2b1e93ce208f6a8fca10a13b28ee537be192199948d165f18` |
+| `run_5000ops_4m_RHC_GREEDY_seed42.json` | `50f1c5b752f1360cb47a36ccd550d9cec3135b67845f45d6e87766aa4d11318c` |
+| `run_5000ops_4m_RHC_GREEDY_seed999.json` | `1b73fb7781451db04bb7cc0c5fc645b9c05826e1e07a6b83a9f861478e8e6c7d` |
+| `run_8000ops_12m_RHC_GREEDY_seed1.json` | `9c9418a4789fc41ae58252871478f5a0659e91d52d2d7248431bf976037ffa60` |
+| `run_8000ops_12m_RHC_GREEDY_seed42.json` | `96536806925e3ae48980440f861a62eda4d995ee80a921a21344b56f05fcb15f` |
+| `run_8000ops_12m_RHC_GREEDY_seed999.json` | `9fd5e828e3b98a6eb3a50c6a24715c221fd7b842c18ea7316817dc5b80340008` |
+| `run_8000ops_4m_RHC_GREEDY_seed1.json` | `357aa5c7a4eeaecef171492bca7dd7f27d733c60b97d4a948f8dff0168936b9b` |
+| `run_8000ops_4m_RHC_GREEDY_seed42.json` | `142c92b82bcb509a60d015c15a099e9997ee583241c4cea795e950069db83e77` |
+| `run_8000ops_4m_RHC_GREEDY_seed999.json` | `6be3ead841554ba8ab00c4f197b415863646a5131b82a381fcfb1164ffb98a1c` |
+| `run_8000ops_8m_RHC_GREEDY_seed1.json` | `29b965d86bcc16a57e95f54dd3f8e28a83a95dfa251e242c61bc43eccbf64828` |
+| `run_8000ops_8m_RHC_GREEDY_seed42.json` | `3e6e30b7a1719f6e22bbdba7381a120a6b1fb7a250ac4642a6320a37303c3be4` |
+| `run_8000ops_8m_RHC_GREEDY_seed999.json` | `e9b80ce63816f6e6f7c50b64311550f160f082ef696f2d724c4f51682144f342` |
 
-**Remainder (explicit):** `run_3000*`, `run_5000ops_4m_*`, `run_5000ops_12m_*`,
-`run_8000*`, `run_3000ops_4m_GREED_seed1.json` (in-process 14.5 min stall;
-live SHA-256 `4978269481fd0388b97122c45a4eabc41917c254e34f75659ea1817f46265f41`),
-and `sessions/**`. Live `SHA256SUMS.txt` covers top-level JSON including
-remainder cells. `sessions/` is a later capture, not P2.3.
+**Remainder (explicit):** the `run_3000*`, `run_5000ops_4m_*`, `run_5000ops_12m_*`,
+and `run_8000*` rows above are remainder cells (not P2.3).
+`run_3000ops_4m_GREED_seed1.json` is the in-process 14.5 min stall.
+`sessions/**` is a later capture, not P2.3, and is not in live `SHA256SUMS.txt`.

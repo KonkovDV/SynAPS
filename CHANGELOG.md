@@ -61,6 +61,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of a `не`/`not` proximity skip. CLI and the benchmark harness emit
   ADR-0005 process codes 0/2/3/1. CP-SAT/ALNS/LBBD refuse a non-empty calendar
   rather than returning a silent FEASIBLE.
+- **Hash provenance (F0.4 / 2026-08-26):** COVER MD no longer says the sums
+  table was stale. On `fe1c6a8` the `e5caad9a…` row for
+  `run_100k_at_200_seed42.json` was the correct git-blob LF digest; `7a4083e`
+  wrote a Windows-CRLF digest `da100734…`; Ubuntu CI caught it; `515488b`
+  restored LF (`benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md`). JSON
+  bytes were not rewritten. MD Artifact SHA-256 tables must match
+  `SHA256SUMS.txt` line for line (`tests/test_evidence_md_integrity.py`).
 
 <!-- non-claims:start -->
 Historical Unreleased dump below this marker. Non-canonical 499770 / ~145 s /
