@@ -46,6 +46,8 @@ def test_alns_zero_budget_stamps_wall_cut() -> None:
     assert result.metadata["wall_clock_path_dependent"] is True
     assert result.metadata["determinism_violated"] is True
     assert result.metadata.get("time_limit_exhausted_before_search") is True
+    if not result.assignments:
+        assert result.status.value == "error"
 
 
 def test_rhc_completed_run_is_not_wall_stamped() -> None:

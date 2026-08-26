@@ -3784,7 +3784,7 @@ class AlnsSolver(BaseSolver):
             )
 
         initial_solution_ms = int((time.monotonic() - initial_solution_t0) * 1000)
-        time_limit_exhausted_before_search = (time.monotonic() - t0) > time_limit_s
+        time_limit_exhausted_before_search = (time.monotonic() - t0) >= time_limit_s
 
         # Current best
         current_assignments = list(initial_result.assignments)

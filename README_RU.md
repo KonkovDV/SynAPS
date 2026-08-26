@@ -51,7 +51,7 @@ python -m synaps list-solver-configs
 
 **Есть:** deterministic-first портфель, стабильные solve/repair контракты, feasibility checker, CI, lockfiles + SBOM.
 
-**Не заявлено:** валидация на живом заводе; SOTA; N-1 / SAIDI. `RHC-ALNS` не гарантия completeness в коротком timebox. Покрытие крупных инстансов — путь `RHC-GREEDY-COVER`, не ALNS. Цифры 50K–500K и статус `FEASIBLE` из README не цитировать: только хешированная лестница [`benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md`](benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md). Майский протокол — история: [`benchmark/BENCHMARK_EVIDENCE_50K_2026_05_18.md`](benchmark/BENCHMARK_EVIDENCE_50K_2026_05_18.md) (`SUPERSEDED`).
+**Не заявлено:** валидация на живом заводе; SOTA; N-1 / SAIDI. `RHC-ALNS` не гарантия completeness в коротком timebox. Покрытие крупных инстансов — путь `RHC-GREEDY-COVER`, не ALNS. Цифры 50K–500K и статус `FEASIBLE` из README не цитировать: только хешированная лестница [`benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md`](benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md). **100k@200 не является feasible на трёх сидах** (seed 42 stalled). Эта лестница — широкий горизонт без календаря смен; ночной аналог — другая геометрия ([`benchmark/BENCHMARK_EVIDENCE_DEADZONE_5K_2026_08_26.md`](benchmark/BENCHMARK_EVIDENCE_DEADZONE_5K_2026_08_26.md)). Майский протокол — история: [`benchmark/BENCHMARK_EVIDENCE_50K_2026_05_18.md`](benchmark/BENCHMARK_EVIDENCE_50K_2026_05_18.md) (`SUPERSEDED`).
 
 Протокол evidence: [`benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md`](benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md). История: [`CHANGELOG.md`](CHANGELOG.md).
 

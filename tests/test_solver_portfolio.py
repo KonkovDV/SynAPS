@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from synaps.model import SolverStatus
+from synaps.solvers.coverage_outcome import CoverageClass, classify_coverage
 from synaps.solvers.cpsat_solver import CpSatSolver
 from synaps.solvers.greedy_dispatch import GreedyDispatch
 from synaps.solvers.lbbd_solver import LbbdSolver
@@ -76,6 +78,17 @@ def test_available_solver_configs_matches_public_portfolio() -> None:
     ]
 
 
+def test_every_named_config_declares_time_limit_s() -> None:
+    """B3: fail-closed. No public named config may omit a wall box."""
+    for name in available_solver_configs():
+        _solver, solve_kwargs = create_solver(name)
+        limit = solve_kwargs.get("time_limit_s")
+        if limit is None and isinstance(solve_kwargs.get("inner_kwargs"), dict):
+            limit = solve_kwargs["inner_kwargs"].get("time_limit_s")
+        assert limit is not None, name
+        assert float(limit) > 0, name
+
+
 def test_create_solver_returns_solver_instance_and_default_solve_kwargs() -> None:
     solver, solve_kwargs = create_solver("CPSAT-10")
 
@@ -130,7 +143,11 @@ def test_create_solver_supports_greedy_variant() -> None:
     solver, solve_kwargs = create_solver("GREED-K1-3")
 
     assert isinstance(solver, GreedyDispatch)
-    assert solve_kwargs == {}
+    assert solve_kwargs == {"time_limit_s": 120}
+
+    default, default_kwargs = create_solver("GREED")
+    assert isinstance(default, GreedyDispatch)
+    assert default_kwargs == {"time_limit_s": 120}
 
 
 def test_create_solver_rhc_alns_defaults_to_greedy_only_inner_repair() -> None:
@@ -409,6 +426,76 @@ def test_route_solver_alns_500_for_5k_ops_with_400s_budget() -> None:
     )
 
     assert decision.solver_config == "ALNS-500"
+
+
+def test_route_solver_skips_alns_500_when_hard_windows() -> None:
+    """N1: 5k@400s with a per-op window is not a coverage route through ALNS-500."""
+    problem = make_simple_problem(n_orders=1250, ops_per_order=4)
+    payload = problem.model_dump()
+    payload["operations"][0]["latest_finish"] = payload["planning_horizon_end"]
+    windowed = problem.__class__.model_validate(payload)
+
+    decision = route_solver_config(
+        windowed,
+        context=SolverRoutingContext(
+            regime=SolveRegime.NOMINAL,
+            preferred_max_latency_s=400,
+        ),
+    )
+
+    assert decision.solver_config == "RHC-GREEDY"
+    assert "window" in decision.reason or "calendar" in decision.reason
+
+
+def test_route_solver_skips_alns_500_on_3k_and_9k_windowed() -> None:
+    """E1: 3k-9k with hard windows must not default to ALNS-500."""
+    for n_orders in (750, 2250):
+        problem = make_simple_problem(n_orders=n_orders, ops_per_order=4)
+        payload = problem.model_dump()
+        payload["operations"][0]["latest_finish"] = payload["planning_horizon_end"]
+        windowed = problem.__class__.model_validate(payload)
+        decision = route_solver_config(
+            windowed,
+            context=SolverRoutingContext(
+                regime=SolveRegime.NOMINAL,
+                preferred_max_latency_s=400,
+            ),
+        )
+        assert decision.solver_config == "RHC-GREEDY", (n_orders, decision.solver_config)
+
+
+def test_default_cheap_routes_schedule_at_least_one_op() -> None:
+    """E3: GREED / CPSAT-10 on the tiny fixture must not return an empty success."""
+    problem = make_simple_problem()
+    for name in ("GREED", "CPSAT-10"):
+        solver, kwargs = create_solver(name)
+        result = solver.solve(problem, **kwargs)
+        coverage = classify_coverage(
+            n_operations=len(problem.operations),
+            n_assigned=len(result.assignments),
+        )
+        assert coverage is not CoverageClass.EMPTY, name
+        assert result.status not in {SolverStatus.FEASIBLE, SolverStatus.OPTIMAL} or (
+            len(result.assignments) > 0
+        )
+
+
+def test_route_feasibility_first_skips_alns_500_when_hard_windows() -> None:
+    problem = make_simple_problem(n_orders=1250, ops_per_order=4)
+    payload = problem.model_dump()
+    payload["operations"][0]["latest_finish"] = payload["planning_horizon_end"]
+    windowed = problem.__class__.model_validate(payload)
+
+    decision = route_solver_config(
+        windowed,
+        context=SolverRoutingContext(
+            regime=SolveRegime.NOMINAL,
+            preferred_max_latency_s=400,
+            portfolio_policy=PortfolioPolicy.FEASIBILITY_FIRST,
+        ),
+    )
+
+    assert decision.solver_config == "RHC-GREEDY"
 
 
 def test_route_solver_cover_for_50k_ops_without_latency_budget() -> None:

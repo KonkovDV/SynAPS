@@ -26,6 +26,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`docs/rfc/DEPENDABOT_TRIAGE_2026_08_26.md`). Domain placement:
   `docs/adr/0003-domain-layer-placement.md`,
   `docs/adr/0004-domain-repo-standard.md`.
+- **COVER ladder vs CHANGELOG numbers (N5 / Г):** canonical set is hashed
+  `cover-ladder-2026-08-25/` (kernel `bd09d13`, Windows 11, CPython 3.13.7).
+  Cause of the older Unreleased row is **not fully known**: different generator
+  packing (499770 vs 500000), RSS probe failed on ladder early cells so 2.3 GiB
+  is not this run, wall-clock 145 s vs 73 s may be native-wheel/build or
+  machine load. Do not mix rows. Memory requirement for 500k is ~3.96 GiB RSS,
+  not a 4 GiB VM. 60k CHANGELOG 59932 ops / 41298 min vs ladder 60000 / 41195
+  (seed=1) is the same class of packing/draw difference. 200k ~45 s vs ~24 s:
+  same. 100k ~26 s vs 12.6–13.7 s, plus seed 42 stall.
+- **Fail-closed routing / GREED box (N1, N2):** `GREED` and `GREED-K1-3`
+  now carry `time_limit_s=120`. `RHC-ALNS` / `RHC-ALNS-100K` /
+  `RHC-ALNS-SEARCH-COVER` now declare the existing solver default
+  `time_limit_s=600` in registry kwargs (was implicit in `RhcSolver`).
+  Unconstrained 5k@400s still routes to `ALNS-500`. Instances with per-op
+  windows or a machine calendar do not (`RHC-GREEDY`) — ALNS-500 scheduled
+  0 ops on the night analog. Do not retune `global_greedy_cover_min_ops`
+  to chase a Yes.
+- **Work-center shift calendar (N7):** `WorkCenter.calendar` is a list of
+  `ShiftInterval`. Empty = 24/7. Non-empty is a hard primitive: processing
+  cannot straddle a closed period. Checker emits `CALENDAR_VIOLATION`.
+  Native COVER skips when any calendar is set. CP-SAT/ALNS/LBBD/BEAM do
+  not encode shifts yet.
+- **Remainder worker_error recapture (N3 / B1):** hashed `8k@4` RHC-GREEDY
+  cells stay `worker_error` (no traceback). A new session on CPython 3.13.7
+  + native did not reproduce the isolate kill: ratio 0.264375, wall 145 s,
+  `MISSING_ASSIGNMENT`. That is not a Yes and not a rewrite of the epoch
+  JSON. Isolate now records Python exceptions and watchdog stderr.
 
 ### Added
 

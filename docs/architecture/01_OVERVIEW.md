@@ -114,7 +114,7 @@ graph LR
 | ADR-013 | Signed artifacts and SBOM are part of production readiness |
 | ADR-014 | Target: Digital Twin via SimPy DES, not proprietary simulation |
 | ADR-015 | Target: LLM Copilot on-prem only; no data leaves the perimeter |
-| ADR-016 | Target: Federated Learning with differential privacy guarantees |
+| ADR-016 | Target: Federated Learning with differential privacy |
 | ADR-017 | Target: Quantum readiness via QUBO formulation, classical fallback mandatory |
 | ADR-018 | Language follows boundary and hot path: TypeScript at the edge, Python for optimizer and ML orchestration, Rust for native kernels |
 

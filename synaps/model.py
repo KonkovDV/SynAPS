@@ -43,6 +43,24 @@ class Order(BaseModel):
     domain_attributes: dict[str, Any] = Field(default_factory=dict)
 
 
+class ShiftInterval(BaseModel):
+    """One open processing window on a work center.
+
+    ``WorkCenter.calendar`` empty means 24/7. A non-empty list is a hard
+    machine calendar: an operation's ``[start_time, end_time]`` must sit
+    inside a single interval (cannot straddle a closed period / midnight).
+    """
+
+    start: datetime
+    end: datetime
+
+    @model_validator(mode="after")
+    def _ordered(self) -> Self:
+        if self.end <= self.start:
+            raise ValueError("ShiftInterval.end must be after start")
+        return self
+
+
 class WorkCenter(BaseModel):
     """Execution resource, station, or processing unit."""
 
@@ -53,6 +71,7 @@ class WorkCenter(BaseModel):
     # a negative -> negative durations); max_parallel is a lane count >= 1.
     speed_factor: float = Field(default=1.0, gt=0)
     max_parallel: int = Field(default=1, ge=1)
+    calendar: list[ShiftInterval] = Field(default_factory=list)
     domain_attributes: dict[str, Any] = Field(default_factory=dict)
 
 

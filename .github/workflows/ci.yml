@@ -40,6 +40,9 @@ jobs:
       - name: Lint (format check)
         run: ruff format --check synaps tests benchmark
 
+      - name: Claims lint
+        run: python scripts/verify_claims.py
+
   contract-schema-drift:
     runs-on: ubuntu-latest
     steps:

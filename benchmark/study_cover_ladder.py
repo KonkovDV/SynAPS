@@ -179,12 +179,19 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="Comma-separated scale_id values",
     )
     parser.add_argument("--resume", action="store_true", help="Skip existing run_*.json files")
+    parser.add_argument(
+        "--session-id",
+        default="",
+        help="Write this run under out_dir/sessions/<id>/ (does not replace historical files)",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     out_dir: Path = args.out_dir
+    if str(args.session_id).strip():
+        out_dir = out_dir / "sessions" / str(args.session_id).strip()
     out_dir.mkdir(parents=True, exist_ok=True)
     env = collect_environment()
     env_path = out_dir / "environment.json"

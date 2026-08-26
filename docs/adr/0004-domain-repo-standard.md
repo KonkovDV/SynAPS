@@ -30,6 +30,11 @@ MobiRoute pin: `5168fc71005653945097e1f07ada1ce9cbc02eec`.
 
 **Not allowed:** floating “latest SynAPS”, or claiming GridPlan/MobiRoute results as kernel 50k/500k evidence (different algebra).
 
+GridPlan is **not** bumped to `fe1c6a8` in this iteration: the kernel added
+`WorkCenter.calendar` after `bd09d13`; a pin bump without a GridPlan
+regression run would be a false hygiene signal. MobiRoute stays `5168fc7`
+(DARP search is not the COVER path).
+
 MobiRoute is **not** bumped to `bd09d13` in this iteration: DARP search is not the kernel COVER path; a pin bump without a domain regression run would be a false hygiene signal.
 
 ## Applied this iteration

@@ -29,9 +29,11 @@ min / median / max = **48269 / 128312 / 186947**.
 mean 123722, sample sd 41810, CV 0.338.
 max/min = **3.87×** (was 3.40× on seeds 1..5).
 
-[ОЦЕНКА] Student t 95% (df=9, t=2.262): mean ± 2.262·s/√10 ≈ 123722 ± 29916 → **[93806, 153638]**.
-The helper in `evidence_common.summarize_seed` only emits a t-interval for n=3;
-this interval is computed by hand from the same sample.
+[КОД: `benchmark.evidence_common.summarize_seed`] Student t 95% (n=10, df=9,
+t=2.2621571627409915): mean 123722.3, sample sd 41810.256, half-width 29909.255
+→ **[93813.045, 153631.555]**.
+The previous hand row (mean 123722, ±29916 → [93806, 153638]) was rounding of
+the same sample; hashed JSON was not rewritten.
 
 ### Is the 3.4× (now 3.87×) spread the instance, the generator, or the solver?
 

@@ -71,9 +71,23 @@ def _cover_reason(op_count: int, *, feasibility_first: bool) -> str:
     )
 
 
+def _alns_blocked_by_windows(op_count: int) -> SolverRoutingDecision:
+    """ALNS-500/300 is not a coverage route on hard windows (KI-N1)."""
+
+    return SolverRoutingDecision(
+        solver_config="RHC-GREEDY",
+        reason=(
+            f"per-op windows or machine calendar ({op_count} ops): ALNS is not a "
+            "coverage route (ALNS-500 scheduled 0 ops, wall_clock_before_search, "
+            "5k night-window 2026-08-26)"
+        ),
+    )
+
+
 def _route_feasibility_first_nominal(
     op_count: int,
     latency: int | None,
+    has_hard_time_windows: bool,
 ) -> SolverRoutingDecision:
     if latency is not None:
         if op_count > _LONG_HORIZON_OPS and latency > 300:
@@ -81,7 +95,11 @@ def _route_feasibility_first_nominal(
                 solver_config="RHC-GREEDY-COVER",
                 reason=_cover_reason(op_count, feasibility_first=True),
             )
-        if op_count <= _INDUSTRIAL_OPS and latency > 300:
+        if (
+            not has_hard_time_windows
+            and op_count <= _INDUSTRIAL_OPS
+            and latency > 300
+        ):
             return SolverRoutingDecision(
                 solver_config="ALNS-500",
                 reason=(
@@ -89,7 +107,11 @@ def _route_feasibility_first_nominal(
                     f"nominal instances ({op_count} ops) under a 5+ minute budget"
                 ),
             )
-        if op_count <= _LONG_HORIZON_OPS and latency > 120:
+        if (
+            not has_hard_time_windows
+            and op_count <= _LONG_HORIZON_OPS
+            and latency > 120
+        ):
             return SolverRoutingDecision(
                 solver_config="ALNS-300",
                 reason=(
@@ -97,6 +119,8 @@ def _route_feasibility_first_nominal(
                     f"routing for {op_count} ops when latency budget exceeds {latency}s"
                 ),
             )
+        if has_hard_time_windows and op_count <= _LONG_HORIZON_OPS and latency > 120:
+            return _alns_blocked_by_windows(op_count)
     if op_count > _LONG_HORIZON_OPS:
         return SolverRoutingDecision(
             solver_config="RHC-GREEDY",
@@ -119,6 +143,7 @@ def _route_feasibility_first_nominal(
 def _route_long_horizon_balanced(
     op_count: int,
     latency: int | None,
+    has_hard_time_windows: bool,
 ) -> SolverRoutingDecision:
     if latency is not None:
         if _LONG_HORIZON_OPS < op_count <= _INDUSTRIAL_OPS and latency > 300:
@@ -127,6 +152,8 @@ def _route_long_horizon_balanced(
                 reason=_cover_reason(op_count, feasibility_first=False),
             )
         if op_count <= _INDUSTRIAL_OPS and latency > 300:
+            if has_hard_time_windows:
+                return _alns_blocked_by_windows(op_count)
             return SolverRoutingDecision(
                 solver_config="ALNS-500",
                 reason=(
@@ -135,6 +162,8 @@ def _route_long_horizon_balanced(
                 ),
             )
         if op_count <= _LONG_HORIZON_OPS and latency > 120:
+            if has_hard_time_windows:
+                return _alns_blocked_by_windows(op_count)
             return SolverRoutingDecision(
                 solver_config="ALNS-300",
                 reason=(
@@ -319,7 +348,9 @@ def route_solver_config(
         and ctx.regime is SolveRegime.NOMINAL
         and op_count > 120
     ):
-        return _route_feasibility_first_nominal(op_count, latency)
+        return _route_feasibility_first_nominal(
+            op_count, latency, profile.has_hard_time_windows
+        )
 
     if op_count <= 20 and wc_count <= 5 and not has_aux_constraints:
         return SolverRoutingDecision(
@@ -372,7 +403,9 @@ def route_solver_config(
         )
 
     # Long-horizon NOMINAL: rolling-horizon coverage above 10k ops.
-    return _route_long_horizon_balanced(op_count, latency)
+    return _route_long_horizon_balanced(
+        op_count, latency, profile.has_hard_time_windows
+    )
 
 
 def select_solver(

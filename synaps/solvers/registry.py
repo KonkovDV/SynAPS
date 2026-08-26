@@ -97,22 +97,22 @@ def _rhc_alns_solve_kwargs(*, window_minutes: int, overlap_minutes: int) -> dict
 _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
     "GREED": SolverRegistration(
         factory=_build_greed_default,
-        solve_kwargs={},
+        solve_kwargs={"time_limit_s": 120},
         description="Greedy ATCS constructive heuristic (default latency-first path)",
     ),
     "GREED-K1-3": SolverRegistration(
         factory=_build_greed_k1_3,
-        solve_kwargs={},
+        solve_kwargs={"time_limit_s": 120},
         description="Greedy ATCS constructive heuristic with extended tardiness look-ahead",
     ),
     "BEAM-3": SolverRegistration(
         factory=_build_beam_3,
-        solve_kwargs={},
+        solve_kwargs={"time_limit_s": 120},
         description="Filtered Beam Search (width=3) ATCS dispatch for improved SDST solutions",
     ),
     "BEAM-5": SolverRegistration(
         factory=_build_beam_5,
-        solve_kwargs={},
+        solve_kwargs={"time_limit_s": 120},
         description="Filtered Beam Search (width=5) ATCS dispatch for complex SDST matrices",
     ),
     "CPSAT-10": SolverRegistration(
@@ -297,7 +297,10 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
     # ---- RHC variants (10k-100k+ operations) ----
     "RHC-ALNS": SolverRegistration(
         factory=_build_rhc,
-        solve_kwargs=build_solve_kwargs_from_spec(RhcPolicySpec.from_preset(RhcPolicy.BALANCED)),
+        solve_kwargs={
+            **build_solve_kwargs_from_spec(RhcPolicySpec.from_preset(RhcPolicy.BALANCED)),
+            "time_limit_s": 600,
+        },
         description=(
             "Receding Horizon Control with ALNS inner solver. "
             "8-hour windows, 2-hour overlap, max 5000 ops/window, "
@@ -307,9 +310,10 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
     ),
     "RHC-ALNS-100K": SolverRegistration(
         factory=_build_rhc,
-        solve_kwargs=build_solve_kwargs_from_spec(
-            RhcPolicySpec.from_preset(RhcPolicy.SEARCH_ENTRY)
-        ),
+        solve_kwargs={
+            **build_solve_kwargs_from_spec(RhcPolicySpec.from_preset(RhcPolicy.SEARCH_ENTRY)),
+            "time_limit_s": 600,
+        },
         description=(
             "Named 100K+ RHC-ALNS search-entry profile. "
             "5-hour windows, 90-minute overlap, greedy-only repair, and the April 2026 "
@@ -318,9 +322,10 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
     ),
     "RHC-ALNS-SEARCH-COVER": SolverRegistration(
         factory=_build_rhc,
-        solve_kwargs=build_solve_kwargs_from_spec(
-            RhcPolicySpec.from_preset(RhcPolicy.SEARCH_COVER)
-        ),
+        solve_kwargs={
+            **build_solve_kwargs_from_spec(RhcPolicySpec.from_preset(RhcPolicy.SEARCH_COVER)),
+            "time_limit_s": 600,
+        },
         description=(
             "Search-active RHC-ALNS with coverage safety net. "
             "6-hour windows / 90-minute overlap (search-active DOE geometry), "

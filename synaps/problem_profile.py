@@ -28,6 +28,7 @@ class ProblemProfile:
     nonzero_setup_density: float
     has_aux_constraints: bool
     has_nonzero_setups: bool
+    has_hard_time_windows: bool
     sdst_metric: bool
     size_band: str
     precedence_depth: int
@@ -39,6 +40,17 @@ class ProblemProfile:
 
 def _has_sequence_dependent_transition_cost(entry: SetupEntry) -> bool:
     return entry.setup_minutes > 0 or entry.material_loss > 0 or entry.energy_kwh > 0
+
+
+def _has_hard_time_windows(problem: ScheduleProblem) -> bool:
+    """Per-op windows or a non-empty machine calendar (KI-N1 / KI-N7)."""
+
+    if any(
+        operation.earliest_start is not None or operation.latest_finish is not None
+        for operation in problem.operations
+    ):
+        return True
+    return any(work_center.calendar for work_center in problem.work_centers)
 
 
 def _size_band(operation_count: int) -> str:
@@ -143,6 +155,7 @@ def build_problem_profile(problem: ScheduleProblem) -> ProblemProfile:
         nonzero_setup_density=nonzero_setup_density,
         has_aux_constraints=bool(problem.auxiliary_resources or problem.aux_requirements),
         has_nonzero_setups=setup_nonzero_entry_count > 0,
+        has_hard_time_windows=_has_hard_time_windows(problem),
         sdst_metric=is_setup_matrix_metric(problem),
         size_band=_size_band(operation_count),
         precedence_depth=precedence_depth,

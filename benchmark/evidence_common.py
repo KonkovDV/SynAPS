@@ -15,7 +15,50 @@ from typing import Any
 from synaps.accelerators import get_acceleration_status
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-T_CRIT_95_N3 = 4.302652729911275  # Student t, df=2, two-tailed 0.05
+# Student t 0.975 quantile, index = df = n-1, for n in 2..31.
+_T_CRIT_975 = (
+    0.0,
+    12.706204736432095,
+    4.302652729911275,
+    3.182446305284263,
+    2.7764451051977987,
+    2.5705818366147395,
+    2.4469118511440436,
+    2.364624251592784,
+    2.306004135204166,
+    2.2621571627409915,
+    2.228138850958557,
+    2.200985160082949,
+    2.178812829667228,
+    2.1603686564619728,
+    2.1447866879169277,
+    2.131449545559323,
+    2.1199052992210112,
+    2.1098155778331806,
+    2.10092204024096,
+    2.093024054408263,
+    2.0859634472658364,
+    2.079613844727662,
+    2.0738730679040147,
+    2.0686576104190406,
+    2.0638985616280205,
+    2.0595385527532946,
+    2.055529438642871,
+    2.0518305164802833,
+    2.048407141795244,
+    2.045229642132703,
+    2.0422724563012373,
+)
+T_CRIT_95_N3 = _T_CRIT_975[2]
+
+
+def t_crit_95(n: int) -> float | None:
+    """Two-tailed 95% Student-t critical value for sample size n, or None."""
+
+    df = n - 1
+    if 1 <= df < len(_T_CRIT_975):
+        return _T_CRIT_975[df]
+    return None
 
 
 def git_head() -> str:
@@ -28,6 +71,22 @@ def git_head() -> str:
         ).strip()
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
+
+
+def cpu_flags() -> str | None:
+    """Linux ``/proc/cpuinfo`` flags (AVX2/FMA3). None on Windows (KI-N10)."""
+
+    cpuinfo = Path("/proc/cpuinfo")
+    if not cpuinfo.is_file():
+        return None
+    try:
+        for line in cpuinfo.read_text(encoding="utf-8", errors="replace").splitlines():
+            lowered = line.lower()
+            if lowered.startswith("flags") or line.startswith("Features"):
+                return line.split(":", 1)[-1].strip()
+    except OSError:
+        return None
+    return None
 
 
 def peak_rss_bytes() -> int | None:
@@ -108,6 +167,7 @@ def collect_environment() -> dict[str, Any]:
         "processor": platform.processor(),
         "machine": platform.machine(),
         "cpu_count": os.cpu_count(),
+        "cpu_flags": cpu_flags(),
         "synaps_native": native_mod,
         "synaps_native_file": native_file,
         "acceleration": accel,
@@ -125,8 +185,10 @@ def summarize_seed(values: list[float]) -> dict[str, Any]:
     sample_sd = stdev(ordered) if n > 1 else 0.0
     cv = (sample_sd / avg) if avg else None
     half_width = None
-    if n == 3 and sample_sd > 0:
-        half_width = T_CRIT_95_N3 * sample_sd / (n**0.5)
+    t_crit = t_crit_95(n)
+    if t_crit is not None and n >= 2 and sample_sd > 0:
+        half_width = t_crit * sample_sd / (n**0.5)
+    df = n - 1
     return {
         "n": n,
         "min": ordered[0],
@@ -140,8 +202,8 @@ def summarize_seed(values: list[float]) -> dict[str, Any]:
         "ci95_t_low": (avg - half_width) if half_width is not None else avg,
         "ci95_t_high": (avg + half_width) if half_width is not None else avg,
         "ci95_note": (
-            "Student t, df=n-1, two-tailed 0.05. n=3 ⇒ interval is wide; "
-            "treat as a dispersion bound, not a quality claim."
+            f"Student t, df={df}, two-tailed 0.05. "
+            "n<2 or n>31 ⇒ no interval. Treat as a dispersion bound, not a quality claim."
         ),
     }
 

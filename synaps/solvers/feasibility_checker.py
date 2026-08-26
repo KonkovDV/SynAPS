@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
+from synaps.calendar import processing_fits_calendar
 from synaps.timegrain import duration_minutes_for, physical_processing_minutes_for
 
 
@@ -232,6 +233,9 @@ class FeasibilityChecker:
            machine speed — hard floor, no tolerance, F2; DURATION_MISMATCH).
            Under ``strict_grain=True``, spans below the canonical integer
            reservation grain are flagged as DURATION_BELOW_GRAIN.
+        9. Work-center shift calendar (CALENDAR_VIOLATION): processing
+           ``[start, end]`` must sit in one published interval. Empty calendar
+           is 24/7. Setup occupancy before start is not clipped (KI-N7).
     """
 
     @staticmethod
@@ -974,6 +978,13 @@ class FeasibilityChecker:
             exhaustive=exhaustive,
             operation_ids=scoped_ops,
         )
+        self._check_work_center_calendar(
+            assignments=assignments,
+            work_centers_by_id=work_centers_by_id,
+            violations=violations,
+            exhaustive=exhaustive,
+            operation_ids=scoped_ops,
+        )
 
         # 8. Operation durations (P0-3; hardened by F2, audit v4 — see the
         # helper's docstring for the physical-floor contract).
@@ -1046,6 +1057,40 @@ class FeasibilityChecker:
                             f"{assignment.end_time}, after latest_finish {latest}."
                         ),
                         operation_id=assignment.operation_id,
+                    )
+                )
+                if not exhaustive:
+                    return
+
+    @staticmethod
+    def _check_work_center_calendar(
+        *,
+        assignments: list[Assignment],
+        work_centers_by_id: dict[Any, Any],
+        violations: list[FeasibilityViolation],
+        exhaustive: bool,
+        operation_ids: frozenset[Any] | None = None,
+    ) -> None:
+        """Processing must sit in one published shift (empty calendar = 24/7)."""
+
+        for assignment in assignments:
+            if operation_ids is not None and assignment.operation_id not in operation_ids:
+                continue
+            work_center = work_centers_by_id.get(assignment.work_center_id)
+            calendar = getattr(work_center, "calendar", None) if work_center is not None else None
+            if calendar and not processing_fits_calendar(
+                assignment.start_time, assignment.end_time, calendar
+            ):
+                violations.append(
+                    FeasibilityViolation(
+                        "CALENDAR_VIOLATION",
+                        (
+                            f"Operation {assignment.operation_id} "
+                            f"[{assignment.start_time}, {assignment.end_time}] is not "
+                            f"inside a shift on {assignment.work_center_id}."
+                        ),
+                        operation_id=assignment.operation_id,
+                        work_center_id=assignment.work_center_id,
                     )
                 )
                 if not exhaustive:

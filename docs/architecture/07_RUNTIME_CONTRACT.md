@@ -100,9 +100,9 @@ That package performs three tasks only:
 
 ---
 
-## 5. Current Guarantees
+## 5. Current contract surface
 
-The current contract guarantees:
+The current contract states:
 
 1. a stable request/response structure for solve and repair execution;
 2. explicit routing context (`regime`, latency preference, exactness preference);

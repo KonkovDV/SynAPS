@@ -8,11 +8,13 @@ benchmark/evidence/deadzone-5k-2026-08-25/.
 from __future__ import annotations
 
 import argparse
+import faulthandler
 import json
 import subprocess
 import sys
 import tempfile
 import time
+import traceback
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -102,8 +104,8 @@ def _run_path(out_dir: Path, ops: int, machines: int, solver: str, seed: int) ->
 def _watchdog_s(solver_config: str) -> float:
     """Study isolation only. Does not change registry kwargs.
 
-    GREED has no ``time_limit_s``. RHC default is 600s when the named config
-    omits it. Slack covers generate + independent notary.
+    GREED/BEAM registry ``time_limit_s`` is 120 s. Isolation slack covers
+    generate + independent notary. This watchdog is not a solver retune.
     """
     _, kwargs = create_solver(solver_config)
     limit = kwargs.get("time_limit_s")
@@ -148,7 +150,7 @@ def _stall_record(
         "stall_watchdog_s": watchdog_s,
         "stall_note": (
             "Worker killed after study watchdog. Registry kwargs unchanged. "
-            "GREED has no time_limit_s; other configs use named time_limit_s + 90s slack."
+            "Isolation uses named time_limit_s + 90s slack (GREED/BEAM 120s → 210s)."
         ),
     }
 
@@ -161,9 +163,7 @@ def run_one(
     seed: int,
 ) -> dict[str, Any]:
     gen_t0 = time.perf_counter()
-    problem = generate_deadzone_problem(
-        n_operations=n_operations, n_machines=n_machines, seed=seed
-    )
+    problem = generate_deadzone_problem(n_operations=n_operations, n_machines=n_machines, seed=seed)
     generate_s = time.perf_counter() - gen_t0
     print(
         f"    generated {len(problem.operations)} ops in {generate_s:.2f}s, solving...",
@@ -207,11 +207,7 @@ def run_one(
 
 def five_k_eight_answer(runs: list[dict[str, Any]]) -> dict[str, Any]:
     """P2.3: any config with ratio=1 and verified_feasible on all three seeds at 5k@8."""
-    target = [
-        r
-        for r in runs
-        if r["n_operations_requested"] == 5000 and r["n_machines"] == 8
-    ]
+    target = [r for r in runs if r["n_operations_requested"] == 5000 and r["n_machines"] == 8]
     by_solver: dict[str, list[dict[str, Any]]] = {}
     for row in target:
         by_solver.setdefault(row["solver_config"], []).append(row)
@@ -219,14 +215,11 @@ def five_k_eight_answer(runs: list[dict[str, Any]]) -> dict[str, Any]:
     detail = {}
     for name, group in by_solver.items():
         seeds = sorted(r["seed"] for r in group)
-        ok = (
-            seeds == [1, 42, 999]
-            and all(
-                (not r.get("stalled"))
-                and r.get("scheduled_ratio") == 1.0
-                and r.get("verified_feasible")
-                for r in group
-            )
+        ok = seeds == [1, 42, 999] and all(
+            (not r.get("stalled"))
+            and r.get("scheduled_ratio") == 1.0
+            and r.get("verified_feasible")
+            for r in group
         )
         detail[name] = {
             "seeds": seeds,
@@ -268,6 +261,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--machines", default="4,8,12")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument(
+        "--session-id",
+        default="",
+        help="Write this run under out_dir/sessions/<id>/ (does not replace historical files)",
+    )
+    parser.add_argument(
         "--in-process",
         action="store_true",
         help="Solve in this process (no watchdog). Default isolates each cell.",
@@ -282,19 +280,36 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def _run_worker_job(job_path: Path) -> int:
+    faulthandler.enable()
     job = json.loads(job_path.read_text(encoding="utf-8"))
     print(
         f"  generating {job['n_operations']}@{job['n_machines']} "
         f"{job['solver_config']} seed={job['seed']}",
         flush=True,
     )
-    record = run_one(
-        n_operations=int(job["n_operations"]),
-        n_machines=int(job["n_machines"]),
-        solver_config=str(job["solver_config"]),
-        seed=int(job["seed"]),
-    )
     out = Path(job["out_path"])
+    try:
+        record = run_one(
+            n_operations=int(job["n_operations"]),
+            n_machines=int(job["n_machines"]),
+            solver_config=str(job["solver_config"]),
+            seed=int(job["seed"]),
+        )
+    except Exception as exc:
+        record = _stall_record(
+            n_operations=int(job["n_operations"]),
+            n_machines=int(job["n_machines"]),
+            solver_config=str(job["solver_config"]),
+            seed=int(job["seed"]),
+            watchdog_s=0.0,
+        )
+        record["status"] = "worker_error"
+        record["stalled"] = False
+        record["search_stop_reason"] = "worker_exception"
+        record["stall_note"] = f"{type(exc).__name__}: {exc}"
+        record["worker_traceback"] = traceback.format_exc()[-8000:]
+        record["wall_time_s"] = None
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(_format_ratio_line(record), flush=True)
     return 0
@@ -349,8 +364,10 @@ def _run_isolated_cell(
                 cwd=str(REPO_ROOT),
                 timeout=watchdog,
                 check=False,
+                capture_output=True,
+                text=True,
             )
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
             record = _stall_record(
                 n_operations=n_ops,
                 n_machines=n_m,
@@ -358,6 +375,14 @@ def _run_isolated_cell(
                 seed=seed,
                 watchdog_s=watchdog,
             )
+            stderr_raw = exc.stderr
+            stdout_raw = exc.stdout
+            if isinstance(stderr_raw, bytes):
+                stderr_raw = stderr_raw.decode("utf-8", errors="replace")
+            if isinstance(stdout_raw, bytes):
+                stdout_raw = stdout_raw.decode("utf-8", errors="replace")
+            record["worker_stderr_tail"] = (stderr_raw or "")[-4000:]
+            record["worker_stdout_tail"] = (stdout_raw or "")[-2000:]
             path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             print(
                 f"  STALL watchdog={watchdog:.0f}s {solver_config} {n_ops}@{n_m} seed={seed}",
@@ -374,10 +399,15 @@ def _run_isolated_cell(
             )
             record["status"] = "worker_error"
             record["search_stop_reason"] = "worker_exit_nonzero"
+            stderr_tail = (completed.stderr or "")[-4000:]
+            stdout_tail = (completed.stdout or "")[-2000:]
             record["stall_note"] = (
                 f"Worker process exited {completed.returncode} before writing a result. "
                 "Not a named-config timebox."
             )
+            record["worker_returncode"] = completed.returncode
+            record["worker_stderr_tail"] = stderr_tail
+            record["worker_stdout_tail"] = stdout_tail
             path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             return record
         return json.loads(path.read_text(encoding="utf-8"))
@@ -395,9 +425,7 @@ def load_all_run_records(out_dir: Path) -> list[dict[str, Any]]:
 
 def write_summary_and_hashes(out_dir: Path, *, seeds: tuple[int, ...]) -> dict[str, Any]:
     disk_runs = load_all_run_records(out_dir)
-    solvers = sorted(
-        {str(row["solver_config"]) for row in disk_runs if row.get("solver_config")}
-    )
+    solvers = sorted({str(row["solver_config"]) for row in disk_runs if row.get("solver_config")})
     payload = {
         "protocol": "5k dead-zone 2026-08-25",
         "seeds": list(seeds),
@@ -421,13 +449,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.worker_job is not None:
         return _run_worker_job(args.worker_job)
     out_dir: Path = args.out_dir
+    if str(args.session_id).strip():
+        out_dir = out_dir / "sessions" / str(args.session_id).strip()
     out_dir.mkdir(parents=True, exist_ok=True)
     env_path = out_dir / "environment.json"
     if not (args.resume and env_path.exists()):
         env = collect_environment()
-        env_path.write_text(
-            json.dumps(env, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
+        env_path.write_text(json.dumps(env, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     seeds = tuple(int(x.strip()) for x in str(args.seeds).split(",") if x.strip())
     solvers = tuple(x.strip() for x in str(args.solvers).split(",") if x.strip())
     ops_list = tuple(int(x.strip()) for x in str(args.ops).split(",") if x.strip())

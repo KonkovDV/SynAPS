@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from synaps.accelerators import resource_capacity_window_is_feasible
+from synaps.calendar import delay_start_to_open_shift
 from synaps.solvers._time_windows import operation_latest_finish_offset_minutes
 from synaps.timegrain import duration_minutes_for
 
@@ -467,6 +468,20 @@ def _candidate_starts(
     return sorted(starts)
 
 
+def _clip_start_to_calendar(
+    work_center: Any,
+    gap_start: float,
+    duration: float,
+    horizon_start: datetime,
+) -> float | None:
+    """Delay processing start into an open shift, or None if none fits."""
+
+    calendar = getattr(work_center, "calendar", None) or []
+    if not calendar:
+        return gap_start
+    return delay_start_to_open_shift(gap_start, duration, calendar, horizon_start)
+
+
 def find_earliest_feasible_slot(
     context: DispatchContext,
     scheduled_assignments: list[Assignment],
@@ -524,7 +539,14 @@ def find_earliest_feasible_slot(
             if previous_state is not None
             else 0.0
         )
-        gap_start = max(earliest_start, previous_end + setup_before)
+        gap_start = _clip_start_to_calendar(
+            work_center,
+            max(earliest_start, previous_end + setup_before),
+            duration,
+            context.horizon_start,
+        )
+        if gap_start is None:
+            return None
 
         if following is not None:
             following_start = _offset_minutes(context, following, end=False)

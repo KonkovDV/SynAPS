@@ -79,14 +79,14 @@ These are **measured line counts**, not estimates.
 | **Total Solver Core** | | **9 124** | |
 | **Total with Support** | | **10 846** | |
 
-### 2.2. Solver Registry — 21 Pre-Configured Profiles (registry.py, 444 LOC)
+### 2.2. Solver Registry — 25 named solver configs (registry.py)
 
 The `SolverRegistry` (`registry.py`) provides named profiles used by the Portfolio Router:
 
 | Profile | Solver Class | Time Limit | Iterations | Use Case |
 |---------|-------------|------------|------------|----------|
-| `GREED` | GreedyDispatch | — | — | Instant constructive plan ($< 1$ s) |
-| `GREED-K1-3` | GreedyDispatch | — | — | Constructive heuristic with longer tardiness look-ahead |
+| `GREED` | GreedyDispatch | 120 s | — | Instant constructive plan (fail-closed time box; was unbounded, KI-N2) |
+| `GREED-K1-3` | GreedyDispatch | 120 s | — | Constructive heuristic with longer tardiness look-ahead |
 | `BEAM-3` | BeamSearchDispatch | — | width=3 | Filtered beam search for SDST-sensitive instances |
 | `BEAM-5` | BeamSearchDispatch | — | width=5 | Extended beam search for complex SDST matrices |
 | `CPSAT-10` | CpSatSolver | 10 s | — | Small instances ($\leq 20$ ops) |
@@ -101,7 +101,7 @@ The `SolverRegistry` (`registry.py`) provides named profiles used by the Portfol
 | `LBBD-10-HD` | LbbdHdSolver | 300 s | 10 | Large factory |
 | `LBBD-20-HD` | LbbdHdSolver | 600 s | 20 | Extreme (50K+ ops, experimental — use RHC-GREEDY-COVER as the validated coverage path) |
 | `ALNS-300` | AlnsSolver | 120 s | 300 | Metaheuristic for 1K–10K ops |
-| `ALNS-500` | AlnsSolver | 300 s | 500 | Metaheuristic for ≤10K ops with a 5+ minute budget |
+| `ALNS-500` | AlnsSolver | 300 s | 500 | Metaheuristic for ≤10K ops with a 5+ minute budget. **Not** a coverage route when the instance has per-op windows or a machine calendar (KI-N1: 5k night analog scheduled 0 ops). |
 | `ALNS-1000` | AlnsSolver | 600 s | 1000 | Extended ALNS for 50K+ ops |
 | `RHC-ALNS` | RhcSolver (ALNS inner) | 600 s | 8h windows | Explicit refine profile; not the auto-route at 50K–100K+ |
 | `RHC-CPSAT` | RhcSolver (CP-SAT inner) | 300 s | 8h windows | Temporal decomposition with exact per-window solve |
@@ -134,6 +134,8 @@ Default (NOMINAL):
     If N ≤ 500                     → LBBD-10
     If latency > 120s and N ≤ 10K  → ALNS-300
     If latency > 300s and N ≤ 10K  → ALNS-500
+      (skipped when the instance has per-op windows or WorkCenter.calendar;
+       those route to RHC-GREEDY — KI-N1)
     If N > 10K and N ≤ 50K         → RHC-GREEDY-COVER
       (with or without latency > 300s; rolling-horizon coverage)
     If latency > 600s and N > 50K  → RHC-GREEDY-COVER

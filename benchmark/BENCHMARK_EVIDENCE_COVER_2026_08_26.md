@@ -96,7 +96,7 @@ point estimates of different generator draws.
 | scale | n | ratio min/med/max | makespan min/med/max | CV makespan | wall min/med/max | CV wall | t 95% makespan half-width |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 60k@100 | 3 | 1/1/1 | 41195 / 41641 / 42065 | 0.0104 | 4.477 / 6.957 / 7.022 | 0.236 | 1081 |
-| 100k@200 | 2 | 1/1/1 | 33090 / 33266 / 33442 | 0.0075 | 12.569 / 13.144 / 13.719 | 0.062 | n=2, no t_{df=2} row |
+| 100k@200 | 2 | 1/1/1 | 33090 / 33266 / 33442 | 0.0075 | 12.569 / 13.144 / 13.719 | 0.062 | n=2: hashed `summary.json` has no half-width (helper was n=3-only). Code now emits df=1; interval is wide. JSON not rewritten. |
 | 200k@400 | 3 | 1/1/1 | 31946 / 32166 / 32321 | 0.0059 | 23.79 / 24.05 / 24.29 | 0.010 | 468 |
 | 500k@1000 | 3 | 1/1/1 | 31620 / 31649 / 32115 | 0.0087 | 71.45 / 73.00 / 74.17 | 0.019 | 690 |
 
@@ -114,8 +114,10 @@ Do not cite “100k COVER is feasible on three seeds”.
    generator family, not industrial deployment.
 5. Words forbidden unless a solver returned checked `OPTIMAL`: optimally,
    proven (except the empty-notary tautology), guarantees, industrially deployed.
-6. 400@8 native-dead zone, gap-insert cap 64 / 80k, router 5k→ALNS-500 remain
-   **limitations**. They were not moved to make this ladder look better.
+6. 400@8 native-dead zone, gap-insert cap 64 / 80k remain limitations.
+   Unconstrained 5k@400s still routes to ALNS-500. Instances with per-op
+   windows or a machine calendar do not (`RHC-GREEDY`). Do not retune
+   `global_greedy_cover_min_ops` to chase a Yes on the night analog.
 7. Cable seeds 1..10 and C6-R1 re-probe:
    [`BENCHMARK_EVIDENCE_CABLE_C6_2026_08_26.md`](BENCHMARK_EVIDENCE_CABLE_C6_2026_08_26.md).
    Generator tardiness span is 3.87×; solver-seed CV is 0. C6-R1 INFEASIBLE
@@ -151,6 +153,9 @@ Do not cite “100k COVER is feasible on three seeds”.
 
 Directory `benchmark/evidence/cover-ladder-2026-08-25/`. Hashes from
 `SHA256SUMS.txt` (SHA-256 of that file itself is listed last).
+On `fe1c6a8` the published checksum for `run_100k_at_200_seed42.json` was
+`e5caad9a…` while the committed JSON hashed `da100734…` (A1). JSON bytes
+were not rewritten; the sums table was stale. This table follows the files.
 
 | File | SHA-256 |
 |------|---------|
@@ -159,7 +164,7 @@ Directory `benchmark/evidence/cover-ladder-2026-08-25/`. Hashes from
 | `run_60k_at_100_seed42.json` | `0b474c2d12804d749983fe1abf8ca9b91f7f636b2209df878396afa0da0f75c2` |
 | `run_60k_at_100_seed999.json` | `55ef691bbb3a128501a387e97ef752bb0bd29f77f16a1664961816841a177f46` |
 | `run_100k_at_200_seed1.json` | `cc0924ba36e87d01bedf0ae1966cad847fd2ceb23ad02f4ed56efec2455080f9` |
-| `run_100k_at_200_seed42.json` | `e5caad9af58b2eeb9a6d876b93adbd0e48d86816e9d17abc8676696ec5bc77b8` |
+| `run_100k_at_200_seed42.json` | `da1007349cc2afa4752651f5776ca4f883b5a1a556d04497b1c26580bc18ccf8` |
 | `run_100k_at_200_seed999.json` | `81a01e10840cf8d07e8135cc426340dc49caf5d1ac9a240010f8290fb7df5f7e` |
 | `run_200k_at_400_seed1.json` | `22a12b0b1d173f3086bdb765673f30178b70f94e2c4cce67b44db46aaa0a8fe8` |
 | `run_200k_at_400_seed42.json` | `1a213515d8a393d80f7988db47160abee853b27e782d1137d34b0b246e2570da` |
@@ -168,4 +173,4 @@ Directory `benchmark/evidence/cover-ladder-2026-08-25/`. Hashes from
 | `run_500k_at_1000_seed42.json` | `5b312151c3a7fc5ee40787ae48fe4c8191ccdfaf1063a71737b5fe09fd3318fb` |
 | `run_500k_at_1000_seed999.json` | `6a8ec97e7230a4c21dbbb6a169eb785bf52a1442637f25e1d6a8f3cebbb76cc7` |
 | `summary.json` | `30c28cd0fb348fd3e96081a21799d1c97c473780efb65eeda827a60716519e57` |
-| `SHA256SUMS.txt` | `21c1f35cf1107fb8f09e8df89525c6bdaf97662b74cc2b0e6af7ce11ff98a5ec` |
+| `SHA256SUMS.txt` | `8ade38f0cd30299e7fdbfe3c156b2f8a686554f03e84ea48c834ef54c3942171` |

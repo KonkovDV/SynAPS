@@ -22,6 +22,7 @@ from heapq import heappop, heappush
 from typing import TYPE_CHECKING, Any
 
 from synaps.accelerators import compute_atcs_log_score, resource_capacity_window_is_feasible
+from synaps.calendar import delay_start_to_open_shift, work_centers_have_calendar
 from synaps.model import Assignment
 from synaps.solvers._dispatch_support import MachineIndex, find_earliest_feasible_slot
 from synaps.solvers._time_windows import operation_latest_finish_offset_minutes
@@ -919,6 +920,16 @@ def _best_list_schedule_slot(
             earliest_start=floor,
             setup_minutes=dispatch_context.setup_minutes,
         )
+        if work_center.calendar:
+            cal_start = delay_start_to_open_shift(
+                start,
+                duration,
+                work_center.calendar,
+                dispatch_context.horizon_start,
+            )
+            if cal_start is None:
+                continue
+            start = cal_start
         latest = operation_latest_finish_offset_minutes(op, dispatch_context.horizon_start)
         cap = horizon_minutes if latest is None else min(horizon_minutes, latest)
         delayed = _delay_start_for_aux(
@@ -974,6 +985,8 @@ def _try_native_list_schedule(
     if _native_list_schedule_cover is None:
         return None
     if any(op.machine_duration_overrides for op in operations):
+        return None
+    if work_centers_have_calendar(list(dispatch_context.wc_by_id.values())):
         return None
     packed = _pack_list_schedule_native(
         operations=operations,

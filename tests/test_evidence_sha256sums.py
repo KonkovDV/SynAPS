@@ -36,11 +36,8 @@ def test_cable_c6_sha256sums_match_files() -> None:
 
 
 def test_deadzone_p2_3_freeze_run_files_still_match() -> None:
-    """environment.json and summary.json were later rewritten; run_*.json stay."""
-    _check_sums(
-        _EVIDENCE / "deadzone-5k-2026-08-25" / "SHA256SUMS_p2_3.txt",
-        skip=frozenset({"environment.json", "summary.json"}),
-    )
+    """Freeze sums are the 15 5k@8 runs + summary_p2_3 copy. Env bytes are lost."""
+    _check_sums(_EVIDENCE / "deadzone-5k-2026-08-25" / "SHA256SUMS_p2_3.txt")
 
 
 def test_deadzone_live_sha256sums_match_files() -> None:
