@@ -51,6 +51,7 @@ from synaps.solvers._lbbd_cuts import (
     cut_pool_fingerprint,
     reported_lower_bound,
 )
+from synaps.solvers.coverage_outcome import refuse_unsupported_calendar, stamp_honest_coverage
 from synaps.solvers.cpsat_solver import CpSatSolver
 from synaps.timegrain import duration_minutes_for
 
@@ -76,6 +77,9 @@ class LbbdSolver(BaseSolver):
         return "lbbd"
 
     def solve(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
+        refused = refuse_unsupported_calendar(problem, self.name)
+        if refused is not None:
+            return refused
         t0 = time.monotonic()
         max_iterations: int = int(kwargs.get("max_iterations", 10))
         time_limit_s: int = int(kwargs.get("time_limit_s", 60))
@@ -211,7 +215,7 @@ class LbbdSolver(BaseSolver):
                     self.name, t0, iteration, master_proven_infeasible, bool(best_assignments)
                 )
                 if failed is not None:
-                    return failed
+                    return stamp_honest_coverage(problem, failed)
                 break
 
             assignment_map, master_bound = master_result
@@ -423,52 +427,52 @@ class LbbdSolver(BaseSolver):
         # instead of implying convergence via a gap number.
         benders_active = len(benders_cuts) > 0
         quality_warning = None if benders_active else "lbbd_no_cuts_degenerate"
-        return ScheduleResult(
-            solver_name=self.name,
-            status=status,
-            assignments=best_assignments,
-            objective=best_objective,
-            duration_ms=elapsed_ms,
-            random_seed=random_seed,
-            metadata={
-                "iterations": len(iteration_log),
-                "lower_bound": reported_lb,
-                "upper_bound": best_ub,
-                "gap": (
-                    (best_ub - reported_lb) / max(best_ub, 1e-9) if best_ub < float("inf") else None
-                ),
-                "benders_active": benders_active,
-                "quality_warning": quality_warning,
-                "lower_bound_invariant_violated": lb_invariant_violated,
-                "lower_bound_method": "master_relaxation_benders",
-                "lower_bound_components": {
-                    "master_relaxation_lb": reported_lb,
-                    "assignment_setup_lb": compute_assignment_setup_lb_total(
-                        problem, best_assignments
+        return stamp_honest_coverage(
+            problem,
+            ScheduleResult(
+                solver_name=self.name,
+                status=status,
+                assignments=best_assignments,
+                objective=best_objective,
+                duration_ms=elapsed_ms,
+                random_seed=random_seed,
+                metadata={
+                    "iterations": len(iteration_log),
+                    "lower_bound": reported_lb,
+                    "upper_bound": best_ub,
+                    "gap": (
+                        (best_ub - reported_lb) / max(best_ub, 1e-9)
+                        if best_ub < float("inf")
+                        else None
                     ),
+                    "benders_active": benders_active,
+                    "quality_warning": quality_warning,
+                    "lower_bound_invariant_violated": lb_invariant_violated,
+                    "lower_bound_method": "master_relaxation_benders",
+                    "lower_bound_components": {
+                        "master_relaxation_lb": reported_lb,
+                        "assignment_setup_lb": compute_assignment_setup_lb_total(
+                            problem, best_assignments
+                        ),
+                    },
+                    "iteration_log": iteration_log,
+                    "lb_evolution": lb_evolution,
+                    "ub_evolution": ub_evolution,
+                    "cut_kind_lb_contribution": cut_kind_lb_contribution,
+                    "gap_threshold": gap_threshold,
+                    "setup_relaxation": setup_relaxation,
+                    "master_warm_start_iterations": master_warm_start_iterations,
+                    "greedy_warm_start_used": greedy_warm_start_used,
+                    "parallel_subproblems": parallel_subproblems,
+                    "cut_pool": {
+                        "size": len(benders_cuts),
+                        "kinds": cut_kinds,
+                        "skipped_duplicate": cuts_skipped_duplicate,
+                        "skipped_unproven_subproblem": cuts_skipped_unproven_subproblem,
+                    },
                 },
-                "iteration_log": iteration_log,
-                "lb_evolution": lb_evolution,
-                "ub_evolution": ub_evolution,
-                "cut_kind_lb_contribution": cut_kind_lb_contribution,
-                "gap_threshold": gap_threshold,
-                "setup_relaxation": setup_relaxation,
-                "master_warm_start_iterations": master_warm_start_iterations,
-                "greedy_warm_start_used": greedy_warm_start_used,
-                "parallel_subproblems": parallel_subproblems,
-                "cut_pool": {
-                    "size": len(benders_cuts),
-                    "kinds": cut_kinds,
-                    "skipped_duplicate": cuts_skipped_duplicate,
-                    "skipped_unproven_subproblem": cuts_skipped_unproven_subproblem,
-                },
-            },
+            ),
         )
-
-
-# ---------------------------------------------------------------------------
-# Master Problem (HiGHS MIP)
-# ---------------------------------------------------------------------------
 
 
 class _BendersCut:

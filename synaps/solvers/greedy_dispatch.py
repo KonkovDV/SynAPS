@@ -28,7 +28,7 @@ from synaps.solvers._dispatch_support import (
     recompute_assignment_setups,
 )
 from synaps.solvers._time_windows import operation_earliest_offset_minutes
-from synaps.solvers.coverage_outcome import classify_coverage, honest_status
+from synaps.solvers.coverage_outcome import stamp_honest_coverage
 from synaps.timegrain import physical_processing_minutes_for
 
 
@@ -215,13 +215,7 @@ class GreedyDispatch(BaseSolver):
         else:
             result = self._solve_priority_rule_sweep(virtual_problem, **kwargs)
         _unroll_lane_assignments(result, virtual_to_original)
-        coverage = classify_coverage(
-            n_operations=len(problem.operations),
-            n_assigned=len(result.assignments),
-        )
-        result.metadata["coverage_class"] = coverage.value
-        result.status = honest_status(result.status, coverage)
-        return result
+        return stamp_honest_coverage(problem, result)
 
     def _solve_priority_rule_sweep(
         self, virtual_problem: ScheduleProblem, **kwargs: Any
@@ -705,13 +699,7 @@ class BeamSearchDispatch(BaseSolver):
                 best = candidate
         assert best is not None
         _unroll_lane_assignments(best, virtual_to_original)
-        coverage = classify_coverage(
-            n_operations=len(problem.operations),
-            n_assigned=len(best.assignments),
-        )
-        best.metadata["coverage_class"] = coverage.value
-        best.status = honest_status(best.status, coverage)
-        return best
+        return stamp_honest_coverage(problem, best)
 
     def _solve_core(
         self, problem: ScheduleProblem, beam_width: int, **kwargs: Any

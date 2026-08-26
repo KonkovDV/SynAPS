@@ -53,6 +53,7 @@ from synaps.solvers._lbbd_cuts import (
     cut_pool_fingerprint,
     reported_lower_bound,
 )
+from synaps.solvers.coverage_outcome import refuse_unsupported_calendar, stamp_honest_coverage
 from synaps.solvers.cpsat_solver import CpSatSolver
 from synaps.solvers.partitioning import partition_machines
 from synaps.timegrain import duration_minutes_for
@@ -92,6 +93,9 @@ class LbbdHdSolver(BaseSolver):
         return "lbbd_hd"
 
     def solve(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
+        refused = refuse_unsupported_calendar(problem, self.name)
+        if refused is not None:
+            return refused
         t0 = time.monotonic()
 
         # ---- Configuration ----
@@ -258,7 +262,7 @@ class LbbdHdSolver(BaseSolver):
                     bool(best_assignments),
                 )
                 if failed is not None:
-                    return failed
+                    return stamp_honest_coverage(problem, failed)
                 break
 
             assignment_map, master_bound = master_result
@@ -479,51 +483,54 @@ class LbbdHdSolver(BaseSolver):
         # N2 (audit v3): expose whether the Benders master actually learned.
         benders_active = len(benders_cuts) > 0
         quality_warning = None if benders_active else "lbbd_no_cuts_degenerate"
-        return ScheduleResult(
-            solver_name=self.name,
-            status=status,
-            assignments=best_assignments,
-            objective=best_objective,
-            duration_ms=elapsed_ms,
-            random_seed=random_seed,
-            metadata={
-                "iterations": len(iteration_log),
-                "lower_bound": reported_lb,
-                "upper_bound": best_ub,
-                "gap": (best_ub - reported_lb) / max(best_ub, 1e-9)
-                if best_ub < float("inf")
-                else None,
-                "benders_active": benders_active,
-                "quality_warning": quality_warning,
-                "lower_bound_invariant_violated": lb_invariant_violated,
-                "lower_bound_method": "master_relaxation_benders_hd",
-                "lower_bound_components": {
-                    "master_relaxation_lb": reported_lb,
-                    "assignment_setup_lb": compute_assignment_setup_lb_total(
-                        problem, best_assignments
-                    ),
+        return stamp_honest_coverage(
+            problem,
+            ScheduleResult(
+                solver_name=self.name,
+                status=status,
+                assignments=best_assignments,
+                objective=best_objective,
+                duration_ms=elapsed_ms,
+                random_seed=random_seed,
+                metadata={
+                    "iterations": len(iteration_log),
+                    "lower_bound": reported_lb,
+                    "upper_bound": best_ub,
+                    "gap": (best_ub - reported_lb) / max(best_ub, 1e-9)
+                    if best_ub < float("inf")
+                    else None,
+                    "benders_active": benders_active,
+                    "quality_warning": quality_warning,
+                    "lower_bound_invariant_violated": lb_invariant_violated,
+                    "lower_bound_method": "master_relaxation_benders_hd",
+                    "lower_bound_components": {
+                        "master_relaxation_lb": reported_lb,
+                        "assignment_setup_lb": compute_assignment_setup_lb_total(
+                            problem, best_assignments
+                        ),
+                    },
+                    "iteration_log": iteration_log,
+                    "lb_evolution": lb_evolution,
+                    "ub_evolution": ub_evolution,
+                    "cut_kind_lb_contribution": cut_kind_lb_contribution,
+                    "gap_threshold": gap_threshold,
+                    "setup_relaxation": setup_relaxation,
+                    "setup_cut_top_k": setup_cut_top_k,
+                    "local_branching_enabled": local_branching_enabled,
+                    "local_branching_delta_ratio": local_branching_delta_ratio,
+                    "local_branching_max_ops": local_branching_max_ops,
+                    "master_warm_start_iterations": master_warm_starts,
+                    "max_ops_per_cluster": max_ops_per_cluster,
+                    "num_workers": num_workers,
+                    "warm_start_used": use_warm_start,
+                    "cut_pool": {
+                        "size": len(benders_cuts),
+                        "kinds": cut_kinds,
+                        "skipped_duplicate": cuts_skipped_duplicate,
+                        "skipped_unproven_subproblem": cuts_skipped_unproven_subproblem,
+                    },
                 },
-                "iteration_log": iteration_log,
-                "lb_evolution": lb_evolution,
-                "ub_evolution": ub_evolution,
-                "cut_kind_lb_contribution": cut_kind_lb_contribution,
-                "gap_threshold": gap_threshold,
-                "setup_relaxation": setup_relaxation,
-                "setup_cut_top_k": setup_cut_top_k,
-                "local_branching_enabled": local_branching_enabled,
-                "local_branching_delta_ratio": local_branching_delta_ratio,
-                "local_branching_max_ops": local_branching_max_ops,
-                "master_warm_start_iterations": master_warm_starts,
-                "max_ops_per_cluster": max_ops_per_cluster,
-                "num_workers": num_workers,
-                "warm_start_used": use_warm_start,
-                "cut_pool": {
-                    "size": len(benders_cuts),
-                    "kinds": cut_kinds,
-                    "skipped_duplicate": cuts_skipped_duplicate,
-                    "skipped_unproven_subproblem": cuts_skipped_unproven_subproblem,
-                },
-            },
+            ),
         )
 
 

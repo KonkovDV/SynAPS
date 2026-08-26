@@ -416,6 +416,27 @@
       "title": "SetupEntry",
       "type": "object"
     },
+    "ShiftInterval": {
+      "description": "One open processing window on a work center.\n\n``WorkCenter.calendar`` empty means 24/7. A non-empty list is a hard\nmachine calendar: an operation's ``[start_time, end_time]`` must sit\ninside a single interval (cannot straddle a closed period / midnight).",
+      "properties": {
+        "end": {
+          "format": "date-time",
+          "title": "End",
+          "type": "string"
+        },
+        "start": {
+          "format": "date-time",
+          "title": "Start",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "title": "ShiftInterval",
+      "type": "object"
+    },
     "SolveRegime": {
       "description": "Operational contexts described in the solver portfolio docs.",
       "enum": [
@@ -461,6 +482,13 @@
     "WorkCenter": {
       "description": "Execution resource, station, or processing unit.",
       "properties": {
+        "calendar": {
+          "items": {
+            "$ref": "#/$defs/ShiftInterval"
+          },
+          "title": "Calendar",
+          "type": "array"
+        },
         "capability_group": {
           "title": "Capability Group",
           "type": "string"

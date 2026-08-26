@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
-from synaps.model import SolverStatus
-from synaps.solvers.coverage_outcome import CoverageClass, classify_coverage, honest_status
+from synaps.model import ScheduleResult, SolverStatus
+from synaps.solvers.coverage_outcome import (
+    CoverageClass,
+    classify_coverage,
+    honest_status,
+    process_exit_code,
+    stamp_honest_coverage,
+)
 from synaps.solvers.registry import create_solver
 from tests.conftest import make_simple_problem
 
@@ -27,3 +33,29 @@ def test_greed_on_tiny_instance_is_full_feasible() -> None:
     assert result.metadata.get("coverage_class") == CoverageClass.FULL.value
     assert len(result.assignments) == len(problem.operations)
     assert result.status is SolverStatus.FEASIBLE
+    assert process_exit_code(result.status, CoverageClass.FULL) == 0
+
+
+def test_stamp_demotes_empty_feasible_on_every_family_label() -> None:
+    problem = make_simple_problem()
+    for name in (
+        "greedy",
+        "alns",
+        "cpsat",
+        "rhc",
+        "lbbd",
+        "lbbd_hd",
+        "incremental_repair",
+        "beam_search",
+    ):
+        result = ScheduleResult(solver_name=name, status=SolverStatus.FEASIBLE, assignments=[])
+        stamped = stamp_honest_coverage(problem, result)
+        assert stamped.status is SolverStatus.ERROR, name
+        assert process_exit_code(stamped.status, CoverageClass.EMPTY) == 3
+
+
+def test_process_exit_codes_match_adr_0005() -> None:
+    assert process_exit_code(SolverStatus.FEASIBLE, CoverageClass.FULL) == 0
+    assert process_exit_code(SolverStatus.FEASIBLE, CoverageClass.INCOMPLETE) == 2
+    assert process_exit_code(SolverStatus.ERROR, CoverageClass.EMPTY) == 3
+    assert process_exit_code(SolverStatus.ERROR, CoverageClass.INCOMPLETE) == 1

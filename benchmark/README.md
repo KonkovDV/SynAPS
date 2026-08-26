@@ -58,7 +58,7 @@ Mapping caveats (see `benchmark/fjs_loader.py`, `describe_fjs_mapping()`):
 
 ## Evidence and claims
 
-Published protocol and non-claims: [`BENCHMARK_EVIDENCE_COVER_2026_08_26.md`](BENCHMARK_EVIDENCE_COVER_2026_08_26.md). May 2026 file is historical (`SUPERSEDED`): [`BENCHMARK_EVIDENCE_50K_2026_05_18.md`](BENCHMARK_EVIDENCE_50K_2026_05_18.md).
+Published protocol and non-claims: [`BENCHMARK_EVIDENCE_COVER_2026_08_26.md`](BENCHMARK_EVIDENCE_COVER_2026_08_26.md). The hashed ladder is **not homogeneous**: 60k/200k/500k completed on seeds 1/42/999; **100k@200 is two of three** (seed 42 stalled). May 2026 file is historical (`SUPERSEDED`): [`BENCHMARK_EVIDENCE_50K_2026_05_18.md`](BENCHMARK_EVIDENCE_50K_2026_05_18.md).
 
 Cable C6a / C6-R1 (2026-08-26): [`BENCHMARK_EVIDENCE_CABLE_C6_2026_08_26.md`](BENCHMARK_EVIDENCE_CABLE_C6_2026_08_26.md).
 

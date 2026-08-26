@@ -58,3 +58,16 @@ def test_deadzone_p2_3_answer_is_no() -> None:
         (_EVIDENCE / "deadzone-5k-2026-08-25" / "summary.json").read_text(encoding="utf-8")
     )
     assert live["p2_3"]["answer"] == "no"
+
+
+def test_sha256sums_gate_fails_on_planted_mismatch(tmp_path: Path) -> None:
+    target = tmp_path / "environment.json"
+    target.write_text("{}\n", encoding="utf-8")
+    sums = tmp_path / "SHA256SUMS.txt"
+    sums.write_text("0" * 64 + " environment.json\n", encoding="utf-8")
+    try:
+        _check_sums(sums)
+    except AssertionError as exc:
+        assert "mismatch" in str(exc)
+    else:
+        raise AssertionError("hash gate accepted a planted mismatch")

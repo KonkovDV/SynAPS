@@ -78,15 +78,28 @@ def test_available_solver_configs_matches_public_portfolio() -> None:
     ]
 
 
+def _assert_positive_time_limit(solve_kwargs: dict[str, object], name: str) -> None:
+    limit = solve_kwargs.get("time_limit_s")
+    if limit is None and isinstance(solve_kwargs.get("inner_kwargs"), dict):
+        limit = solve_kwargs["inner_kwargs"].get("time_limit_s")
+    assert limit is not None, name
+    assert float(limit) > 0, name
+
+
 def test_every_named_config_declares_time_limit_s() -> None:
     """B3: fail-closed. No public named config may omit a wall box."""
     for name in available_solver_configs():
         _solver, solve_kwargs = create_solver(name)
-        limit = solve_kwargs.get("time_limit_s")
-        if limit is None and isinstance(solve_kwargs.get("inner_kwargs"), dict):
-            limit = solve_kwargs["inner_kwargs"].get("time_limit_s")
-        assert limit is not None, name
-        assert float(limit) > 0, name
+        _assert_positive_time_limit(dict(solve_kwargs), name)
+
+
+def test_time_limit_gate_fails_on_planted_missing_box() -> None:
+    try:
+        _assert_positive_time_limit({}, "PLANTED")
+    except AssertionError as exc:
+        assert "PLANTED" in str(exc)
+    else:
+        raise AssertionError("time_limit gate accepted a planted config without time_limit_s")
 
 
 def test_create_solver_returns_solver_instance_and_default_solve_kwargs() -> None:

@@ -43,8 +43,8 @@ levers are forbidden as retunes (E4 / honesty protocol).
 | What | `ShiftInterval` on `WorkCenter` | GridPlan/signs emit many `earliest_start`/`latest_finish` |
 | Notary | New kind `CALENDAR_VIOLATION` | Existing window kinds only; night analog already measured |
 | Native COVER | Must skip or gain a calendar ABI | Unchanged; still blind to “machine closed” |
-| Conformance matrix | GREED/COVER clip; CP-SAT/ALNS/LBBD/BEAM silent until encoded | No new field; same 5k hole |
-| 25 named configs | Same names; windowed 5k@400s must not route to ALNS-500 | Router still sees windows, not a calendar |
+| Conformance matrix | GREED/COVER/BEAM clip processing; CP-SAT/ALNS/LBBD refuse calendar | No new field; same 5k hole |
+| 25 named configs | Same names; windowed or calendar 5k@400s must not route to ALNS-500 | Domain unrolling still looks like per-op windows |
 | Breaks | CP-SAT `FEASIBLE` can fail the checker until shifts are in the model | Urban night ТОиР still cannot say “the crew is off at 06:00” as a resource |
 
 ## Proposed result / exit codes (E2)
@@ -62,7 +62,10 @@ Empty schedule with `FEASIBLE`/`OPTIMAL` is forbidden (`synaps.solvers.coverage_
 
 - Unconstrained 5k@400s → `ALNS-500` (A15-P1-3). Measured empty plan is
   `ERROR`, not `FEASIBLE`. Empty + success is forbidden.
-- Hard windows or non-empty calendar → `RHC-GREEDY` below the COVER 10k gate.
+- Hard windows or non-empty calendar → `RHC-GREEDY` when a latency hint
+  would otherwise pick ALNS (below the COVER 10k gate). Without a latency
+  hint, 5k still selects `LBBD-10-HD`, which then **refuses** a non-empty
+  calendar (`ERROR`), not `RHC-GREEDY`.
 - Incomplete coverage (`MISSING_ASSIGNMENT`) is not `verified_feasible`.
 - Do not lower `global_greedy_cover_min_ops` to chase a Yes.
 
@@ -74,5 +77,10 @@ lag stays under ADR-0004 until those repos regression-run this primitive.
 
 ## Partial ship
 
-Kernel field + checker + greedy/COVER clip + native skip are in the tree.
-CP-SAT/ALNS/LBBD/BEAM do not encode shifts. That gap is KI-N7, not a Yes.
+Kernel field + checker + greedy/COVER/BEAM clip of **processing** + native skip
+are in the tree. BEAM uses the same `find_earliest_feasible_slot` as GREED, so
+processing is clipped; ADR table row “BEAM silent” was wrong for processing.
+CP-SAT/ALNS/LBBD do not encode shifts: they **refuse** a non-empty calendar
+(`calendar_unsupported`, empty `ERROR`). SDST setup occupancy before `start`
+is still not clipped (KI-N7 follow-up). CLI/harness process codes 0/2/3/1 are
+implemented. That gap is KI-N7, not a Yes.

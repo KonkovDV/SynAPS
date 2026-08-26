@@ -20,6 +20,7 @@ from synaps.instrumentation import (
 from synaps.logging import get_logger
 from synaps.model import ScheduleResult, SolverErrorCategory, SolverStatus
 from synaps.problem_profile import build_problem_profile
+from synaps.solvers.coverage_outcome import stamp_honest_coverage
 from synaps.solvers.incremental_repair import IncrementalRepair
 from synaps.solvers.registry import create_solver
 from synaps.solvers.router import (
@@ -152,14 +153,18 @@ def _run_guarded_solve(
     solve_kwargs: Mapping[str, object],
 ) -> ScheduleResult:
     try:
-        return guarded_solve(solver, problem, limits=limits, **dict(solve_kwargs))
+        result = guarded_solve(solver, problem, limits=limits, **dict(solve_kwargs))
+        return stamp_honest_coverage(problem, result)
     except SolverMemoryError as exc:
         _log.error("portfolio_memory_guard_triggered", error=str(exc), solver=solver.name)
-        return ScheduleResult(
-            solver_name=solver.name,
-            status=SolverStatus.ERROR,
-            error_category=SolverErrorCategory.INTERNAL_ERROR,
-            metadata={"guard_error": str(exc), "guard_kind": "memory"},
+        return stamp_honest_coverage(
+            problem,
+            ScheduleResult(
+                solver_name=solver.name,
+                status=SolverStatus.ERROR,
+                error_category=SolverErrorCategory.INTERNAL_ERROR,
+                metadata={"guard_error": str(exc), "guard_kind": "memory"},
+            ),
         )
 
 

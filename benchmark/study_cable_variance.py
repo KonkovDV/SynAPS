@@ -136,9 +136,7 @@ def c6_r1_seed2(out_dir: Path) -> dict[str, Any]:
         }
         for row in waves
         if not row.get("skipped")
-        and (
-            row.get("status") != "feasible" or int(row.get("notary_hard_violations") or 0) != 0
-        )
+        and (row.get("status") != "feasible" or int(row.get("notary_hard_violations") or 0) != 0)
     ]
     payload = {
         "experiment": "C6-R1 seed=2 waves=4",

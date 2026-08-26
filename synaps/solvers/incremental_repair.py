@@ -23,6 +23,7 @@ from synaps.solvers._dispatch_support import (
     recompute_assignment_setups,
 )
 from synaps.solvers._time_windows import operation_earliest_offset_minutes
+from synaps.solvers.coverage_outcome import stamp_honest_coverage
 from synaps.solvers.delta_notary import notarize_repair
 
 if TYPE_CHECKING:
@@ -254,7 +255,7 @@ class IncrementalRepair(BaseSolver):
 
         virtual_problem, virtual_to_original = _virtualize_parallel_lanes(problem)
         if not virtual_to_original:
-            return self._solve_core(problem, **kwargs)
+            return stamp_honest_coverage(problem, self._solve_core(problem, **kwargs))
         mapped_kwargs = dict(kwargs)
         mapped_kwargs["base_assignments"] = _map_assignments_onto_virtual_lanes(
             list(kwargs.get("base_assignments") or []),
@@ -263,7 +264,7 @@ class IncrementalRepair(BaseSolver):
         result = self._solve_core(virtual_problem, **mapped_kwargs)
         _unroll_lane_assignments(result, virtual_to_original)
         result.metadata["parallel_virtualization"] = True
-        return result
+        return stamp_honest_coverage(problem, result)
 
     def _solve_core(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
         t0 = time.monotonic()

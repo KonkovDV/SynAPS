@@ -92,8 +92,8 @@ P2.3-era bytes are gone.
 1. Not a factory night-shift. No machine calendar.
 2. Not COVER-at-scale: 5k is below the 10k global list-schedule gate.
 3. n=3 seeds, one draw each. Not `--repeats>1`.
-4. Words forbidden: optimally, proven (except empty-notary on a full schedule),
-   guarantees, industrially deployed.
+4. Words forbidden: optimally, proven (except empty-notary on a full schedule), <!-- claims-ok -->
+   guarantees, industrially deployed. <!-- claims-ok -->
 5. Watchdog 600s is not GREED's registry time box.
 
 ## Failure taxonomy (this protocol)
@@ -111,11 +111,11 @@ P2.3-era bytes are gone.
 P2.3 freeze (5k@8 payload; `environment.json` in this file is **orphaned** —
 later remainder overwrote the bytes):
 
-- `summary_p2_3_5000x8.json` = `25a4cf8bf27052eb106f06724e2af678f9d0e0500e171d5131d0368e87e1c62d`
-- `SHA256SUMS_p2_3.txt` = `22f71aaa49a93a8a08b8b2529ea7953d5a1c4f7d34e4f75f9f7faebd437789fa`
+- `summary_p2_3_5000x8.json` = `8c1fd12dc128a244eb6216f5a617c85503300bf5d08d3a438eee29b34c618b25`
+- `SHA256SUMS_p2_3.txt` = `93f55815ceab4400a6108d0ade584e574e8dce7ecc965b460fa536a706852595`
 
 Live directory after remainder + summary rebuild (`SHA256SUMS.txt`
-`3ef7e7b138f8645c930f048b0e20007c6ea4bcc8e2b436705414512f654a0d63`).
+`f3d1615d2e524bdae7f6bce6f13f1dc60c454c0c60695f920f3934ed49bd0c20`).
 `environment.json` is remainder-session, not the P2.3 capture.
 P2.3 freeze sums now list only the 15 `run_5000ops_8m_*.json` files plus
 `summary_p2_3_5000x8.json` (the old freeze `summary.json` bytes). The freeze
@@ -123,7 +123,7 @@ copy no longer lists overwritten `environment.json` / live `summary.json` /
 `run_3000ops_4m_GREED_seed1.json`.
 
 Recapture (not P2.3): `sessions/recapture-2026-08-26/environment.json`
-SHA-256 `8fa793e793479e128289329c059fea193083f5e4593d39335f95b43c00dc14c1`.
+SHA-256 `c8bc8363a3b0849fd33639b589283f7dda326712bbe1ea3b590af9a18834e1bc`.
 
 B1 recapture 8k@4 RHC-GREEDY seed 1 (hashed remainder JSON **not** rewritten).
 Epoch file stays `worker_error` at 210 s. This tree: isolate finished inside
@@ -136,32 +136,32 @@ is unknown (old isolate may have dropped stderr).
 
 | File | SHA-256 |
 | --- | --- |
-| `environment.json` | `52cbc8d517bc465907d4161d63dd9782ba08747f88ac4a342c3d80cae4282ca7` |
-| `sessions/recapture-2026-08-26/environment.json` | `8fa793e793479e128289329c059fea193083f5e4593d39335f95b43c00dc14c1` |
-| `sessions/worker-error-2026-08-26/run_8000ops_4m_RHC_GREEDY_seed1.json` | `bd5c2d7d0187d6eb0f2119c6bdad9b2c65b8f2626e0a875e7003fdfc63eb847e` |
-| `sessions/worker-error-2026-08-26/SHA256SUMS.txt` | `905f85fd2250bf0d2e8d280080d5d5fc6cd878b56f2c2d9c066f904175890a5f` |
-| `sessions/worker-error-2026-08-26-py313/run_8000ops_4m_RHC_GREEDY_seed1.json` | `fc5623f68c16ef9b46b205e3f8c95dcbf4567fe1d8a8a1b6294b324a6057bd31` |
-| `sessions/worker-error-2026-08-26-py313/SHA256SUMS.txt` | `94ed1c9e13a33b96bdabb165d5280a6bb9c1e1c28c352b9e96113fb5e395f040` |
-| `summary.json` | `0a24dc92546dc90cc9455102c0ff973e9f4045bf76d7361436ad2c117163407f` |
-| `SHA256SUMS.txt` | `3ef7e7b138f8645c930f048b0e20007c6ea4bcc8e2b436705414512f654a0d63` |
-| `run_5000ops_8m_GREED_seed1.json` | `dacb5fee40714db95da68cce9937860460e6472f1818a26a093828f19d6accb5` |
-| `run_5000ops_8m_GREED_seed42.json` | `30c7345a05755a45bcb5b87ae780fbf7b82d362f2403b3ac08f05775d49acb64` |
-| `run_5000ops_8m_GREED_seed999.json` | `5817b5f015911d7b93cd5151367a7b051adcaa7d5dfa0ce6ddebe8a8701131b1` |
-| `run_5000ops_8m_ALNS_500_seed1.json` | `f7ce9c52a9d111fedc768cc54488c3c364019ab545cf250756ec296b2e40b4b7` |
-| `run_5000ops_8m_ALNS_500_seed42.json` | `7a1f7cabdebaffce3156170b5294604a05534c4b2e9892b6224b278614c4513d` |
-| `run_5000ops_8m_ALNS_500_seed999.json` | `2f9b00e38c798fc86ab1083940945e67a9c66e580cdbdadb413dc03b5a24d4b1` |
-| `run_5000ops_8m_RHC_GREEDY_seed1.json` | `d6b2483eeb7ae3988d6eda434f9804d3d22670d53536dc9fa570f609b615e90f` |
-| `run_5000ops_8m_RHC_GREEDY_seed42.json` | `76556864ecf835141930ff7dfcd8124b1ca1510ef08983b03c5a4da354a28c56` |
-| `run_5000ops_8m_RHC_GREEDY_seed999.json` | `20b27f7599dc6928bf9e6919eb17530f00bfb44f14c913d4d1ba735cb1931c07` |
-| `run_5000ops_8m_RHC_GREEDY_COVER_seed1.json` | `0d99f075e6caf76f94e6d71e2163550688211410e1236d59334a418918e5c1a9` |
-| `run_5000ops_8m_RHC_GREEDY_COVER_seed42.json` | `a48c877e917135c0d7d9dfa646650acc3d776f87110bcb5ce8c786f08297d4d3` |
-| `run_5000ops_8m_RHC_GREEDY_COVER_seed999.json` | `454635159ad97ed4ad2040fc8e246f8c274caa3ec8b95e6ac047ff1cd89863f3` |
-| `run_5000ops_8m_RHC_ALNS_SEARCH_COVER_seed1.json` | `bdd10160ede03a0bb8081f82ca7e1c70b5952e66731c7ada5e8770cb8a11229d` |
-| `run_5000ops_8m_RHC_ALNS_SEARCH_COVER_seed42.json` | `9b623d20ff16714311b974e1da98d6ce8536d954117acd58795354df2a955098` |
-| `run_5000ops_8m_RHC_ALNS_SEARCH_COVER_seed999.json` | `9c7f040f7e9b14410f867e1dc11ebcb2295324ee5234a9cfff2e89123387ae19` |
+| `environment.json` | `ef3d4ae969749474d324c29c41897382611bddad0d436f39efc331977832b1cf` |
+| `sessions/recapture-2026-08-26/environment.json` | `c8bc8363a3b0849fd33639b589283f7dda326712bbe1ea3b590af9a18834e1bc` |
+| `sessions/worker-error-2026-08-26/run_8000ops_4m_RHC_GREEDY_seed1.json` | `b09fc80fe11dfeea44174c63aa849e3b5120da0c2aeacdd746ec74f5b7f62a5c` |
+| `sessions/worker-error-2026-08-26/SHA256SUMS.txt` | `e1cc6e2566cb3b811cb698fafb3b8d7751049800c6e3c76bcec115e9926cf29d` |
+| `sessions/worker-error-2026-08-26-py313/run_8000ops_4m_RHC_GREEDY_seed1.json` | `d51f8ea42e5cc911c6851916f4dcd783d25e9542ed8d0760525d63f11f35178f` |
+| `sessions/worker-error-2026-08-26-py313/SHA256SUMS.txt` | `33ca8da76c2bed1ab8c5f2a8c81846ea32383b7f6a38aa510af7559b24511ed9` |
+| `summary.json` | `29ab576d0023c9aff16f674c6f94d257c4d4b94a9c15a3086249a890643b45c4` |
+| `SHA256SUMS.txt` | `f3d1615d2e524bdae7f6bce6f13f1dc60c454c0c60695f920f3934ed49bd0c20` |
+| `run_5000ops_8m_GREED_seed1.json` | `358062e9b2d3c0a1848d3eedbca1deb8aee6819cac82baf68facf2bb431df2a6` |
+| `run_5000ops_8m_GREED_seed42.json` | `f254f11e1bb7f9dea5a5d58cf94a18f569bfceac9b634b6fea7e4b8266ab0508` |
+| `run_5000ops_8m_GREED_seed999.json` | `d05ce024f7d5adab25e9c32c8ba06355c456d0231c331a5a7a34f4516fabfddc` |
+| `run_5000ops_8m_ALNS_500_seed1.json` | `397a172e6e82acc726c781c82b059269ffb05c7cd147c17845fd5e6071250734` |
+| `run_5000ops_8m_ALNS_500_seed42.json` | `f761ff8173a085a42d03a5eb8cc6cbcb0f1c9e29573ec13a69a8504240eeac63` |
+| `run_5000ops_8m_ALNS_500_seed999.json` | `e5a004f6b2edf6e973c45abd87b0f79c4232abec5ec6fd8c7484421244666c78` |
+| `run_5000ops_8m_RHC_GREEDY_seed1.json` | `7b163f7c545460bb53108d5537d9e1b7d44215395b8eac0da68b2236357caac9` |
+| `run_5000ops_8m_RHC_GREEDY_seed42.json` | `cc7df457f4fbf0291e7cabc869de38cfd928e2ed4b9befab7d6be9572ae5a96c` |
+| `run_5000ops_8m_RHC_GREEDY_seed999.json` | `67c051ed87a3b78732fa1490beeff240bdc826eabd54add824fad0e58285b8c8` |
+| `run_5000ops_8m_RHC_GREEDY_COVER_seed1.json` | `2a8d5c4ab17c593c886f93676f331b5540df59f055091a8520e10b97facf3980` |
+| `run_5000ops_8m_RHC_GREEDY_COVER_seed42.json` | `ff3460981f09883cf2ba031013098f82f4f78d2f329fb60a9b6e470add6e449f` |
+| `run_5000ops_8m_RHC_GREEDY_COVER_seed999.json` | `5c744685a4e0e31e6eae7ca16000699b46e38658c157cb0bdc5905152f2b4c54` |
+| `run_5000ops_8m_RHC_ALNS_SEARCH_COVER_seed1.json` | `00d8c9aec9f3432fa587daa5495d0c8797c87b1c422c5049ced8c18498b1bd1c` |
+| `run_5000ops_8m_RHC_ALNS_SEARCH_COVER_seed42.json` | `f6d5a86a713ec65e34df0f3f839032f03689251236241a7e7adf2febc6982968` |
+| `run_5000ops_8m_RHC_ALNS_SEARCH_COVER_seed999.json` | `6e3f535589be54971401fc1d81f6c2ecaacdf251b3d1ac7464af7547f0373ed1` |
 
 **Remainder (explicit):** `run_3000*`, `run_5000ops_4m_*`, `run_5000ops_12m_*`,
 `run_8000*`, `run_3000ops_4m_GREED_seed1.json` (in-process 14.5 min stall;
-live SHA-256 `f71ff7892443c7d97e60d314ae3445737e8bda6237c67b7befee06e5fb834937`),
+live SHA-256 `4978269481fd0388b97122c45a4eabc41917c254e34f75659ea1817f46265f41`),
 and `sessions/**`. Live `SHA256SUMS.txt` covers top-level JSON including
 remainder cells. `sessions/` is a later capture, not P2.3.

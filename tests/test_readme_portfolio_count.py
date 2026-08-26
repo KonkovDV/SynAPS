@@ -28,12 +28,9 @@ def test_available_solver_configs_count_matches_readme_en_and_ru() -> None:
     en_n = int(en_match.group(1))
     ru_n = int(ru_match.group(1))
     assert en_n == registry_n, (
-        f"README.md portfolio count {en_n} != registry {registry_n} "
-        f"({available_solver_configs()})"
+        f"README.md portfolio count {en_n} != registry {registry_n} ({available_solver_configs()})"
     )
-    assert ru_n == registry_n, (
-        f"README_RU.md portfolio count {ru_n} != registry {registry_n}"
-    )
+    assert ru_n == registry_n, f"README_RU.md portfolio count {ru_n} != registry {registry_n}"
 
 
 def test_github_repo_description_file_matches_registry_count() -> None:
