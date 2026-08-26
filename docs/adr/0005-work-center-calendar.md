@@ -1,10 +1,15 @@
 # ADR-0005: Work-center shift calendar is a kernel primitive
 
-- **Status:** Accepted. Kernel gates OPEN (2026-08-26 И3/И4/И8): occupancy
-  notary, calendar-aware routing whitelist, empty-success demotion.
-  Implementation remaining: CP-SAT/ALNS/LBBD still refuse rather than encode
-  shifts; native COVER still skips. Fourth domain repository is not opened
-  in this round.
+- **Status:** Accepted. Kernel gates OPEN on merge
+  `9b5063422f25d6a3cd26b18f6749fc7720541398` (PR #11, 2026-08-26T20:22:50Z).
+  Linux required jobs run
+  [33007702599](https://github.com/KonkovDV/SynAPS/actions/runs/33007702599)
+  (`lint`, `contract-schema-drift`, `typecheck`, `test-fast (3.12)`,
+  `test-fast (3.13)`, `benchmark-smoke`, `control-plane` all success).
+  Occupancy notary, calendar-aware routing whitelist, empty-success
+  demotion. Implementation remaining: CP-SAT/ALNS/LBBD still refuse rather
+  than encode shifts; native COVER still skips. Fourth domain repository
+  is not created in this commit.
 - **Date:** 2026-08-26
 - **Related:** ADR-0003 (domain placement), night-window dead-zone evidence
 
@@ -81,10 +86,12 @@ Empty schedule with `FEASIBLE`/`OPTIMAL` is forbidden (`synaps.solvers.coverage_
 
 ## Gate
 
-Kernel gates are **open**: occupancy notary, calendar-aware routing whitelist,
-empty-success `ERROR`. Without those, do not start a fourth domain repository
-and do not promise night/emergency work in a new domain layer. GridPlan/MobiRoute
-pin lag stays under ADR-0004 until 2026-09-09.
+Kernel gates are **open** on merge `9b506342` / Linux run
+[33007702599](https://github.com/KonkovDV/SynAPS/actions/runs/33007702599)
+(2026-08-26): occupancy notary, calendar-aware routing whitelist,
+empty-success `ERROR`. Do not promise night/emergency work in a new domain
+layer until that SHA is the pin. GridPlan/MobiRoute pin lag stays under
+ADR-0004 until 2026-09-09.
 
 ## Partial ship
 
