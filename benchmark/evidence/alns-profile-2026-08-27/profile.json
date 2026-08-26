@@ -1,0 +1,96 @@
+{
+  "one_liner": "construction in evaluate_gap (C:\\SynAPS\\synaps\\solvers\\_dispatch_support.py:527) tottime=47.737146s ncalls=15108752",
+  "protocol": "alns-500-5k8-cprofile-2026-08-27",
+  "pstats_head": "         713009374 function calls (713009358 primitive calls) in 250.301 seconds\n\n   Ordered by: internal time\n   List reduced from 197 to 10 due to restriction <10>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n 15108752   47.737    0.000  182.098    0.000 C:\\SynAPS\\synaps\\solvers\\_dispatch_support.py:527(evaluate_gap)\n 80420206   39.205    0.000   85.974    0.000 {method 'get' of 'dict' objects}\n171972818   31.806    0.000   51.959    0.000 C:\\Users\\\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044c\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\uuid.py:268(__hash__)\n171972818   20.153    0.000   20.153    0.000 {built-in method builtins.hash}\n        8   17.266    2.158  253.030   31.629 C:\\SynAPS\\synaps\\solvers\\greedy_dispatch.py:268(_solve_core)\n 24972027   13.381    0.000   20.709    0.000 C:\\SynAPS\\synaps\\solvers\\_dispatch_support.py:312(_offset_minutes)\n  2835184   12.497    0.000  211.606    0.000 C:\\SynAPS\\synaps\\solvers\\_dispatch_support.py:485(find_earliest_feasible_slot)\n 54407839    8.633    0.000    8.633    0.000 {built-in method builtins.getattr}\n 27809183    8.033    0.000   24.492    0.000 C:\\SynAPS\\synaps\\solvers\\_dispatch_support.py:317(_assignment_state_id)\n 25696549    7.624    0.000    7.624    0.000 {method 'total_seconds' of 'datetime.timedelta' objects}\n\n\n",
+  "run": {
+    "generate_s": 0.303,
+    "n_machines": 8,
+    "n_operations_requested": 5000,
+    "night_analog": false,
+    "notary_hard_violation_kinds": null,
+    "ops_generated": 5000,
+    "ops_scheduled": 0,
+    "scheduled_ratio": 0.0,
+    "search_stop_reason": "wall_clock_before_search",
+    "seed": 1,
+    "solver_config": "ALNS-500",
+    "status": "error",
+    "time_limit_reached": null,
+    "time_limit_s_kwarg": 300.0,
+    "verified_feasible": false,
+    "wall_clock_before_search": true,
+    "wall_time_s": 253.388
+  },
+  "top10_tottime": [
+    {
+      "file": "C:\\SynAPS\\synaps\\solvers\\_dispatch_support.py",
+      "func": "evaluate_gap",
+      "line": 527,
+      "ncalls": 15108752,
+      "tottime": 47.737146
+    },
+    {
+      "file": "~",
+      "func": "<method 'get' of 'dict' objects>",
+      "line": 0,
+      "ncalls": 80420206,
+      "tottime": 39.204712
+    },
+    {
+      "file": "C:\\Users\\\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044c\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\uuid.py",
+      "func": "__hash__",
+      "line": 268,
+      "ncalls": 171972818,
+      "tottime": 31.805946
+    },
+    {
+      "file": "~",
+      "func": "<built-in method builtins.hash>",
+      "line": 0,
+      "ncalls": 171972818,
+      "tottime": 20.152647
+    },
+    {
+      "file": "C:\\SynAPS\\synaps\\solvers\\greedy_dispatch.py",
+      "func": "_solve_core",
+      "line": 268,
+      "ncalls": 8,
+      "tottime": 17.265737
+    },
+    {
+      "file": "C:\\SynAPS\\synaps\\solvers\\_dispatch_support.py",
+      "func": "_offset_minutes",
+      "line": 312,
+      "ncalls": 24972027,
+      "tottime": 13.381108
+    },
+    {
+      "file": "C:\\SynAPS\\synaps\\solvers\\_dispatch_support.py",
+      "func": "find_earliest_feasible_slot",
+      "line": 485,
+      "ncalls": 2835184,
+      "tottime": 12.497211
+    },
+    {
+      "file": "~",
+      "func": "<built-in method builtins.getattr>",
+      "line": 0,
+      "ncalls": 54407839,
+      "tottime": 8.633177
+    },
+    {
+      "file": "C:\\SynAPS\\synaps\\solvers\\_dispatch_support.py",
+      "func": "_assignment_state_id",
+      "line": 317,
+      "ncalls": 27809183,
+      "tottime": 8.03283
+    },
+    {
+      "file": "~",
+      "func": "<method 'total_seconds' of 'datetime.timedelta' objects>",
+      "line": 0,
+      "ncalls": 25696549,
+      "tottime": 7.624218
+    }
+  ]
+}

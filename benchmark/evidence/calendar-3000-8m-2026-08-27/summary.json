@@ -1,0 +1,53 @@
+{
+  "notary_kinds_by_seed": {
+    "1": [
+      "CALENDAR_VIOLATION",
+      "MISSING_ASSIGNMENT"
+    ],
+    "42": [
+      "CALENDAR_VIOLATION",
+      "MISSING_ASSIGNMENT"
+    ],
+    "999": [
+      "CALENDAR_VIOLATION",
+      "MISSING_ASSIGNMENT"
+    ]
+  },
+  "protocol": "machine-calendar-3000-8-2026-08-27",
+  "reason_counts_by_seed": {
+    "1": {
+      "GOST_PRIORITY_PREEMPTED": 0,
+      "IMPOSSIBLE_BY_CONSTRUCTION": 0,
+      "NO_CREW_CAPACITY": 239,
+      "WINDOW_CLOSED": 0
+    },
+    "42": {
+      "GOST_PRIORITY_PREEMPTED": 0,
+      "IMPOSSIBLE_BY_CONSTRUCTION": 0,
+      "NO_CREW_CAPACITY": 298,
+      "WINDOW_CLOSED": 0
+    },
+    "999": {
+      "GOST_PRIORITY_PREEMPTED": 0,
+      "IMPOSSIBLE_BY_CONSTRUCTION": 0,
+      "NO_CREW_CAPACITY": 375,
+      "WINDOW_CLOSED": 0
+    }
+  },
+  "scheduled_ratios": [
+    0.9203333333333333,
+    0.9006666666666666,
+    0.875
+  ],
+  "seeds": [
+    1,
+    42,
+    999
+  ],
+  "solver_config": "RHC-GREEDY",
+  "walls_s": [
+    150.138,
+    150.108,
+    150.116
+  ]
+}
