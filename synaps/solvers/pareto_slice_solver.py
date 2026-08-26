@@ -21,6 +21,7 @@ from typing import Any
 from synaps.model import ObjectiveValues, ScheduleProblem, ScheduleResult, SolverStatus
 from synaps.objective import scalarize
 from synaps.solvers import BaseSolver
+from synaps.solvers.coverage_outcome import stamp_honest_coverage
 from synaps.solvers.cpsat_solver import CpSatSolver
 
 
@@ -158,12 +159,15 @@ class ParetoSliceCpSatSolver(BaseSolver):
         )
 
         baseline_solver = CpSatSolver()
-        baseline = baseline_solver.solve(
+        baseline = stamp_honest_coverage(
             problem,
-            time_limit_s=stage1_time_limit_s,
-            random_seed=random_seed,
-            num_workers=num_workers,
-            material_loss_scale=material_loss_scale,
+            baseline_solver.solve(
+                problem,
+                time_limit_s=stage1_time_limit_s,
+                random_seed=random_seed,
+                num_workers=num_workers,
+                material_loss_scale=material_loss_scale,
+            ),
         )
 
         if baseline.status not in {SolverStatus.OPTIMAL, SolverStatus.FEASIBLE}:
@@ -260,7 +264,7 @@ class ParetoSliceCpSatSolver(BaseSolver):
                     "epsilon_points": epsilon_points,
                 },
             }
-            return baseline
+            return stamp_honest_coverage(problem, baseline)
 
         selected_result.solver_name = self.name
         selected_result.metadata = {
@@ -284,7 +288,7 @@ class ParetoSliceCpSatSolver(BaseSolver):
                 "epsilon_points": epsilon_points,
             },
         }
-        return selected_result
+        return stamp_honest_coverage(problem, selected_result)
 
 
 __all__ = ["ParetoSliceCpSatSolver"]

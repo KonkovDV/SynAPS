@@ -233,9 +233,9 @@ class FeasibilityChecker:
            machine speed — hard floor, no tolerance, F2; DURATION_MISMATCH).
            Under ``strict_grain=True``, spans below the canonical integer
            reservation grain are flagged as DURATION_BELOW_GRAIN.
-        9. Work-center shift calendar (CALENDAR_VIOLATION): processing
-           ``[start, end]`` must sit in one published interval. Empty calendar
-           is 24/7. Setup occupancy before start is not clipped (KI-N7).
+        9. Work-center shift calendar (CALENDAR_VIOLATION): occupancy
+           ``[start - setup, end]`` must sit in one published interval. Empty
+           calendar is 24/7. Dispatch clips setup together with processing.
     """
 
     @staticmethod
@@ -1071,23 +1071,26 @@ class FeasibilityChecker:
         exhaustive: bool,
         operation_ids: frozenset[Any] | None = None,
     ) -> None:
-        """Processing must sit in one published shift (empty calendar = 24/7)."""
+        """Occupancy [start - setup, end] must sit in one published shift."""
 
         for assignment in assignments:
             if operation_ids is not None and assignment.operation_id not in operation_ids:
                 continue
             work_center = work_centers_by_id.get(assignment.work_center_id)
             calendar = getattr(work_center, "calendar", None) if work_center is not None else None
+            setup_minutes = int(getattr(assignment, "setup_minutes", 0) or 0)
+            occupancy_start = assignment.start_time - timedelta(minutes=setup_minutes)
             if calendar and not processing_fits_calendar(
-                assignment.start_time, assignment.end_time, calendar
+                occupancy_start, assignment.end_time, calendar
             ):
                 violations.append(
                     FeasibilityViolation(
                         "CALENDAR_VIOLATION",
                         (
-                            f"Operation {assignment.operation_id} "
-                            f"[{assignment.start_time}, {assignment.end_time}] is not "
-                            f"inside a shift on {assignment.work_center_id}."
+                            f"Operation {assignment.operation_id} occupancy "
+                            f"[{occupancy_start}, {assignment.end_time}] "
+                            f"(setup {setup_minutes} min) is not inside a shift on "
+                            f"{assignment.work_center_id}."
                         ),
                         operation_id=assignment.operation_id,
                         work_center_id=assignment.work_center_id,

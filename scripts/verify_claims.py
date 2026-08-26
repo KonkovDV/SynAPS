@@ -16,9 +16,13 @@ FORBIDDEN = (
     r"\boptimally\b",
     r"\bguarantees\b",
     r"industrially deployed",
-    r"\bвнедр[её]н(?:ный|ая|ое|ые|ных)?\b",
-    r"\bгарантирует\b",
-    r"\bоптимально\b",
+    r"\bвнедр[её]н\w*",
+    r"\bгарант(?:ия|ированн\w*)",
+    r"\bоптимальн\w*",
+    r"\bдоказан(?:о|а|ы)\b",
+    r"\bпромышленно\b",
+    r"\bуникальн\w*",
+    r"лучш\w*\s+в\s+мире",
 )
 PROVEN_OK = re.compile(
     r"proven_hard_violations\s*=\s*[∅Ø]|empty-notary|empty notary|notary empty",
@@ -32,7 +36,10 @@ EXPLICIT_NONCLAIM = re.compile(
 NON_CLAIMS_START = "<!-- non-claims:start -->"
 NON_CLAIMS_END = "<!-- non-claims:end -->"
 # Measured wall/memory, not config names like time_limit_s=120.
-PERF_NUM = re.compile(r"(?<![\w./=_-])~?\d+(?:[ \u00a0]\d{3})*(?:\.\d+)?\s+(?:s|ms|GiB|MiB)\b")
+PERF_NUM = re.compile(
+    r"(?<![\w./=_@-])~?\d+(?:[ \u00a0]\d{3})*(?:\.\d+)?\s*"
+    r"(?:ms|сек|мин|GiB|MiB|ГБ|МБ|GB|MB|ч|s|с)\b"
+)
 CONFIGISH = re.compile(
     r"time_limit_s|timeout_s|watchdog|preferred_max_latency|CPSAT-\d+|latency budget",
     re.I,

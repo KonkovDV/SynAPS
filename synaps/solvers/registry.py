@@ -386,6 +386,22 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
     ),
 }
 
+# ADR-0005: occupancy clip vs explicit refuse. Native COVER skips to Python
+# when a calendar is set; RHC-GREEDY-COVER stays in the clip set.
+CALENDAR_AWARE: frozenset[str] = frozenset(
+    {
+        "GREED",
+        "GREED-K1-3",
+        "BEAM-3",
+        "BEAM-5",
+        "RHC-GREEDY",
+        "RHC-GREEDY-COVER",
+    }
+)
+CALENDAR_REFUSING: frozenset[str] = frozenset(
+    name for name in _SOLVER_REGISTRY if name not in CALENDAR_AWARE
+)
+
 
 def available_solver_configs() -> list[str]:
     """Return the stable list of public solver configuration names."""
@@ -427,6 +443,8 @@ def build_solver_registry_manifest() -> list[dict[str, object]]:
 
 
 __all__ = [
+    "CALENDAR_AWARE",
+    "CALENDAR_REFUSING",
     "SolverRegistration",
     "available_solver_configs",
     "build_solver_registry_manifest",

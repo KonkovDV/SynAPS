@@ -20,7 +20,7 @@ _FORBIDDEN = (
     "world record",
 )
 
-_REQUIRED_KI = tuple(f"KI-N{i}" for i in range(1, 13))
+_REQUIRED_KI = tuple(f"KI-N{i}" for i in range(1, 14))
 
 
 def test_claims_denylist_in_front_matter() -> None:
@@ -88,12 +88,121 @@ def test_verify_claims_does_not_skip_on_bare_ne(tmp_path: Path) -> None:
     assert completed.returncode == 1
 
 
+def _planted_scan_root(tmp_path: Path, *, readme_ru: str, changelog: str = "# x\n") -> None:
+    (tmp_path / "README.md").write_text("# x\n", encoding="utf-8")
+    (tmp_path / "README_RU.md").write_text(readme_ru, encoding="utf-8")
+    (tmp_path / "KNOWN_ISSUES.md").write_text("# x\n", encoding="utf-8")
+    (tmp_path / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
+    (tmp_path / "benchmark").mkdir()
+    (tmp_path / "benchmark" / "README.md").write_text("# b\n", encoding="utf-8")
+
+
 def test_verify_claims_fails_on_unsourced_wall_time(tmp_path: Path) -> None:
     (tmp_path / "README.md").write_text("Cover finished in 145 s.\n", encoding="utf-8")
     for name in ("README_RU.md", "KNOWN_ISSUES.md", "CHANGELOG.md"):
         (tmp_path / name).write_text("# x\n", encoding="utf-8")
     (tmp_path / "benchmark").mkdir()
     (tmp_path / "benchmark" / "README.md").write_text("# b\n", encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "verify_claims.py"), "--root", str(tmp_path)],
+        check=False,
+        cwd=_ROOT,
+    )
+    assert completed.returncode == 1
+
+
+def test_verify_claims_fails_on_russian_dokazano(tmp_path: Path) -> None:
+    _planted_scan_root(tmp_path, readme_ru="Покрытие доказано на 5k.\n")
+    completed = subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "verify_claims.py"), "--root", str(tmp_path)],
+        check=False,
+        cwd=_ROOT,
+    )
+    assert completed.returncode == 1
+
+
+def test_verify_claims_fails_on_russian_garantiya(tmp_path: Path) -> None:
+    _planted_scan_root(tmp_path, readme_ru="Это гарантия полноты покрытия.\n")
+    completed = subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "verify_claims.py"), "--root", str(tmp_path)],
+        check=False,
+        cwd=_ROOT,
+    )
+    assert completed.returncode == 1
+
+
+def test_verify_claims_fails_on_russian_optimaln(tmp_path: Path) -> None:
+    _planted_scan_root(tmp_path, readme_ru="Решатель выдаёт оптимальный план.\n")
+    completed = subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "verify_claims.py"), "--root", str(tmp_path)],
+        check=False,
+        cwd=_ROOT,
+    )
+    assert completed.returncode == 1
+
+
+def test_verify_claims_fails_on_russian_vnedren(tmp_path: Path) -> None:
+    _planted_scan_root(tmp_path, readme_ru="Система уже внедрена на заводе.\n")
+    completed = subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "verify_claims.py"), "--root", str(tmp_path)],
+        check=False,
+        cwd=_ROOT,
+    )
+    assert completed.returncode == 1
+
+
+def test_verify_claims_fails_on_russian_promyshlenno(tmp_path: Path) -> None:
+    _planted_scan_root(tmp_path, readme_ru="Промышленно готовый APS-контур.\n")
+    completed = subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "verify_claims.py"), "--root", str(tmp_path)],
+        check=False,
+        cwd=_ROOT,
+    )
+    assert completed.returncode == 1
+
+
+def test_verify_claims_fails_on_russian_unikaln(tmp_path: Path) -> None:
+    _planted_scan_root(tmp_path, readme_ru="Уникальный алгоритм покрытия.\n")
+    completed = subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "verify_claims.py"), "--root", str(tmp_path)],
+        check=False,
+        cwd=_ROOT,
+    )
+    assert completed.returncode == 1
+
+
+def test_verify_claims_fails_on_russian_best_in_world(tmp_path: Path) -> None:
+    _planted_scan_root(tmp_path, readme_ru="Лучший в мире планировщик смен.\n")
+    completed = subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "verify_claims.py"), "--root", str(tmp_path)],
+        check=False,
+        cwd=_ROOT,
+    )
+    assert completed.returncode == 1
+
+
+def test_verify_claims_fails_on_cyrillic_seconds_without_evidence(tmp_path: Path) -> None:
+    _planted_scan_root(tmp_path, readme_ru="Покрытие за 145с на этой машине.\n")  # noqa: RUF001
+    completed = subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "verify_claims.py"), "--root", str(tmp_path)],
+        check=False,
+        cwd=_ROOT,
+    )
+    assert completed.returncode == 1
+
+
+def test_verify_claims_fails_on_nospace_seconds_without_evidence(tmp_path: Path) -> None:
+    _planted_scan_root(tmp_path, readme_ru="Покрытие за 13.7s на этой машине.\n")
+    completed = subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "verify_claims.py"), "--root", str(tmp_path)],
+        check=False,
+        cwd=_ROOT,
+    )
+    assert completed.returncode == 1
+
+
+def test_verify_claims_fails_on_cyrillic_gib_without_evidence(tmp_path: Path) -> None:
+    _planted_scan_root(tmp_path, readme_ru="Пик RSS 3.96 ГБ на лестнице.\n")
     completed = subprocess.run(
         [sys.executable, str(_ROOT / "scripts" / "verify_claims.py"), "--root", str(tmp_path)],
         check=False,

@@ -539,14 +539,16 @@ def find_earliest_feasible_slot(
             if previous_state is not None
             else 0.0
         )
-        gap_start = _clip_start_to_calendar(
+        occupancy_earliest = max(previous_end, earliest_start - float(setup_before))
+        occupancy_start = _clip_start_to_calendar(
             work_center,
-            max(earliest_start, previous_end + setup_before),
-            duration,
+            occupancy_earliest,
+            duration + float(setup_before),
             context.horizon_start,
         )
-        if gap_start is None:
+        if occupancy_start is None:
             return None
+        gap_start = occupancy_start + float(setup_before)
 
         if following is not None:
             following_start = _offset_minutes(context, following, end=False)

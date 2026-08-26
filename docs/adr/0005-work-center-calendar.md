@@ -1,6 +1,10 @@
 # ADR-0005: Work-center shift calendar is a kernel primitive
 
-- **Status:** Accepted for the contract; implementation is partial (KI-N7).
+- **Status:** Accepted. Kernel gates OPEN (2026-08-26 И3/И4/И8): occupancy
+  notary, calendar-aware routing whitelist, empty-success demotion.
+  Implementation remaining: CP-SAT/ALNS/LBBD still refuse rather than encode
+  shifts; native COVER still skips. Fourth domain repository is not opened
+  in this round.
 - **Date:** 2026-08-26
 - **Related:** ADR-0003 (domain placement), night-window dead-zone evidence
 
@@ -25,10 +29,12 @@ levers are forbidden as retunes (E4 / honesty protocol).
 ## Minimal contract
 
 1. `WorkCenter.calendar: list[ShiftInterval]`. Empty list = 24/7 open.
-2. Processing `[start_time, end_time]` must sit inside **one** interval
-   (an operation cannot straddle a closed period). Justification: the night
-   analog already forbade crossing midnight per op; SDST setup occupancy
-   before `start` is **not** clipped in this iteration (KI-N7 follow-up).
+2. Occupancy `[start_time − setup_minutes, end_time]` must sit inside **one**
+   interval (an operation cannot straddle a closed period). **Decision (И3.3):**
+   calendar-aware dispatch **clips setup together with processing**. An instance
+   whose setup+processing cannot fit a published shift is unplaced / refused —
+   it is not silently allowed. The notary emits `CALENDAR_VIOLATION` on
+   occupancy, not only on processing.
 3. Per-op `earliest_start` / `latest_finish` remain; the feasible slot is the
    intersection of op window, machine open interval, release, and horizon.
 4. Freeze / notary: `CALENDAR_VIOLATION` is a hard checker kind.
@@ -62,25 +68,29 @@ Empty schedule with `FEASIBLE`/`OPTIMAL` is forbidden (`synaps.solvers.coverage_
 
 - Unconstrained 5k@400s → `ALNS-500` (A15-P1-3). Measured empty plan is
   `ERROR`, not `FEASIBLE`. Empty + success is forbidden.
-- Hard windows or non-empty calendar → `RHC-GREEDY` when a latency hint
-  would otherwise pick ALNS (below the COVER 10k gate). Without a latency
-  hint, 5k still selects `LBBD-10-HD`, which then **refuses** a non-empty
-  calendar (`ERROR`), not `RHC-GREEDY`.
+- Non-empty machine calendar → a config in `CALENDAR_AWARE`
+  (`GREED` / `GREED-K1-3` / `BEAM-3` / `BEAM-5` / `RHC-GREEDY` /
+  `RHC-GREEDY-COVER`) for **any** `(policy × latency)` including
+  `latency=None` and `exact_required`. `CALENDAR_REFUSING` (CP-SAT / ALNS /
+  LBBD / RHC-ALNS / RHC-CPSAT) is never selected. Table:
+  `docs/architecture/CALENDAR_ROUTING.md`.
+- Hard per-op windows without a calendar still block ALNS when a latency
+  hint would otherwise pick it (`RHC-GREEDY` below the COVER 10k gate).
 - Incomplete coverage (`MISSING_ASSIGNMENT`) is not `verified_feasible`.
 - Do not lower `global_greedy_cover_min_ops` to chase a Yes.
 
 ## Gate
 
-Without this contract, do not start a fourth domain repository and do not
-promise night/emergency work in a new domain layer. GridPlan/MobiRoute pin
-lag stays under ADR-0004 until those repos regression-run this primitive.
+Kernel gates are **open**: occupancy notary, calendar-aware routing whitelist,
+empty-success `ERROR`. Without those, do not start a fourth domain repository
+and do not promise night/emergency work in a new domain layer. GridPlan/MobiRoute
+pin lag stays under ADR-0004 until 2026-09-09.
 
 ## Partial ship
 
-Kernel field + checker + greedy/COVER/BEAM clip of **processing** + native skip
-are in the tree. BEAM uses the same `find_earliest_feasible_slot` as GREED, so
-processing is clipped; ADR table row “BEAM silent” was wrong for processing.
-CP-SAT/ALNS/LBBD do not encode shifts: they **refuse** a non-empty calendar
-(`calendar_unsupported`, empty `ERROR`). SDST setup occupancy before `start`
-is still not clipped (KI-N7 follow-up). CLI/harness process codes 0/2/3/1 are
-implemented. That gap is KI-N7, not a Yes.
+Kernel field + checker occupancy `[start − setup, end]` + greedy/COVER/BEAM
+clip of **setup and processing** + native skip are in the tree. CP-SAT/ALNS/LBBD
+do not encode shifts: they **refuse** a non-empty calendar (`calendar_unsupported`,
+empty `ERROR`). CLI/harness process codes 0/2/3/1 are implemented. Pareto-slice
+stamps empty inner results. KI-N7 notary gap is closed; remaining work is encoding
+shifts in exact/ALNS models, not silent allow.

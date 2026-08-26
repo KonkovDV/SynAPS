@@ -68,6 +68,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   restored LF (`benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md`). JSON
   bytes were not rewritten. MD Artifact SHA-256 tables must match
   `SHA256SUMS.txt` line for line (`tests/test_evidence_md_integrity.py`).
+- **100k@200 is two of three seeds:** seed 42 stalled; do not cite three-seed
+  COVER feasibility at 100k. README, README_RU, this Unreleased row, and
+  `benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md` use the same sentence.
+- **ADR-0005 kernel gates OPEN (И3/И4/И8):** occupancy notary
+  `[start − setup, end]`; calendar instances route inside `CALENDAR_AWARE`
+  even when `preferred_max_latency_s is None`; empty assignments are `ERROR`
+  on all 25 named configs (Pareto-slice stamps the inner result). Fourth
+  domain repository is not created in this round. Table:
+  `docs/architecture/CALENDAR_ROUTING.md`.
+- **Branch protection / test-slow (И1):** `master` requires a PR plus
+  lint, contract-schema-drift, typecheck, test-fast 3.12/3.13,
+  benchmark-smoke, control-plane. `test-slow` is post-merge only
+  (`CONTRIBUTING.md`). Direct push `7a4083e` is the counter-example.
+
+### CI conclusions (И1.3)
+
+| Commit | Job | Conclusion | Run |
+| --- | --- | --- | --- |
+| `515488b` | lint | success | [32987597757](https://github.com/KonkovDV/SynAPS/actions/runs/32987597757) |
+| `515488b` | contract-schema-drift | success | same |
+| `515488b` | typecheck | success | same |
+| `515488b` | test-fast (3.12) | success | same |
+| `515488b` | test-fast (3.13) | success | same |
+| `515488b` | benchmark-smoke | success | same |
+| `515488b` | control-plane | success | same |
+| `515488b` | test-slow (not required) | failure — `test_study_solver_scaling_compares_requested_solvers_for_large_preset` (`assert False is True`, LBBD-10 feasible) | [job](https://github.com/KonkovDV/SynAPS/actions/runs/32987597757/job/98237495558) |
+| `7a4083e` | lint | failure (ruff format) | [32975680460](https://github.com/KonkovDV/SynAPS/actions/runs/32975680460) |
+| `7a4083e` | contract-schema-drift | failure (schema drift) | same |
+| `7a4083e` | typecheck | success | same |
+| `7a4083e` | test-fast (3.12) | failure — SHA-256 working-tree CRLF ≠ git-blob LF (`environment.json` / SHA256SUMS) | same |
+| `7a4083e` | test-fast (3.13) | failure — same hash mismatch | same |
+| `7a4083e` | benchmark-smoke | success | same |
+| `7a4083e` | control-plane | success | same |
+
+First commit on `master` whose **six required jobs** are all green after the
+hash regression: `515488b`
+([run 32987597757](https://github.com/KonkovDV/SynAPS/actions/runs/32987597757)).
+Last fully-green workflow (including test-slow): `bd09d13`
+([run 31974734700](https://github.com/KonkovDV/SynAPS/actions/runs/31974734700)).
 
 <!-- non-claims:start -->
 Historical Unreleased dump below this marker. Non-canonical 499770 / ~145 s /

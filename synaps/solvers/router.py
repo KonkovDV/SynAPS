@@ -13,7 +13,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from synaps.problem_profile import build_problem_profile
-from synaps.solvers.registry import create_solver
+from synaps.solvers.registry import CALENDAR_AWARE, create_solver
 
 if TYPE_CHECKING:
     from synaps.model import ScheduleProblem
@@ -68,6 +68,29 @@ def _cover_reason(op_count: int, *, feasibility_first: bool) -> str:
         f"{prefix}long-horizon instance ({op_count} ops) uses coverage-complete "
         "rolling-horizon greedy; LBBD-HD is unvalidated at this scale and "
         "monolithic ALNS exceeds the window budget"
+    )
+
+
+def _route_machine_calendar(
+    op_count: int,
+    latency: int | None,
+) -> SolverRoutingDecision:
+    """Non-empty calendar → CALENDAR_AWARE only (И4). Never LBBD/ALNS/CP-SAT."""
+
+    if op_count > _LONG_HORIZON_OPS:
+        config = "RHC-GREEDY-COVER"
+    elif latency is not None and latency <= 1:
+        config = "GREED"
+    else:
+        config = "RHC-GREEDY"
+    if config not in CALENDAR_AWARE:
+        raise RuntimeError(f"calendar route {config} is not CALENDAR_AWARE")
+    return SolverRoutingDecision(
+        solver_config=config,
+        reason=(
+            f"non-empty machine calendar ({op_count} ops): route to a "
+            "calendar-aware config that clips occupancy into published shifts"
+        ),
     )
 
 
@@ -198,6 +221,8 @@ def route_solver_config(
     ctx = context or SolverRoutingContext()
     profile = build_problem_profile(problem)
     op_count = profile.operation_count
+    if profile.has_machine_calendar:
+        return _route_machine_calendar(op_count, ctx.preferred_max_latency_s)
     wc_count = profile.work_center_count
     has_aux_constraints = profile.has_aux_constraints
     has_nonzero_setups = profile.has_nonzero_setups

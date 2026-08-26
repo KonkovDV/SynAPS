@@ -101,7 +101,7 @@ point estimates of different generator draws.
 | 500k@1000 | 3 | 1/1/1 | 31620 / 31649 / 32115 | 0.0087 | 71.45 / 73.00 / 74.17 | 0.019 | 690 |
 
 `all_verified_feasible` is **false** at 100k@200 because one seed stalled.
-Do not cite “100k COVER is feasible on three seeds”.
+**100k@200 is two of three seeds.** Do not cite “100k COVER is feasible on three seeds”.
 
 ---
 

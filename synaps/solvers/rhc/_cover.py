@@ -921,15 +921,16 @@ def _best_list_schedule_slot(
             setup_minutes=dispatch_context.setup_minutes,
         )
         if work_center.calendar:
-            cal_start = delay_start_to_open_shift(
-                start,
-                duration,
+            occupancy_earliest = start - float(setup)
+            cal_occupancy = delay_start_to_open_shift(
+                occupancy_earliest,
+                duration + float(setup),
                 work_center.calendar,
                 dispatch_context.horizon_start,
             )
-            if cal_start is None:
+            if cal_occupancy is None:
                 continue
-            start = cal_start
+            start = cal_occupancy + float(setup)
         latest = operation_latest_finish_offset_minutes(op, dispatch_context.horizon_start)
         cap = horizon_minutes if latest is None else min(horizon_minutes, latest)
         delayed = _delay_start_for_aux(

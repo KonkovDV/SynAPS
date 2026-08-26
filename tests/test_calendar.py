@@ -28,7 +28,7 @@ from synaps.model import (
 )
 from synaps.problem_profile import build_problem_profile
 from synaps.solvers.feasibility_checker import FeasibilityChecker
-from synaps.solvers.registry import create_solver
+from synaps.solvers.registry import CALENDAR_AWARE, CALENDAR_REFUSING, create_solver
 from synaps.solvers.router import (
     PortfolioPolicy,
     SolveRegime,
@@ -97,6 +97,74 @@ def test_checker_emits_calendar_violation() -> None:
     )
     kinds = {v.kind for v in FeasibilityChecker().check(problem, [assignment], exhaustive=True)}
     assert "CALENDAR_VIOLATION" in kinds
+
+
+def test_checker_rejects_setup_occupying_closed_shift() -> None:
+    """И3.1: occupancy [start - setup, end] must sit in one published shift.
+
+    Processing is inside 08:00-16:00; a 60-minute setup occupies 07:00-08:00
+    (closed). The notary must emit CALENDAR_VIOLATION, not [].
+    """
+
+    problem = _one_op_problem(calendar=[_night_shift()])
+    wc = problem.work_centers[0]
+    op = problem.operations[0]
+    start = H0 + timedelta(hours=8)
+    assignment = Assignment(
+        operation_id=op.id,
+        work_center_id=wc.id,
+        start_time=start,
+        end_time=start + timedelta(hours=1),
+        setup_minutes=60,
+    )
+    kinds = {v.kind for v in FeasibilityChecker().check(problem, [assignment], exhaustive=True)}
+    assert "CALENDAR_VIOLATION" in kinds
+
+
+def test_greed_clips_setup_into_open_shift() -> None:
+    """After И3.2/И3.3, GREED occupancy including setup must pass the notary."""
+
+    from synaps.model import SetupEntry
+
+    state_a = State(code="a")
+    state_b = State(code="b")
+    wc = WorkCenter(code="M", capability_group="G", calendar=[_night_shift()])
+    order = Order(external_ref="O", due_date=HE)
+    op_a = Operation(
+        order_id=order.id,
+        seq_in_order=1,
+        state_id=state_a.id,
+        base_duration_min=30,
+        eligible_wc_ids=[wc.id],
+    )
+    op_b = Operation(
+        order_id=order.id,
+        seq_in_order=2,
+        state_id=state_b.id,
+        predecessor_op_id=op_a.id,
+        base_duration_min=30,
+        eligible_wc_ids=[wc.id],
+    )
+    problem = ScheduleProblem(
+        states=[state_a, state_b],
+        orders=[order],
+        operations=[op_a, op_b],
+        work_centers=[wc],
+        setup_matrix=[
+            SetupEntry(
+                work_center_id=wc.id,
+                from_state_id=state_a.id,
+                to_state_id=state_b.id,
+                setup_minutes=60,
+            )
+        ],
+        planning_horizon_start=H0,
+        planning_horizon_end=HE,
+    )
+    solver, kwargs = create_solver("GREED")
+    result = solver.solve(problem, **kwargs)
+    assert result.assignments
+    assert not FeasibilityChecker().check(problem, result.assignments, exhaustive=True)
 
 
 def test_checker_accepts_assignment_inside_shift() -> None:
@@ -179,6 +247,54 @@ def test_route_never_selects_alns_on_calendar_without_windows() -> None:
         context=SolverRoutingContext(exact_required=True, preferred_max_latency_s=400),
     )
     assert exact.solver_config not in {"ALNS-500", "ALNS-300"}
+
+
+def test_calendar_sets_partition_the_portfolio() -> None:
+    from synaps.solvers.registry import available_solver_configs
+
+    names = set(available_solver_configs())
+    assert names == CALENDAR_AWARE | CALENDAR_REFUSING
+    assert CALENDAR_AWARE.isdisjoint(CALENDAR_REFUSING)
+    assert len(names) == 25
+
+
+def test_route_calendar_instance_returns_calendar_aware_whitelist() -> None:
+    """И4.2: calendar-only 5k must route inside CALENDAR_AWARE, not merely ¬ALNS.
+
+    Must fail on BALANCED x latency=None while the calendar check still sits
+    inside ``if latency is not None`` (LBBD-10-HD is CALENDAR_REFUSING).
+    """
+
+    from tests.conftest import make_simple_problem
+
+    problem = make_simple_problem(n_orders=1250, ops_per_order=4)
+    payload = problem.model_dump()
+    start = payload["planning_horizon_start"]
+    end = payload["planning_horizon_end"]
+    for work_center in payload["work_centers"]:
+        work_center["calendar"] = [{"start": start, "end": end}]
+    cal = problem.__class__.model_validate(payload)
+    latencies = (None, 1, 60, 180, 400, 900)
+    for policy in PortfolioPolicy:
+        for latency in latencies:
+            decision = route_solver_config(
+                cal,
+                context=SolverRoutingContext(
+                    regime=SolveRegime.NOMINAL,
+                    preferred_max_latency_s=latency,
+                    portfolio_policy=policy,
+                ),
+            )
+            assert decision.solver_config in CALENDAR_AWARE, (
+                policy,
+                latency,
+                decision.solver_config,
+            )
+    exact_none = route_solver_config(
+        cal,
+        context=SolverRoutingContext(exact_required=True, preferred_max_latency_s=None),
+    )
+    assert exact_none.solver_config in CALENDAR_AWARE, exact_none.solver_config
 
 
 def test_cpsat_alns_lbbd_refuse_nonempty_calendar() -> None:
