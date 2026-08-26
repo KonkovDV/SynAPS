@@ -1,5 +1,5 @@
 # K2.3: Linux KI-N3 recapture. Reuses the native-accelerator maturin build.
-# Does not rewrite hashed dead-zone JSON. Dispatch only.
+# Does not rewrite hashed dead-zone JSON. workflow_dispatch only (not a PR gate).
 name: Linux N3 recapture
 
 on:
