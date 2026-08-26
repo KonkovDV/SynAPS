@@ -20,6 +20,8 @@ def test_build_problem_profile_on_simple_problem() -> None:
     assert profile.setup_nonzero_entry_count == 4
     assert profile.has_nonzero_setups is True
     assert profile.has_hard_time_windows is False
+    assert profile.has_per_op_windows is False
+    assert profile.has_machine_calendar is False
     assert profile.has_aux_constraints is False
     assert profile.size_band == "small"
 

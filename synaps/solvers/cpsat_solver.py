@@ -24,6 +24,7 @@ from synaps.solvers._time_windows import (
     operation_earliest_offset_minutes,
     operation_latest_finish_offset_minutes,
 )
+from synaps.solvers.coverage_outcome import refuse_unsupported_calendar, stamp_honest_coverage
 from synaps.timegrain import duration_minutes_for
 
 # N3 (audit v3): time limits are owned by ``time_limit_s`` and may not be set
@@ -1002,6 +1003,9 @@ class CpSatSolver(BaseSolver):
         return assignments, objective, metadata
 
     def solve(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
+        refused = refuse_unsupported_calendar(problem, self.name)
+        if refused is not None:
+            return refused
         time_limit_s = int(kwargs.get("time_limit_s", 30))
         random_seed = int(kwargs.get("random_seed", 42))
         num_workers = int(kwargs.get("num_workers", 8))
@@ -1446,12 +1450,15 @@ class CpSatSolver(BaseSolver):
         )
 
         elapsed_ms = int((time.monotonic() - t0) * 1000)
-        return ScheduleResult(
-            solver_name=self.name,
-            status=result_status,
-            assignments=assignments,
-            objective=objective,
-            duration_ms=elapsed_ms,
-            random_seed=random_seed,
-            metadata=metadata,
+        return stamp_honest_coverage(
+            problem,
+            ScheduleResult(
+                solver_name=self.name,
+                status=result_status,
+                assignments=assignments,
+                objective=objective,
+                duration_ms=elapsed_ms,
+                random_seed=random_seed,
+                metadata=metadata,
+            ),
         )

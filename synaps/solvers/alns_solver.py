@@ -39,6 +39,7 @@ from synaps.solvers._dispatch_support import (
     recompute_assignment_setups,
 )
 from synaps.solvers._time_windows import operation_earliest_offset_minutes
+from synaps.solvers.coverage_outcome import refuse_unsupported_calendar, stamp_honest_coverage
 from synaps.solvers.feasibility_checker import FeasibilityChecker
 
 try:
@@ -3011,6 +3012,9 @@ class AlnsSolver(BaseSolver):
         return "alns"
 
     def solve(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
+        refused = refuse_unsupported_calendar(problem, self.name)
+        if refused is not None:
+            return refused
         # M2: virtualize max_parallel>1 work centers into disjunctive lanes so
         # the destroy/repair loop (which has no cumulative-capacity concept)
         # can run ops concurrently on a parallel machine instead of serializing
@@ -3028,10 +3032,10 @@ class AlnsSolver(BaseSolver):
         if frozen_raw and virtual_to_original:
             result = self._solve_core(problem, **kwargs)
             result.metadata["parallel_virtualization_skipped_due_to_frozen"] = True
-            return result
+            return stamp_honest_coverage(problem, result)
         result = self._solve_core(virtual_problem, **kwargs)
         _unroll_lane_assignments(result, virtual_to_original)
-        return result
+        return stamp_honest_coverage(problem, result)
 
     def _final_validate(
         self,

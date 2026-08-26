@@ -26,15 +26,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`docs/rfc/DEPENDABOT_TRIAGE_2026_08_26.md`). Domain placement:
   `docs/adr/0003-domain-layer-placement.md`,
   `docs/adr/0004-domain-repo-standard.md`.
-- **COVER ladder vs CHANGELOG numbers (N5 / Г):** canonical set is hashed
+- **COVER ladder vs CHANGELOG numbers (KI-N5 / Г):** canonical set is hashed
   `cover-ladder-2026-08-25/` (kernel `bd09d13`, Windows 11, CPython 3.13.7).
   Cause of the older Unreleased row is **not fully known**: different generator
-  packing (499770 vs 500000), RSS probe failed on ladder early cells so 2.3 GiB
-  is not this run, wall-clock 145 s vs 73 s may be native-wheel/build or
-  machine load. Do not mix rows. Memory requirement for 500k is ~3.96 GiB RSS,
+  packing (499770 vs 500000, KI-N5), RSS probe failed on ladder early cells so
+  2.3 GiB is not this run (KI-N5), wall-clock 145 s vs 73 s may be
+  native-wheel/build or machine load (KI-N5). Do not mix rows. Memory
+  requirement for 500k is ~3.96 GiB RSS (`cover-ladder-2026-08-25/`),
   not a 4 GiB VM. 60k CHANGELOG 59932 ops / 41298 min vs ladder 60000 / 41195
-  (seed=1) is the same class of packing/draw difference. 200k ~45 s vs ~24 s:
-  same. 100k ~26 s vs 12.6–13.7 s, plus seed 42 stall.
+  (seed=1) is the same class of packing/draw difference (KI-N5). 200k ~45 s vs
+  ~24 s: same (KI-N5). 100k ~26 s vs 12.6–13.7 s, plus seed 42 stall (KI-N5).
 - **Fail-closed routing / GREED box (N1, N2):** `GREED` and `GREED-K1-3`
   now carry `time_limit_s=120`. `RHC-ALNS` / `RHC-ALNS-100K` /
   `RHC-ALNS-SEARCH-COVER` now declare the existing solver default
@@ -46,13 +47,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Work-center shift calendar (N7):** `WorkCenter.calendar` is a list of
   `ShiftInterval`. Empty = 24/7. Non-empty is a hard primitive: processing
   cannot straddle a closed period. Checker emits `CALENDAR_VIOLATION`.
-  Native COVER skips when any calendar is set. CP-SAT/ALNS/LBBD/BEAM do
-  not encode shifts yet.
+  Native COVER skips when any calendar is set. GREED/BEAM/RHC-GREEDY clip
+  processing; CP-SAT/ALNS/LBBD refuse a non-empty calendar.
 - **Remainder worker_error recapture (N3 / B1):** hashed `8k@4` RHC-GREEDY
   cells stay `worker_error` (no traceback). A new session on CPython 3.13.7
-  + native did not reproduce the isolate kill: ratio 0.264375, wall 145 s,
+  + native did not reproduce the isolate kill: ratio 0.264375, wall 145 s
+  (`benchmark/evidence/deadzone-5k-2026-08-25/sessions/worker-error-2026-08-26-py313/`),
   `MISSING_ASSIGNMENT`. That is not a Yes and not a rewrite of the epoch
   JSON. Isolate now records Python exceptions and watchdog stderr.
+
+- **Honesty gates (2026-08-26 Ж):** contract schemas include `WorkCenter.calendar`.
+  Claims lint uses explicit `<!-- claims-ok -->` / `<!-- non-claims -->` markers
+  instead of a `не`/`not` proximity skip. CLI and the benchmark harness emit
+  ADR-0005 process codes 0/2/3/1. CP-SAT/ALNS/LBBD refuse a non-empty calendar
+  rather than returning a silent FEASIBLE.
+
+<!-- non-claims:start -->
+Historical Unreleased dump below this marker. Non-canonical 499770 / ~145 s /
+~2.3 GiB belong to KI-N5; cite `benchmark/evidence/cover-ladder-2026-08-25/`.
 
 ### Added
 
@@ -541,6 +553,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Makefile` `native-test` target indentation (was nested inside `native-build` recipe).
 - `tests/smoke/__init__.py` invalid syntax.
 - Removed accidentally tracked native wheel (`native-dist/synaps_native-0.3.0-cp313-cp313-win_amd64.whl`) from git index.
+
+<!-- non-claims:end -->
 
 ## [0.1.0] - 2026-05-14
 

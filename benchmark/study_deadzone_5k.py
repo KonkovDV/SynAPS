@@ -310,6 +310,12 @@ def _run_worker_job(job_path: Path) -> int:
         record["worker_traceback"] = traceback.format_exc()[-8000:]
         record["wall_time_s"] = None
     out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        import resource as _resource
+
+        record["worker_peak_rss_raw"] = _resource.getrusage(_resource.RUSAGE_SELF).ru_maxrss
+    except (ImportError, OSError):
+        record["worker_peak_rss_raw"] = None
     out.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(_format_ratio_line(record), flush=True)
     return 0
@@ -383,6 +389,11 @@ def _run_isolated_cell(
                 stdout_raw = stdout_raw.decode("utf-8", errors="replace")
             record["worker_stderr_tail"] = (stderr_raw or "")[-4000:]
             record["worker_stdout_tail"] = (stdout_raw or "")[-2000:]
+            record["worker_returncode"] = None
+            record["worker_signal"] = "timeout"
+            stderr_path = path.with_name(path.name + ".stderr.txt")
+            stderr_path.write_text(stderr_raw or "", encoding="utf-8")
+            record["worker_stderr_file"] = stderr_path.name
             path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             print(
                 f"  STALL watchdog={watchdog:.0f}s {solver_config} {n_ops}@{n_m} seed={seed}",
@@ -406,8 +417,13 @@ def _run_isolated_cell(
                 "Not a named-config timebox."
             )
             record["worker_returncode"] = completed.returncode
+            if completed.returncode is not None and completed.returncode < 0:
+                record["worker_signal"] = -completed.returncode
             record["worker_stderr_tail"] = stderr_tail
             record["worker_stdout_tail"] = stdout_tail
+            stderr_path = path.with_name(path.name + ".stderr.txt")
+            stderr_path.write_text(completed.stderr or "", encoding="utf-8")
+            record["worker_stderr_file"] = stderr_path.name
             path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             return record
         return json.loads(path.read_text(encoding="utf-8"))

@@ -54,3 +54,49 @@ def test_verify_claims_script_exits_zero() -> None:
         cwd=_ROOT,
     )
     assert completed.returncode == 0
+
+
+def test_verify_claims_fails_on_planted_forbidden_word(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text("SynAPS is industrially deployed.\n", encoding="utf-8")
+    for name in ("README_RU.md", "KNOWN_ISSUES.md", "CHANGELOG.md"):
+        (tmp_path / name).write_text("# x\n", encoding="utf-8")
+    (tmp_path / "benchmark").mkdir()
+    (tmp_path / "benchmark" / "README.md").write_text("# b\n", encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "verify_claims.py"), "--root", str(tmp_path)],
+        check=False,
+        cwd=_ROOT,
+    )
+    assert completed.returncode == 1
+
+
+def test_verify_claims_does_not_skip_on_bare_ne(tmp_path: Path) -> None:
+    """A Russian «не» no longer blanks the rest of the line (Ж2.1)."""
+    (tmp_path / "README.md").write_text(
+        "Это не шутка: SynAPS is industrially deployed.\n",
+        encoding="utf-8",
+    )
+    for name in ("README_RU.md", "KNOWN_ISSUES.md", "CHANGELOG.md"):
+        (tmp_path / name).write_text("# x\n", encoding="utf-8")
+    (tmp_path / "benchmark").mkdir()
+    (tmp_path / "benchmark" / "README.md").write_text("# b\n", encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "verify_claims.py"), "--root", str(tmp_path)],
+        check=False,
+        cwd=_ROOT,
+    )
+    assert completed.returncode == 1
+
+
+def test_verify_claims_fails_on_unsourced_wall_time(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text("Cover finished in 145 s.\n", encoding="utf-8")
+    for name in ("README_RU.md", "KNOWN_ISSUES.md", "CHANGELOG.md"):
+        (tmp_path / name).write_text("# x\n", encoding="utf-8")
+    (tmp_path / "benchmark").mkdir()
+    (tmp_path / "benchmark" / "README.md").write_text("# b\n", encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(_ROOT / "scripts" / "verify_claims.py"), "--root", str(tmp_path)],
+        check=False,
+        cwd=_ROOT,
+    )
+    assert completed.returncode == 1

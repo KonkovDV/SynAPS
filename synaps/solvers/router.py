@@ -95,11 +95,7 @@ def _route_feasibility_first_nominal(
                 solver_config="RHC-GREEDY-COVER",
                 reason=_cover_reason(op_count, feasibility_first=True),
             )
-        if (
-            not has_hard_time_windows
-            and op_count <= _INDUSTRIAL_OPS
-            and latency > 300
-        ):
+        if not has_hard_time_windows and op_count <= _INDUSTRIAL_OPS and latency > 300:
             return SolverRoutingDecision(
                 solver_config="ALNS-500",
                 reason=(
@@ -107,11 +103,7 @@ def _route_feasibility_first_nominal(
                     f"nominal instances ({op_count} ops) under a 5+ minute budget"
                 ),
             )
-        if (
-            not has_hard_time_windows
-            and op_count <= _LONG_HORIZON_OPS
-            and latency > 120
-        ):
+        if not has_hard_time_windows and op_count <= _LONG_HORIZON_OPS and latency > 120:
             return SolverRoutingDecision(
                 solver_config="ALNS-300",
                 reason=(
@@ -349,7 +341,9 @@ def route_solver_config(
         and op_count > 120
     ):
         return _route_feasibility_first_nominal(
-            op_count, latency, profile.has_hard_time_windows
+            op_count,
+            latency,
+            profile.has_per_op_windows or profile.has_machine_calendar,
         )
 
     if op_count <= 20 and wc_count <= 5 and not has_aux_constraints:
@@ -404,7 +398,9 @@ def route_solver_config(
 
     # Long-horizon NOMINAL: rolling-horizon coverage above 10k ops.
     return _route_long_horizon_balanced(
-        op_count, latency, profile.has_hard_time_windows
+        op_count,
+        latency,
+        profile.has_per_op_windows or profile.has_machine_calendar,
     )
 
 

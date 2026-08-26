@@ -22,6 +22,12 @@ from synaps import solve_schedule
 from synaps.model import ScheduleProblem, ScheduleResult
 from synaps.problem_profile import build_problem_profile
 from synaps.replay import build_benchmark_replay_artifact, write_replay_artifact
+from synaps.solvers.coverage_outcome import (
+    CoverageClass,
+    classify_coverage,
+    process_exit_code,
+    stamp_honest_coverage,
+)
 from synaps.solvers.registry import available_solver_configs, create_solver
 from synaps.validation import verify_schedule_result
 
@@ -308,6 +314,7 @@ def _run_single(
         else:
             assert solver is not None
             result = solver.solve(problem, **solve_kwargs)
+        result = stamp_honest_coverage(problem, result)
         wall_times.append(time.perf_counter() - t0)
         weighted_sum_samples.append(result.objective.weighted_sum)
         makespan_samples.append(result.objective.makespan_minutes)
@@ -377,10 +384,22 @@ def _run_single(
     if peak_rss_mb is not None:
         statistics_block["peak_rss_mb"] = peak_rss_mb
 
+    coverage = classify_coverage(
+        n_operations=len(problem.operations),
+        n_assigned=len(last_result.assignments),
+    )
+    exit_code = process_exit_code(last_result.status, coverage)
+
     results_block: dict[str, Any] = {
         "status": last_result.status.value,
-        "feasible": last_result.status.value in ("optimal", "feasible"),
-        "proved_optimal": last_result.status.value == "optimal",
+        "feasible": (
+            coverage is CoverageClass.FULL
+            and last_result.status.value in ("optimal", "feasible")
+            and verification.feasible
+        ),
+        "coverage_class": coverage.value,
+        "process_exit_code": exit_code,
+        "proved_optimal": last_result.status.value == "optimal" and coverage is CoverageClass.FULL,
         "solver_name": last_result.solver_name,
         "makespan_minutes": obj.makespan_minutes,
         "total_setup_minutes": obj.total_setup_minutes,
@@ -545,6 +564,16 @@ def main() -> None:
 
     json.dump(all_reports if len(all_reports) > 1 else all_reports[0], sys.stdout, indent=2)
     sys.stdout.write("\n")
+    codes: list[int] = []
+    for report in all_reports:
+        if "comparisons" in report:
+            codes.extend(
+                int(item.get("results", {}).get("process_exit_code", 1))
+                for item in report["comparisons"]
+            )
+        else:
+            codes.append(int(report.get("results", {}).get("process_exit_code", 1)))
+    raise SystemExit(max(codes) if codes else 1)
 
 
 if __name__ == "__main__":

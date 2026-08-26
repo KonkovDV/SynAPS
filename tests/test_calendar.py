@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import ValidationError
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from synaps.calendar import (
     delay_start_to_open_shift,
@@ -18,13 +22,19 @@ from synaps.model import (
     Order,
     ScheduleProblem,
     ShiftInterval,
+    SolverStatus,
     State,
     WorkCenter,
 )
 from synaps.problem_profile import build_problem_profile
 from synaps.solvers.feasibility_checker import FeasibilityChecker
 from synaps.solvers.registry import create_solver
-from synaps.solvers.router import SolveRegime, SolverRoutingContext, route_solver_config
+from synaps.solvers.router import (
+    PortfolioPolicy,
+    SolveRegime,
+    SolverRoutingContext,
+    route_solver_config,
+)
 
 H0 = datetime(2026, 1, 1, tzinfo=UTC)
 HE = H0 + timedelta(days=1)
@@ -116,6 +126,8 @@ def test_greed_clips_to_shift() -> None:
 def test_profile_and_router_see_machine_calendar() -> None:
     problem = _one_op_problem(calendar=[_night_shift()])
     assert build_problem_profile(problem).has_hard_time_windows is True
+    assert build_problem_profile(problem).has_machine_calendar is True
+    assert build_problem_profile(problem).has_per_op_windows is False
     assert work_centers_have_calendar(problem.work_centers) is True
 
     large = _one_op_problem(calendar=[_night_shift()])
@@ -131,3 +143,59 @@ def test_profile_and_router_see_machine_calendar() -> None:
 def test_shift_interval_rejects_empty_span() -> None:
     with pytest.raises(ValidationError):
         ShiftInterval(start=H0, end=H0)
+
+
+def test_route_never_selects_alns_on_calendar_without_windows() -> None:
+    """Ж4.2: calendar-only 5k is not an ALNS-500/300 route under any policy."""
+    from tests.conftest import make_simple_problem
+
+    problem = make_simple_problem(n_orders=1250, ops_per_order=4)
+    payload = problem.model_dump()
+    start = payload["planning_horizon_start"]
+    end = payload["planning_horizon_end"]
+    for work_center in payload["work_centers"]:
+        work_center["calendar"] = [{"start": start, "end": end}]
+    cal = problem.__class__.model_validate(payload)
+    profile = build_problem_profile(cal)
+    assert profile.has_machine_calendar is True
+    assert profile.has_per_op_windows is False
+    for policy in PortfolioPolicy:
+        for latency in (None, 1, 180, 400, 900):
+            decision = route_solver_config(
+                cal,
+                context=SolverRoutingContext(
+                    regime=SolveRegime.NOMINAL,
+                    preferred_max_latency_s=latency,
+                    portfolio_policy=policy,
+                ),
+            )
+            assert decision.solver_config not in {"ALNS-500", "ALNS-300"}, (
+                policy,
+                latency,
+                decision.solver_config,
+            )
+    exact = route_solver_config(
+        cal,
+        context=SolverRoutingContext(exact_required=True, preferred_max_latency_s=400),
+    )
+    assert exact.solver_config not in {"ALNS-500", "ALNS-300"}
+
+
+def test_cpsat_alns_lbbd_refuse_nonempty_calendar() -> None:
+    problem = _one_op_problem(calendar=[_night_shift()])
+    for name in ("CPSAT-10", "ALNS-300", "LBBD-5"):
+        solver, kwargs = create_solver(name)
+        result = solver.solve(problem, **kwargs)
+        assert result.status is SolverStatus.ERROR, name
+        assert result.assignments == []
+        assert result.metadata.get("calendar_unsupported") is True
+
+
+def test_cli_calendar_cpsat_exits_3(tmp_path: Path) -> None:
+    from synaps.cli import main
+
+    problem = _one_op_problem(calendar=[_night_shift()])
+    instance = tmp_path / "cal.json"
+    instance.write_text(problem.model_dump_json(), encoding="utf-8")
+    code = main(["solve", str(instance), "--solver-config", "CPSAT-10", "--no-verify-feasibility"])
+    assert code == 3

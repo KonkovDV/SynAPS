@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Fail CI when published docs use forbidden claim words (KI-N11 / C3)."""
+"""Fail CI when published docs use forbidden claim words or unsourced timings.
+
+KI-N11 / Ж2: skip is an explicit marker on the line or a tagged non-claims
+block, not a ``не`` / ``not`` proximity heuristic.
+"""
 
 from __future__ import annotations
 
@@ -16,33 +20,37 @@ FORBIDDEN = (
     r"\bгарантирует\b",
     r"\bоптимально\b",
 )
-# `proven` is allowed only next to the empty-notary tautology.
 PROVEN_OK = re.compile(
     r"proven_hard_violations\s*=\s*[∅Ø]|empty-notary|empty notary|notary empty",
     re.I,
 )
-
-NEGATION = re.compile(
-    r"\bnot\b.{0,40}|\bне\b.{0,40}|non-claims|не заявлено|"
-    r"forbidden unless|words forbidden|not claimed",
+CLAIMS_OK = re.compile(r"<!--\s*claims-ok\s*-->|#\s*claims-ok\s*$", re.I)
+EXPLICIT_NONCLAIM = re.compile(
+    r"Not claimed:|не заявлено:|\bnon-claims\b",
     re.I,
 )
-
+NON_CLAIMS_START = "<!-- non-claims:start -->"
+NON_CLAIMS_END = "<!-- non-claims:end -->"
+# Measured wall/memory, not config names like time_limit_s=120.
+PERF_NUM = re.compile(r"(?<![\w./=_-])~?\d+(?:[ \u00a0]\d{3})*(?:\.\d+)?\s+(?:s|ms|GiB|MiB)\b")
+CONFIGISH = re.compile(
+    r"time_limit_s|timeout_s|watchdog|preferred_max_latency|CPSAT-\d+|latency budget",
+    re.I,
+)
+EVIDENCE_REF = re.compile(
+    r"benchmark/|BENCHMARK_EVIDENCE|KI-N\d+|docs/rfc/|cover-ladder|"
+    r"deadzone|cable-c6|SHA256|evidence/",
+    re.I,
+)
 _SKIP_EVIDENCE = ("50K", "SEARCH_COVER")
 
 
-def _unreleased_changed(changelog: str) -> str:
-    """Honesty-close surface: first ### Changed under [Unreleased], not the historical dump."""
+def _unreleased(changelog: str) -> str:
+    """Entire [Unreleased] section, not only the first ### Changed."""
     parts = re.split(r"\n## \[", changelog, maxsplit=2)
-    unreleased = parts[1] if len(parts) > 1 else changelog
-    chunks = re.split(r"\n### ", unreleased, maxsplit=2)
-    for chunk in chunks:
-        if chunk.startswith("Changed") or chunk.lstrip().startswith("Changed"):
-            return chunk
-        if "\nChanged" in chunk[:40]:
-            return chunk
-    # Fallback: first 80 lines of Unreleased.
-    return "\n".join(unreleased.splitlines()[:80])
+    if len(parts) < 2:
+        return changelog
+    return parts[1]
 
 
 def _scan_paths(root: Path) -> list[Path]:
@@ -66,37 +74,81 @@ def _scan_paths(root: Path) -> list[Path]:
     return [path for path in paths if path.is_file()]
 
 
+def _iter_active_lines(text: str) -> list[tuple[int, str, bool]]:
+    """Yield (lineno, line, skipped) after applying block and line markers."""
+    in_block = False
+    out: list[tuple[int, str, bool]] = []
+    for i, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if stripped == NON_CLAIMS_START:
+            in_block = True
+            out.append((i, line, True))
+            continue
+        if stripped == NON_CLAIMS_END:
+            in_block = False
+            out.append((i, line, True))
+            continue
+        skipped = in_block or bool(CLAIMS_OK.search(line)) or bool(EXPLICIT_NONCLAIM.search(line))
+        out.append((i, line, skipped))
+    return out
+
+
+def _number_needs_evidence(line: str) -> bool:
+    return bool(PERF_NUM.search(line)) and not CONFIGISH.search(line)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--stats", action="store_true")
     args = parser.parse_args(argv)
     root: Path = args.root
     hits: list[str] = []
+    stats: dict[str, tuple[int, int]] = {}
     for path in _scan_paths(root):
         text = path.read_text(encoding="utf-8")
-        body = _unreleased_changed(text) if path.name == "CHANGELOG.md" else text
-        prev = ""
-        for i, line in enumerate(body.splitlines(), start=1):
-            skip = bool(NEGATION.search(line))
-            if not skip and NEGATION.search(prev) and line.startswith(" "):
-                skip = True
-            prev = line
-            if skip:
+        body = _unreleased(text) if path.name == "CHANGELOG.md" else text
+        rows = _iter_active_lines(body)
+        skipped_n = sum(1 for _i, _line, skipped in rows if skipped)
+        stats[str(path.relative_to(root))] = (skipped_n, len(rows))
+        for idx, (lineno, line, skipped) in enumerate(rows):
+            if skipped:
                 continue
             if "proven" in line.lower() and PROVEN_OK.search(line):
                 continue
             for pattern in FORBIDDEN:
                 if re.search(pattern, line, re.I) and "proven_hard_violations" not in line:
-                    hits.append(f"{path.relative_to(root)}:{i}: {pattern}")
+                    hits.append(f"{path.relative_to(root)}:{lineno}: {pattern}")
             if (
                 re.search(r"\bproven\b", line, re.I)
                 and not PROVEN_OK.search(line)
                 and "except" not in line.lower()
                 and "tautolog" not in line.lower()
             ):
-                hits.append(f"{path.relative_to(root)}:{i}: proven")
+                hits.append(f"{path.relative_to(root)}:{lineno}: proven")
+            if _number_needs_evidence(line) and (
+                path.name
+                in {
+                    "README.md",
+                    "README_RU.md",
+                    "CHANGELOG.md",
+                    "KNOWN_ISSUES.md",
+                }
+                or path == root / "benchmark" / "README.md"
+            ):
+                prev = rows[idx - 1][1] if idx > 0 else ""
+                nxt = rows[idx + 1][1] if idx + 1 < len(rows) else ""
+                window = f"{prev}\n{line}\n{nxt}"
+                if not EVIDENCE_REF.search(window):
+                    hits.append(
+                        f"{path.relative_to(root)}:{lineno}: "
+                        "performance number without evidence file"
+                    )
+    if args.stats:
+        for name, (skipped_n, total) in sorted(stats.items()):
+            print(f"{name}: skipped {skipped_n}/{total}")
     if hits:
-        print("verify_claims: forbidden phrasing\n" + "\n".join(hits[:50]))
+        print("verify_claims: forbidden phrasing\n" + "\n".join(hits[:80]))
         return 1
     return 0
 

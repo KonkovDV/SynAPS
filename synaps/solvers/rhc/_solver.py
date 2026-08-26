@@ -44,6 +44,7 @@ from synaps.solvers._dispatch_support import (
     find_earliest_feasible_slot,
     recompute_assignment_setups,
 )
+from synaps.solvers.coverage_outcome import refuse_unsupported_calendar, stamp_honest_coverage
 from synaps.solvers.lower_bounds import compute_relaxed_makespan_lower_bound
 from synaps.solvers.rhc._admission import (
     advance_admission_frontier,
@@ -142,6 +143,10 @@ class RhcSolver(BaseSolver):
         window_minutes: int = int(kwargs.get("window_minutes", 480))
         overlap_minutes: int = int(kwargs.get("overlap_minutes", 120))
         inner_solver_name: str = str(kwargs.get("inner_solver", "alns"))
+        if inner_solver_name != "greedy":
+            refused = refuse_unsupported_calendar(problem, self.name)
+            if refused is not None:
+                return refused
         global_greedy_cover_min_ops: int = max(
             0, int(kwargs.get("global_greedy_cover_min_ops", 10_000))
         )
@@ -2427,24 +2432,27 @@ class RhcSolver(BaseSolver):
 
         if not committed_assignments:
             elapsed_ms = int((time.monotonic() - t0) * 1000)
-            return ScheduleResult(
-                solver_name=self.name,
-                status=SolverStatus.ERROR,
-                duration_ms=elapsed_ms,
-                metadata={
-                    "error": "no assignments produced",
-                    "acceleration": acceleration_status,
-                    "windows": window_count,
-                    "time_limit_reached": time_limit_reached,
-                    "horizon_clipped_assignments": horizon_clipped_assignments,
-                    "fallback_repair_attempted": fallback_repair_attempted,
-                    "fallback_repair_skipped": fallback_repair_skipped,
-                    "fallback_repair_time_limited": fallback_repair_time_limited,
-                    "ops_unscheduled": len(problem.operations),
-                    "lower_bound_upper_bound_comparable": False,
-                    "gap": None,
-                    "temporal_stabilization": temporal_stabilization,
-                },
+            return stamp_honest_coverage(
+                problem,
+                ScheduleResult(
+                    solver_name=self.name,
+                    status=SolverStatus.ERROR,
+                    duration_ms=elapsed_ms,
+                    metadata={
+                        "error": "no assignments produced",
+                        "acceleration": acceleration_status,
+                        "windows": window_count,
+                        "time_limit_reached": time_limit_reached,
+                        "horizon_clipped_assignments": horizon_clipped_assignments,
+                        "fallback_repair_attempted": fallback_repair_attempted,
+                        "fallback_repair_skipped": fallback_repair_skipped,
+                        "fallback_repair_time_limited": fallback_repair_time_limited,
+                        "ops_unscheduled": len(problem.operations),
+                        "lower_bound_upper_bound_comparable": False,
+                        "gap": None,
+                        "temporal_stabilization": temporal_stabilization,
+                    },
+                ),
             )
 
         # Evaluate
@@ -2506,262 +2514,272 @@ class RhcSolver(BaseSolver):
             ),
         }
 
-        return ScheduleResult(
-            solver_name=self.name,
-            status=status,
-            assignments=committed_assignments,
-            objective=final_obj,
-            duration_ms=elapsed_ms,
-            metadata={
-                "acceleration": acceleration_status,
-                "windows_solved": window_count,
-                "global_greedy_cover": global_greedy_cover_used,
-                "global_greedy_cover_min_ops": global_greedy_cover_min_ops,
-                "ops_scheduled": scheduled_count,
-                "ops_total": total_ops,
-                "lower_bound": round(global_lower_bound.value, 4),
-                "upper_bound": round(final_obj.makespan_minutes, 4),
-                "gap": gap_ratio,
-                "lower_bound_upper_bound_comparable": bounds_comparable,
-                "lower_bound_method": "relaxed_precedence_capacity",
-                "lower_bound_components": global_lower_bound.as_metadata(),
-                "inner_solver": inner_solver_name,
-                "inner_solver_windows": inner_solver_windows,
-                "inner_fallback_windows": inner_fallback_windows,
-                "inner_fallback_ratio": round(inner_fallback_ratio, 4),
-                "inner_resolution_counts": inner_resolution_counts,
-                "inner_fallback_reason_counts": dict(sorted(inner_fallback_reason_counts.items())),
-                "inner_status_counts": dict(sorted(inner_status_counts.items())),
-                "inner_exception_windows": inner_exception_windows,
-                "inner_exception_message_samples": list(inner_exception_messages_sample),
-                "inner_exception_logs_emitted": min(
-                    inner_exception_logs_emitted,
-                    max_inner_exception_logs,
-                ),
-                "inner_exception_logs_suppressed": max(
-                    inner_exception_logs_emitted - max_inner_exception_logs,
-                    0,
-                ),
-                "inner_fallback_kpi_threshold": inner_fallback_kpi_threshold,
-                "inner_fallback_kpi_passed": inner_fallback_ratio <= inner_fallback_kpi_threshold,
-                "coverage_pace_guard_enabled": coverage_pace_guard_enabled,
-                "coverage_pace_threshold": coverage_pace_threshold,
-                "coverage_pace_min_windows": coverage_pace_min_windows,
-                "coverage_pace_interventions": coverage_pace_interventions,
-                "coverage_pace_final_ratio": (
-                    round(final_pace_ratio, 4) if final_pace_ratio is not None else None
-                ),
-                "commit_precedence_gate_enabled": commit_precedence_gate_enabled,
-                "commit_precedence_deferred_ops_total": len(commit_precedence_deferred_op_ids),
-                "preprocessing_ms": preprocessing_ms,
-                "preprocessing_phase_ms": dict(preprocess_phase_ms),
-                "peak_window_candidate_count": peak_window_candidate_count,
-                "peak_raw_window_candidate_count": peak_raw_window_candidate_count,
-                "due_pressure_selected_ops": len(due_pressure_selected_ids),
-                "candidate_pool_limit": candidate_pool_limit,
-                "candidate_pool_factor": candidate_pool_factor,
-                "adaptive_window_enabled": adaptive_window_enabled,
-                "adaptive_window_min_fill_ratio": adaptive_window_min_fill_ratio,
-                "adaptive_window_max_multiplier": adaptive_window_max_multiplier,
-                "adaptive_window_expansions": adaptive_window_expansions,
-                "adaptive_window_mean_multiplier_applied": round(
-                    sum(adaptive_window_expansion_factors) / len(adaptive_window_expansion_factors),
-                    4,
-                )
-                if adaptive_window_expansion_factors
-                else 1.0,
-                "adaptive_window_max_multiplier_applied": round(
-                    max(adaptive_window_expansion_factors),
-                    4,
-                )
-                if adaptive_window_expansion_factors
-                else 1.0,
-                "external_warm_start_supplied_assignments": len(external_warm_start_by_op),
-                "external_warm_start_used_windows": external_warm_start_used_windows,
-                "candidate_pool_clamped_windows": candidate_pool_clamped_windows,
-                "candidate_pool_filtered_ops": candidate_pool_filtered_ops,
-                "candidate_admission_enabled": candidate_admission_active,
-                "candidate_admission_configured": candidate_admission_enabled,
-                "precedence_ready_candidate_filter_enabled": (
-                    precedence_ready_candidate_filter_enabled
-                ),
-                "precedence_ready_filtered_ops": precedence_ready_filtered_ops,
-                "precedence_ready_blocked_by_precedence_count": (
-                    precedence_blocked_by_precedence_count
-                ),
-                "precedence_ready_ratio": round(
-                    precedence_ready_candidate_ready_total
-                    / max(precedence_ready_candidate_ops_total, 1),
-                    4,
-                ),
-                "due_admission_horizon_factor": due_admission_horizon_factor,
-                "admission_tail_weight": admission_tail_weight,
-                "progressive_admission_relaxation_enabled": (
-                    progressive_admission_relaxation_enabled
-                ),
-                "admission_relaxation_min_fill_ratio": admission_relaxation_min_fill_ratio,
-                "admission_relaxation_windows": admission_relaxation_windows,
-                "admission_relaxation_recovered_ops": admission_relaxation_recovered_ops,
-                "admission_full_scan_enabled": admission_full_scan_enabled,
-                "admission_full_scan_min_fill_ratio": admission_full_scan_min_fill_ratio,
-                "admission_full_scan_windows": admission_full_scan_windows,
-                "admission_full_scan_triggered_windows": admission_full_scan_triggered_windows,
-                "admission_full_scan_added_ops": admission_full_scan_added_ops,
-                "admission_full_scan_final_pool_peak": admission_full_scan_final_pool_peak,
-                "admission_full_scan_recovered_ops": admission_full_scan_recovered_ops,
-                "candidate_pressure_mean": round(
-                    sum(candidate_pressure_values) / len(candidate_pressure_values),
-                    4,
-                )
-                if candidate_pressure_values
-                else 0.0,
-                "candidate_pressure_max": round(max(candidate_pressure_values), 4)
-                if candidate_pressure_values
-                else 0.0,
-                "due_pressure_mean": round(
-                    sum(due_pressure_values) / len(due_pressure_values),
-                    4,
-                )
-                if due_pressure_values
-                else 0.0,
-                "due_drift_minutes_mean": round(
-                    sum(due_drift_minutes_values) / len(due_drift_minutes_values),
-                    2,
-                )
-                if due_drift_minutes_values
-                else 0.0,
-                "due_drift_minutes_max": round(max(due_drift_minutes_values), 2)
-                if due_drift_minutes_values
-                else 0.0,
-                "spillover_count": spillover_count,
-                "earliest_frontier_advances": admission_frontier_advances,
-                "admission_frontier_advances": admission_frontier_advances,
-                "admission_starvation_count": admission_starvation_count,
-                "due_frontier_advances": due_frontier_advances,
-                "effective_window_operation_cap": effective_window_op_cap,
-                "window_load_factor": window_load_factor,
-                "dynamic_no_improve_enabled": dynamic_no_improve_enabled,
-                "no_improve_due_alpha": no_improve_due_alpha,
-                "no_improve_candidate_beta": no_improve_candidate_beta,
-                "no_improve_min_iters": no_improve_min_iters,
-                "no_improve_max_iters": no_improve_max_iters,
-                "max_windows": max_windows,
-                "inner_solver_min_budget_s": inner_solver_min_budget_s,
-                "backtracking_enabled": backtracking_enabled,
-                "backtracking_tail_minutes": backtracking_tail_minutes,
-                "backtracking_max_ops": backtracking_max_ops,
-                "backtracking_windows": backtracking_windows,
-                "backtracking_ops_total": backtracking_ops_total,
-                "inner_window_time_fraction": inner_window_time_fraction,
-                "inner_window_time_cap_s": inner_window_time_cap_s,
-                "commit_boundary_mode": "end_time",
-                "alns_inner_window_time_cap_s": alns_inner_window_time_cap_s,
-                "alns_inner_window_time_cap_scale_threshold_ops": (
-                    alns_inner_window_time_cap_scale_threshold_ops
-                ),
-                "alns_inner_window_time_cap_scaled_s": alns_inner_window_time_cap_scaled_s,
-                "alns_budget_auto_scaling_enabled": alns_budget_auto_scaling_enabled,
-                "alns_budget_estimated_repair_s_per_destroyed_op": (
-                    round(
-                        float(alns_budget_estimated_repair_s_per_destroyed_op_raw),
+        return stamp_honest_coverage(
+            problem,
+            ScheduleResult(
+                solver_name=self.name,
+                status=status,
+                assignments=committed_assignments,
+                objective=final_obj,
+                duration_ms=elapsed_ms,
+                metadata={
+                    "acceleration": acceleration_status,
+                    "windows_solved": window_count,
+                    "global_greedy_cover": global_greedy_cover_used,
+                    "global_greedy_cover_min_ops": global_greedy_cover_min_ops,
+                    "ops_scheduled": scheduled_count,
+                    "ops_total": total_ops,
+                    "lower_bound": round(global_lower_bound.value, 4),
+                    "upper_bound": round(final_obj.makespan_minutes, 4),
+                    "gap": gap_ratio,
+                    "lower_bound_upper_bound_comparable": bounds_comparable,
+                    "lower_bound_method": "relaxed_precedence_capacity",
+                    "lower_bound_components": global_lower_bound.as_metadata(),
+                    "inner_solver": inner_solver_name,
+                    "inner_solver_windows": inner_solver_windows,
+                    "inner_fallback_windows": inner_fallback_windows,
+                    "inner_fallback_ratio": round(inner_fallback_ratio, 4),
+                    "inner_resolution_counts": inner_resolution_counts,
+                    "inner_fallback_reason_counts": dict(
+                        sorted(inner_fallback_reason_counts.items())
+                    ),
+                    "inner_status_counts": dict(sorted(inner_status_counts.items())),
+                    "inner_exception_windows": inner_exception_windows,
+                    "inner_exception_message_samples": list(inner_exception_messages_sample),
+                    "inner_exception_logs_emitted": min(
+                        inner_exception_logs_emitted,
+                        max_inner_exception_logs,
+                    ),
+                    "inner_exception_logs_suppressed": max(
+                        inner_exception_logs_emitted - max_inner_exception_logs,
+                        0,
+                    ),
+                    "inner_fallback_kpi_threshold": inner_fallback_kpi_threshold,
+                    "inner_fallback_kpi_passed": inner_fallback_ratio
+                    <= inner_fallback_kpi_threshold,
+                    "coverage_pace_guard_enabled": coverage_pace_guard_enabled,
+                    "coverage_pace_threshold": coverage_pace_threshold,
+                    "coverage_pace_min_windows": coverage_pace_min_windows,
+                    "coverage_pace_interventions": coverage_pace_interventions,
+                    "coverage_pace_final_ratio": (
+                        round(final_pace_ratio, 4) if final_pace_ratio is not None else None
+                    ),
+                    "commit_precedence_gate_enabled": commit_precedence_gate_enabled,
+                    "commit_precedence_deferred_ops_total": len(commit_precedence_deferred_op_ids),
+                    "preprocessing_ms": preprocessing_ms,
+                    "preprocessing_phase_ms": dict(preprocess_phase_ms),
+                    "peak_window_candidate_count": peak_window_candidate_count,
+                    "peak_raw_window_candidate_count": peak_raw_window_candidate_count,
+                    "due_pressure_selected_ops": len(due_pressure_selected_ids),
+                    "candidate_pool_limit": candidate_pool_limit,
+                    "candidate_pool_factor": candidate_pool_factor,
+                    "adaptive_window_enabled": adaptive_window_enabled,
+                    "adaptive_window_min_fill_ratio": adaptive_window_min_fill_ratio,
+                    "adaptive_window_max_multiplier": adaptive_window_max_multiplier,
+                    "adaptive_window_expansions": adaptive_window_expansions,
+                    "adaptive_window_mean_multiplier_applied": round(
+                        sum(adaptive_window_expansion_factors)
+                        / len(adaptive_window_expansion_factors),
                         4,
                     )
-                    if alns_budget_estimated_repair_s_per_destroyed_op_raw is not None
-                    else None
-                ),
-                "alns_dynamic_repair_budget_enabled": alns_dynamic_repair_budget_enabled,
-                "alns_dynamic_repair_s_per_destroyed_op": (alns_dynamic_repair_s_per_destroyed_op),
-                "alns_dynamic_repair_time_limit_min_s": (alns_dynamic_repair_time_limit_min_s),
-                "alns_dynamic_repair_time_limit_max_s": (alns_dynamic_repair_time_limit_max_s),
-                # R2 (EMA calibration) telemetry: final state of the
-                # solver-scoped repair-cost estimator.
-                "alns_repair_cost_ema_alpha": alns_repair_cost_alpha,
-                "alns_repair_cost_ema_estimate_s_per_destroyed_op": (
-                    round(alns_repair_cost_estimator.estimate, 6)
-                    if alns_repair_cost_estimator.estimate is not None
-                    else None
-                ),
-                "alns_repair_cost_ema_observation_count": (
-                    alns_repair_cost_estimator.observation_count
-                ),
-                "alns_budget_scaled_windows": alns_budget_scaled_windows,
-                "alns_presearch_budget_guard_enabled": (alns_presearch_budget_guard_enabled),
-                "alns_presearch_max_window_ops": alns_presearch_max_window_ops,
-                "alns_presearch_min_time_limit_s": alns_presearch_min_time_limit_s,
-                "alns_presearch_budget_guard_skipped_windows": (
-                    alns_presearch_budget_guard_skipped_windows
-                ),
-                "alns_budget_mean_effective_max_iterations": round(
-                    sum(alns_effective_max_iterations_values)
-                    / len(alns_effective_max_iterations_values),
-                    2,
-                )
-                if alns_effective_max_iterations_values
-                else 0.0,
-                "alns_budget_mean_effective_max_destroy": round(
-                    sum(alns_effective_max_destroy_values) / len(alns_effective_max_destroy_values),
-                    2,
-                )
-                if alns_effective_max_destroy_values
-                else 0.0,
-                "alns_budget_mean_effective_repair_time_limit_s": round(
-                    sum(alns_effective_repair_time_limit_values)
-                    / len(alns_effective_repair_time_limit_values),
-                    4,
-                )
-                if alns_effective_repair_time_limit_values
-                else 0.0,
-                "boundary_reanchor_windows": boundary_reanchor_windows,
-                "boundary_reanchor_ops_total": boundary_reanchor_ops_total,
-                "boundary_reanchor_changed_ops_total": boundary_reanchor_changed_ops_total,
-                "random_seed_base": random_seed_base,
-                "hybrid_inner_routing_enabled": hybrid_inner_routing_enabled,
-                "hybrid_inner_solver": hybrid_inner_solver_name,
-                "hybrid_due_pressure_threshold": hybrid_due_pressure_threshold,
-                "hybrid_candidate_pressure_threshold": hybrid_candidate_pressure_threshold,
-                "hybrid_max_ops": hybrid_max_ops,
-                "hybrid_route_attempts": hybrid_route_attempts,
-                "hybrid_route_activations": hybrid_route_activations,
-                "hybrid_route_activation_rate": round(
-                    hybrid_route_activations / max(1, hybrid_route_attempts),
-                    4,
-                )
-                if hybrid_route_attempts > 0
-                else 0.0,
-                "horizon_clipped_assignments": horizon_clipped_assignments,
-                "temporal_stabilization": temporal_stabilization,
-                **notary_meta,
-                "time_limit_reached": time_limit_reached,
-                "wall_clock_path_dependent": bool(time_limit_reached),
-                "determinism": determinism,
-                "determinism_violated": bool(time_limit_reached) and determinism == "strict",
-                "search_stop_reason": "wall_clock" if time_limit_reached else "completed",
-                "time_limit_s": time_limit_s,
-                "window_time_limit_s": window_time_limit_s,
-                "coverage_reserve_s": coverage_reserve_s,
-                "coverage_deadline_s": coverage_deadline_s,
-                "coverage_time_reserve_fraction": coverage_time_reserve_fraction,
-                "fallback_repair_on_timeout": fallback_repair_on_timeout,
-                "fallback_repair_soft_budget_s": fallback_repair_soft_budget_s,
-                "coverage_horizon_extension_factor": coverage_horizon_extension_factor,
-                "window_bound_inner_horizon": window_bound_inner_horizon,
-                "window_horizon_slack_minutes": window_horizon_slack_minutes,
-                "planning_horizon_extended": planning_horizon_extended,
-                "original_planning_horizon_end": original_horizon_end.isoformat(),
-                "effective_planning_horizon_end": horizon_end.isoformat(),
-                "original_horizon_minutes": original_horizon_minutes,
-                "effective_horizon_minutes": horizon_minutes,
-                "fallback_repair_attempted": fallback_repair_attempted,
-                "fallback_repair_skipped": fallback_repair_skipped,
-                "fallback_repair_time_limited": fallback_repair_time_limited,
-                "ops_unscheduled": total_ops - scheduled_count,
-                "cross_window_variable_fixing_enabled": cross_window_variable_fixing_enabled,
-                "cross_window_stable_ops_total": len(cross_window_stable_ops),
-                "cross_window_stable_ops_count_per_window": [
-                    s.get("cross_window_stable_ops_count", 0) for s in inner_window_summaries
-                ],
-                "inner_window_summaries": inner_window_summaries,
-            },
+                    if adaptive_window_expansion_factors
+                    else 1.0,
+                    "adaptive_window_max_multiplier_applied": round(
+                        max(adaptive_window_expansion_factors),
+                        4,
+                    )
+                    if adaptive_window_expansion_factors
+                    else 1.0,
+                    "external_warm_start_supplied_assignments": len(external_warm_start_by_op),
+                    "external_warm_start_used_windows": external_warm_start_used_windows,
+                    "candidate_pool_clamped_windows": candidate_pool_clamped_windows,
+                    "candidate_pool_filtered_ops": candidate_pool_filtered_ops,
+                    "candidate_admission_enabled": candidate_admission_active,
+                    "candidate_admission_configured": candidate_admission_enabled,
+                    "precedence_ready_candidate_filter_enabled": (
+                        precedence_ready_candidate_filter_enabled
+                    ),
+                    "precedence_ready_filtered_ops": precedence_ready_filtered_ops,
+                    "precedence_ready_blocked_by_precedence_count": (
+                        precedence_blocked_by_precedence_count
+                    ),
+                    "precedence_ready_ratio": round(
+                        precedence_ready_candidate_ready_total
+                        / max(precedence_ready_candidate_ops_total, 1),
+                        4,
+                    ),
+                    "due_admission_horizon_factor": due_admission_horizon_factor,
+                    "admission_tail_weight": admission_tail_weight,
+                    "progressive_admission_relaxation_enabled": (
+                        progressive_admission_relaxation_enabled
+                    ),
+                    "admission_relaxation_min_fill_ratio": admission_relaxation_min_fill_ratio,
+                    "admission_relaxation_windows": admission_relaxation_windows,
+                    "admission_relaxation_recovered_ops": admission_relaxation_recovered_ops,
+                    "admission_full_scan_enabled": admission_full_scan_enabled,
+                    "admission_full_scan_min_fill_ratio": admission_full_scan_min_fill_ratio,
+                    "admission_full_scan_windows": admission_full_scan_windows,
+                    "admission_full_scan_triggered_windows": admission_full_scan_triggered_windows,
+                    "admission_full_scan_added_ops": admission_full_scan_added_ops,
+                    "admission_full_scan_final_pool_peak": admission_full_scan_final_pool_peak,
+                    "admission_full_scan_recovered_ops": admission_full_scan_recovered_ops,
+                    "candidate_pressure_mean": round(
+                        sum(candidate_pressure_values) / len(candidate_pressure_values),
+                        4,
+                    )
+                    if candidate_pressure_values
+                    else 0.0,
+                    "candidate_pressure_max": round(max(candidate_pressure_values), 4)
+                    if candidate_pressure_values
+                    else 0.0,
+                    "due_pressure_mean": round(
+                        sum(due_pressure_values) / len(due_pressure_values),
+                        4,
+                    )
+                    if due_pressure_values
+                    else 0.0,
+                    "due_drift_minutes_mean": round(
+                        sum(due_drift_minutes_values) / len(due_drift_minutes_values),
+                        2,
+                    )
+                    if due_drift_minutes_values
+                    else 0.0,
+                    "due_drift_minutes_max": round(max(due_drift_minutes_values), 2)
+                    if due_drift_minutes_values
+                    else 0.0,
+                    "spillover_count": spillover_count,
+                    "earliest_frontier_advances": admission_frontier_advances,
+                    "admission_frontier_advances": admission_frontier_advances,
+                    "admission_starvation_count": admission_starvation_count,
+                    "due_frontier_advances": due_frontier_advances,
+                    "effective_window_operation_cap": effective_window_op_cap,
+                    "window_load_factor": window_load_factor,
+                    "dynamic_no_improve_enabled": dynamic_no_improve_enabled,
+                    "no_improve_due_alpha": no_improve_due_alpha,
+                    "no_improve_candidate_beta": no_improve_candidate_beta,
+                    "no_improve_min_iters": no_improve_min_iters,
+                    "no_improve_max_iters": no_improve_max_iters,
+                    "max_windows": max_windows,
+                    "inner_solver_min_budget_s": inner_solver_min_budget_s,
+                    "backtracking_enabled": backtracking_enabled,
+                    "backtracking_tail_minutes": backtracking_tail_minutes,
+                    "backtracking_max_ops": backtracking_max_ops,
+                    "backtracking_windows": backtracking_windows,
+                    "backtracking_ops_total": backtracking_ops_total,
+                    "inner_window_time_fraction": inner_window_time_fraction,
+                    "inner_window_time_cap_s": inner_window_time_cap_s,
+                    "commit_boundary_mode": "end_time",
+                    "alns_inner_window_time_cap_s": alns_inner_window_time_cap_s,
+                    "alns_inner_window_time_cap_scale_threshold_ops": (
+                        alns_inner_window_time_cap_scale_threshold_ops
+                    ),
+                    "alns_inner_window_time_cap_scaled_s": alns_inner_window_time_cap_scaled_s,
+                    "alns_budget_auto_scaling_enabled": alns_budget_auto_scaling_enabled,
+                    "alns_budget_estimated_repair_s_per_destroyed_op": (
+                        round(
+                            float(alns_budget_estimated_repair_s_per_destroyed_op_raw),
+                            4,
+                        )
+                        if alns_budget_estimated_repair_s_per_destroyed_op_raw is not None
+                        else None
+                    ),
+                    "alns_dynamic_repair_budget_enabled": alns_dynamic_repair_budget_enabled,
+                    "alns_dynamic_repair_s_per_destroyed_op": (
+                        alns_dynamic_repair_s_per_destroyed_op
+                    ),
+                    "alns_dynamic_repair_time_limit_min_s": (alns_dynamic_repair_time_limit_min_s),
+                    "alns_dynamic_repair_time_limit_max_s": (alns_dynamic_repair_time_limit_max_s),
+                    # R2 (EMA calibration) telemetry: final state of the
+                    # solver-scoped repair-cost estimator.
+                    "alns_repair_cost_ema_alpha": alns_repair_cost_alpha,
+                    "alns_repair_cost_ema_estimate_s_per_destroyed_op": (
+                        round(alns_repair_cost_estimator.estimate, 6)
+                        if alns_repair_cost_estimator.estimate is not None
+                        else None
+                    ),
+                    "alns_repair_cost_ema_observation_count": (
+                        alns_repair_cost_estimator.observation_count
+                    ),
+                    "alns_budget_scaled_windows": alns_budget_scaled_windows,
+                    "alns_presearch_budget_guard_enabled": (alns_presearch_budget_guard_enabled),
+                    "alns_presearch_max_window_ops": alns_presearch_max_window_ops,
+                    "alns_presearch_min_time_limit_s": alns_presearch_min_time_limit_s,
+                    "alns_presearch_budget_guard_skipped_windows": (
+                        alns_presearch_budget_guard_skipped_windows
+                    ),
+                    "alns_budget_mean_effective_max_iterations": round(
+                        sum(alns_effective_max_iterations_values)
+                        / len(alns_effective_max_iterations_values),
+                        2,
+                    )
+                    if alns_effective_max_iterations_values
+                    else 0.0,
+                    "alns_budget_mean_effective_max_destroy": round(
+                        sum(alns_effective_max_destroy_values)
+                        / len(alns_effective_max_destroy_values),
+                        2,
+                    )
+                    if alns_effective_max_destroy_values
+                    else 0.0,
+                    "alns_budget_mean_effective_repair_time_limit_s": round(
+                        sum(alns_effective_repair_time_limit_values)
+                        / len(alns_effective_repair_time_limit_values),
+                        4,
+                    )
+                    if alns_effective_repair_time_limit_values
+                    else 0.0,
+                    "boundary_reanchor_windows": boundary_reanchor_windows,
+                    "boundary_reanchor_ops_total": boundary_reanchor_ops_total,
+                    "boundary_reanchor_changed_ops_total": boundary_reanchor_changed_ops_total,
+                    "random_seed_base": random_seed_base,
+                    "hybrid_inner_routing_enabled": hybrid_inner_routing_enabled,
+                    "hybrid_inner_solver": hybrid_inner_solver_name,
+                    "hybrid_due_pressure_threshold": hybrid_due_pressure_threshold,
+                    "hybrid_candidate_pressure_threshold": hybrid_candidate_pressure_threshold,
+                    "hybrid_max_ops": hybrid_max_ops,
+                    "hybrid_route_attempts": hybrid_route_attempts,
+                    "hybrid_route_activations": hybrid_route_activations,
+                    "hybrid_route_activation_rate": round(
+                        hybrid_route_activations / max(1, hybrid_route_attempts),
+                        4,
+                    )
+                    if hybrid_route_attempts > 0
+                    else 0.0,
+                    "horizon_clipped_assignments": horizon_clipped_assignments,
+                    "temporal_stabilization": temporal_stabilization,
+                    **notary_meta,
+                    "time_limit_reached": time_limit_reached,
+                    "wall_clock_path_dependent": bool(time_limit_reached),
+                    "determinism": determinism,
+                    "determinism_violated": bool(time_limit_reached) and determinism == "strict",
+                    "search_stop_reason": "wall_clock" if time_limit_reached else "completed",
+                    "time_limit_s": time_limit_s,
+                    "window_time_limit_s": window_time_limit_s,
+                    "coverage_reserve_s": coverage_reserve_s,
+                    "coverage_deadline_s": coverage_deadline_s,
+                    "coverage_time_reserve_fraction": coverage_time_reserve_fraction,
+                    "fallback_repair_on_timeout": fallback_repair_on_timeout,
+                    "fallback_repair_soft_budget_s": fallback_repair_soft_budget_s,
+                    "coverage_horizon_extension_factor": coverage_horizon_extension_factor,
+                    "window_bound_inner_horizon": window_bound_inner_horizon,
+                    "window_horizon_slack_minutes": window_horizon_slack_minutes,
+                    "planning_horizon_extended": planning_horizon_extended,
+                    "original_planning_horizon_end": original_horizon_end.isoformat(),
+                    "effective_planning_horizon_end": horizon_end.isoformat(),
+                    "original_horizon_minutes": original_horizon_minutes,
+                    "effective_horizon_minutes": horizon_minutes,
+                    "fallback_repair_attempted": fallback_repair_attempted,
+                    "fallback_repair_skipped": fallback_repair_skipped,
+                    "fallback_repair_time_limited": fallback_repair_time_limited,
+                    "ops_unscheduled": total_ops - scheduled_count,
+                    "cross_window_variable_fixing_enabled": cross_window_variable_fixing_enabled,
+                    "cross_window_stable_ops_total": len(cross_window_stable_ops),
+                    "cross_window_stable_ops_count_per_window": [
+                        s.get("cross_window_stable_ops_count", 0) for s in inner_window_summaries
+                    ],
+                    "inner_window_summaries": inner_window_summaries,
+                },
+            ),
         )
 
     @staticmethod

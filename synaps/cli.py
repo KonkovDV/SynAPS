@@ -19,8 +19,17 @@ from synaps.contracts import (
 )
 from synaps.model import ScheduleProblem, ScheduleResult, normalize_schedule_problem_data
 from synaps.replay import build_runtime_replay_artifact, write_replay_artifact
+from synaps.solvers.coverage_outcome import classify_coverage, process_exit_code
 from synaps.solvers.registry import available_solver_configs, build_solver_registry_manifest
 from synaps.solvers.router import PortfolioPolicy, SolveRegime, SolverRoutingContext
+
+
+def _process_exit(problem: ScheduleProblem, result: ScheduleResult) -> int:
+    coverage = classify_coverage(
+        n_operations=len(problem.operations),
+        n_assigned=len(result.assignments),
+    )
+    return process_exit_code(result.status, coverage)
 
 
 def _load_problem(path: Path) -> ScheduleProblem:
@@ -482,7 +491,7 @@ def main(argv: list[str] | None = None) -> int:
             stem_parts=(args.instance.stem, args.solver_config or "AUTO", "runtime-solve"),
         )
         _write_json_output(result.model_dump(mode="json"), args.output_file)
-        return 0
+        return _process_exit(problem, result)
 
     elif args.command == "solve-request":
         solve_request = parse_solve_request_json(_load_json_source(args.request))
@@ -531,7 +540,7 @@ def main(argv: list[str] | None = None) -> int:
             ),
         )
         _write_json_output(solve_response.model_dump(mode="json"), args.output_file)
-        return 0
+        return _process_exit(resolved_problem, solve_response.result)
 
     elif args.command == "repair-request":
         repair_request = parse_repair_request_json(_load_json_source(args.request))
@@ -560,7 +569,7 @@ def main(argv: list[str] | None = None) -> int:
             ),
         )
         _write_json_output(repair_response.model_dump(mode="json"), args.output_file)
-        return 0
+        return _process_exit(repair_request.problem, repair_response.result)
 
     elif args.command == "write-contract-schemas":
         written = write_contract_schemas(args.output_dir)

@@ -112,8 +112,8 @@ Do not cite “100k COVER is feasible on three seeds”.
 3. n=3 is not `--repeats>1` in the CHANGELOG DOE sense; CV/CI are descriptive.
 4. `FEASIBLE` here means independent `proven_hard_violations = ∅` on this
    generator family, not industrial deployment.
-5. Words forbidden unless a solver returned checked `OPTIMAL`: optimally,
-   proven (except the empty-notary tautology), guarantees, industrially deployed.
+5. Words forbidden unless a solver returned checked `OPTIMAL`: optimally, <!-- claims-ok -->
+   proven (except the empty-notary tautology), guarantees, industrially deployed. <!-- claims-ok -->
 6. 400@8 native-dead zone, gap-insert cap 64 / 80k remain limitations.
    Unconstrained 5k@400s still routes to ALNS-500. Instances with per-op
    windows or a machine calendar do not (`RHC-GREEDY`). Do not retune
@@ -159,18 +159,18 @@ were not rewritten; the sums table was stale. This table follows the files.
 
 | File | SHA-256 |
 |------|---------|
-| `environment.json` | `b026e49fd8079ce30fcf9e70ffe8ac85c6eb1cc11e9a5725ea4fc2acdbbb7033` |
-| `run_60k_at_100_seed1.json` | `b1c04e99961a1e48c9a601c0b9de3573c4f75838ced26ece4b4b6fb6b9295d29` |
-| `run_60k_at_100_seed42.json` | `0b474c2d12804d749983fe1abf8ca9b91f7f636b2209df878396afa0da0f75c2` |
-| `run_60k_at_100_seed999.json` | `55ef691bbb3a128501a387e97ef752bb0bd29f77f16a1664961816841a177f46` |
-| `run_100k_at_200_seed1.json` | `cc0924ba36e87d01bedf0ae1966cad847fd2ceb23ad02f4ed56efec2455080f9` |
-| `run_100k_at_200_seed42.json` | `da1007349cc2afa4752651f5776ca4f883b5a1a556d04497b1c26580bc18ccf8` |
-| `run_100k_at_200_seed999.json` | `81a01e10840cf8d07e8135cc426340dc49caf5d1ac9a240010f8290fb7df5f7e` |
-| `run_200k_at_400_seed1.json` | `22a12b0b1d173f3086bdb765673f30178b70f94e2c4cce67b44db46aaa0a8fe8` |
-| `run_200k_at_400_seed42.json` | `1a213515d8a393d80f7988db47160abee853b27e782d1137d34b0b246e2570da` |
-| `run_200k_at_400_seed999.json` | `7061a134ee212870a132d0a714c1c5065ab6726753f2e7fadd30f5c67b6766da` |
-| `run_500k_at_1000_seed1.json` | `75f84f913da6faa7de144dab02c594cd1abbf43204176a5c16f54403684290c2` |
-| `run_500k_at_1000_seed42.json` | `5b312151c3a7fc5ee40787ae48fe4c8191ccdfaf1063a71737b5fe09fd3318fb` |
-| `run_500k_at_1000_seed999.json` | `6a8ec97e7230a4c21dbbb6a169eb785bf52a1442637f25e1d6a8f3cebbb76cc7` |
-| `summary.json` | `30c28cd0fb348fd3e96081a21799d1c97c473780efb65eeda827a60716519e57` |
-| `SHA256SUMS.txt` | `8ade38f0cd30299e7fdbfe3c156b2f8a686554f03e84ea48c834ef54c3942171` |
+| `environment.json` | `977126179a8a31c25067c57ce43eca31153f890c01d432135ac354967b3db3c7` |
+| `run_60k_at_100_seed1.json` | `e39aa48c9a38d236aa3c1b4104ac5396ddf262cefb5cdb5b435e4411700326e1` |
+| `run_60k_at_100_seed42.json` | `1636be3360840ef813d0877a46ee4146a2a3112ddb65d5e6cf4b4636d5adbc3f` |
+| `run_60k_at_100_seed999.json` | `3f49e808e2fd61359fbecf973a6ac59018043ee7f2c940d71f9c2eaedd73a43c` |
+| `run_100k_at_200_seed1.json` | `cacb51584a6dbaf335fc929e7434c2a424bde51f748912b91ba9193aa81dfbde` |
+| `run_100k_at_200_seed42.json` | `e5caad9af58b2eeb9a6d876b93adbd0e48d86816e9d17abc8676696ec5bc77b8` |
+| `run_100k_at_200_seed999.json` | `46663e743f9b4ca4299488f1a5899aef07ae9a772b76bb5e2aed8ac8d795e156` |
+| `run_200k_at_400_seed1.json` | `4f9dd708c0eaacf65bff86652500d34e94f6cea35d1d0dc6d88d1a5d4d87938c` |
+| `run_200k_at_400_seed42.json` | `b1d5b34bdbad704916cc84b39ee085c3001bf4ef75e6c1fbf3113d8ff696d625` |
+| `run_200k_at_400_seed999.json` | `37b45252c21ce3fe8ab29d0c0e9b0efc663b1c3b0177092caaf6e0968ba3da83` |
+| `run_500k_at_1000_seed1.json` | `c8241745863116137824175685b18d90871a0211ca7530937d9f68133a3f012a` |
+| `run_500k_at_1000_seed42.json` | `e5c65810eae5c95da0d2ccef7bd51caf7bf60446e2aacc7f419b69549061cc69` |
+| `run_500k_at_1000_seed999.json` | `a535085983a715e9cbafb0eaaa6ae1e092fc145f92d1fdad82a632b3d06e612b` |
+| `summary.json` | `51b7144d906c14331a001dbbc6b165bb61b9c4483e9161d4a80c5b4d80b2d5b6` |
+| `SHA256SUMS.txt` | `79082fc9f5a3160ff71c119eac8d1bf8d69e2a359d6efea5598ac3a1fae45ee2` |

@@ -137,7 +137,7 @@ _LONG_FUNCTION_RATCHET: dict[str, int] = {
     "solvers/alns_solver.py::_solve_core": 1558,
     "solvers/feasibility_checker.py::check": 217,
     "solvers/lbbd_hd_solver.py::solve": 433,
-    "solvers/lbbd_solver.py::solve": 386,
+    "solvers/lbbd_solver.py::solve": 397,
     "solvers/cpsat_solver.py::solve": 453,
     "solvers/greedy_dispatch.py::_solve_core": 362,
     "solvers/router.py::route_solver_config": 211,

@@ -138,9 +138,7 @@ def aggregate(runs: list[dict[str, Any]]) -> dict[str, Any]:
     summary = {}
     for scale_id, group in by_scale.items():
         completed = [
-            r
-            for r in group
-            if not r.get("stalled") and r.get("scheduled_ratio") is not None
+            r for r in group if not r.get("stalled") and r.get("scheduled_ratio") is not None
         ]
         makespans = [
             float(row["makespan_minutes"])
@@ -196,9 +194,7 @@ def main(argv: list[str] | None = None) -> int:
     env = collect_environment()
     env_path = out_dir / "environment.json"
     if not (args.resume and env_path.exists()):
-        env_path.write_text(
-            json.dumps(env, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
+        env_path.write_text(json.dumps(env, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     seeds = tuple(int(item.strip()) for item in str(args.seeds).split(",") if item.strip())
     wanted = {item.strip() for item in str(args.scales).split(",") if item.strip()}
     runs: list[dict[str, Any]] = []
