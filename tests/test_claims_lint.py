@@ -20,7 +20,7 @@ _FORBIDDEN = (
     "world record",
 )
 
-_REQUIRED_KI = tuple(f"KI-N{i}" for i in range(1, 14))
+_REQUIRED_KI = tuple(f"KI-N{i}" for i in range(1, 15))
 
 
 def test_claims_denylist_in_front_matter() -> None:
@@ -34,7 +34,7 @@ def test_claims_denylist_in_front_matter() -> None:
     assert not hits, f"forbidden claim phrase(s): {hits}"
 
 
-def test_known_issues_lists_n1_through_n12() -> None:
+def test_known_issues_lists_n1_through_n14() -> None:
     text = (_ROOT / "KNOWN_ISSUES.md").read_text(encoding="utf-8")
     missing = [kid for kid in _REQUIRED_KI if kid not in text]
     assert not missing, f"KNOWN_ISSUES.md missing {missing}"

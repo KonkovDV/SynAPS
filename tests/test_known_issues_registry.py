@@ -69,3 +69,6 @@ def test_known_issues_registry_exists_and_lists_ki_ids() -> None:
     assert "KI-N1" in text
     assert "KI-N7" in text
     assert "KI-N12" in text
+    assert "KI-N13" in text
+    assert "KI-N14" in text
+    assert "test_study_solver_scaling_compares_requested_solvers_for_large_preset" in text

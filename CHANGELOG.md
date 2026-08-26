@@ -71,12 +71,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **100k@200 is two of three seeds:** seed 42 stalled; do not cite three-seed
   COVER feasibility at 100k. README, README_RU, this Unreleased row, and
   `benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md` use the same sentence.
-- **ADR-0005 kernel gates OPEN (И3/И4/И8):** occupancy notary
-  `[start − setup, end]`; calendar instances route inside `CALENDAR_AWARE`
-  even when `preferred_max_latency_s is None`; empty assignments are `ERROR`
-  on all 25 named configs (Pareto-slice stamps the inner result). Fourth
-  domain repository is not created in this round. Table:
-  `docs/architecture/CALENDAR_ROUTING.md`.
+- **ADR-0005 kernel gates OPEN (И3/И4/И8):** merge
+  `9b5063422f25d6a3cd26b18f6749fc7720541398` (PR #11, 2026-08-26T20:22:50Z),
+  Linux required-jobs run
+  [33007702599](https://github.com/KonkovDV/SynAPS/actions/runs/33007702599).
+  Occupancy notary `[start − setup, end]`; calendar instances route inside
+  `CALENDAR_AWARE` even when `preferred_max_latency_s is None`; empty
+  assignments are `ERROR` on all 25 named configs (Pareto-slice stamps the
+  inner result). Fourth domain repository is not created in this commit.
+  Table: `docs/architecture/CALENDAR_ROUTING.md`.
 - **Branch protection / test-slow (И1):** `master` requires a PR plus
   lint, contract-schema-drift, typecheck, test-fast 3.12/3.13,
   benchmark-smoke, control-plane. `test-slow` is post-merge only
@@ -101,12 +104,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | `7a4083e` | test-fast (3.13) | failure — same hash mismatch | same |
 | `7a4083e` | benchmark-smoke | success | same |
 | `7a4083e` | control-plane | success | same |
+| `efa5ae9` (PR #11 head) | lint | success | [33007702599](https://github.com/KonkovDV/SynAPS/actions/runs/33007702599) |
+| `efa5ae9` | contract-schema-drift | success | same |
+| `efa5ae9` | typecheck | success | same |
+| `efa5ae9` | test-fast (3.12) | success | same |
+| `efa5ae9` | test-fast (3.13) | success | same |
+| `efa5ae9` | benchmark-smoke | success | same |
+| `efa5ae9` | control-plane | success | same |
+| `efa5ae9` | test-slow (not required) | skipped (PR, not master) | same |
 
-First commit on `master` whose **six required jobs** are all green after the
-hash regression: `515488b`
+Merge of PR #11: `9b506342` (2026-08-26T20:22:50Z). First commit on
+`master` whose **six required jobs** are all green after the hash
+regression: `515488b`
 ([run 32987597757](https://github.com/KonkovDV/SynAPS/actions/runs/32987597757)).
 Last fully-green workflow (including test-slow): `bd09d13`
 ([run 31974734700](https://github.com/KonkovDV/SynAPS/actions/runs/31974734700)).
+`test-slow` remains red on `515488b` (KI-N14).
 
 <!-- non-claims:start -->
 Historical Unreleased dump below this marker. Non-canonical 499770 / ~145 s /
