@@ -1,0 +1,2421 @@
+{
+  "generate_s": 0.103,
+  "geometry": "work_center.calendar night 22:00-06:00; per-op windows empty",
+  "has_machine_calendar": true,
+  "has_per_op_windows": false,
+  "independent_violation_kinds": [],
+  "n_machines": 8,
+  "n_operations_requested": 3000,
+  "night_hours": 8,
+  "night_start_hour": 22,
+  "not_the_deadzone_ratio": "0.7702 is per-op windows on 24/7 machines; do not reuse",
+  "notary_hard_violation_count": 346,
+  "notary_hard_violation_kinds": [
+    "CALENDAR_VIOLATION",
+    "MISSING_ASSIGNMENT"
+  ],
+  "ops_generated": 3000,
+  "ops_scheduled": 2702,
+  "protocol": "machine-calendar-3000-8-2026-08-27",
+  "reason_counts": {
+    "GOST_PRIORITY_PREEMPTED": 0,
+    "IMPOSSIBLE_BY_CONSTRUCTION": 0,
+    "NO_CREW_CAPACITY": 298,
+    "WINDOW_CLOSED": 0
+  },
+  "scheduled_ratio": 0.9006666666666666,
+  "search_stop_reason": "wall_clock",
+  "seed": 42,
+  "solver_config": "RHC-GREEDY",
+  "status": "error",
+  "time_limit_reached": true,
+  "unplaced": [
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 35.0,
+      "operation_id": "6d1ed1a0-447b-471c-b50d-117e018261d0",
+      "order_id": "453d7b10-d436-4a5e-a9c9-4a06504406f5",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 41.0,
+      "operation_id": "bbf3afbe-e156-4886-9249-92ee2dc79a0a",
+      "order_id": "6e3a6428-f343-4d42-9be4-52b74b55be95",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 43.0,
+      "operation_id": "67b1a954-3c3a-4e16-b33c-643d833de871",
+      "order_id": "6e3a6428-f343-4d42-9be4-52b74b55be95",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 54.0,
+      "operation_id": "fe4d970e-325a-4817-9e8d-203094ecabdd",
+      "order_id": "2fc3cd45-7003-49ba-a717-954fce078592",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 55.0,
+      "operation_id": "eca5947e-1b9e-40aa-8352-8373a292da43",
+      "order_id": "8a08dd59-06ec-47af-b3a0-64ae005428c5",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 54.0,
+      "operation_id": "b6a0fda2-969a-45bd-90d0-b162fed8c5b6",
+      "order_id": "8a08dd59-06ec-47af-b3a0-64ae005428c5",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 39.0,
+      "operation_id": "0956ffe4-0576-43fd-b0da-e006e8e8474c",
+      "order_id": "52ccaacf-4c6f-47f0-b6dc-e09e9e03e42b",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 39.0,
+      "operation_id": "ef8c9169-c5a1-49e6-9ed0-4cf271bdfc8c",
+      "order_id": "29dcece5-8c57-41b1-8c05-ffc1d9a338dc",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 31.0,
+      "operation_id": "d17aa54b-3448-4214-a85e-bc118e65fb20",
+      "order_id": "0e31e2f4-c9e6-4b46-be5c-29f11ffaec73",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 50.0,
+      "operation_id": "dade6cae-4519-4cdf-956d-edaf3f868f67",
+      "order_id": "0e31e2f4-c9e6-4b46-be5c-29f11ffaec73",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 49.0,
+      "operation_id": "f7b6d17d-2343-4844-9f3a-ddbc9a4bdfc9",
+      "order_id": "3221ef18-7206-4f76-a449-095f5a69fadd",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 61.0,
+      "operation_id": "82a808af-636b-4ba4-9530-f7793bf08176",
+      "order_id": "3221ef18-7206-4f76-a449-095f5a69fadd",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 53.0,
+      "operation_id": "c6d9397a-70b7-4767-8cc6-cd5b40391617",
+      "order_id": "243ae825-4b07-489f-8e0d-9dab6700fe3b",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 41.0,
+      "operation_id": "f94a5938-6561-42e7-9f0f-1b7dad6c88c8",
+      "order_id": "628f0a8f-ca60-4c65-ab1d-1f3a69fa9d30",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 37.0,
+      "operation_id": "4f786ac5-9ca7-4f7d-8422-1e55dad7b620",
+      "order_id": "a78a4eba-2566-447e-a751-7bb204a7904c",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 44.0,
+      "operation_id": "de4bac83-2937-486b-a1a8-38a0e02e5860",
+      "order_id": "220055d7-4347-4f7e-97be-1b7cd421af0b",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 51.0,
+      "operation_id": "55f1cd68-9344-406b-8236-fc68973b8602",
+      "order_id": "be27b088-94ad-403e-a712-7d1dcf3ecbe2",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 48.0,
+      "operation_id": "a839da06-4106-4bcb-9ae4-6d3781860bc6",
+      "order_id": "16eeb515-9562-4bcf-962d-2c939be3801f",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 48.0,
+      "operation_id": "ad13e0fb-5655-429c-b43b-ab84a35257d5",
+      "order_id": "9eb1199d-60ca-4d55-a643-757d0e64328f",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 53.0,
+      "operation_id": "60bb936d-9541-4f03-a43e-5100f8f49d60",
+      "order_id": "9eb1199d-60ca-4d55-a643-757d0e64328f",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 46.0,
+      "operation_id": "78cae954-d328-4fec-a025-5fe723f6a42f",
+      "order_id": "2a401b83-af58-4ee1-91cc-bc78e2d2b4fa",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 58.0,
+      "operation_id": "f5a0350c-58ea-4d80-8413-c82af25932a7",
+      "order_id": "846c0161-2cc1-4f77-987b-3c63878257b8",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 53.0,
+      "operation_id": "f64fd8da-edea-4fe4-8220-ad35dfe2ea05",
+      "order_id": "c24908ff-d591-477a-9dc0-e2bcdb2d3646",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 59.0,
+      "operation_id": "8e0c8ab2-63c0-448e-a4f0-3a2d4624d8cb",
+      "order_id": "15f89724-bc62-4418-9ea6-d1c22070c3cd",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 45.0,
+      "operation_id": "3995d022-c44d-499c-839d-80197dd5901a",
+      "order_id": "65d39a60-6431-4985-983e-940e66e2873f",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 64.0,
+      "operation_id": "aa17c338-d19b-43bb-bd8b-daf3dad80810",
+      "order_id": "99c9624d-6996-4294-9edd-a86aac013de4",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 52.0,
+      "operation_id": "e3c576b4-d041-4e69-8a8b-53c4a2758ac3",
+      "order_id": "e7bdd2d6-bfab-4004-8231-d81a02c70274",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 59.0,
+      "operation_id": "f3a59bd9-fba4-47a7-b68a-6a39c8cdd5f9",
+      "order_id": "e7bdd2d6-bfab-4004-8231-d81a02c70274",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 52.0,
+      "operation_id": "63bd4b12-ce84-4d01-b54c-dcfe0abcb527",
+      "order_id": "93328f26-4754-45cf-9be8-06a059442b5e",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 39.0,
+      "operation_id": "32731271-483a-42a6-8f5b-684800e42536",
+      "order_id": "d5351266-dedc-4489-b7c6-b36b7056b29f",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 58.0,
+      "operation_id": "697ee421-232f-4966-a923-2cff391f37e6",
+      "order_id": "1bfcd5e5-0083-47df-807b-faaa2458bf4e",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 52.0,
+      "operation_id": "dd3b5993-a107-4f50-a412-777fa04beb82",
+      "order_id": "7d269f8c-352c-4ca0-b22a-05c6d9822338",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 37.0,
+      "operation_id": "538972ca-d4ac-4159-91e4-68e91516f8e4",
+      "order_id": "7d269f8c-352c-4ca0-b22a-05c6d9822338",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 47.0,
+      "operation_id": "a1b3f292-7268-4a03-81b8-ccd61c6fccd3",
+      "order_id": "9a59bbaa-aa70-479d-b637-110a91908114",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 46.0,
+      "operation_id": "28587928-eea8-40d1-afc1-7e81de7f83b3",
+      "order_id": "9a59bbaa-aa70-479d-b637-110a91908114",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 53.0,
+      "operation_id": "b61d2468-e0f7-47f9-b504-d9332cc3771f",
+      "order_id": "dd172e7c-8bb5-4740-916f-ac4a46568c23",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 56.0,
+      "operation_id": "b9ad9bc7-1c70-4270-aab2-0fd01e8982b4",
+      "order_id": "dd172e7c-8bb5-4740-916f-ac4a46568c23",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 29.0,
+      "operation_id": "9aab41e2-e060-4a91-8ae0-bda64ce3e98a",
+      "order_id": "2af7126a-745d-4b7e-8725-3fe7a83ca111",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 51.0,
+      "operation_id": "d49ab69c-6210-4780-a1ca-3c04a0e9f63e",
+      "order_id": "2af7126a-745d-4b7e-8725-3fe7a83ca111",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 59.0,
+      "operation_id": "e0ee7c67-d9dc-4dd5-a222-229646ac90bd",
+      "order_id": "3b33e77b-18a8-469e-969f-8e299a4e0955",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 59.0,
+      "operation_id": "610da706-3e10-4048-9c1c-970d428570a8",
+      "order_id": "a9392c16-1b90-4bc2-afe9-6c25109966b5",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 55.0,
+      "operation_id": "51f118c0-d693-4f57-8176-9037f146b46f",
+      "order_id": "d47865f1-0a2c-43bf-a92c-e0a1b1c6e5c7",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 60.0,
+      "operation_id": "bb739726-e227-4fbb-a198-075c4e95e934",
+      "order_id": "a5710b88-46e6-4bc1-9cf9-4545312ee23f",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 51.0,
+      "operation_id": "76f4aff6-2eb7-49f5-b2e9-fc3d891557bd",
+      "order_id": "a5710b88-46e6-4bc1-9cf9-4545312ee23f",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 40.0,
+      "operation_id": "6111ee52-8372-48e1-ad6c-40140cf836a3",
+      "order_id": "5b3d0302-ba9c-4408-8188-fa52bdbef1cf",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 50.0,
+      "operation_id": "3aa39b40-4773-4c61-9b8b-54602986ae88",
+      "order_id": "5b3d0302-ba9c-4408-8188-fa52bdbef1cf",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 42.0,
+      "operation_id": "759821a7-f0e1-44ca-bde5-95962bb5f635",
+      "order_id": "46a6a97c-9c29-495f-b607-4c35cfc592a3",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 54.0,
+      "operation_id": "562b6a40-102b-4af7-b8ef-4325bbf2103e",
+      "order_id": "46a6a97c-9c29-495f-b607-4c35cfc592a3",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 44.0,
+      "operation_id": "da215f4c-4094-4bb3-9116-c86d0c944695",
+      "order_id": "95a2098a-cdd1-4839-93bf-bfc9496b335c",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 47.0,
+      "operation_id": "4dafddce-b6a3-476d-9a1e-a20b467bbb7c",
+      "order_id": "c67efa88-2ad5-400b-a090-a4aded06186d",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 44.0,
+      "operation_id": "57b31a6e-fdb7-4551-a378-85a33f5464a3",
+      "order_id": "6faf063d-ee62-4912-8415-87bceaedcb49",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 48.0,
+      "operation_id": "cd57be5a-863c-4da1-9fef-f78378637daa",
+      "order_id": "6faf063d-ee62-4912-8415-87bceaedcb49",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 59.0,
+      "operation_id": "6768c521-15a2-4fbd-84fa-74cfba1379c9",
+      "order_id": "72829c0f-39a7-4ee6-8f6e-d0ba4a3e7882",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 49.0,
+      "operation_id": "4206a4bc-d3ad-41ca-aae6-fe6d4cb9d1e7",
+      "order_id": "72829c0f-39a7-4ee6-8f6e-d0ba4a3e7882",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 57.0,
+      "operation_id": "fe06031d-be66-43a9-a3f2-a0d330877727",
+      "order_id": "7547b384-8308-49d5-ad14-c8a4c14676e4",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 50.0,
+      "operation_id": "71cd877a-585b-4c29-9414-e67439a92acd",
+      "order_id": "7547b384-8308-49d5-ad14-c8a4c14676e4",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 52.0,
+      "operation_id": "f7f88709-63fb-4689-8da6-5a9dc3180efd",
+      "order_id": "07b0577a-ab0e-48d2-9a10-5471f81eaf47",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 55.0,
+      "operation_id": "2f634635-8be5-438d-911f-ffdba683773e",
+      "order_id": "07b0577a-ab0e-48d2-9a10-5471f81eaf47",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 51.0,
+      "operation_id": "ef361618-8f9c-477b-be33-b85049a6b65b",
+      "order_id": "84178f9c-c60a-4016-af4d-b40286f3c707",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 51.0,
+      "operation_id": "6dc67e6f-8d01-42a0-8b0b-c61c3810982b",
+      "order_id": "97774890-3f7f-4def-bc74-826bd10b1728",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 51.0,
+      "operation_id": "7a6c0045-4f0f-434b-be3a-3c51d48bd5a9",
+      "order_id": "3a4909b8-8d26-4eb2-b960-f3ba146d7abc",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 63.0,
+      "operation_id": "6484a45b-b724-4bca-8f91-153dd6ba30cb",
+      "order_id": "35a373af-4ea5-4d88-9605-35ded2805cea",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 44.0,
+      "operation_id": "ddd22036-3639-43a5-a849-11db775bbf60",
+      "order_id": "3eda2c41-2276-46bc-87b0-3857cdc0d3e4",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 51.0,
+      "operation_id": "6d38a0f3-7eab-4ec4-b3bf-69f03d629be2",
+      "order_id": "6261d87e-faec-47f7-8fee-8ad6b8f775aa",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 55.0,
+      "operation_id": "eca30338-a4e9-4199-9215-8a7b848e2b2d",
+      "order_id": "6261d87e-faec-47f7-8fee-8ad6b8f775aa",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 51.0,
+      "operation_id": "7b58d34d-8df4-4f01-bfcd-e52a34bcebb5",
+      "order_id": "9b29c5c4-14bf-4ba0-80d1-7825e6cfb091",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 56.0,
+      "operation_id": "3451792e-518e-4aa8-b8a8-373c593a7cde",
+      "order_id": "9b29c5c4-14bf-4ba0-80d1-7825e6cfb091",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 37.0,
+      "operation_id": "6f75c0b8-5c3a-4ec3-afe6-e976290a5f44",
+      "order_id": "4e1acec2-69f9-4406-8767-8c98bb935023",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 45.0,
+      "operation_id": "8bda69e5-2ebe-40fc-83d4-1020fd971c02",
+      "order_id": "61e7548c-f597-494e-9d12-b9ebda8340bf",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 41.0,
+      "operation_id": "52cdffaa-640f-485d-97b5-8c517818b4f2",
+      "order_id": "2649a892-c249-4b25-aab4-be6b71bacc1d",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 45.0,
+      "operation_id": "aecc7729-be8c-42de-9f5b-1035a948a154",
+      "order_id": "7170205e-7437-4c89-a589-d6fc251f3738",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 33.0,
+      "operation_id": "ac4f0702-2a22-41bc-82da-6b2c9dceb86f",
+      "order_id": "7170205e-7437-4c89-a589-d6fc251f3738",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 53.0,
+      "operation_id": "c3623184-2b84-46d3-9d23-18eba14ce7f1",
+      "order_id": "17299527-d39d-44eb-b867-bb4e82d72298",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 42.0,
+      "operation_id": "b0844555-f649-455b-b716-13ceed1bd7fd",
+      "order_id": "c8fb956a-f7d6-4ed5-b6c7-901e89c03bc5",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 41.0,
+      "operation_id": "ca82349e-a1fb-4aec-8176-ea02b60539b1",
+      "order_id": "c8fb956a-f7d6-4ed5-b6c7-901e89c03bc5",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 49.0,
+      "operation_id": "df2bce29-c34f-4f00-9619-51d42689508e",
+      "order_id": "89881d37-dcca-4563-882b-6307953e6852",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 57.0,
+      "operation_id": "c08947b3-dd4f-4198-8036-0f1970f99648",
+      "order_id": "e6171689-0c4b-4dbd-9cd0-6c28a2afe126",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 59.0,
+      "operation_id": "81733e7c-b449-4908-b87f-798939b11b53",
+      "order_id": "0b8537d6-7140-4a04-ad53-f236ffe3e761",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 58.0,
+      "operation_id": "e4e872bc-2bf5-40d3-ba3d-4bd638f4c20e",
+      "order_id": "b29ddb14-0895-4184-a5cd-98494bff0219",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 35.0,
+      "operation_id": "75a81600-4392-4827-adbf-688c95d8c8d4",
+      "order_id": "7cae8532-3728-4ccd-8239-5830891954ca",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 46.0,
+      "operation_id": "4337a131-53bc-4924-83e4-28aa259bf6ed",
+      "order_id": "4ebbc3f9-9e5e-4a04-bdf1-2862b59721b4",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 48.0,
+      "operation_id": "97daa70e-4880-47f4-b085-4482f9b692d8",
+      "order_id": "4ebbc3f9-9e5e-4a04-bdf1-2862b59721b4",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 43.0,
+      "operation_id": "d6e2c9a4-8c5e-4fdc-a47b-aed25dd58227",
+      "order_id": "20cee5bd-9f10-4da5-a437-367ced7de9ae",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 44.0,
+      "operation_id": "65146802-3bec-4e37-9a42-3277e1e26e44",
+      "order_id": "20cee5bd-9f10-4da5-a437-367ced7de9ae",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 51.0,
+      "operation_id": "9cae625a-2bc4-4ad3-a54b-9d6d5bc342ad",
+      "order_id": "dd984270-fccc-4010-b2d0-5148220a3f5e",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 44.0,
+      "operation_id": "93fc5bb4-9ef2-40a7-b4e6-9e286b2def7d",
+      "order_id": "0dd4e94f-0057-44c7-9438-e120e02db211",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 51.0,
+      "operation_id": "a845adec-1889-4205-bd47-ea33229184a2",
+      "order_id": "0dd4e94f-0057-44c7-9438-e120e02db211",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 44.0,
+      "operation_id": "b93da956-3468-45db-9f66-939c5af9305e",
+      "order_id": "f403a31b-763e-4831-9923-6ae7abc44924",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 43.0,
+      "operation_id": "1cb3cd9b-cd87-4566-b955-f961ab7e2240",
+      "order_id": "f403a31b-763e-4831-9923-6ae7abc44924",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 48.0,
+      "operation_id": "7c180785-d4d3-4bf3-8e2d-bc31280b646e",
+      "order_id": "c5d9f844-1220-4088-b889-7605beb87e3e",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 53.0,
+      "operation_id": "f4a6fe34-36c4-4412-9dca-f0de300a9874",
+      "order_id": "3c06de07-2f1e-4c45-bc38-8504ea930ef4",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 45.0,
+      "operation_id": "f06ab236-e7ef-4d51-98f9-d82032a220d3",
+      "order_id": "3c06de07-2f1e-4c45-bc38-8504ea930ef4",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 58.0,
+      "operation_id": "f1e4fdd1-1f5f-4414-9891-d37f802f5681",
+      "order_id": "bf6528d0-7d21-450d-a3e1-64903347a01c",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 45.0,
+      "operation_id": "b8d64e58-1028-4183-9326-73734d89d12f",
+      "order_id": "bf6528d0-7d21-450d-a3e1-64903347a01c",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 49.0,
+      "operation_id": "e5149bda-dea4-47c7-b6dd-bf2f025039ca",
+      "order_id": "1a37424b-7579-4f9b-a7d2-4f19d61bdd8e",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 43.0,
+      "operation_id": "4ff4cba5-92d9-4723-8dce-227b7a6f449b",
+      "order_id": "1faae4c3-e22f-4959-a7ef-a5ad64b1e6c2",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 55.0,
+      "operation_id": "eb503098-e228-43dc-82df-4953fd7f7969",
+      "order_id": "c01ae787-9140-4321-9f6f-f16caa5f063d",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 59.0,
+      "operation_id": "a5f57cb7-e6cf-404c-9374-0ea84b18cba1",
+      "order_id": "c01ae787-9140-4321-9f6f-f16caa5f063d",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 47.0,
+      "operation_id": "7a257ca5-bacc-48d3-9af8-7c4389829887",
+      "order_id": "1e1152f2-7042-44f0-adb6-02df63a58bab",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 48.0,
+      "operation_id": "45f91d05-2899-483c-a187-9be6146656e1",
+      "order_id": "79fcb7b0-86d8-4724-be19-287d2f4089d2",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 61.0,
+      "operation_id": "807110f8-4548-4fa7-881e-70759a305a20",
+      "order_id": "79fcb7b0-86d8-4724-be19-287d2f4089d2",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 51.0,
+      "operation_id": "b032d691-0481-406d-86fb-933c3624821d",
+      "order_id": "6928ff18-87a5-4ad7-a38e-503b5a8e5ff5",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 39.0,
+      "operation_id": "f9e5d697-30dd-46b7-b399-e9a75119343a",
+      "order_id": "e8a6b5fb-309e-4cc1-a5e3-af267af0cf36",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 50.0,
+      "operation_id": "d013f416-ce3a-4740-98d1-778417c67ca0",
+      "order_id": "8bc30c24-7b1a-42c6-8e68-c6b6c5554846",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 45.0,
+      "operation_id": "93bf0693-7a19-4163-9cbc-b7c003693436",
+      "order_id": "8bc30c24-7b1a-42c6-8e68-c6b6c5554846",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 50.0,
+      "operation_id": "57845cc7-e693-425e-9849-7500e8e57d26",
+      "order_id": "ab415539-e5a8-4216-a535-a62d332a81b9",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 33.0,
+      "operation_id": "c91628c3-6749-4a06-9e54-1bb455a0b777",
+      "order_id": "ab415539-e5a8-4216-a535-a62d332a81b9",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 46.0,
+      "operation_id": "c54cead5-dbe2-4215-8fce-ec8d0bef49d7",
+      "order_id": "6b9bee77-25ac-42e5-87f2-aa37a06d54f9",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 59.0,
+      "operation_id": "883c8cfd-5d3f-4229-a42d-e1fd35ca1752",
+      "order_id": "6b9bee77-25ac-42e5-87f2-aa37a06d54f9",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 40.0,
+      "operation_id": "3f80badd-0bcd-41fe-8bb3-4ecfef6c60f8",
+      "order_id": "fa7d664d-b0ce-470e-8ca4-ff6a2bc0485b",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 52.0,
+      "operation_id": "67ef9017-957e-40fe-acbb-ec05360d3750",
+      "order_id": "c9863c1b-d7c8-49d4-8d82-40737784ac09",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 39.0,
+      "operation_id": "db56e722-6995-4f8c-ad7c-bec43a0de0dc",
+      "order_id": "04beab1c-c569-479e-82ce-a62bff0496d3",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 44.0,
+      "operation_id": "60950ea0-21af-4875-aef6-438c072f84a9",
+      "order_id": "04beab1c-c569-479e-82ce-a62bff0496d3",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 53.0,
+      "operation_id": "e0a73531-aeae-4f62-99f1-4ba8f060ceee",
+      "order_id": "ae9610d2-cf80-497c-b4b5-4298768acbd0",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 59.0,
+      "operation_id": "9dd4651e-251c-4b7a-9616-390c61b92717",
+      "order_id": "ae9610d2-cf80-497c-b4b5-4298768acbd0",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 59.0,
+      "operation_id": "c1c1c84c-c420-4348-87ee-5f0d606fcac0",
+      "order_id": "8656db87-fd44-4f08-83e1-816449d29c9c",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 45.0,
+      "operation_id": "66d89d68-0555-49de-bf9e-743c6da4fe28",
+      "order_id": "31e2ad2b-0bc3-4fc6-9ceb-2d190f975765",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 53.0,
+      "operation_id": "8c574f9b-7403-499b-a1ad-0a5c3cae8ddb",
+      "order_id": "f075d89a-802d-4901-95fc-fcb25d8d67d1",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 53.0,
+      "operation_id": "3c65481c-c6cb-4682-960a-b9c0491bb5ff",
+      "order_id": "f075d89a-802d-4901-95fc-fcb25d8d67d1",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 44.0,
+      "operation_id": "c1b860b4-6181-4739-8581-81b90b0c4d2b",
+      "order_id": "af7b2c7d-a918-436a-a61b-b9373ea18981",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 42.0,
+      "operation_id": "ed2c1fff-9179-48bd-9b48-2537ad0b7cf0",
+      "order_id": "af5643e3-ff9d-45ae-a2ec-ac9d7e2f9f55",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 41.0,
+      "operation_id": "c576d9a9-381b-48da-8018-5df335b1d694",
+      "order_id": "57db2b90-fb55-4bd6-a04c-668607e2eacd",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 60.0,
+      "operation_id": "a3d691ac-fe99-4306-bb64-da68ca9c943e",
+      "order_id": "57db2b90-fb55-4bd6-a04c-668607e2eacd",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 45.0,
+      "operation_id": "90ffc485-e87c-4ec6-b39c-eb3cc5720e91",
+      "order_id": "be22f5c6-0571-4499-85d3-739db6dc91be",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 56.0,
+      "operation_id": "fb02d1f2-c252-4e04-b996-f44e08f40046",
+      "order_id": "c956a2e2-d5b2-4f5e-961a-88f80b3424d5",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 46.0,
+      "operation_id": "7a25d914-1070-4246-ab06-4fd110550267",
+      "order_id": "c956a2e2-d5b2-4f5e-961a-88f80b3424d5",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 49.0,
+      "operation_id": "a902256f-a0e4-4bbb-a03e-41912a8faa86",
+      "order_id": "22fca5ee-0597-4cfc-af59-5edd07d69544",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 49.0,
+      "operation_id": "a7625ee2-9d1c-4b61-a502-3703ed2ec36b",
+      "order_id": "22fca5ee-0597-4cfc-af59-5edd07d69544",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 60.0,
+      "operation_id": "5686cbf0-16ed-4097-9cdf-02b1bfa2fff6",
+      "order_id": "3ef2b82a-9bc9-48fe-ad35-471f5382644d",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 26.0,
+      "operation_id": "b5171548-fbdc-45cf-a8ec-a72b52edf4c3",
+      "order_id": "3ef2b82a-9bc9-48fe-ad35-471f5382644d",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 45.0,
+      "operation_id": "acc04daa-6b20-4b8c-b1e8-59ac3486148c",
+      "order_id": "ace0edec-fce2-49f4-a16c-f8944b27fd74",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 59.0,
+      "operation_id": "bc787799-4ebe-4672-825c-6204b73221dc",
+      "order_id": "199e4137-2a77-4501-a3f3-b78714b20f39",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 61.0,
+      "operation_id": "d5f61bf6-7113-4259-a3a3-1387803201f0",
+      "order_id": "bc618ab6-fbd0-4e80-ab8e-7e0ea3ef4ae4",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 52.0,
+      "operation_id": "8aaa7fc9-c970-4775-abd3-8975800f3dc2",
+      "order_id": "bc618ab6-fbd0-4e80-ab8e-7e0ea3ef4ae4",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 40.0,
+      "operation_id": "c0e14837-590d-4f5c-85ae-3bd64f27d4bb",
+      "order_id": "47fa5ed8-a923-4b71-9667-3d19d9122acd",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 43.0,
+      "operation_id": "70366268-d9f7-48cf-a665-ec335680c7fd",
+      "order_id": "a7ba137f-41b9-4fb3-8656-2e6f03efeda9",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 53.0,
+      "operation_id": "e0e5f6ed-3a98-484e-9675-ebac752afb0a",
+      "order_id": "8ed410dc-13e1-488a-8606-505ca0281153",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 54.0,
+      "operation_id": "4a809256-2aaf-4f28-9187-0367a98550c2",
+      "order_id": "be320100-968d-4def-adbc-f53192232700",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 53.0,
+      "operation_id": "927b3168-3374-4f7d-b7e6-ea7a6d001ca0",
+      "order_id": "be320100-968d-4def-adbc-f53192232700",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 50.0,
+      "operation_id": "7c2bee8f-79f3-4d33-92d0-a4766129176f",
+      "order_id": "71549d35-4d90-4723-85ba-b9e0f95046fd",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 48.0,
+      "operation_id": "e9de3fd0-e310-4e60-8464-57450b270799",
+      "order_id": "93ce095b-929a-4c43-ba06-3070ee0a2903",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 50.0,
+      "operation_id": "faa6a4fa-53d7-4ed7-99c9-9429accd9452",
+      "order_id": "000937f1-312c-40fc-9321-459467a22106",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 45.0,
+      "operation_id": "8f185a4d-dac6-482c-9c7b-87f33fc59794",
+      "order_id": "000937f1-312c-40fc-9321-459467a22106",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 31.0,
+      "operation_id": "4e8caaa7-a8f6-41e3-b9d7-2187b9bf1d04",
+      "order_id": "460805d1-f53a-428c-9a1f-c2c5d21c5641",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 52.0,
+      "operation_id": "312f56ed-a776-436e-8752-8bca3a9050bb",
+      "order_id": "994ef59e-ac07-470b-bbee-24fd5f788381",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 53.0,
+      "operation_id": "beaa4ce6-45d5-47f3-8758-31dea2d4424e",
+      "order_id": "023e1c35-b33b-449a-8d44-ce6278f2459c",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 57.0,
+      "operation_id": "bba155a7-f0d3-4652-9df0-ced5081d276d",
+      "order_id": "8665df87-088d-442d-8fde-f9344dabc097",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 47.0,
+      "operation_id": "6b6a2d1c-8bf5-41a9-bfea-4b3cce0c1dab",
+      "order_id": "d7213a00-8fb0-4fe9-8072-4f6a193980b8",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 56.0,
+      "operation_id": "a2909a68-2e08-4d36-a0bd-2f1559d10ea4",
+      "order_id": "d7213a00-8fb0-4fe9-8072-4f6a193980b8",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 52.0,
+      "operation_id": "d6c6b0bf-7893-4f53-bbcc-4a97a04fb600",
+      "order_id": "e1fe6b9b-4902-487b-bc47-9e9e5af77b80",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 52.0,
+      "operation_id": "166a1c62-b3cd-4bb1-beea-509c7b52062d",
+      "order_id": "e1fe6b9b-4902-487b-bc47-9e9e5af77b80",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 39.0,
+      "operation_id": "ed8651c4-d969-4d0f-a46d-7dc50fef9adb",
+      "order_id": "ee63b2cc-6b36-4f33-8c37-b71c8045d448",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 47.0,
+      "operation_id": "bfd1cc2a-8ece-4ba8-b854-ffee9ff52ff5",
+      "order_id": "ee63b2cc-6b36-4f33-8c37-b71c8045d448",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 35.0,
+      "operation_id": "9fb43b4d-e601-4912-b525-18567d84fb0a",
+      "order_id": "bb3e40bb-2274-4a9c-b945-ad9995462227",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 59.0,
+      "operation_id": "e8168349-b1bd-4eeb-9768-2526f750ef06",
+      "order_id": "ad03eab5-b10a-4958-952c-f751347a3a60",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 56.0,
+      "operation_id": "a7146750-fcf1-4272-95de-ba59a0192ee2",
+      "order_id": "a356d710-f8b7-4290-bfb2-e56b605fd7fe",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 50.0,
+      "operation_id": "8e55612f-fa8a-4923-a2c2-8885dcb420f4",
+      "order_id": "ea3883aa-350c-4d4a-9b48-332db5e4701d",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 50.0,
+      "operation_id": "4c15d70d-6f4c-4616-a3c3-a6137718ab65",
+      "order_id": "ea3883aa-350c-4d4a-9b48-332db5e4701d",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 51.0,
+      "operation_id": "f48da9fd-c00f-4ad3-95a1-3e5c26a32360",
+      "order_id": "4a89799f-c7e7-49d9-9db7-547e3c487000",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 50.0,
+      "operation_id": "c5287b27-b746-43f9-b1f2-a7826725140a",
+      "order_id": "f37c47e0-27f5-47cc-a62a-0f4b1b1444da",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 52.0,
+      "operation_id": "708b17b3-33fa-4d86-bbc3-8ea9349cb9cc",
+      "order_id": "4ae3c0d3-f82b-4a03-9454-155bf799ac61",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 50.0,
+      "operation_id": "56af5c0a-92f2-4cc2-8dd9-2ab6d40a736b",
+      "order_id": "9c7cb914-70fe-4c72-ae72-8f6ff0487798",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 38.0,
+      "operation_id": "a4026001-af6a-4225-a23c-22df7ca1983c",
+      "order_id": "e2e5f6e4-26ce-41e2-8e1d-54b8f79832da",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 37.0,
+      "operation_id": "35cd591c-0869-4682-8837-cd6659de3877",
+      "order_id": "e2e5f6e4-26ce-41e2-8e1d-54b8f79832da",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 53.0,
+      "operation_id": "a68d1a90-6a61-4322-86a7-203728e9e8a3",
+      "order_id": "f100c652-6c34-4a82-865d-46e9bc5fc3d3",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 44.0,
+      "operation_id": "4e9e76a3-fab4-48b2-b992-346da49a0a8e",
+      "order_id": "7bee4f1e-9bd2-4e0d-9377-e3dfe61e4e48",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 41.0,
+      "operation_id": "a4b7ad44-86f9-4e5a-bcc7-b8622955a57c",
+      "order_id": "4da2d466-d504-41a4-9927-7e1ebfcd11f1",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 38.0,
+      "operation_id": "f890305e-8fdb-4b13-8100-04e610755229",
+      "order_id": "4da2d466-d504-41a4-9927-7e1ebfcd11f1",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 39.0,
+      "operation_id": "5a250aec-df0c-4a39-b588-7183fb0d3106",
+      "order_id": "22abc567-8ced-476c-947d-1b43c78f6e35",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 29.0,
+      "operation_id": "59f7addc-1183-4181-afba-bb770e5c4e39",
+      "order_id": "820620cd-b2ae-4293-a7ab-e41f8f3b25bb",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 56.0,
+      "operation_id": "6d91c2b5-7f92-4e47-8778-39dfbcb5c63e",
+      "order_id": "a88b68c3-d8d1-4c6a-b0aa-1cf0f69e06be",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 45.0,
+      "operation_id": "b0e46cf9-1783-4a12-adfc-d1b64a4682e0",
+      "order_id": "a88b68c3-d8d1-4c6a-b0aa-1cf0f69e06be",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 29.0,
+      "operation_id": "47dbfd35-90e8-4b02-953d-3aacae76fe6c",
+      "order_id": "f5bc9b75-bd26-4b69-b08b-0c78a04303d8",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 42.0,
+      "operation_id": "3c130470-3628-47f4-b569-c0c1d53db82f",
+      "order_id": "f5bc9b75-bd26-4b69-b08b-0c78a04303d8",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 48.0,
+      "operation_id": "6d678f5d-4388-49c2-989c-309c43922892",
+      "order_id": "4d142010-dd7b-4f66-8f32-0c4c3375c550",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 37.0,
+      "operation_id": "5dc32e39-6cf2-46f3-b36c-39a1c721cc6a",
+      "order_id": "4d142010-dd7b-4f66-8f32-0c4c3375c550",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 44.0,
+      "operation_id": "74f6144d-e4d9-4f8c-903e-fe1907845bac",
+      "order_id": "9db7859c-ebfa-4732-9c9b-17815e63fce3",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 56.0,
+      "operation_id": "9d75cbd1-50b6-4c79-a99d-64b50b0480fc",
+      "order_id": "3e68709c-13a9-428a-b147-920465567415",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 59.0,
+      "operation_id": "832b235b-7421-4506-9167-b4c475f49097",
+      "order_id": "3e68709c-13a9-428a-b147-920465567415",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 56.0,
+      "operation_id": "589ee3ee-855d-4acb-98de-df3b7c0f01d2",
+      "order_id": "33d94c9e-77d9-4366-ad31-c6a32b6d6be1",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 48.0,
+      "operation_id": "8ed0e13e-3360-419b-9f36-d29cbb781324",
+      "order_id": "586f0a91-a527-4aa1-b2b7-f7c789d42b45",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 50.0,
+      "operation_id": "9893d3f3-bd1d-435b-896f-adda66f6b080",
+      "order_id": "aa395dbf-cec3-4eb2-94e8-12d007247167",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 53.0,
+      "operation_id": "47c884d6-371e-4ec4-a616-67ac1b890092",
+      "order_id": "10b32522-9a51-4f65-a78c-578b75f3fd8a",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 41.0,
+      "operation_id": "a7c7a64e-0a84-46a2-919e-d46a3d561508",
+      "order_id": "f3c0b888-550e-4621-914c-ddca83fc2eef",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 50.0,
+      "operation_id": "94b675f4-b1de-488e-98db-cf20ad599925",
+      "order_id": "f3c0b888-550e-4621-914c-ddca83fc2eef",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 46.0,
+      "operation_id": "a76b259e-d7bf-4dde-aca1-5244ba317edd",
+      "order_id": "114b31dd-a972-4beb-8533-c3cd27ae8d0c",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 49.0,
+      "operation_id": "e6f2778b-3534-46a7-98f4-c341335d6d57",
+      "order_id": "896f0044-214b-43a0-9424-8da86c58b0b6",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 60.0,
+      "operation_id": "ecd106fb-6258-46b4-bb54-71987fab2d04",
+      "order_id": "896f0044-214b-43a0-9424-8da86c58b0b6",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 56.0,
+      "operation_id": "912c5c9e-d02f-4759-a564-929ee913e715",
+      "order_id": "afcf8c2c-1445-44a1-b7d0-f9dc110c929c",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 55.0,
+      "operation_id": "6bd5961f-9480-4914-9fbd-833e468ebb0b",
+      "order_id": "afcf8c2c-1445-44a1-b7d0-f9dc110c929c",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 40.0,
+      "operation_id": "b6f7df87-0e8b-4a4f-8350-80d7aa97dcd5",
+      "order_id": "e3a4a46b-e841-4198-8a3f-4f8111852ba0",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 42.0,
+      "operation_id": "7b66804a-757c-41a6-af5c-a5c0a181dc0d",
+      "order_id": "a4618ed4-662a-41ee-817a-c66f7d1af6a6",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 26.0,
+      "operation_id": "7e3dee6a-af7e-42b4-98e9-8ea8e095f2dc",
+      "order_id": "1f151e29-f379-43a8-a115-17e980ca7661",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 48.0,
+      "operation_id": "af4c6806-e3f0-4f35-961c-9d54df0416fb",
+      "order_id": "964a2aa6-fd3f-46db-bf58-473a36ff3757",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 56.0,
+      "operation_id": "5e51aa6d-3770-46f8-ada4-f7a7f247f0f8",
+      "order_id": "d4158ff6-e806-44eb-b57f-7497f58374e7",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 49.0,
+      "operation_id": "e0564da9-e603-4adc-9eab-514d4c821cc0",
+      "order_id": "d4158ff6-e806-44eb-b57f-7497f58374e7",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 54.0,
+      "operation_id": "6f02172f-75e2-425b-8a97-87209056d138",
+      "order_id": "909133ea-b631-4056-8fd8-344a49fc7045",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 48.0,
+      "operation_id": "8d9979ce-9cac-4fd2-a0e1-4e2f3fafd7a7",
+      "order_id": "59540585-1430-40e4-ae77-58a3639e1188",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 43.0,
+      "operation_id": "827338af-9f63-46eb-9e56-65c660feade5",
+      "order_id": "a218c345-a27b-4b82-8c40-4b2798cad8ad",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 61.0,
+      "operation_id": "ec75433a-d226-4f77-8533-0e364eb73e18",
+      "order_id": "aee31605-70e7-4f02-962b-7ce0cb564920",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 58.0,
+      "operation_id": "515503e3-88f8-4094-8785-b4d291414ea0",
+      "order_id": "aee31605-70e7-4f02-962b-7ce0cb564920",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 55.0,
+      "operation_id": "4a97706a-ecd9-4e5d-818f-0fff76f22e80",
+      "order_id": "85b93d8e-706d-4e27-9b41-433c1ee5e60b",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 41.0,
+      "operation_id": "b1b2038b-144d-4e32-9329-282d02317a35",
+      "order_id": "85b93d8e-706d-4e27-9b41-433c1ee5e60b",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 45.0,
+      "operation_id": "c9615222-4388-4585-8fb8-b303de171cc5",
+      "order_id": "3a2593f6-14e8-44ba-8d20-49662533cd74",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 48.0,
+      "operation_id": "933f70ff-87b6-4421-b4c8-c925faa8b016",
+      "order_id": "3a2593f6-14e8-44ba-8d20-49662533cd74",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 36.0,
+      "operation_id": "5b7550f7-3d4d-4a05-9438-f00a1647b540",
+      "order_id": "8135f65d-289f-4427-a5d3-a625b02de20e",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 55.0,
+      "operation_id": "b2acc426-7f94-4013-8d60-bc4e848bb7d4",
+      "order_id": "91a9e4f4-a5a5-4869-9303-54a4d2da40bc",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 41.0,
+      "operation_id": "bb5b1e02-d307-4768-a60e-3b321c3f8816",
+      "order_id": "91a9e4f4-a5a5-4869-9303-54a4d2da40bc",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 61.0,
+      "operation_id": "6e7c2e30-9373-4b03-af1b-7b8ee007dcbc",
+      "order_id": "44faac8b-50e7-4598-b355-b49a4211d6e8",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 40.0,
+      "operation_id": "f44c508f-6330-4ecb-b2ee-414809ab53f8",
+      "order_id": "44faac8b-50e7-4598-b355-b49a4211d6e8",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 41.0,
+      "operation_id": "4810f309-4b01-474b-a7ea-a7024e30f13f",
+      "order_id": "203b91ab-d0bd-4fc4-adf6-3d4323e2eab9",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 47.0,
+      "operation_id": "ece71097-abd4-4a58-b465-868690dfbf1f",
+      "order_id": "203b91ab-d0bd-4fc4-adf6-3d4323e2eab9",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 40.0,
+      "operation_id": "ad298f53-f8f4-4613-8059-84de10aec6ba",
+      "order_id": "d1097e93-6f94-4147-bf04-cb6764079169",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 42.0,
+      "operation_id": "3380a314-5f2e-41c9-af99-bdef784bb7c9",
+      "order_id": "d1097e93-6f94-4147-bf04-cb6764079169",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 39.0,
+      "operation_id": "a2351f18-96dd-4466-b782-27b7233f2b8e",
+      "order_id": "44cbfff8-551e-44dd-b136-cef5cc041194",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 36.0,
+      "operation_id": "7d965682-4dec-4fe0-b848-628e91bc67bd",
+      "order_id": "55ff0a03-5452-43d3-ada8-96bfe8f9bc78",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 42.0,
+      "operation_id": "bde987db-1e08-4ba2-835b-aeee382acb70",
+      "order_id": "4b53ee75-7543-4557-9709-201d21ba880e",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 26.0,
+      "operation_id": "7142b96c-2313-4f26-bb1e-3aaec1e9226e",
+      "order_id": "4b53ee75-7543-4557-9709-201d21ba880e",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 52.0,
+      "operation_id": "64f05bcd-a8af-4bd1-96df-ac8edd90ae2c",
+      "order_id": "d82855e9-8ada-4231-8709-eedbb87f3a0f",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 49.0,
+      "operation_id": "9ecf54f5-b3ab-4be1-a446-f9869b9505b7",
+      "order_id": "d82855e9-8ada-4231-8709-eedbb87f3a0f",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 29.0,
+      "operation_id": "b0260977-605d-492f-a975-ff0e0c4069ed",
+      "order_id": "622c98d4-a6aa-4d4a-9f27-6aee93b24380",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 48.0,
+      "operation_id": "9e62bab9-56f7-4447-995c-07dcc0175edf",
+      "order_id": "573d177b-bd91-455d-b3f2-a2c1947a2990",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 45.0,
+      "operation_id": "af9cec38-a1bc-4ef2-b534-efde1ea1844e",
+      "order_id": "8a0a3bb7-992b-4c0f-83cc-cf797a21ece3",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 50.0,
+      "operation_id": "1bd7db3a-34e6-40de-9b3f-fe7d0645dc4c",
+      "order_id": "8a0a3bb7-992b-4c0f-83cc-cf797a21ece3",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 43.0,
+      "operation_id": "71bd12d2-f82f-4cc9-96ae-82e1be192ca6",
+      "order_id": "3778270f-cef8-4767-93d4-6fa57c31017c",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 46.0,
+      "operation_id": "8af84e06-a970-4385-a107-819d7020cd2a",
+      "order_id": "f805af15-a26e-4d0b-9091-13e79a658ad6",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 47.0,
+      "operation_id": "52956f86-57c5-4ad5-b185-aa09199e87db",
+      "order_id": "32d7b41e-4a38-40a4-a248-8581327f053b",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 50.0,
+      "operation_id": "5e1685d4-bf5d-4c9f-aa2e-4e4296a8b296",
+      "order_id": "32d7b41e-4a38-40a4-a248-8581327f053b",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 52.0,
+      "operation_id": "48ad8c84-677f-4d8f-9cf4-f5207d85fcc8",
+      "order_id": "0bd87e22-f336-40cb-9849-eb327ef205e4",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 48.0,
+      "operation_id": "e2d09daa-b770-4e51-89d8-2e09ddd1c6e9",
+      "order_id": "8887a447-b8a4-4fa1-ba47-b39e45bb9834",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 46.0,
+      "operation_id": "40f62f61-2c54-4ca4-ae75-6d1f6fa17468",
+      "order_id": "8887a447-b8a4-4fa1-ba47-b39e45bb9834",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 45.0,
+      "operation_id": "f8a0bb72-c3fd-4c25-8e51-b62fa8c309d8",
+      "order_id": "2e88cf99-7bd4-4c76-942e-fe4e8ac68ca5",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 56.0,
+      "operation_id": "50df8b03-cec0-4b13-ac9f-a39c5fac00f0",
+      "order_id": "2e88cf99-7bd4-4c76-942e-fe4e8ac68ca5",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 53.0,
+      "operation_id": "718946f9-1445-405a-88d5-8d1c78c415d5",
+      "order_id": "7d5093f2-57c0-418d-a77e-7d84f7c3670b",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 48.0,
+      "operation_id": "f4a40f9d-7584-4367-a119-2d45ee2dd737",
+      "order_id": "3726b0e9-ed14-40d1-ba44-7bba6cac586d",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 57.0,
+      "operation_id": "e5810a51-7b28-419a-974c-5cac0e26ccc3",
+      "order_id": "67e1a8e5-6b11-4207-a28d-84d8d26c6493",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 36.0,
+      "operation_id": "bc1ba5e5-a6d1-4554-b63d-7feaf95d55d1",
+      "order_id": "73839314-9a3f-4544-8adc-52a4aeaa0d40",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 62.0,
+      "operation_id": "3f0d8e0a-5ea4-466e-80d4-f5ad88a3832d",
+      "order_id": "d6cf7583-21dc-4538-b47c-9394b2c059c0",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 40.0,
+      "operation_id": "f94105d3-fd9d-46f3-a16d-4aacce4db59f",
+      "order_id": "61c2c0d0-4757-440f-8f30-97a5b3ca76b3",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 36.0,
+      "operation_id": "ad0196b9-9584-49ff-ba25-924b64c9ceb8",
+      "order_id": "19d155fc-deca-4fde-b6aa-ac94f53cd555",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 58.0,
+      "operation_id": "3c93411c-0ca7-4c20-825d-fac3bd3aab60",
+      "order_id": "19d155fc-deca-4fde-b6aa-ac94f53cd555",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 48.0,
+      "operation_id": "af2cb572-23a3-4c26-a80a-1eaf95660aca",
+      "order_id": "8f4e2d63-a7e6-46eb-84e8-84a596493fb7",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 42.0,
+      "operation_id": "e440f99d-cc9a-425b-a347-6156acee2b04",
+      "order_id": "8f4e2d63-a7e6-46eb-84e8-84a596493fb7",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 37.0,
+      "operation_id": "85ee22de-47d1-4640-8dca-3fbd6f46fd7d",
+      "order_id": "8d3f0994-119e-458d-b65a-b4b6e82d7787",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 52.0,
+      "operation_id": "09df04db-c5e4-42de-a525-0ef2e2d1b25e",
+      "order_id": "8d3f0994-119e-458d-b65a-b4b6e82d7787",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 60.0,
+      "operation_id": "6c4d975b-7cf7-4928-b6f3-a12ce15f6255",
+      "order_id": "aceccdc0-11f9-4ce0-be22-a7e00b9157a8",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 48.0,
+      "operation_id": "63e3d8d5-dc6c-4879-beea-1735781c629e",
+      "order_id": "0f299184-9c85-469c-a1a2-c686ca6768ac",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 55.0,
+      "operation_id": "9f7720fb-d243-416c-8399-1cbaee342d70",
+      "order_id": "6eeb1313-89e8-4e82-ab79-147585e41ad4",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 53.0,
+      "operation_id": "5c8c495f-c782-40b1-bc3a-2aab14f0db8c",
+      "order_id": "a4dba2bd-962c-4a51-a18c-dba54211e704",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 41.0,
+      "operation_id": "b50e02d7-b0df-4da1-803f-20837df9d2df",
+      "order_id": "a4dba2bd-962c-4a51-a18c-dba54211e704",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 47.0,
+      "operation_id": "6fa4e4ae-f52f-436a-a20c-754fdb01ad04",
+      "order_id": "314c77bc-82f2-4cae-a808-18bb937d93b2",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 53.0,
+      "operation_id": "fbe9d42f-b9cb-40c9-9760-3782a17da99a",
+      "order_id": "6a03f9b0-727e-45c0-b714-976227e29db4",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 53.0,
+      "operation_id": "35a5ca8e-564e-4c5c-ae8c-d9814058f1ba",
+      "order_id": "6a03f9b0-727e-45c0-b714-976227e29db4",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 61.0,
+      "operation_id": "ae29095c-5932-4ab3-b44f-c77d622d5373",
+      "order_id": "997fc5c1-4080-4586-8753-3cd74c9db2f4",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 58.0,
+      "operation_id": "a6717400-66d2-4839-af54-8dede8be26e9",
+      "order_id": "997fc5c1-4080-4586-8753-3cd74c9db2f4",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 62.0,
+      "operation_id": "99fc36b4-9251-464d-bd44-8090d4bdae71",
+      "order_id": "3f1b2ee7-abed-4e62-8db5-27438cbcae41",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 41.0,
+      "operation_id": "ad7ce7fc-baee-4c9f-92ce-6816b30d2a7b",
+      "order_id": "1bbec020-e85a-401e-bb08-b22012a2cd0e",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 42.0,
+      "operation_id": "a288d1cc-9569-4065-b5a6-cd2798829b47",
+      "order_id": "75e12c39-b1f4-4ded-b69c-8ce105b9b8fb",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 30.0,
+      "operation_id": "39d7611e-34f6-40c7-ba77-45af3c347e0f",
+      "order_id": "7cc8d019-55e2-48ff-9431-94807b6eaaf4",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 61.0,
+      "operation_id": "af5a1da3-dc1d-4770-a938-d5b1fdc7c023",
+      "order_id": "bb90b637-e0f6-4fa4-aae4-9e5982d50e14",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 50.0,
+      "operation_id": "bda7658b-4131-4976-b1bd-849e4aa7c243",
+      "order_id": "bf69d53c-5a70-4ef3-81db-0b297fc4bb7f",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 44.0,
+      "operation_id": "10ea7916-cbe7-4b53-8c5e-860a785ccffb",
+      "order_id": "bf69d53c-5a70-4ef3-81db-0b297fc4bb7f",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 45.0,
+      "operation_id": "fbbf3439-55cd-4cbb-92d8-73a3c82e1505",
+      "order_id": "49d5d987-a596-4993-9816-cbda6e3c2b3e",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 59.0,
+      "operation_id": "f9eca9c4-8e66-43ce-9f54-52ecfb84278d",
+      "order_id": "16803edb-cffe-4152-87a5-7485302083da",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 52.0,
+      "operation_id": "b76c567e-e0e5-4d0e-8813-47afa6c02656",
+      "order_id": "94a1f790-5aa5-4ddf-b483-2735673b2b1e",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 53.0,
+      "operation_id": "3980591f-96d3-403e-a80e-4f69fcd0fe33",
+      "order_id": "94a1f790-5aa5-4ddf-b483-2735673b2b1e",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 47.0,
+      "operation_id": "48b5ed25-7193-41fd-a24f-b8acd60416ef",
+      "order_id": "8bede96d-8fa1-44af-91d6-78cd0268577e",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 51.0,
+      "operation_id": "f4379b91-3b1a-4485-984b-85d2b04ba350",
+      "order_id": "420faa1e-6447-4322-8093-38b12dfe286f",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 52.0,
+      "operation_id": "bb38d249-4197-4201-adaa-a9365434ec91",
+      "order_id": "c2d684c8-9613-40f4-8c09-f355fcb58018",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 48.0,
+      "operation_id": "8ca371f1-091f-4a76-9c04-f9ff18d0500a",
+      "order_id": "e09dd151-b6c7-4642-95df-1880eea735fd",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 49.0,
+      "operation_id": "f4522bf4-06c0-40dd-9190-ca518f33a06a",
+      "order_id": "6d3d7202-bbf4-47fd-9a70-6f093b11d152",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 56.0,
+      "operation_id": "ac574516-51fa-48c8-a958-b1e4f05d6c3f",
+      "order_id": "b9058bd0-c616-4608-93c1-b0c815b79c15",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 48.0,
+      "operation_id": "7e1458bb-0f43-450f-928b-1de7bacc3e2b",
+      "order_id": "85a8bd2c-cd56-4ad6-83c0-5f5bd1cdc3bd",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 60.0,
+      "operation_id": "fc91263e-4048-4207-be1c-983b64605a37",
+      "order_id": "8ad71f42-7a7e-4a00-97f3-b09d75eb3081",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 54.0,
+      "operation_id": "d3c01004-f5f8-4a3b-8e3a-3ac9ca503ac9",
+      "order_id": "8ad71f42-7a7e-4a00-97f3-b09d75eb3081",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 41.0,
+      "operation_id": "b00d662d-325b-468e-8b18-23eaae5e7fd1",
+      "order_id": "bff4129f-0fc6-49ab-ba42-07b92c2a2ac9",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 51.0,
+      "operation_id": "62dc253a-c338-46ef-b776-ab7897ece74b",
+      "order_id": "47ab0f06-bc1a-44f5-a2e9-5bf9d20acd4f",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 52.0,
+      "operation_id": "8f72b4d9-6223-4039-bc3e-152276386b00",
+      "order_id": "8b327efb-c14a-4fa7-950a-1471e9c504ca",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 42.0,
+      "operation_id": "ce687a18-c807-45ca-9b6e-5d7f8266a3ab",
+      "order_id": "526b117d-882f-4330-9195-58262387c273",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 60.0,
+      "operation_id": "b6b78ce2-1106-4202-8584-cfa9f25c92b4",
+      "order_id": "202d2794-2b6a-4efe-b8bb-e6cff200de97",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 52.0,
+      "operation_id": "7e610795-d40b-448e-ab4a-08e22a62e7d4",
+      "order_id": "202d2794-2b6a-4efe-b8bb-e6cff200de97",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 52.0,
+      "operation_id": "5c11b575-399f-46a3-b230-e862e38f1579",
+      "order_id": "cf314af8-d71c-4bf7-9e8d-368ee0bc83c9",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 42.0,
+      "operation_id": "9dd35a5e-2221-489e-b6a8-dabbb7408ca8",
+      "order_id": "7c6ad9af-2305-4cc9-a2bc-c4effc44492e",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 28.0,
+      "operation_id": "87763e82-10f5-4c5e-9df3-fab6940f14fa",
+      "order_id": "6063600e-3e52-4fd7-be83-b52620b98ec3",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 54.0,
+      "operation_id": "843b7fca-41cc-4efb-a94a-338e9b5f9b2d",
+      "order_id": "6063600e-3e52-4fd7-be83-b52620b98ec3",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 63.0,
+      "operation_id": "0e17cbd7-dbed-469a-993d-24f6eba62c4f",
+      "order_id": "7e1a901c-6835-4107-9815-63cba40de4c8",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 57.0,
+      "operation_id": "5891e740-7609-4000-924a-6193c2373d02",
+      "order_id": "ec324f45-8009-4f20-bea7-d9a5bbbb7a79",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 66.0,
+      "operation_id": "c55f75b6-cdfe-4f91-b050-67d23d371f5f",
+      "order_id": "ec324f45-8009-4f20-bea7-d9a5bbbb7a79",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 53.0,
+      "operation_id": "e79d5bb8-494e-4cf6-9117-72adc46cda15",
+      "order_id": "8e59ad83-65e7-47d8-bdd0-a04b298a02cb",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 63.0,
+      "operation_id": "c2ad010e-7155-48aa-9e3b-e281def50d50",
+      "order_id": "5a60c8a9-0adc-4668-a485-6aa07b2983b2",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 41.0,
+      "operation_id": "79bf934d-ba19-457b-9c25-177e3669b30e",
+      "order_id": "5a60c8a9-0adc-4668-a485-6aa07b2983b2",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 63.0,
+      "operation_id": "e1da8b04-d399-4f57-9b6b-1805c212eab6",
+      "order_id": "4adec1bc-7700-464e-be1b-cfabf444e4dd",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 50.0,
+      "operation_id": "aca15550-6816-4796-93ae-932d76cb6f7b",
+      "order_id": "4adec1bc-7700-464e-be1b-cfabf444e4dd",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 49.0,
+      "operation_id": "97fb4bdf-32ea-40ed-9fd7-38bc283cfc85",
+      "order_id": "9f3daf6e-9246-43fd-af4d-698e3b355144",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 50.0,
+      "operation_id": "60939ff6-16e9-48b1-93e8-76f2cc8715f0",
+      "order_id": "9f3daf6e-9246-43fd-af4d-698e3b355144",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 41.0,
+      "operation_id": "4398b80f-6e47-4931-9fb9-3d18b8138345",
+      "order_id": "184cdfc3-188c-4ac2-9fee-e95ee013fd23",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 35.0,
+      "operation_id": "aa5f3002-f97f-4e83-bd76-945dbe76a28a",
+      "order_id": "d69ad6ae-193b-4f93-b31c-65a49365aa50",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 4
+    },
+    {
+      "max_shift_min": 480.0,
+      "occupancy_min": 61.0,
+      "operation_id": "eabc5dc5-bf7e-493b-ad69-ac3ed07be243",
+      "order_id": "6f5a4b9a-01d1-457f-b7a6-1c8bc7583d03",
+      "reason": "NO_CREW_CAPACITY",
+      "seq_in_order": 5
+    }
+  ],
+  "unplaced_count": 298,
+  "verified_feasible": false,
+  "wall_time_s": 150.108
+}
