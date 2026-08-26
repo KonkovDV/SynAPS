@@ -1,9 +1,10 @@
 """Work-center shift calendar.
 
 Empty ``WorkCenter.calendar`` is 24/7 open — that is not a night shift. A
-non-empty calendar is a hard constraint: processing ``[start, end]`` must sit
-inside one interval (an operation cannot straddle a closed period). Setup
-occupancy before ``start`` is not clipped here (KI-N7 follow-up).
+non-empty calendar is a hard constraint: occupancy
+``[start - setup, end]`` must sit inside one interval (an operation cannot
+straddle a closed period). Dispatch clips setup together with processing
+(ADR-0005).
 """
 
 from __future__ import annotations

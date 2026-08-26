@@ -207,6 +207,29 @@ def test_hashed_8k4_remainder_stays_worker_error() -> None:
     assert recap["verified_feasible"] is False
 
 
+def test_hashed_verified_feasible_cells_have_no_machine_calendar() -> None:
+    """И3.4: COVER/deadzone hashed Yes-cells cannot flip under occupancy notary.
+
+    Those protocols have empty WorkCenter.calendar (COVER is wide-horizon;
+    deadzone is per-op night windows). Re-notary of stored assignments is
+    impossible: run JSON has no assignment list. Geometry implies ноль flips.
+    """
+
+    cover = _BENCH / "evidence" / "cover-ladder-2026-08-25"
+    for path in cover.glob("run_*_seed*.json"):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if payload.get("verified_feasible") is not True:
+            continue
+        dumped = json.dumps(payload.get("generator_kwargs") or {})
+        assert "calendar" not in dumped, path.name
+    dead = _BENCH / "evidence" / "deadzone-5k-2026-08-25"
+    for path in dead.glob("run_5000ops_8m_*.json"):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if payload.get("verified_feasible") is True:
+            raise AssertionError(f"P2.3 freeze unexpectedly verified_feasible: {path.name}")
+        assert payload.get("night_window_hours") == 8 or "night" in json.dumps(payload).lower()
+
+
 def test_deadzone_worker_job_records_exception(tmp_path: Path) -> None:
     from benchmark.study_deadzone_5k import _run_worker_job
 

@@ -45,7 +45,7 @@ python -m synaps list-solver-configs
 | Metaheuristic | `ALNS-*` | Качество локальным поиском |
 | Horizon | `RHC-GREEDY`, `RHC-ALNS`, `RHC-GREEDY-COVER` | Крупные инстансы (10K–100K+) |
 
-Для **полного покрытия** на крупных инстансах — `RHC-GREEDY-COVER`. `RHC-ALNS` — refine/качество, не гарантия completeness в коротком timebox.
+Для **полного покрытия** на крупных инстансах — `RHC-GREEDY-COVER`. `RHC-ALNS` — refine/качество, не обеспечивает completeness в коротком timebox.
 
 ## Что заявлено и что нет
 

@@ -87,6 +87,13 @@ All pull requests must pass:
 - `mypy synaps --strict --no-error-summary` — zero type errors
 - Fast test suite (`pytest -m "not slow"`) — green
 
+`test-slow` in `.github/workflows/ci.yml` runs only after merge
+(`if: github.event_name == 'push' && github.ref == 'refs/heads/master'`).
+It is **not** a required status check and **not** a PR gate. Required checks
+on `master` are: `lint`, `contract-schema-drift`, `typecheck`,
+`test-fast (3.12)`, `test-fast (3.13)`, `benchmark-smoke`, `control-plane`.
+A red `test-slow` on a master push does not mean those six jobs were skipped.
+
 ## Domain Parametrizations
 
 For a new industry vertical:

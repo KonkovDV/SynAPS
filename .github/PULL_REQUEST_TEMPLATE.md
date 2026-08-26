@@ -17,7 +17,12 @@
 
 ## Validation
 
-- [ ] `pytest tests/ -v`
+Required GitHub checks on `master` (branch protection): `lint`,
+`contract-schema-drift`, `typecheck`, `test-fast (3.12)`, `test-fast (3.13)`,
+`benchmark-smoke`, `control-plane`. `test-slow` is post-merge only and is
+not a PR gate.
+
+- [ ] `pytest tests/ -m "not slow"`
 - [ ] `ruff check synaps tests benchmark --select F,E9`
 - [ ] `python -m build`
 - [ ] `twine check dist/*`
