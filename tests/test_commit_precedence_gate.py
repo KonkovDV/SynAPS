@@ -142,6 +142,33 @@ class TestRhcGateIntegration:
             kwargs = build_solve_kwargs_from_spec(RhcPolicySpec.from_preset(policy))
             assert kwargs["commit_precedence_gate_enabled"] is False, policy
 
+    def test_rhc_greedy_cover_registry_keeps_gate_off(self) -> None:
+        from synaps.solvers.registry import create_solver
+
+        _, kwargs = create_solver("RHC-GREEDY-COVER")
+        assert kwargs["commit_precedence_gate_enabled"] is False
+
+    def test_forced_global_list_schedule_has_zero_precedence_violations(self) -> None:
+        """Global list-schedule is one pass; no window commit, so the gate is unused.
+
+        Cross-window PRECEDENCE_VIOLATION cannot arise because there are no
+        frozen windows. This is the ≥10k COVER path, forced here with min_ops=0.
+        """
+        from synaps.solvers.feasibility_checker import FeasibilityChecker
+        from synaps.solvers.registry import create_solver
+        from tests.conftest import make_simple_problem
+
+        problem = make_simple_problem(n_orders=4, ops_per_order=3)
+        solver, kwargs = create_solver("RHC-GREEDY-COVER")
+        kwargs["global_greedy_cover_min_ops"] = 0
+        kwargs["time_limit_s"] = 30
+        result = solver.solve(problem, **kwargs)
+        assert result.metadata["global_greedy_cover"] is True
+        assert result.metadata["commit_precedence_gate_enabled"] is False
+        violations = FeasibilityChecker().check(problem, result.assignments, exhaustive=True)
+        precedence = [item for item in violations if item.kind == "PRECEDENCE_VIOLATION"]
+        assert precedence == [], [item.message for item in precedence]
+
 
 @pytest.mark.slow
 class TestGateEliminatesPrecedenceViolations:

@@ -1,0 +1,7 @@
+# Indexing-only (Agent can still open a file if you @mention it).
+native/**/target/
+benchmark/results/
+benchmark/studies/
+.pytest_cache/
+__pycache__/
+docs/gridplan/

@@ -1,0 +1,68 @@
+{
+  "folders": [
+    {
+      "name": "SynAPS",
+      "path": "C:/SynAPS"
+    },
+    {
+      "name": "GridPlan",
+      "path": "C:/SynAPS-GridPlan"
+    },
+    {
+      "name": "MobiRoute",
+      "path": "C:/SynAPS-MobiRoute"
+    },
+    {
+      "name": "AeroBIM",
+      "path": "C:/AeroBIM"
+    }
+  ],
+  "settings": {
+    "chat.useCustomizationsInParentRepositories": false,
+    "chat.useNestedAgentsMdFiles": false,
+    "search.followSymlinks": false,
+    "files.watcherExclude": {
+      "**/native/**/target/**": true,
+      "**/target/debug/**": true,
+      "**/target/release/**": true,
+      "**/__pycache__/**": true,
+      "**/.pytest_cache/**": true,
+      "**/.git/objects/**": true,
+      "**/.venv/**": true,
+      "**/node_modules/**": true,
+      "**/benchmark/results/**": true,
+      "**/var/**": true,
+      "**/artifacts/**": true,
+      "**/.local/**": true,
+      "**/backend/.venv*/**": true,
+      "**/.mypy_cache/**": true
+    },
+    "search.exclude": {
+      "**/native/**/target": true,
+      "**/__pycache__": true,
+      "**/.pytest_cache": true,
+      "**/node_modules": true,
+      "**/benchmark/results": true,
+      "**/var": true,
+      "**/.local": true,
+      "**/.mypy_cache": true
+    },
+    "files.exclude": {
+      "**/native/**/target": true,
+      "**/__pycache__": true,
+      "**/node_modules": true,
+      "**/.local": true
+    },
+    "python.analysis.exclude": [
+      "**/native/**/target",
+      "**/__pycache__",
+      "**/.pytest_cache",
+      "**/.venv",
+      "**/backend/.venv*",
+      "**/node_modules",
+      "**/var",
+      "**/.local"
+    ],
+    "rust-analyzer.files.excludeDirs": ["target", ".git"]
+  }
+}

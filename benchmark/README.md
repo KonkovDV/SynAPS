@@ -58,7 +58,11 @@ Mapping caveats (see `benchmark/fjs_loader.py`, `describe_fjs_mapping()`):
 
 ## Evidence and claims
 
-Published protocol and non-claims: [`BENCHMARK_EVIDENCE_50K_2026_05_18.md`](BENCHMARK_EVIDENCE_50K_2026_05_18.md).
+Published protocol and non-claims: [`BENCHMARK_EVIDENCE_COVER_2026_08_26.md`](BENCHMARK_EVIDENCE_COVER_2026_08_26.md). May 2026 file is historical (`SUPERSEDED`): [`BENCHMARK_EVIDENCE_50K_2026_05_18.md`](BENCHMARK_EVIDENCE_50K_2026_05_18.md).
+
+Cable C6a / C6-R1 (2026-08-26): [`BENCHMARK_EVIDENCE_CABLE_C6_2026_08_26.md`](BENCHMARK_EVIDENCE_CABLE_C6_2026_08_26.md).
+
+5k night-window dead-zone (P2.3 = **no**): [`BENCHMARK_EVIDENCE_DEADZONE_5K_2026_08_26.md`](BENCHMARK_EVIDENCE_DEADZONE_5K_2026_08_26.md).
 
 SEARCH_COVER + coverage-pace guard + `.fjs` loader evidence (2026-07): [`BENCHMARK_EVIDENCE_SEARCH_COVER_2026_07_29.md`](BENCHMARK_EVIDENCE_SEARCH_COVER_2026_07_29.md).
 

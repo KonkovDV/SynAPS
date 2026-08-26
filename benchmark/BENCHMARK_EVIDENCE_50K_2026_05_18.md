@@ -1,5 +1,12 @@
 # SynAPS 50K Benchmark Evidence — 2026-05-18
 
+> **SUPERSEDED BY** [`BENCHMARK_EVIDENCE_COVER_2026_08_26.md`](BENCHMARK_EVIDENCE_COVER_2026_08_26.md).
+> Keep this file as the historical 2026-05-18 protocol: `solver_error` on the
+> 50K throughput lane, 98,067 unscheduled ops on the bounded 100K slice,
+> artifact hashes `TBD`, and the Next Step “Do not add new claims until a
+> solver produces at least one feasible 50K+ outcome”. Those sentences describe
+> May 2026. They are not the current COVER ladder.
+
 > **Status**: Artifact-bound evidence. Not a universal performance guarantee.
 > **Scope**: Reproducible 50K pilot protocol, recent measurements, and honest non-claims.
 >

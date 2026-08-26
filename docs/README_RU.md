@@ -27,6 +27,9 @@ Language: [EN](README.md) | **RU**
 
 ## Governance
 
+- [ADR-0001](adr/0001-strict-determinism-single-thread.md)
+- [ADR-0003](adr/0003-domain-layer-placement.md)
+- [ADR-0004](adr/0004-domain-repo-standard.md)
 - [../CONTRIBUTING.md](../CONTRIBUTING.md)
 - [../SECURITY.md](../SECURITY.md)
 - [../CHANGELOG.md](../CHANGELOG.md)

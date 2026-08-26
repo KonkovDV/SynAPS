@@ -35,6 +35,10 @@ Public technical docs for the scheduling core.
 
 ## Governance
 
+- [ADR-0001](adr/0001-strict-determinism-single-thread.md) — CP-SAT strict determinism
+- [ADR-0002](adr/0002-proof-logging-veripb.md) — VeriPB / proof logging (no-go)
+- [ADR-0003](adr/0003-domain-layer-placement.md) — in-kernel vs separate domain repo
+- [ADR-0004](adr/0004-domain-repo-standard.md) — domain README/pin/status vocabulary
 - [../CONTRIBUTING.md](../CONTRIBUTING.md)
 - [../SECURITY.md](../SECURITY.md)
 - [../CHANGELOG.md](../CHANGELOG.md)

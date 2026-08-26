@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Honesty close (2026-08-26):** GitHub About and README portfolio count are
+  25 configs (CI: `tests/test_readme_portfolio_count.py`). Scale protocol in
+  README now points at
+  `benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md`; the May 2026 50K file
+  is marked `SUPERSEDED` and kept. COVER rows below that used **seed=1 only**
+  remain **point estimates** under the project DOE rule (`--repeats>1` + CI
+  before citation). Cable generator seeds 1..10 and C6-R1 re-probe:
+  `benchmark/BENCHMARK_EVIDENCE_CABLE_C6_2026_08_26.md` (C6-R1 INFEASIBLE not
+  reproduced). Night-window 5k@8 (P2.3): **no** named config hit
+  `scheduled_ratio=1.0` and `verified_feasible=true` on seeds 1/42/999
+  (`benchmark/BENCHMARK_EVIDENCE_DEADZONE_5K_2026_08_26.md`). A remainder
+  `--resume` had rewritten `summary.json` to `incomplete`; harness now globs
+  all `run_*.json` and keeps the P2.3 freeze copies. Dependabot PRs #1–#7
+  closed; action pins applied on HEAD
+  (`docs/rfc/DEPENDABOT_TRIAGE_2026_08_26.md`). Domain placement:
+  `docs/adr/0003-domain-layer-placement.md`,
+  `docs/adr/0004-domain-repo-standard.md`.
+
 ### Added
 
 - **Kernel leftovers (C7):** ingest ceils `release_date` /

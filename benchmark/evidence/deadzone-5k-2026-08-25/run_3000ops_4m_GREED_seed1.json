@@ -1,0 +1,19 @@
+{
+  "n_operations_requested": 3000,
+  "n_machines": 4,
+  "night_start_hour": 22,
+  "night_window_hours": 8,
+  "seed": 1,
+  "solver_config": "GREED",
+  "status": "stalled",
+  "stalled": true,
+  "stall_note": "In-process GREED (registry has no time_limit_s) killed after ~14.5 min wall with no return. Not a named-config timebox. Later cells use study watchdog isolation (GREED 600s).",
+  "stall_watchdog_s": 870.0,
+  "search_stop_reason": "study_killed_stall",
+  "scheduled_ratio": null,
+  "verified_feasible": false,
+  "ops_generated": null,
+  "ops_scheduled": null,
+  "wall_time_s": 870.0,
+  "makespan_minutes": null
+}

@@ -1,0 +1,55 @@
+{
+  "experiment": "fixed_instance_seed1_solver_random_seed",
+  "fixed": "generate_nervous_month seed=1, 1600@8, family+colour-phase",
+  "identical_tardiness": true,
+  "rows": [
+    {
+      "determinism_violated": false,
+      "global_greedy_cover": true,
+      "instance_seed": 1,
+      "notary_hard_violations": 0,
+      "ops_scheduled": 20316,
+      "ops_total": 20316,
+      "solver_random_seed": 1,
+      "status": "feasible",
+      "tardiness_minutes": 87134.0
+    },
+    {
+      "determinism_violated": false,
+      "global_greedy_cover": true,
+      "instance_seed": 1,
+      "notary_hard_violations": 0,
+      "ops_scheduled": 20316,
+      "ops_total": 20316,
+      "solver_random_seed": 42,
+      "status": "feasible",
+      "tardiness_minutes": 87134.0
+    },
+    {
+      "determinism_violated": false,
+      "global_greedy_cover": true,
+      "instance_seed": 1,
+      "notary_hard_violations": 0,
+      "ops_scheduled": 20316,
+      "ops_total": 20316,
+      "solver_random_seed": 999,
+      "status": "feasible",
+      "tardiness_minutes": 87134.0
+    }
+  ],
+  "tardiness_stats": {
+    "ci95_note": "Student t, df=n-1, two-tailed 0.05. n=3 \u21d2 interval is wide; treat as a dispersion bound, not a quality claim.",
+    "ci95_t_halfwidth": null,
+    "ci95_t_high": 87134.0,
+    "ci95_t_low": 87134.0,
+    "cv": 0.0,
+    "max": 87134.0,
+    "mean": 87134.0,
+    "median": 87134.0,
+    "min": 87134.0,
+    "n": 3,
+    "stdev_population": 0.0,
+    "stdev_sample": 0.0
+  },
+  "varied": "RHC-GREEDY-COVER random_seed"
+}
