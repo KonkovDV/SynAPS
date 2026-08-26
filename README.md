@@ -59,9 +59,9 @@ For **full coverage** on large instances, prefer `RHC-GREEDY-COVER` (reserved re
 
 **Shipped:** deterministic-first portfolio, stable solve/repair contracts, feasibility checker, CI (Python / TypeScript / Rust), lockfiles + SBOM, Scorecard workflows.
 
-**Not claimed:** live-factory validation; SOTA quality; N-1 / SAIDI. `RHC-ALNS` is not a completeness guarantee under short timeboxes. Honest `FEASIBLE` at 50K–100K is the `RHC-GREEDY-COVER` list-schedule path (adequate machines vs horizon), not ALNS.
+**Not claimed:** live-factory validation; SOTA quality; N-1 / SAIDI. `RHC-ALNS` is not a completeness guarantee under short timeboxes. Large-instance **coverage** is the `RHC-GREEDY-COVER` list-schedule path (enough machines vs horizon), not ALNS. Do not quote 50K–500K wall times or `FEASIBLE` from README: cite the hashed ladder [`benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md`](benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md). The May 2026 protocol is historical: [`benchmark/BENCHMARK_EVIDENCE_50K_2026_05_18.md`](benchmark/BENCHMARK_EVIDENCE_50K_2026_05_18.md) (`SUPERSEDED`).
 
-Scale evidence protocol: [`benchmark/BENCHMARK_EVIDENCE_50K_2026_05_18.md`](benchmark/BENCHMARK_EVIDENCE_50K_2026_05_18.md). History: [`CHANGELOG.md`](CHANGELOG.md).
+Scale evidence protocol: [`benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md`](benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md). History: [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Development
 

@@ -1,0 +1,139 @@
+{
+  "all_feasible": true,
+  "experiment": "generator_seed_1_to_10",
+  "fixed": "solver path = nervous-month default COVER (ATCS windowed)",
+  "notary_hard_violations": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "runs": [
+    {
+      "n_operations": 20316,
+      "notary_hard_violations": 0,
+      "seed": 1,
+      "solve_s": 4.184,
+      "status": "feasible",
+      "tardiness_minutes": 87134.0
+    },
+    {
+      "n_operations": 20154,
+      "notary_hard_violations": 0,
+      "seed": 2,
+      "solve_s": 4.171,
+      "status": "feasible",
+      "tardiness_minutes": 164355.0
+    },
+    {
+      "n_operations": 19860,
+      "notary_hard_violations": 0,
+      "seed": 3,
+      "solve_s": 4.079,
+      "status": "feasible",
+      "tardiness_minutes": 131980.0
+    },
+    {
+      "n_operations": 20136,
+      "notary_hard_violations": 0,
+      "seed": 4,
+      "solve_s": 4.186,
+      "status": "feasible",
+      "tardiness_minutes": 84156.0
+    },
+    {
+      "n_operations": 19932,
+      "notary_hard_violations": 0,
+      "seed": 5,
+      "solve_s": 4.115,
+      "status": "feasible",
+      "tardiness_minutes": 48269.0
+    },
+    {
+      "n_operations": 20208,
+      "notary_hard_violations": 0,
+      "seed": 6,
+      "solve_s": 4.265,
+      "status": "feasible",
+      "tardiness_minutes": 151960.0
+    },
+    {
+      "n_operations": 20004,
+      "notary_hard_violations": 0,
+      "seed": 7,
+      "solve_s": 4.208,
+      "status": "feasible",
+      "tardiness_minutes": 112047.0
+    },
+    {
+      "n_operations": 20154,
+      "notary_hard_violations": 0,
+      "seed": 8,
+      "solve_s": 4.141,
+      "status": "feasible",
+      "tardiness_minutes": 124644.0
+    },
+    {
+      "n_operations": 19968,
+      "notary_hard_violations": 0,
+      "seed": 9,
+      "solve_s": 4.146,
+      "status": "feasible",
+      "tardiness_minutes": 145731.0
+    },
+    {
+      "n_operations": 20544,
+      "notary_hard_violations": 0,
+      "seed": 10,
+      "solve_s": 4.251,
+      "status": "feasible",
+      "tardiness_minutes": 186947.0
+    }
+  ],
+  "solve_s": [
+    4.184,
+    4.171,
+    4.079,
+    4.186,
+    4.115,
+    4.265,
+    4.208,
+    4.141,
+    4.146,
+    4.251
+  ],
+  "spread_max_over_min": 3.8730240941390957,
+  "tardiness_minutes": [
+    87134,
+    164355,
+    131980,
+    84156,
+    48269,
+    151960,
+    112047,
+    124644,
+    145731,
+    186947
+  ],
+  "tardiness_stats": {
+    "ci95_note": "Student t, df=n-1, two-tailed 0.05. n=3 \u21d2 interval is wide; treat as a dispersion bound, not a quality claim.",
+    "ci95_t_halfwidth": null,
+    "ci95_t_high": 123722.3,
+    "ci95_t_low": 123722.3,
+    "cv": 0.33793629829413613,
+    "max": 186947.0,
+    "mean": 123722.3,
+    "median": 128312.0,
+    "min": 48269.0,
+    "n": 10,
+    "stdev_population": 39664.69162882777,
+    "stdev_sample": 41810.2560784366
+  },
+  "varied": "instance generator seed"
+}

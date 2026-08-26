@@ -1,0 +1,1 @@
+Deterministic-first scheduling engine for MO-FJSP-SDST-ARC. 25 named solver configs, independent feasibility checker, benchmark harness.

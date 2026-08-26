@@ -57,6 +57,7 @@ cache/
 benchmark/results/
 benchmark/studies/
 !benchmark/studies/.gitkeep
+benchmark/evidence/**/*.job
 
 # Cursor / agent local probes (never publish)
 .cursor-*

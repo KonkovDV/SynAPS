@@ -1,0 +1,22 @@
+{
+  "scale_id": "100k@200",
+  "seed": 42,
+  "status": "stalled",
+  "stalled": true,
+  "stall_where": "RHC fallback greedy repair after 136 unscheduled leftovers",
+  "stall_note": "Process killed after >8 min with no return. Sibling seed 1 finished in 13.7s. Matches CHANGELOG limitation: at 100k in-pass insert is disabled and residual gap-fill can hang. Not retuned.",
+  "ops_generated": 100000,
+  "ops_scheduled": null,
+  "scheduled_ratio": null,
+  "verified_feasible": false,
+  "notary_empty": false,
+  "notary_hard_violation_count": null,
+  "makespan_minutes": null,
+  "wall_time_s": 480.0,
+  "peak_rss_mb": null,
+  "native_backend": "native",
+  "determinism": "strict",
+  "determinism_violated": null,
+  "global_greedy_cover": true,
+  "search_stop_reason": "study_killed_stall"
+}

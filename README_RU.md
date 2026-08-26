@@ -36,7 +36,7 @@ python -m synaps list-solver-configs
 
 ## Портфель солверов
 
-23 конфигурации в [`synaps/solvers/registry.py`](synaps/solvers/registry.py):
+25 конфигураций в [`synaps/solvers/registry.py`](synaps/solvers/registry.py):
 
 | Семейство | Примеры | Назначение |
 | --- | --- | --- |
@@ -51,9 +51,9 @@ python -m synaps list-solver-configs
 
 **Есть:** deterministic-first портфель, стабильные solve/repair контракты, feasibility checker, CI, lockfiles + SBOM.
 
-**Не заявлено:** валидация на живом заводе; SOTA; N-1 / SAIDI. `RHC-ALNS` не гарантия completeness в коротком timebox. Честный `FEASIBLE` на 50K–100K — путь `RHC-GREEDY-COVER` (достаточно станков относительно горизонта), не ALNS.
+**Не заявлено:** валидация на живом заводе; SOTA; N-1 / SAIDI. `RHC-ALNS` не гарантия completeness в коротком timebox. Покрытие крупных инстансов — путь `RHC-GREEDY-COVER`, не ALNS. Цифры 50K–500K и статус `FEASIBLE` из README не цитировать: только хешированная лестница [`benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md`](benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md). Майский протокол — история: [`benchmark/BENCHMARK_EVIDENCE_50K_2026_05_18.md`](benchmark/BENCHMARK_EVIDENCE_50K_2026_05_18.md) (`SUPERSEDED`).
 
-Протокол evidence: [`benchmark/BENCHMARK_EVIDENCE_50K_2026_05_18.md`](benchmark/BENCHMARK_EVIDENCE_50K_2026_05_18.md). История: [`CHANGELOG.md`](CHANGELOG.md).
+Протокол evidence: [`benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md`](benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md). История: [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Разработка
 

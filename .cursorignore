@@ -1,0 +1,17 @@
+﻿# Cursor indexing / Agent file discovery. Gitignore already covers most of
+# this; these patterns also keep @codebase off cargo artifacts that VS Code
+# still watches.
+
+native/**/target/
+.maturin/
+.pytest_cache/
+__pycache__/
+*.pyc
+.venv/
+venv/
+benchmark/results/
+benchmark/studies/
+.cursor-*
+docs/gridplan/
+*.pyd
+*.so
