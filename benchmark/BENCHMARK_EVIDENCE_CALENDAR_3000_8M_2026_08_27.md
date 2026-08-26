@@ -19,7 +19,9 @@ as night coverage for signs.
 | 999 | 2625 | 0.8750 | 150.116 | error | wall_clock | `CALENDAR_VIOLATION`, `MISSING_ASSIGNMENT` |
 
 `verified_feasible=false` on all three. Independent `verify_schedule_result`
-reported empty `violation_kinds`; the solver notary is the occupancy source.
+reported empty `violation_kinds` on this run (KI-N15 skip, now closed in
+kernel; these JSON bytes are not rewritten). The solver notary is the
+occupancy source for this study.
 
 ## Unplaced reason codes (every leftover op)
 

@@ -21,6 +21,10 @@ _STUDY = {
     "BENCHMARK_EVIDENCE_DEADZONE_5K_2026_08_26.md": "deadzone-5k-2026-08-25",
     "BENCHMARK_EVIDENCE_CABLE_C6_2026_08_26.md": "cable-c6-2026-08-25",
 }
+# Cited K2 folders that are not yet in the K3.2 glob allowlist.
+_CITED_EXTRA = {
+    "BENCHMARK_EVIDENCE_BEAM_ALNS_2026_08_26.md": "beam-alns-box-2026-08-26",
+}
 _SCALE_FILE = {
     "60k@100": "60k_at_100",
     "100k@200": "100k_at_200",
@@ -68,7 +72,7 @@ def _assert_md_table_matches_sums(
 
 def test_artifact_sha256_table_matches_sha256sums_txt() -> None:
     """F0.5: MD Artifact/SHA-256 table matches SHA256SUMS.txt line for line."""
-    for name, study in _STUDY.items():
+    for name, study in {**_STUDY, **_CITED_EXTRA}.items():
         sums = _parse_sha256sums(_BENCH / "evidence" / study / "SHA256SUMS.txt")
         listed = _parse_hashes((_BENCH / name).read_text(encoding="utf-8"))
         _assert_md_table_matches_sums(name, sums, listed)

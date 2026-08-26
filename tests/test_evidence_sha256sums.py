@@ -71,3 +71,18 @@ def test_sha256sums_gate_fails_on_planted_mismatch(tmp_path: Path) -> None:
         assert "mismatch" in str(exc)
     else:
         raise AssertionError("hash gate accepted a planted mismatch")
+
+
+def test_beam_alns_box_run_json_files_are_listed_in_sha256sums() -> None:
+    """RT 2026-08-27: cited BEAM/ALNS cells cannot sit outside SHA256SUMS."""
+
+    folder = _EVIDENCE / "beam-alns-box-2026-08-26"
+    listed = {
+        line.split(None, 1)[1]
+        for line in (folder / "SHA256SUMS.txt").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    }
+    on_disk = {path.name for path in folder.glob("run_*.json")}
+    missing = sorted(on_disk - listed)
+    assert not missing, f"unhashed run JSON in beam-alns-box: {missing}"
+    _check_sums(folder / "SHA256SUMS.txt")

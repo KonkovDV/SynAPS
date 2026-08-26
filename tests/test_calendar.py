@@ -21,6 +21,7 @@ from synaps.model import (
     Operation,
     Order,
     ScheduleProblem,
+    ScheduleResult,
     ShiftInterval,
     SolverStatus,
     State,
@@ -315,3 +316,96 @@ def test_cli_calendar_cpsat_exits_3(tmp_path: Path) -> None:
     instance.write_text(problem.model_dump_json(), encoding="utf-8")
     code = main(["solve", str(instance), "--solver-config", "CPSAT-10", "--no-verify-feasibility"])
     assert code == 3
+
+
+def test_verify_error_with_assignments_still_runs_notary() -> None:
+    """RT 2026-08-27: ERROR + nonempty assignments must not skip the checker.
+
+    ``verify_schedule_result`` used to return empty kinds whenever status was
+    not FEASIBLE/OPTIMAL. K2.1 then published ``independent_violation_kinds=[]``
+    next to notary ``CALENDAR_VIOLATION``. feasible stays False.
+    """
+
+    from synaps.validation import verify_schedule_result
+
+    problem = _one_op_problem(calendar=[_night_shift()])
+    wc = problem.work_centers[0]
+    op = problem.operations[0]
+    result = ScheduleResult(
+        solver_name="GREED",
+        status=SolverStatus.ERROR,
+        assignments=[
+            Assignment(
+                operation_id=op.id,
+                work_center_id=wc.id,
+                start_time=H0,
+                end_time=H0 + timedelta(hours=1),
+                setup_minutes=0,
+            )
+        ],
+    )
+    verification = verify_schedule_result(problem, result)
+    assert verification.feasible is False
+    assert "CALENDAR_VIOLATION" in verification.violation_kinds
+
+
+def test_verify_timeout_with_assignments_still_runs_notary() -> None:
+    """BEAM boxed cells publish status=timeout with partial assignments."""
+
+    from synaps.validation import verify_schedule_result
+
+    problem = _one_op_problem(calendar=[_night_shift()])
+    wc = problem.work_centers[0]
+    op = problem.operations[0]
+    result = ScheduleResult(
+        solver_name="BEAM-3",
+        status=SolverStatus.TIMEOUT,
+        assignments=[
+            Assignment(
+                operation_id=op.id,
+                work_center_id=wc.id,
+                start_time=H0,
+                end_time=H0 + timedelta(hours=1),
+                setup_minutes=0,
+            )
+        ],
+    )
+    verification = verify_schedule_result(problem, result)
+    assert verification.feasible is False
+    assert "CALENDAR_VIOLATION" in verification.violation_kinds
+
+
+def test_verify_error_without_assignments_stays_empty_kinds() -> None:
+    from synaps.validation import verify_schedule_result
+
+    problem = _one_op_problem(calendar=[_night_shift()])
+    result = ScheduleResult(solver_name="GREED", status=SolverStatus.ERROR)
+    verification = verify_schedule_result(problem, result)
+    assert verification.feasible is False
+    assert verification.violation_kinds == []
+    assert verification.violations == []
+
+
+def test_verify_error_with_clean_assignments_is_not_verified_feasible() -> None:
+    """ERROR must not become verified_feasible even when placed work is clean."""
+
+    from synaps.validation import verify_schedule_result
+
+    problem = _one_op_problem(calendar=[])
+    wc = problem.work_centers[0]
+    op = problem.operations[0]
+    result = ScheduleResult(
+        solver_name="GREED",
+        status=SolverStatus.ERROR,
+        assignments=[
+            Assignment(
+                operation_id=op.id,
+                work_center_id=wc.id,
+                start_time=H0,
+                end_time=H0 + timedelta(hours=1),
+                setup_minutes=0,
+            )
+        ],
+    )
+    verification = verify_schedule_result(problem, result)
+    assert verification.feasible is False

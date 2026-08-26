@@ -80,6 +80,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   assignments are `ERROR` on all 25 named configs (Pareto-slice stamps the
   inner result). Fourth domain repository is not created in this commit.
   Table: `docs/architecture/CALENDAR_ROUTING.md`.
+- **Red Team triage (2026-08-27):** Independent notary now checks ERROR /
+  TIMEOUT partial assignments (KI-N15). Boxed BEAM-3 3000@4 night seed 1 is
+  hashed (`benchmark/evidence/beam-alns-box-2026-08-26/`). RFC:
+  `docs/rfc/REDTEAM_TRIAGE_2026_08_27.md`. Hashed COVER / cable / deadzone
+  JSON not rewritten. K3 not started.
+
 - **Branch protection / test-slow (И1):** `master` requires a PR plus
   lint, contract-schema-drift, typecheck, test-fast 3.12/3.13,
   benchmark-smoke, control-plane. `test-slow` is post-merge only

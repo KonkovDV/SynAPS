@@ -26,10 +26,12 @@ Registry declares `time_limit_s=120` for `BEAM-3` and `BEAM-5`.
 `GreedyDispatch._solve_core` reads that kwarg. `BeamSearchDispatch._solve_core`
 does not. The 120 s piggyback is **cosmetic**.
 
-A boxed `BEAM-3` 3000@4 night cell was started after ALNS; it was still running
-after 120 s wall (no JSON yet). Full 12-cell boxed matrix and the unboxed
-matrix are not complete in this file. Completing them would measure unbounded
-BEAM cost, not whether the declared box works.
+Hashed boxed cell (this folder): `BEAM-3` 3000 ops / 4 machines / night analog,
+seed 1. `status=timeout`, `time_limit_s_kwarg=120`, `wall_time_s=12632.756`,
+`scheduled_ratio=0.224` (672/3000), `verified_feasible=false`. That is the
+measurement that the declared box does not stop BEAM. Full 12-cell boxed
+matrix and the unboxed matrix are not complete in this file. Completing them
+would measure unbounded BEAM cost, not whether the declared box works.
 
 ## И6.1 KI-N3 recapture (session, not a rewrite)
 
@@ -53,7 +55,9 @@ RHC-GREEDY seed 1, isolate watchdog 210 s. All six cells `status=error`,
 2. Not a Linux measurement. И6.2 ubuntu-latest 8k@4 was not run.
 3. Not a retune of `global_greedy_cover_min_ops` or ALNS `time_limit_s`.
 4. Not industrial deployment. Not ЦОДД / Мосгортранс / Россети as customers.
-5. BEAM boxed matrix is incomplete; do not cite a BEAM scheduled_ratio from this round.
+5. BEAM boxed matrix is incomplete except the hashed 3000@4 seed-1 cell
+   (`ratio=0.224`, `timeout`, `verified_feasible=false`). Do not cite that
+   ratio as a Yes or as a working 120 s box.
 
 ## Hash provenance
 
@@ -66,7 +70,8 @@ git show HEAD:benchmark/evidence/beam-alns-box-2026-08-26/run_5000ops_8m_ALNS_50
 ## Artifact SHA-256
 
 Directory `benchmark/evidence/beam-alns-box-2026-08-26/`. Rows from
-`SHA256SUMS.txt` after the ALNS-only write (BEAM files, if any, appear later).
+`SHA256SUMS.txt`. Working-tree bytes in this folder are CRLF; `-text` keeps
+the git blob identical. Digests below are those bytes.
 
 | File | SHA-256 |
 |------|---------|
@@ -74,3 +79,4 @@ Directory `benchmark/evidence/beam-alns-box-2026-08-26/`. Rows from
 | `run_5000ops_8m_ALNS_500_free_boxed_seed1.json` | `26c34febf0e74f030d59aa9c9c9b1589e2ad70dd9f643eae7cfbb535068c8b42` |
 | `run_5000ops_8m_ALNS_500_free_boxed_seed42.json` | `f3b5552a4e5f8b898337411ab732571939e1781a8c008894da2b5456449c3793` |
 | `run_5000ops_8m_ALNS_500_free_boxed_seed999.json` | `c701cf53be87b7184e52ec4e71afe760b54da2285594e53b8adddc8c0268d7df` |
+| `run_3000ops_4m_BEAM_3_night_boxed_seed1.json` | `9c4687b17d055e114a642eafc79648b096152aba4b53777d1b71d4f14a082c47` |
