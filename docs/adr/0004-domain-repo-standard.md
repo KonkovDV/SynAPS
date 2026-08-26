@@ -22,8 +22,10 @@ GridPlan pin: `bd09d13561b3bd690845d07546def59b4521b16c` (kernel HEAD at the
 2026-08-26 close).
 MobiRoute pin: `5168fc71005653945097e1f07ada1ce9cbc02eec`.
 
-Kernel HEAD at the honesty-gate round is `7a4083e`. Pins stay. **Sync date:
-2026-09-09.** On that date a domain pin bump must regression-run:
+Kernel HEAD at the honesty-gate round is `515488b`. Pins stay. **Sync date:
+2026-09-09.** Until that date, pin lag is allowed under the four conditions
+below. After 2026-09-09 the lag rule closes: a domain pin bump must
+regression-run:
 
 1. Fail-closed coverage (`EMPTY`+`FEASIBLE` is `ERROR`; CLI codes 0/2/3/1).
 2. Non-empty `WorkCenter.calendar` is refused by CP-SAT/ALNS/LBBD and clipped
@@ -35,7 +37,7 @@ Until then, night/emergency work in a domain layer is not a kernel calendar
 promise: only greedy-family configs clip shifts, and windowed coverage on the
 night analog is 0.75–0.88 (`benchmark/BENCHMARK_EVIDENCE_DEADZONE_5K_2026_08_26.md`).
 
-**Divergence is allowed** when all of the following hold:
+**Until 2026-09-09**, divergence is allowed when all of the following hold:
 
 1. The domain does not call kernel APIs introduced after its pin, or it does not call the kernel solver at all (MobiRoute: engineering reference / adapter pin, own DARP search).
 2. README and a `SYNAPS_COMMIT` constant match.
