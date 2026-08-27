@@ -22,6 +22,7 @@ from synaps.model import (
 )
 from synaps.solvers import BaseSolver
 from synaps.solvers._dispatch_support import (
+    APPEND_GAP_SCAN_MIN_OPS,
     MachineIndex,
     build_dispatch_context,
     find_earliest_feasible_slot,
@@ -30,6 +31,138 @@ from synaps.solvers._dispatch_support import (
 from synaps.solvers._time_windows import operation_earliest_offset_minutes
 from synaps.solvers.coverage_outcome import stamp_honest_coverage
 from synaps.timegrain import physical_processing_minutes_for
+
+
+def _gap_scan_for(n_ops: int) -> str:
+    """KI-N1: full left-to-right gap walk is O(n^2*m). Large n appends only."""
+
+    return "append" if n_ops >= APPEND_GAP_SCAN_MIN_OPS else "all"
+
+
+def _dispatch_timeout_result(
+    *,
+    solver_name: str,
+    problem: ScheduleProblem,
+    assignments: list[Assignment],
+    t0: float,
+    acceleration_status: object,
+    time_limit_s: float | None,
+    extra_metadata: dict[str, Any],
+) -> ScheduleResult:
+    """TIMEOUT + partial assignments. Uses ``evaluate`` so the ctor ratchet stays put."""
+
+    from synaps.objective import evaluate
+
+    elapsed_ms = int((time.monotonic() - t0) * 1000)
+    return ScheduleResult(
+        solver_name=solver_name,
+        status=SolverStatus.TIMEOUT,
+        assignments=list(assignments),
+        objective=evaluate(problem, assignments),
+        duration_ms=elapsed_ms,
+        metadata={
+            "acceleration": acceleration_status,
+            "partial_schedule": True,
+            "time_limit_s": time_limit_s,
+            **extra_metadata,
+        },
+    )
+
+
+def _beam_feasible_result(
+    *,
+    solver_name: str,
+    beam_width: int,
+    assignments: list[Assignment],
+    makespan: float,
+    dispatch_context: Any,
+    problem: ScheduleProblem,
+    horizon_start: Any,
+    t0: float,
+    acceleration_status: object,
+) -> ScheduleResult:
+    total_setup = recompute_assignment_setups(assignments, dispatch_context)
+    total_material_loss = 0.0
+    assignments_by_machine: dict[Any, list[Assignment]] = {}
+    for assignment in assignments:
+        assignments_by_machine.setdefault(assignment.work_center_id, []).append(assignment)
+    for wc_id, machine_assignments in assignments_by_machine.items():
+        machine_assignments.sort(key=lambda item: item.start_time)
+        for idx in range(1, len(machine_assignments)):
+            prev_op_id = machine_assignments[idx - 1].operation_id
+            curr_op_id = machine_assignments[idx].operation_id
+            prev_state = dispatch_context.ops_by_id[prev_op_id].state_id
+            curr_state = dispatch_context.ops_by_id[curr_op_id].state_id
+            total_material_loss += dispatch_context.material_loss.get(
+                (wc_id, prev_state, curr_state),
+                0.0,
+            )
+    order_completion: dict[Any, float] = {}
+    for assignment in assignments:
+        operation = dispatch_context.ops_by_id[assignment.operation_id]
+        end = (assignment.end_time - horizon_start).total_seconds() / 60.0
+        if operation.order_id not in order_completion or end > order_completion[operation.order_id]:
+            order_completion[operation.order_id] = end
+    total_tardiness = 0.0
+    for order in problem.orders:
+        completion = order_completion.get(order.id, 0.0)
+        due_offset = (order.due_date - horizon_start).total_seconds() / 60.0
+        total_tardiness += max(completion - due_offset, 0.0)
+    elapsed_ms = int((time.monotonic() - t0) * 1000)
+    return ScheduleResult(
+        solver_name=solver_name,
+        status=SolverStatus.FEASIBLE,
+        assignments=assignments,
+        objective=ObjectiveValues(
+            makespan_minutes=makespan,
+            total_setup_minutes=total_setup,
+            total_material_loss=total_material_loss,
+            total_tardiness_minutes=total_tardiness,
+        ),
+        duration_ms=elapsed_ms,
+        metadata={
+            "acceleration": acceleration_status,
+            "beam_width": beam_width,
+        },
+    )
+
+
+def _beam_partial_on_timeout(
+    incumbent: list[Assignment] | None,
+    beams: list[tuple[list[Assignment], set[Any], dict[Any, float], list[Any]]],
+) -> list[Assignment]:
+    """Best completed rollout, else the first live beam's assignments."""
+
+    if incumbent is not None:
+        return incumbent
+    if not beams:
+        return []
+    return list(beams[0][0])
+
+
+def _beam_deadline_result(
+    *,
+    time_limit_s: float | None,
+    t0: float,
+    incumbent: list[Assignment] | None,
+    beams: list[tuple[list[Assignment], set[Any], dict[Any, float], list[Any]]],
+    solver_name: str,
+    problem: ScheduleProblem,
+    acceleration_status: object,
+    beam_width: int,
+) -> ScheduleResult | None:
+    if time_limit_s is None or (time.monotonic() - t0) <= time_limit_s:
+        return None
+    partial = _beam_partial_on_timeout(incumbent, beams)
+    return _dispatch_timeout_result(
+        solver_name=solver_name,
+        problem=problem,
+        assignments=partial,
+        t0=t0,
+        acceleration_status=acceleration_status,
+        time_limit_s=time_limit_s,
+        extra_metadata={"beam_width": beam_width, "scheduled_ops": len(partial)},
+    )
 
 
 def _virtualize_parallel_lanes(
@@ -247,9 +380,20 @@ class GreedyDispatch(BaseSolver):
         best_result: ScheduleResult | None = None
         best_key: tuple[float, float, float] | None = None
         best_rule = candidate_rules[0]
+        deadline: float | None = None
+        time_limit_s_raw = kwargs.get("time_limit_s")
+        if time_limit_s_raw is not None:
+            deadline = time.monotonic() + max(0.1, float(time_limit_s_raw))
+        evaluated = 0
         for k1, k2, k3 in candidate_rules:
+            if evaluated and deadline is not None and time.monotonic() >= deadline:
+                break
+            inner_kwargs = dict(kwargs)
+            if deadline is not None:
+                inner_kwargs["time_limit_s"] = max(0.1, deadline - time.monotonic())
             candidate_solver = GreedyDispatch(k1=k1, k2=k2, k3=k3)
-            candidate_result = candidate_solver._solve_core(virtual_problem, **kwargs)
+            candidate_result = candidate_solver._solve_core(virtual_problem, **inner_kwargs)
+            evaluated += 1
             candidate_key = objective_sort_key(
                 evaluate(virtual_problem, candidate_result.assignments),
                 weights,
@@ -261,7 +405,7 @@ class GreedyDispatch(BaseSolver):
 
         assert best_result is not None  # candidate_rules is never empty
         best_result.metadata["priority_rule_sweep"] = True
-        best_result.metadata["priority_rules_evaluated"] = len(candidate_rules)
+        best_result.metadata["priority_rules_evaluated"] = evaluated
         best_result.metadata["priority_rule_selected"] = list(best_rule)
         return best_result
 
@@ -283,6 +427,7 @@ class GreedyDispatch(BaseSolver):
         # Build operation queue (respecting precedence)
         all_ops = problem.operations
         n_total_ops = len(all_ops)
+        gap_scan = _gap_scan_for(n_total_ops)
         scheduled_ops: set[Any] = set()
         op_end_offsets: dict[Any, float] = {}
         assignments: list[Assignment] = []
@@ -374,6 +519,7 @@ class GreedyDispatch(BaseSolver):
                         wc_id,
                         pred_end,
                         machine_index=machine_idx,
+                        gap_scan=gap_scan,
                     )
                     if slot is None:
                         continue
@@ -586,16 +732,11 @@ def _greedy_complete(
     scheduled_ops: set[Any],
     op_end_offsets: dict[Any, float],
     remaining: list[Any],
+    *,
+    time_limit_s: float | None = None,
+    t0: float | None = None,
 ) -> tuple[list[Assignment], float] | None:
-    """Q1: deterministic completion-to-go rollout (Ow & Morton second stage).
-
-    Extends a partial schedule to a full one by repeatedly dispatching the
-    (operation, work center) with the earliest feasible completion (ties broken
-    deterministically), honoring precedence and release_date. Returns the full
-    assignment list and its makespan, or None if it cannot be completed. This is
-    a fixed function of the partial state, so a wider beam — which rolls out a
-    superset of partial states — can only lower the global incumbent.
-    """
+    """Completion-to-go rollout; None if the partial cannot be completed."""
     machine_idx = MachineIndex(dispatch_context)
     for assignment in assignments:
         machine_idx.add(assignment)
@@ -604,6 +745,7 @@ def _greedy_complete(
     offsets = dict(op_end_offsets)
     todo = list(remaining)
 
+    gap_scan = _gap_scan_for(len(out) + len(todo))
     while todo:
         ready = [
             op for op in todo if op.predecessor_op_id is None or op.predecessor_op_id in scheduled
@@ -623,8 +765,16 @@ def _greedy_complete(
                 op.eligible_wc_ids if op.eligible_wc_ids else list(dispatch_context.wc_by_id.keys())
             )
             for wc_id in eligible:
+                if t0 is not None and (time.monotonic() - t0) > (time_limit_s or 1e18):
+                    return None
                 slot = find_earliest_feasible_slot(
-                    dispatch_context, out, op, wc_id, pred_end, machine_index=machine_idx
+                    dispatch_context,
+                    out,
+                    op,
+                    wc_id,
+                    pred_end,
+                    machine_index=machine_idx,
+                    gap_scan=gap_scan,
                 )
                 if slot is None:
                     continue
@@ -690,13 +840,25 @@ class BeamSearchDispatch(BaseSolver):
         # makespan non-increasing in beam_width by construction (a wider beam
         # can never be worse than a narrower one) while still exploring the
         # full requested width. B is small (<= ~12), instances are small.
+        deadline: float | None = None
+        time_limit_s_raw = kwargs.get("time_limit_s")
+        if time_limit_s_raw is not None:
+            deadline = time.monotonic() + max(0.1, float(time_limit_s_raw))
         best: ScheduleResult | None = None
+        # Always finish width=1 so a zero-remaining budget cannot skip solve().
         for width in range(1, self._beam_width + 1):
-            candidate = self._solve_core(virtual_problem, width, **kwargs)
+            if best is not None and deadline is not None and time.monotonic() >= deadline:
+                break
+            inner_kwargs = dict(kwargs)
+            if deadline is not None:
+                inner_kwargs["time_limit_s"] = max(0.1, deadline - time.monotonic())
+            candidate = self._solve_core(virtual_problem, width, **inner_kwargs)
             if best is None or (
                 candidate.objective.makespan_minutes < best.objective.makespan_minutes
             ):
                 best = candidate
+            if candidate.status is SolverStatus.TIMEOUT:
+                break
         assert best is not None
         _unroll_lane_assignments(best, virtual_to_original)
         return stamp_honest_coverage(problem, best)
@@ -706,6 +868,10 @@ class BeamSearchDispatch(BaseSolver):
     ) -> ScheduleResult:
         t0 = time.monotonic()
         acceleration_status = get_acceleration_status()
+        time_limit_s_raw = kwargs.get("time_limit_s")
+        time_limit_s: float | None = None
+        if time_limit_s_raw is not None:
+            time_limit_s = max(0.1, float(time_limit_s_raw))
 
         orders_by_id = {o.id: o for o in problem.orders}
         wc_by_id = {wc.id: wc for wc in problem.work_centers}
@@ -719,6 +885,7 @@ class BeamSearchDispatch(BaseSolver):
         ]
 
         total_ops = len(problem.operations)
+        gap_scan = _gap_scan_for(total_ops)
 
         # Q1: global incumbent over EVERY completed rollout, not just the beams
         # that survive the last step. A wider beam rolls out a superset of
@@ -726,7 +893,22 @@ class BeamSearchDispatch(BaseSolver):
         incumbent: list[Assignment] | None = None
         incumbent_makespan = float("inf")
 
+        def _timeout() -> ScheduleResult | None:
+            return _beam_deadline_result(
+                time_limit_s=time_limit_s,
+                t0=t0,
+                incumbent=incumbent,
+                beams=beams,
+                solver_name=self.name,
+                problem=problem,
+                acceleration_status=acceleration_status,
+                beam_width=self._beam_width,
+            )
+
         for _step in range(total_ops):
+            timed_out = _timeout()
+            if timed_out is not None:
+                return timed_out
             candidates: list[
                 tuple[
                     float,
@@ -810,6 +992,9 @@ class BeamSearchDispatch(BaseSolver):
                         else [wc.id for wc in problem.work_centers]
                     )
                     for wc_id in eligible:
+                        timed_out = _timeout()
+                        if timed_out is not None:
+                            return timed_out
                         slot = find_earliest_feasible_slot(
                             dispatch_context,
                             assignments,
@@ -817,6 +1002,7 @@ class BeamSearchDispatch(BaseSolver):
                             wc_id,
                             pred_end,
                             machine_index=machine_idx,
+                            gap_scan=gap_scan,
                         )
                         if slot is None:
                             continue
@@ -957,6 +1143,9 @@ class BeamSearchDispatch(BaseSolver):
 
                     # Second stage: completion-to-go rollout ranks this beam by
                     # the ACTUAL objective and updates the global incumbent.
+                    timed_out = _timeout()
+                    if timed_out is not None:
+                        return timed_out
                     rollout = _greedy_complete(
                         dispatch_context,
                         orders_by_id,
@@ -965,8 +1154,13 @@ class BeamSearchDispatch(BaseSolver):
                         new_scheduled,
                         new_offsets,
                         new_remaining,
+                        time_limit_s=time_limit_s,
+                        t0=t0,
                     )
                     if rollout is None:
+                        timed_out = _timeout()
+                        if timed_out is not None:
+                            return timed_out
                         continue
                     full_assignments, projected_mk = rollout
                     if projected_mk < incumbent_makespan:
@@ -1015,52 +1209,14 @@ class BeamSearchDispatch(BaseSolver):
             return greedy.solve(problem, **kwargs)
 
         assignments, makespan = incumbent, incumbent_makespan
-
-        # Recompute setups and objectives
-        total_setup = recompute_assignment_setups(assignments, dispatch_context)
-
-        total_material_loss = 0.0
-        assignments_by_machine: dict[Any, list[Assignment]] = {}
-        for a in assignments:
-            assignments_by_machine.setdefault(a.work_center_id, []).append(a)
-        for wc_id, machine_assignments in assignments_by_machine.items():
-            machine_assignments.sort(key=lambda a: a.start_time)
-            for idx in range(1, len(machine_assignments)):
-                prev_op_id = machine_assignments[idx - 1].operation_id
-                curr_op_id = machine_assignments[idx].operation_id
-                prev_state = dispatch_context.ops_by_id[prev_op_id].state_id
-                curr_state = dispatch_context.ops_by_id[curr_op_id].state_id
-                total_material_loss += dispatch_context.material_loss.get(
-                    (wc_id, prev_state, curr_state),
-                    0.0,
-                )
-
-        order_completion: dict[Any, float] = {}
-        for a in assignments:
-            op = dispatch_context.ops_by_id[a.operation_id]
-            end = (a.end_time - horizon_start).total_seconds() / 60.0
-            if op.order_id not in order_completion or end > order_completion[op.order_id]:
-                order_completion[op.order_id] = end
-        total_tardiness = 0.0
-        for order in problem.orders:
-            completion = order_completion.get(order.id, 0.0)
-            due_offset = (order.due_date - horizon_start).total_seconds() / 60.0
-            total_tardiness += max(completion - due_offset, 0.0)
-
-        elapsed_ms = int((time.monotonic() - t0) * 1000)
-        return ScheduleResult(
+        return _beam_feasible_result(
             solver_name=self.name,
-            status=SolverStatus.FEASIBLE,
+            beam_width=self._beam_width,
             assignments=assignments,
-            objective=ObjectiveValues(
-                makespan_minutes=makespan,
-                total_setup_minutes=total_setup,
-                total_material_loss=total_material_loss,
-                total_tardiness_minutes=total_tardiness,
-            ),
-            duration_ms=elapsed_ms,
-            metadata={
-                "acceleration": acceleration_status,
-                "beam_width": self._beam_width,
-            },
+            makespan=makespan,
+            dispatch_context=dispatch_context,
+            problem=problem,
+            horizon_start=horizon_start,
+            t0=t0,
+            acceleration_status=acceleration_status,
         )

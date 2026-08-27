@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -209,3 +210,28 @@ def test_verify_claims_fails_on_cyrillic_gib_without_evidence(tmp_path: Path) ->
         cwd=_ROOT,
     )
     assert completed.returncode == 1
+
+
+def test_readme_ru_sourced_perf_num_ratio_at_least_90_percent() -> None:
+    """K3.1: README_RU PERF_NUM lines must be ≥90% evidence-sourced (vacuous 1.0)."""
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(_ROOT / "scripts" / "verify_claims.py"),
+            "--root",
+            str(_ROOT),
+            "--stats",
+        ],
+        check=False,
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    match = re.search(r"README_RU\.md: sourced (\d+)/(\d+) PERF_NUM", completed.stdout)
+    assert match, completed.stdout
+    sourced = int(match.group(1))
+    total = int(match.group(2))
+    ratio = 1.0 if total == 0 else sourced / total
+    assert ratio >= 0.90, f"README_RU sourced {sourced}/{total} = {ratio:.2f} < 0.90"

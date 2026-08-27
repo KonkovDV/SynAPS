@@ -21,8 +21,9 @@ from pathlib import Path
 
 import pytest
 
-from synaps.model import ScheduleProblem
+from synaps.model import ScheduleProblem, SolverStatus
 from synaps.solvers.alns_solver import AlnsSolver
+from synaps.solvers.greedy_dispatch import BeamSearchDispatch
 from synaps.solvers.lbbd_hd_solver import LbbdHdSolver
 from synaps.solvers.lbbd_solver import LbbdSolver
 
@@ -57,6 +58,46 @@ def test_lbbd_honors_time_limit() -> None:
     wall = time.monotonic() - t0
     assert result.assignments, "LBBD returned no schedule within the budget"
     assert wall <= MAX_WALL_S, f"LBBD wall {wall:.1f}s exceeds {MAX_WALL_S:.1f}s cap"
+
+
+def test_beam_honors_shared_deadline() -> None:
+    """K3.3 / RT27-R3: BeamSearchDispatch must share time_limit_s across widths."""
+
+    problem = _medium()
+    budget_s = 1.0
+    max_wall_s = budget_s * 1.2 + 1.0
+    t0 = time.monotonic()
+    result = BeamSearchDispatch(beam_width=3).solve(problem, time_limit_s=budget_s)
+    wall = time.monotonic() - t0
+    assert wall <= max_wall_s, f"BEAM wall {wall:.1f}s exceeds {max_wall_s:.1f}s cap"
+    assert result.status in {
+        SolverStatus.FEASIBLE,
+        SolverStatus.TIMEOUT,
+        SolverStatus.ERROR,
+    }
+
+
+def test_beam_stops_when_slot_search_is_slow(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Forced-slow find_earliest must still return inside 1.2x+1s of a 1s box."""
+
+    import synaps.solvers.greedy_dispatch as gd
+
+    problem = _medium()
+    original = gd.find_earliest_feasible_slot
+
+    def slow(*args: object, **kwargs: object) -> object:
+        time.sleep(0.05)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(gd, "find_earliest_feasible_slot", slow)
+    budget_s = 1.0
+    max_wall_s = budget_s * 1.2 + 1.0
+    t0 = time.monotonic()
+    result = gd.BeamSearchDispatch(beam_width=3).solve(problem, time_limit_s=budget_s)
+    wall = time.monotonic() - t0
+    assert wall <= max_wall_s, f"BEAM wall {wall:.1f}s exceeds {max_wall_s:.1f}s cap"
+    assert result.status is SolverStatus.TIMEOUT
+    assert result.metadata.get("partial_schedule") is True
 
 
 @pytest.mark.slow

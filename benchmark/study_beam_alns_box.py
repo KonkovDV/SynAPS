@@ -53,6 +53,9 @@ def _record(
         "search_stop_reason": meta.get("search_stop_reason"),
         "time_limit_reached": meta.get("time_limit_reached"),
         "wall_clock_before_search": meta.get("search_stop_reason") == "wall_clock_before_search",
+        "iterations_completed": meta.get("iterations_completed"),
+        "time_limit_exhausted_before_search": meta.get("time_limit_exhausted_before_search"),
+        "coverage_class": meta.get("coverage_class"),
         "generate_s": round(generate_s, 3),
         "wall_time_s": round(wall_s, 3),
         "notary_hard_violation_kinds": meta.get("notary_hard_violation_kinds"),
@@ -67,6 +70,7 @@ def run_one(
     seed: int,
     night_analog: bool,
     boxed: bool,
+    store_assignments: bool = False,
 ) -> dict[str, Any]:
     gen_t0 = time.perf_counter()
     if night_analog:
@@ -99,7 +103,7 @@ def run_one(
     result = solver.solve(problem, **kwargs)
     wall_s = time.perf_counter() - solve_t0
     verification = verify_schedule_result(problem, result)
-    return _record(
+    record = _record(
         n_operations=len(problem.operations),
         n_machines=n_machines,
         solver_config=solver_config,
@@ -111,6 +115,9 @@ def run_one(
         wall_s=wall_s,
         verification=verification,
     )
+    if store_assignments:
+        record["assignments"] = [item.model_dump(mode="json") for item in result.assignments]
+    return record
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -122,6 +129,11 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
     )
     parser.add_argument("--seeds", default="1,42,999")
+    parser.add_argument(
+        "--store-assignments",
+        action="store_true",
+        help="Write assignment lists into new run JSON (never rewrite hashed COVER)",
+    )
     args = parser.parse_args(argv)
     out_dir: Path = args.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -162,6 +174,7 @@ def main(argv: list[str] | None = None) -> int:
                 seed=seed,
                 night_analog=night,
                 boxed=boxed,
+                store_assignments=args.store_assignments,
             )
             path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             print(

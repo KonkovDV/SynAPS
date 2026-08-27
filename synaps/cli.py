@@ -193,9 +193,42 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Optional path where the JSON manifest should be written instead of stdout",
     )
+    _add_recheck_parser(subparsers)
     _add_cable_demo_parser(subparsers)
     _add_cable_nervous_parser(subparsers)
     return parser
+
+
+def _add_recheck_parser(subparsers: Any) -> None:
+    parser = subparsers.add_parser(
+        "recheck",
+        help="Re-run the independent notary on a stored result with assignments",
+    )
+    parser.add_argument("problem", type=Path, help="ScheduleProblem JSON")
+    parser.add_argument(
+        "result",
+        type=Path,
+        help="ScheduleResult JSON or study run JSON with an assignments list",
+    )
+    parser.add_argument(
+        "--output-file",
+        type=Path,
+        help="Optional path where the JSON recheck report should be written",
+    )
+
+
+def _run_recheck(args: argparse.Namespace) -> int:
+    from synaps.recheck import recheck_problem_and_payload
+
+    problem = _load_problem(args.problem)
+    payload = json.loads(args.result.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        payload = {"assignments": payload}
+    report = recheck_problem_and_payload(problem, payload)
+    _write_json_output(report, args.output_file)
+    if not report["recheckable"]:
+        return 3
+    return 0 if report["verified_feasible"] else 1
 
 
 def _add_cable_demo_parser(subparsers: Any) -> None:
@@ -580,6 +613,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "list-solver-configs":
         _write_json_output(build_solver_registry_manifest(), args.output_file)
         return 0
+
+    elif args.command == "recheck":
+        return _run_recheck(args)
 
     elif args.command == "cable-demo":
         return _run_cable_demo(args)

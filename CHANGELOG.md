@@ -56,6 +56,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MISSING_ASSIGNMENT`. That is not a Yes and not a rewrite of the epoch
   JSON. Isolate now records Python exceptions and watchdog stderr.
 
+- **Honesty close K3 (2026-08-27):** Cited `BENCHMARK_EVIDENCE_*.md` files
+  (except retired 50K / SEARCH_COVER) are under a glob hash-gate, including
+  calendar-3000, ALNS-profile, and BEAM/ALNS. `BeamSearchDispatch` shares
+  `time_limit_s` across widths 1..B. CLI `synaps recheck` re-runs the
+  independent notary when assignments are stored; hashed COVER/deadzone run
+  JSON stays not recheckable (no assignment list, not rewritten).
+  `stamp_honest_coverage` is required on every `BaseSolver.solve` via AST.
+  README_RU PERF_NUM sourced ratio is printed by
+  `scripts/verify_claims.py --stats` (floor 90%). Greedy/BEAM construction
+  uses append-only gap scan at n>=2000 (`APPEND_GAP_SCAN_MIN_OPS`);
+  native ALNS seed and Phase-1 completion repair are skipped at that n.
+  K3.6 three-seed recapture: ALNS-500 5k@8 enters search
+  (`wall_clock_before_search=false`); ratios 0.2598 / 0.1044 / 0.1108;
+  status `error`; walls 299.979 s / 299.172 s / 299.63 s
+  (`benchmark/BENCHMARK_EVIDENCE_ALNS_500_5K8_APPEND_2026_08_27.md`).
+  Not a Yes. Epoch И5.2 JSON not rewritten.
+  Recheck notary no longer trusts client `status`. Near-wall ALNS
+  `remaining_s < 1` stamps `wall_clock`, not `completed`.
+  KI-N14 scaling study no longer requires LBBD-10 `results.feasible is True`.
+  Windows local 2026-08-27: that node passed (128.79 s).
+  Linux: **не проверено на Linux**.
 - **Honesty gates (2026-08-26 Ж):** contract schemas include `WorkCenter.calendar`.
   Claims lint uses explicit `<!-- claims-ok -->` / `<!-- non-claims -->` markers
   instead of a `не`/`not` proximity skip. CLI and the benchmark harness emit

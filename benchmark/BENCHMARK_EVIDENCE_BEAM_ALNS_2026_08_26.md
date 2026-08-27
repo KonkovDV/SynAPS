@@ -54,6 +54,8 @@ RHC-GREEDY seed 1, isolate watchdog 210 s. All six cells `status=error`,
 3. Not a retune of `global_greedy_cover_min_ops` or ALNS `time_limit_s`.
 4. Not industrial deployment. Not ЦОДД / Мосгортранс / Россети as customers.
 5. BEAM boxed matrix is incomplete; do not cite a BEAM scheduled_ratio from this round.
+6. K3.6 recapture (search starts, still not a Yes) is a different folder:
+   `benchmark/BENCHMARK_EVIDENCE_ALNS_500_5K8_APPEND_2026_08_27.md`.
 
 ## Hash provenance
 

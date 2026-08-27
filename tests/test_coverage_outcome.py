@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pytest
@@ -87,20 +88,53 @@ def test_alns_500_zero_scheduled_ops_is_not_feasible() -> None:
     assert stamped.metadata.get("coverage_class") == CoverageClass.EMPTY.value
 
 
+def _call_names(tree: ast.AST) -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name):
+            names.add(func.id)
+        elif isinstance(func, ast.Attribute):
+            names.add(func.attr)
+    return names
+
+
 def test_stamp_honest_coverage_is_wired_on_solver_and_harness_paths() -> None:
-    """И8.2: empty-success demotion is not calendar-only."""
+    """K3.5: every BaseSolver.solve stamps coverage; harness paths too."""
 
     root = Path(__file__).resolve().parents[1]
-    paths = (
-        root / "synaps" / "solvers" / "alns_solver.py",
-        root / "synaps" / "solvers" / "rhc" / "_solver.py",
-        root / "synaps" / "solvers" / "greedy_dispatch.py",
-        root / "benchmark" / "run_benchmark.py",
-        root / "synaps" / "solvers" / "pareto_slice_solver.py",
-    )
-    for path in paths:
-        text = path.read_text(encoding="utf-8")
-        assert "stamp_honest_coverage" in text, path.name
+    solvers_root = root / "synaps" / "solvers"
+    missing: list[str] = []
+    seen = 0
+    for path in sorted(solvers_root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in tree.body:
+            if not isinstance(node, ast.ClassDef):
+                continue
+            if not any(
+                isinstance(base, ast.Name) and base.id == "BaseSolver" for base in node.bases
+            ):
+                continue
+            solve = next(
+                (
+                    child
+                    for child in node.body
+                    if isinstance(child, ast.FunctionDef) and child.name == "solve"
+                ),
+                None,
+            )
+            assert solve is not None, f"{path.name}::{node.name} has no solve()"
+            seen += 1
+            if "stamp_honest_coverage" not in _call_names(solve):
+                missing.append(f"{path.relative_to(root).as_posix()}::{node.name}.solve")
+    assert seen >= 8, f"expected BaseSolver subclasses, found {seen}"
+    assert not missing, "solve() missing stamp_honest_coverage: " + ", ".join(missing)
+
+    for rel in ("synaps/portfolio.py", "benchmark/run_benchmark.py"):
+        tree = ast.parse((root / rel).read_text(encoding="utf-8"))
+        assert "stamp_honest_coverage" in _call_names(tree), rel
 
 
 def test_pareto_slice_demotes_empty_feasible_inner(monkeypatch: pytest.MonkeyPatch) -> None:

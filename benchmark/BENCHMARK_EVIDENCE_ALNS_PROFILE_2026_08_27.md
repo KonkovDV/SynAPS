@@ -18,3 +18,15 @@ Evidence: `benchmark/evidence/alns-profile-2026-08-27/`.
 ## Non-claims
 
 Not a rewrite of hashed ALNS JSON. Not an incremental-neighbourhood patch.
+
+## Artifact SHA-256
+
+Directory `benchmark/evidence/alns-profile-2026-08-27/`. Rows from
+`SHA256SUMS.txt` (working-tree bytes).
+
+| File | SHA-256 |
+|------|---------|
+| `environment.json` | `32bc857c61db8824145c899f912ad9421fee91b22dac06c7e14eafd18bc66f4d` |
+| `one_liner.txt` | `5202cee6137da943da6a1cbbc51958921a6b2da3ee1f663edcc23fa99cb396a4` |
+| `profile.json` | `daeae7d555be8fb943a4c1d84adae33bc779a8b3f71172c2f4de02112909903f` |
+
