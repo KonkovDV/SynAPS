@@ -28,6 +28,19 @@ def test_alns_wall_stamp_matches_stop_reason() -> None:
     assert fast["wall_clock_path_dependent"] is True
     assert fast["determinism_violated"] is False
 
+    # K3-RT: D3 remaining_s < 1 stop is a wall cut, not "completed".
+    near_wall = _alns_wall_clock_honesty_meta(
+        "strict", False, 317, 500, elapsed_s=299.2, time_limit_s=300.0
+    )
+    assert near_wall["search_stop_reason"] == "wall_clock"
+    assert near_wall["wall_clock_path_dependent"] is True
+
+    max_near_wall = _alns_wall_clock_honesty_meta(
+        "strict", False, 500, 500, elapsed_s=299.2, time_limit_s=300.0
+    )
+    assert max_near_wall["search_stop_reason"] == "max_iterations"
+    assert max_near_wall["wall_clock_path_dependent"] is False
+
 
 def test_alns_zero_budget_stamps_wall_cut() -> None:
     """Wall timeout before search is a stamp, not a CI error."""

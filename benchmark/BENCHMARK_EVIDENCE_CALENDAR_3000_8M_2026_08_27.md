@@ -49,8 +49,8 @@ That is a notary fact on this run, not a Yes.
 1. Not a sign-city pitch number beyond this generator and this box.
 2. Not Linux. Native COVER was not loaded.
 3. Not a retune of `global_greedy_cover_min_ops`.
-4. Hash-gate `_CURRENT` / `_STUDY` still allowlists three COVER/cable/deadzone
-   MD files; this file is outside that list until K3.2.
+4. Hash-gate glob in `tests/test_evidence_md_integrity.py` cites this file
+   (K3.2); 50K / SEARCH_COVER remain excluded.
 
 ## Artifact SHA-256
 

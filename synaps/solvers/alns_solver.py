@@ -32,6 +32,7 @@ from synaps.model import (
 )
 from synaps.solvers import BaseSolver
 from synaps.solvers._dispatch_support import (
+    APPEND_GAP_SCAN_MIN_OPS,
     MachineIndex,
     build_dispatch_context,
     find_earliest_feasible_slot,
@@ -1429,7 +1430,8 @@ def _repair_greedy_outcome(
     op_positions = {op.id: index for index, op in enumerate(problem.operations)}
     disrupted_op_ids = sorted(destroyed_op_ids, key=op_positions.__getitem__)
 
-    # --- Native fast path ---
+    # Native greedy_repair is unbounded at n>=2000 (K3.6). Python IncrementalRepair
+    # on thousands of holes is the same class of hang; caller skips completion.
     if use_native_greedy_repair and _HAS_NUMPY and len(disrupted_op_ids) > 0:
         native_result = _try_native_greedy_repair(
             problem,
@@ -1614,6 +1616,10 @@ def _native_eligible_machine_indices(
     return indices
 
 
+# D3: do not start a repair when remaining wall is below this many seconds.
+_ALNS_MIN_REPAIR_REMAINING_S = 1.0
+
+
 def _alns_wall_clock_honesty_meta(
     determinism: str,
     time_limit_exhausted_before_search: bool,
@@ -1628,10 +1634,16 @@ def _alns_wall_clock_honesty_meta(
     (including exhaustion before search). Repair still clamps to remaining
     wall budget on a ``max_iterations`` stop — that residual is not this flag.
     ``determinism_violated`` stays informational: never a CI error.
+    The search loop also stops when remaining wall is below
+    ``_ALNS_MIN_REPAIR_REMAINING_S`` (D3). That cut is a wall cut, not
+    ``completed``.
     """
     if time_limit_exhausted_before_search:
         stop = "wall_clock_before_search"
-    elif elapsed_s >= time_limit_s and iterations_completed < max_iterations:
+    elif (
+        elapsed_s + _ALNS_MIN_REPAIR_REMAINING_S >= time_limit_s
+        and iterations_completed < max_iterations
+    ):
         stop = "wall_clock"
     elif iterations_completed >= max_iterations:
         stop = "max_iterations"
@@ -1668,6 +1680,10 @@ def _try_native_greedy_repair(
     if skip is not None:
         if skip_reasons is not None:
             skip_reasons.append(skip)
+        return None
+    if len(disrupted_op_ids) >= APPEND_GAP_SCAN_MIN_OPS:
+        if skip_reasons is not None:
+            skip_reasons.append("large_n_append_scan")
         return None
     if _native_greedy_repair_batch is None:
         return None
@@ -1917,6 +1933,8 @@ def _try_native_initial_seed(
     from synaps.accelerators import _native_greedy_repair_batch, greedy_repair_batch_native
 
     if _native_repair_skip_reason(problem) is not None:
+        return None
+    if len(problem.operations) >= APPEND_GAP_SCAN_MIN_OPS:
         return None
     if _native_greedy_repair_batch is None:
         return None
@@ -2769,7 +2787,7 @@ def _try_cpsat_repair_lane(
         stats["cpsat_repair_skips_large_destroy"] = 1
         return None, stats
     # Wave 9 / D3: do not start a CP-SAT repair that already has no wall budget.
-    if remaining_s < 1.0:
+    if remaining_s < _ALNS_MIN_REPAIR_REMAINING_S:
         return None, stats
 
     stats["cpsat_repair_attempts"] = 1
@@ -3607,11 +3625,9 @@ class AlnsSolver(BaseSolver):
 
         if initial_result is None:
             if n_ops <= initial_beam_op_limit:
-                beam_result = BeamSearchDispatch(beam_width=3).solve(problem)
-                greedy_result = GreedyDispatch().solve(
-                    problem,
-                    time_limit_s=_initial_seed_budget_s(),
-                )
+                seed_kw = {"time_limit_s": _initial_seed_budget_s()}
+                beam_result = BeamSearchDispatch(beam_width=3).solve(problem, **seed_kw)
+                greedy_result = GreedyDispatch().solve(problem, **seed_kw)
 
                 beam_valid = _is_valid_complete_schedule(list(beam_result.assignments))
                 greedy_valid = _is_valid_complete_schedule(list(greedy_result.assignments))
@@ -3739,7 +3755,11 @@ class AlnsSolver(BaseSolver):
         # missing ones via greedy dispatch so ALNS starts from a full schedule.
         # Hard-stop when Phase-1 wall fraction is exhausted so RHC can fall back
         # instead of burning the full window on uncapped completion.
-        if initial_result is not None and len(initial_result.assignments) < n_ops:
+        if (
+            initial_result is not None
+            and len(initial_result.assignments) < n_ops
+            and n_ops < APPEND_GAP_SCAN_MIN_OPS
+        ):
             if _phase1_budget_exhausted():
                 return _initial_generation_error_result(
                     "phase1_wall_budget_exhausted_before_completion",
@@ -3907,7 +3927,7 @@ class AlnsSolver(BaseSolver):
             max_iterations = max(5, int(max_iterations * scale_factor))
             adaptive_iteration_scaling_applied = True
 
-        if sa_auto_calibration_enabled:
+        if sa_auto_calibration_enabled and n_ops < APPEND_GAP_SCAN_MIN_OPS:
             sa_calibrated_base_temp, sa_calibration_samples = _calibrate_sa_temperature(
                 problem,
                 current_assignments,
@@ -4191,7 +4211,7 @@ class AlnsSolver(BaseSolver):
                 remaining_s = time_limit_s - (time.monotonic() - t0)
                 # Wave 9 / D3: stop the search loop before starting a repair with
                 # essentially no remaining wall budget (in-flight overrun guard).
-                if remaining_s < 1.0:
+                if remaining_s < _ALNS_MIN_REPAIR_REMAINING_S:
                     break
                 repair_attempt = _attempt_alns_pair_repair(
                     problem=problem,

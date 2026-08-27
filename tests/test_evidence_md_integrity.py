@@ -11,16 +11,9 @@ _ROOT = Path(__file__).resolve().parents[1]
 _BENCH = _ROOT / "benchmark"
 _HASH_ROW = re.compile(r"\| `([^`]+)` \| `([0-9a-f]{64})` \|", re.I)
 _HASH_BULLET = re.compile(r"`([^`]+)` = `([0-9a-f]{64})`", re.I)
-_CURRENT = (
-    "BENCHMARK_EVIDENCE_COVER_2026_08_26.md",
-    "BENCHMARK_EVIDENCE_DEADZONE_5K_2026_08_26.md",
-    "BENCHMARK_EVIDENCE_CABLE_C6_2026_08_26.md",
-)
-_STUDY = {
-    "BENCHMARK_EVIDENCE_COVER_2026_08_26.md": "cover-ladder-2026-08-25",
-    "BENCHMARK_EVIDENCE_DEADZONE_5K_2026_08_26.md": "deadzone-5k-2026-08-25",
-    "BENCHMARK_EVIDENCE_CABLE_C6_2026_08_26.md": "cable-c6-2026-08-25",
-}
+_SKIP_EVIDENCE = ("50K", "SEARCH_COVER")
+_DIR_LINE = re.compile(r"Directory `benchmark/evidence/([^/`]+)/`")
+_EVIDENCE_DIR = re.compile(r"benchmark/evidence/([A-Za-z0-9._-]+)/")
 _SCALE_FILE = {
     "60k@100": "60k_at_100",
     "100k@200": "100k_at_200",
@@ -52,6 +45,36 @@ def _parse_sha256sums(path: Path) -> dict[str, str]:
     return rows
 
 
+def _cited_evidence_mds() -> list[Path]:
+    """K3.2: every BENCHMARK_EVIDENCE_*.md except retired 50K / SEARCH_COVER."""
+
+    out: list[Path] = []
+    for md in sorted(_BENCH.glob("BENCHMARK_EVIDENCE_*.md")):
+        if any(token in md.name for token in _SKIP_EVIDENCE):
+            continue
+        out.append(md)
+    return out
+
+
+def _study_dir_from_md(text: str) -> str:
+    """Map an evidence MD to its SHA256SUMS folder.
+
+    Prefer the Artifact ``Directory `benchmark/evidence/<dir>/` `` line so a
+    session path mentioned earlier in the narrative cannot steal the mapping
+    (BEAM/ALNS cites deadzone sessions before its own folder).
+    """
+
+    match = _DIR_LINE.search(text)
+    if match:
+        return match.group(1)
+    names = _EVIDENCE_DIR.findall(text)
+    assert names, "markdown has no benchmark/evidence/<dir>/ path"
+    for name in reversed(names):
+        if (_BENCH / "evidence" / name / "SHA256SUMS.txt").is_file():
+            return name
+    return names[0]
+
+
 def _assert_md_table_matches_sums(
     md_name: str, sums: dict[str, str], listed: dict[str, str]
 ) -> None:
@@ -67,11 +90,17 @@ def _assert_md_table_matches_sums(
 
 
 def test_artifact_sha256_table_matches_sha256sums_txt() -> None:
-    """F0.5: MD Artifact/SHA-256 table matches SHA256SUMS.txt line for line."""
-    for name, study in _STUDY.items():
-        sums = _parse_sha256sums(_BENCH / "evidence" / study / "SHA256SUMS.txt")
-        listed = _parse_hashes((_BENCH / name).read_text(encoding="utf-8"))
-        _assert_md_table_matches_sums(name, sums, listed)
+    """F0.5 / K3.2: MD Artifact/SHA-256 table matches SHA256SUMS.txt line for line."""
+    mds = _cited_evidence_mds()
+    assert mds, "no cited BENCHMARK_EVIDENCE_*.md files"
+    for md in mds:
+        text = md.read_text(encoding="utf-8")
+        study = _study_dir_from_md(text)
+        sums_path = _BENCH / "evidence" / study / "SHA256SUMS.txt"
+        assert sums_path.is_file(), f"{md.name}: missing {sums_path}"
+        sums = _parse_sha256sums(sums_path)
+        listed = _parse_hashes(text)
+        _assert_md_table_matches_sums(md.name, sums, listed)
 
 
 def test_artifact_sha256_table_fails_on_planted_mismatch() -> None:
@@ -89,17 +118,25 @@ def test_artifact_sha256_table_fails_on_planted_mismatch() -> None:
 
 
 def test_current_evidence_markdown_files_have_matching_hashes() -> None:
-    for name in _CURRENT:
-        md = _BENCH / name
+    mds = _cited_evidence_mds()
+    names = {md.name for md in mds}
+    assert "BENCHMARK_EVIDENCE_CALENDAR_3000_8M_2026_08_27.md" in names
+    assert "BENCHMARK_EVIDENCE_ALNS_PROFILE_2026_08_27.md" in names
+    assert "BENCHMARK_EVIDENCE_BEAM_ALNS_2026_08_26.md" in names
+    assert "BENCHMARK_EVIDENCE_ALNS_500_5K8_APPEND_2026_08_27.md" in names
+    assert "BENCHMARK_EVIDENCE_50K_2026_05_18.md" not in names
+    assert "BENCHMARK_EVIDENCE_SEARCH_COVER_2026_07_29.md" not in names
+    for md in mds:
         text = md.read_text(encoding="utf-8")
-        assert "SHA-256" in text or "SHA256" in text, f"{name}: no hash section"
+        assert "SHA-256" in text or "SHA256" in text, f"{md.name}: no hash section"
         listed = _parse_hashes(text)
-        assert listed, f"{name}: no hash rows"
-        study = _STUDY[name]
+        assert listed, f"{md.name}: no hash rows"
+        study = _study_dir_from_md(text)
+        folder = _BENCH / "evidence" / study
         for rel, digest in listed.items():
-            path = _BENCH / "evidence" / study / rel
-            assert path.is_file(), f"{name}: missing {rel}"
-            assert _sha256(path) == digest, f"{name}: mismatch {rel}"
+            path = folder / rel
+            assert path.is_file(), f"{md.name}: missing {rel}"
+            assert _sha256(path) == digest, f"{md.name}: mismatch {rel}"
 
 
 def test_cover_md_cells_match_run_json() -> None:
@@ -205,6 +242,42 @@ def test_hashed_8k4_remainder_stays_worker_error() -> None:
     assert recap["scheduled_ratio"] == 0.264375
     assert recap["ops_scheduled"] == 2115
     assert recap["verified_feasible"] is False
+
+
+def test_alns_500_5k8_append_enters_search() -> None:
+    """K3.6: recapture must start ALNS search; epoch 0.0 JSON is not rewritten."""
+
+    folder = _BENCH / "evidence" / "alns-500-5k8-append-2026-08-27"
+    expected = {
+        1: (1299, 0.2598, 299.979),
+        42: (522, 0.1044, 299.172),
+        999: (554, 0.1108, 299.63),
+    }
+    for seed, (ops, ratio, wall) in expected.items():
+        payload = json.loads(
+            (folder / f"run_5000ops_8m_ALNS_500_free_boxed_seed{seed}.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert payload["ops_scheduled"] == ops
+        assert payload["scheduled_ratio"] == ratio
+        assert payload["wall_time_s"] == wall
+        assert payload["status"] == "error"
+        assert payload["verified_feasible"] is False
+        assert payload["wall_clock_before_search"] is False
+        assert payload["search_stop_reason"] != "wall_clock_before_search"
+        assert payload["assignments"]
+        assert payload.get("iterations_completed") is None
+    epoch = json.loads(
+        (
+            _BENCH
+            / "evidence"
+            / "beam-alns-box-2026-08-26"
+            / "run_5000ops_8m_ALNS_500_free_boxed_seed1.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert epoch["ops_scheduled"] == 0
+    assert epoch["search_stop_reason"] == "wall_clock_before_search"
 
 
 def test_hashed_verified_feasible_cells_have_no_machine_calendar() -> None:

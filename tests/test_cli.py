@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 
@@ -12,9 +12,6 @@ from synaps.contracts import RepairRequest, SolveRequest
 from synaps.solvers.greedy_dispatch import GreedyDispatch
 from synaps.solvers.router import SolveRegime
 from tests.conftest import make_simple_problem
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def _write_instance(tmp_path: Path) -> str:
@@ -386,3 +383,76 @@ def test_cli_repair_request_can_write_runtime_replay_artifact(
     assert replay["request_summary"]["disrupted_operation_count"] == 1
     assert manifest[0]["artifact_kind"] == "runtime-repair"
     assert manifest[0]["request_id"] == "repair-contract-replay-1"
+
+
+def test_cli_recheck_roundtrip_tiny_solve(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    instance = _write_instance(tmp_path)
+    result_path = tmp_path / "result.json"
+    solve_code = main(
+        [
+            "solve",
+            instance,
+            "--solver-config",
+            "GREED",
+            "--output-file",
+            str(result_path),
+        ]
+    )
+    assert solve_code == 0
+    capsys.readouterr()
+    recheck_code = main(["recheck", instance, str(result_path)])
+    report = json.loads(capsys.readouterr().out)
+    assert recheck_code == 0
+    assert report["recheckable"] is True
+    assert report["verified_feasible"] is True
+
+
+def test_cli_recheck_notary_ignores_client_error_status(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """K3-RT: status=error must not skip the independent checker."""
+
+    instance = _write_instance(tmp_path)
+    result_path = tmp_path / "result.json"
+    solve_code = main(
+        [
+            "solve",
+            instance,
+            "--solver-config",
+            "GREED",
+            "--output-file",
+            str(result_path),
+        ]
+    )
+    assert solve_code == 0
+    capsys.readouterr()
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    payload["status"] = "error"
+    forged = tmp_path / "forged_error.json"
+    forged.write_text(json.dumps(payload), encoding="utf-8")
+    code = main(["recheck", instance, str(forged)])
+    report = json.loads(capsys.readouterr().out)
+    assert report["recheckable"] is True
+    assert report["client_status"] == "error"
+    assert report["verified_feasible"] is True
+    assert code == 0
+
+
+def test_cli_recheck_hashed_cover_is_not_recheckable(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    instance = _write_instance(tmp_path)
+    cover = (
+        Path(__file__).resolve().parents[1]
+        / "benchmark"
+        / "evidence"
+        / "cover-ladder-2026-08-25"
+        / "run_60k_at_100_seed1.json"
+    )
+    code = main(["recheck", instance, str(cover)])
+    report = json.loads(capsys.readouterr().out)
+    assert code == 3
+    assert report["recheckable"] is False
+    assert report["reason"] == "no_assignments"

@@ -482,6 +482,9 @@ def _clip_start_to_calendar(
     return delay_start_to_open_shift(gap_start, duration, calendar, horizon_start)
 
 
+APPEND_GAP_SCAN_MIN_OPS = 2000
+
+
 def find_earliest_feasible_slot(
     context: DispatchContext,
     scheduled_assignments: list[Assignment],
@@ -489,6 +492,8 @@ def find_earliest_feasible_slot(
     work_center_id: UUID,
     earliest_start: float,
     machine_index: MachineIndex | None = None,
+    *,
+    gap_scan: str = "all",
 ) -> SlotCandidate | None:
     work_center: Any = context.wc_by_id.get(work_center_id)
     if work_center is None:
@@ -601,6 +606,11 @@ def find_earliest_feasible_slot(
                 )
 
         return None
+
+    if gap_scan == "append":
+        if not machine_assignments:
+            return evaluate_gap(None, None)
+        return evaluate_gap(machine_assignments[-1], None)
 
     previous_assignment: Assignment | None = None
     for assignment in machine_assignments:

@@ -7,11 +7,13 @@ from uuid import uuid4
 
 from synaps.model import Assignment, ScheduleProblem
 from synaps.solvers._dispatch_support import (
+    APPEND_GAP_SCAN_MIN_OPS,
     MachineIndex,
     build_dispatch_context,
+    find_earliest_feasible_slot,
     recompute_assignment_setups,
 )
-from tests.conftest import HORIZON_START
+from tests.conftest import HORIZON_START, make_simple_problem
 
 
 def test_machine_index_setup_windows_tolerate_missing_predecessor_operation(
@@ -135,3 +137,44 @@ def test_recompute_assignment_setups_tolerates_missing_previous_operation(
     total_setup = recompute_assignment_setups(assignments, context)
     assert assignments[1].setup_minutes == 0
     assert total_setup == 0.0
+
+
+def test_append_gap_scan_min_ops_threshold() -> None:
+    from synaps.solvers.greedy_dispatch import _gap_scan_for
+
+    assert APPEND_GAP_SCAN_MIN_OPS == 2000
+    assert _gap_scan_for(APPEND_GAP_SCAN_MIN_OPS - 1) == "all"
+    assert _gap_scan_for(APPEND_GAP_SCAN_MIN_OPS) == "append"
+
+
+def test_append_gap_scan_does_not_fill_interior_hole() -> None:
+    """K3.6: append scan only evaluates after the last job on the machine."""
+
+    problem = make_simple_problem(n_orders=3, ops_per_order=1)
+    context = build_dispatch_context(problem)
+    wc_id = problem.work_centers[0].id
+    first, second, third = problem.operations
+    scheduled = [
+        Assignment(
+            operation_id=first.id,
+            work_center_id=wc_id,
+            start_time=HORIZON_START,
+            end_time=HORIZON_START + timedelta(minutes=30),
+            setup_minutes=0,
+        ),
+        Assignment(
+            operation_id=second.id,
+            work_center_id=wc_id,
+            start_time=HORIZON_START + timedelta(minutes=200),
+            end_time=HORIZON_START + timedelta(minutes=230),
+            setup_minutes=0,
+        ),
+    ]
+    slot_all = find_earliest_feasible_slot(context, scheduled, third, wc_id, 0.0, gap_scan="all")
+    slot_append = find_earliest_feasible_slot(
+        context, scheduled, third, wc_id, 0.0, gap_scan="append"
+    )
+    assert slot_all is not None
+    assert slot_append is not None
+    assert slot_all.start_offset < 100
+    assert slot_append.start_offset >= 200

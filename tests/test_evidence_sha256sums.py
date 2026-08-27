@@ -44,6 +44,19 @@ def test_deadzone_live_sha256sums_match_files() -> None:
     _check_sums(_EVIDENCE / "deadzone-5k-2026-08-25" / "SHA256SUMS.txt")
 
 
+def test_all_sha256sums_txt_files_match_listed_bytes() -> None:
+    """K3.2 / RT27-R2: every SHA256SUMS.txt under evidence/, including sessions.
+
+    Does not require every ``run_*.json`` on disk to be listed (untracked BEAM
+    leftovers must not fail CI).
+    """
+
+    paths = sorted(_EVIDENCE.rglob("SHA256SUMS.txt"))
+    assert paths, "no SHA256SUMS.txt under benchmark/evidence"
+    for path in paths:
+        _check_sums(path)
+
+
 def test_deadzone_p2_3_answer_is_no() -> None:
     freeze = json.loads(
         (_EVIDENCE / "deadzone-5k-2026-08-25" / "summary_p2_3_5000x8.json").read_text(

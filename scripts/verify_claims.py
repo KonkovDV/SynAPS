@@ -104,6 +104,23 @@ def _number_needs_evidence(line: str) -> bool:
     return bool(PERF_NUM.search(line)) and not CONFIGISH.search(line)
 
 
+def _perf_num_sourced_counts(rows: list[tuple[int, str, bool]]) -> tuple[int, int]:
+    """Count PERF_NUM lines whose ±1-line window cites an evidence path."""
+
+    sourced = 0
+    total = 0
+    for idx, (_lineno, line, skipped) in enumerate(rows):
+        if skipped or not _number_needs_evidence(line):
+            continue
+        total += 1
+        prev = rows[idx - 1][1] if idx > 0 else ""
+        nxt = rows[idx + 1][1] if idx + 1 < len(rows) else ""
+        window = f"{prev}\n{line}\n{nxt}"
+        if EVIDENCE_REF.search(window):
+            sourced += 1
+    return sourced, total
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
@@ -112,12 +129,16 @@ def main(argv: list[str] | None = None) -> int:
     root: Path = args.root
     hits: list[str] = []
     stats: dict[str, tuple[int, int]] = {}
+    sourced_stats: dict[str, tuple[int, int]] = {}
     for path in _scan_paths(root):
         text = path.read_text(encoding="utf-8")
         body = _unreleased(text) if path.name == "CHANGELOG.md" else text
         rows = _iter_active_lines(body)
         skipped_n = sum(1 for _i, _line, skipped in rows if skipped)
-        stats[str(path.relative_to(root))] = (skipped_n, len(rows))
+        rel = str(path.relative_to(root))
+        stats[rel] = (skipped_n, len(rows))
+        if path.name in {"README.md", "README_RU.md"}:
+            sourced_stats[rel] = _perf_num_sourced_counts(rows)
         for idx, (lineno, line, skipped) in enumerate(rows):
             if skipped:
                 continue
@@ -154,6 +175,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.stats:
         for name, (skipped_n, total) in sorted(stats.items()):
             print(f"{name}: skipped {skipped_n}/{total}")
+        for name, (sourced_n, total_n) in sorted(sourced_stats.items()):
+            print(f"{name}: sourced {sourced_n}/{total_n} PERF_NUM")
     if hits:
         print("verify_claims: forbidden phrasing\n" + "\n".join(hits[:80]))
         return 1
