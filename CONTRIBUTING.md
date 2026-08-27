@@ -88,11 +88,11 @@ All pull requests must pass:
 - Fast test suite (`pytest -m "not slow"`) — green
 
 `test-slow` in `.github/workflows/ci.yml` runs only after merge
-(`if: github.event_name == 'push' && github.ref == 'refs/heads/master'`).
+(`if: github.event_name == 'push' && github.ref == 'refs/heads/main'`).
 It is **not** a required status check and **not** a PR gate. Required checks
-on `master` are: `lint`, `contract-schema-drift`, `typecheck`,
+on `main` are: `lint`, `contract-schema-drift`, `typecheck`,
 `test-fast (3.12)`, `test-fast (3.13)`, `benchmark-smoke`, `control-plane`.
-A red `test-slow` on a master push does not mean those six jobs were skipped.
+A red `test-slow` on a `main` push does not mean those six jobs were skipped.
 
 ## Domain Parametrizations
 

@@ -41,6 +41,12 @@ def test_alns_wall_stamp_matches_stop_reason() -> None:
     assert max_near_wall["search_stop_reason"] == "max_iterations"
     assert max_near_wall["wall_clock_path_dependent"] is False
 
+    stagnated = _alns_wall_clock_honesty_meta(
+        "strict", False, 40, 500, elapsed_s=12.0, time_limit_s=300.0, no_improve=True
+    )
+    assert stagnated["search_stop_reason"] == "no_improve"
+    assert stagnated["wall_clock_path_dependent"] is False
+
 
 def test_alns_zero_budget_stamps_wall_cut() -> None:
     """Wall timeout before search is a stamp, not a CI error."""

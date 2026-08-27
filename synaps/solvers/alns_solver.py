@@ -1627,6 +1627,8 @@ def _alns_wall_clock_honesty_meta(
     max_iterations: int,
     elapsed_s: float,
     time_limit_s: float,
+    *,
+    no_improve: bool = False,
 ) -> dict[str, Any]:
     """Stamp how the ALNS loop stopped. Not a bitwise-identity certificate.
 
@@ -1647,6 +1649,8 @@ def _alns_wall_clock_honesty_meta(
         stop = "wall_clock"
     elif iterations_completed >= max_iterations:
         stop = "max_iterations"
+    elif no_improve:
+        stop = "no_improve"
     else:
         stop = "completed"
     wall = stop.startswith("wall_clock")
@@ -1681,7 +1685,7 @@ def _try_native_greedy_repair(
         if skip_reasons is not None:
             skip_reasons.append(skip)
         return None
-    if len(disrupted_op_ids) >= APPEND_GAP_SCAN_MIN_OPS:
+    if max(len(problem.operations), len(disrupted_op_ids)) >= APPEND_GAP_SCAN_MIN_OPS:
         if skip_reasons is not None:
             skip_reasons.append("large_n_append_scan")
         return None
@@ -3837,9 +3841,6 @@ class AlnsSolver(BaseSolver):
         best_cost = current_cost
 
         # ─── Task 18: Adaptive Iteration Budget + Warm-Start Skip ───────────
-        # These features reduce iteration budget for "easy" windows where the
-        # warm-start already provides a near-optimal solution.
-
         # Task 18.2: Warm-start skip when gap < threshold.
         # If the warm-start solution is already within `warm_start_skip_threshold_gap`
         # of the lower bound, skip ALNS entirely and commit the warm-start directly.
@@ -4595,6 +4596,7 @@ class AlnsSolver(BaseSolver):
                     max_iterations,
                     time.monotonic() - t0,
                     time_limit_s,
+                    no_improve=no_improve_early_stop,
                 ),
                 "time_limit_exhausted_before_search": time_limit_exhausted_before_search,
                 "max_no_improve_iters": max_no_improve_iters,

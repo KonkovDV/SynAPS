@@ -4,6 +4,10 @@
 
 Язык: [EN](README.md) | **RU**
 
+| | |
+| --- | --- |
+| Ветка GitHub | `main` |
+
 [![CI](https://github.com/KonkovDV/SynAPS/actions/workflows/ci.yml/badge.svg)](https://github.com/KonkovDV/SynAPS/actions/workflows/ci.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)

@@ -4,5 +4,5 @@ contact_links:
     url: https://github.com/KonkovDV/SynAPS/security/advisories/new
     about: Use GitHub private vulnerability reporting for exploitable issues. Do not open public security bug reports.
   - name: Support and usage guidance
-    url: https://github.com/KonkovDV/SynAPS/blob/master/SUPPORT.md
+    url: https://github.com/KonkovDV/SynAPS/blob/main/SUPPORT.md
     about: Read the supported public channels and response expectations before opening an issue.

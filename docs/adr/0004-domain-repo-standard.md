@@ -8,7 +8,7 @@
 
 | Field | Rule |
 | --- | --- |
-| GitHub default branch | Recorded in the README table. Kernel: `master`. GridPlan GitHub default: `main`. MobiRoute: `master`. Do not mass-rename in this iteration. |
+| GitHub default branch | Recorded in the README table. Kernel, GridPlan, and MobiRoute: `main`. |
 | README header | Table with **Version**, **SynAPS pin** (link to the full commit URL), **Maturity** (ISO 16290 TRL + one-line not-claim). |
 | Kernel pin | Full SHA in code + README. Never `main`/`master` as a pin. CI must fail if the declared SHA and the install pin diverge. |
 | `docs/` | At least: architecture or constraints, limitations/non-claims, evidence or benchmark protocol. |

@@ -6,7 +6,11 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from synaps.model import Assignment, ScheduleProblem, ScheduleResult, SolverStatus
-from synaps.solvers.alns_solver import AlnsSolver, _try_native_initial_seed
+from synaps.solvers.alns_solver import (
+    AlnsSolver,
+    _try_native_greedy_repair,
+    _try_native_initial_seed,
+)
 from tests.conftest import HORIZON_START, make_simple_problem
 
 if TYPE_CHECKING:
@@ -33,6 +37,33 @@ def test_try_native_initial_seed_skips_at_append_threshold(
         frozen_assignments_by_op={},
     )
     assert result is None
+
+
+def test_try_native_greedy_repair_skips_when_n_ops_at_append_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """K3-R2: skip native in-search repair on n_ops, not only destroy size."""
+
+    import synaps.solvers.alns_solver as alns
+
+    monkeypatch.setattr(alns, "APPEND_GAP_SCAN_MIN_OPS", 1)
+    problem = make_simple_problem(n_orders=1, ops_per_order=2)
+    op = problem.operations[0]
+    skips: list[str] = []
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("native greedy_repair_batch must not run at n_ops threshold")
+
+    monkeypatch.setattr("synaps.accelerators._native_greedy_repair_batch", boom)
+    result = _try_native_greedy_repair(
+        problem,
+        [],
+        [op.id],
+        {op.id: 0},
+        skip_reasons=skips,
+    )
+    assert result is None
+    assert "large_n_append_scan" in skips
 
 
 def test_alns_enters_search_without_completion_repair_at_append_threshold(

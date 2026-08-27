@@ -10,7 +10,7 @@ The repository should be treated as pre-production software and documentation, n
 
 | Surface | Status | Notes |
 | --- | --- | --- |
-| current default branch (`master`) / active `0.1.x` line | best-effort security fixes | active development line |
+| current default branch (`main`) / active `0.1.x` line | best-effort security fixes | active development line |
 | historical snapshots, unpublished experiments, generated artifacts | unsupported | no security-fix commitment |
 
 ## Reporting A Vulnerability

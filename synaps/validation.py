@@ -111,9 +111,18 @@ def verify_schedule_result(
     ``feasible`` uses :func:`proven_hard_violations` so unproven greedy lane
     false-positives do not flip the customer oracle (Wave 8 / RT17-H2). All
     raw violations remain in ``violations`` for diagnostics.
+
+    ``feasible`` is True only when status is ``FEASIBLE`` / ``OPTIMAL`` and
+    the notary is empty. ERROR / TIMEOUT / INFEASIBLE stay False even if
+    placed work is clean. When those statuses carry assignments, the checker
+    still runs so studies do not publish empty ``independent_violation_kinds``
+    next to a solver notary (KI-N15 / K2.1). Empty-assignment failures skip
+    the checker: a 500k COVER miss would otherwise emit 500k
+    ``MISSING_ASSIGNMENT`` rows.
     """
 
-    if result.status not in {SolverStatus.FEASIBLE, SolverStatus.OPTIMAL}:
+    success = result.status in {SolverStatus.FEASIBLE, SolverStatus.OPTIMAL}
+    if not success and not result.assignments:
         return SolutionVerification(
             feasible=False,
             violation_count=0,
@@ -126,7 +135,7 @@ def verify_schedule_result(
     violation_kind_counts = Counter(violation.kind for violation in violations)
     proven = proven_hard_violations(violations)
     return SolutionVerification(
-        feasible=not proven,
+        feasible=bool(success and not proven),
         violation_count=len(violations),
         violation_kinds=sorted(violation_kind_counts.keys()),
         violation_kind_counts=dict(sorted(violation_kind_counts.items())),

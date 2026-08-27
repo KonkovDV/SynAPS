@@ -50,6 +50,8 @@ class TestCoveragePaceController:
         controller = CoveragePaceController(total_ops=10, time_limit_s=100.0)
         assert controller.pace_ratio(elapsed_s=0.0) is None
         assert controller.should_intervene(elapsed_s=0.0) is False
+        controller.observe_window(10)
+        assert controller.pace_ratio(elapsed_s=0.0) == pytest.approx(1.0)
 
     def test_negative_commit_counts_clamped(self) -> None:
         controller = CoveragePaceController(total_ops=10, time_limit_s=100.0)

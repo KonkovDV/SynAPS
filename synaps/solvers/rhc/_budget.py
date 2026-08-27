@@ -230,12 +230,19 @@ class CoveragePaceController:
     def pace_ratio(self, elapsed_s: float) -> float | None:
         """Projected final coverage divided by full coverage.
 
-        ``None`` when the projection is undefined (no ops, no elapsed time).
+        ``None`` when the projection is undefined (no ops, or zero elapsed
+        with no observed windows). After at least one window, a zero-duration
+        run reports realized coverage instead of ``None`` (Windows timer
+        resolution can finish a tiny instance at 0 ms).
         Values below 1.0 mean the run is on pace to finish with partial
         coverage under the current commit rate.
         """
-        if self.total_ops <= 0 or elapsed_s <= 0.0:
+        if self.total_ops <= 0:
             return None
+        if elapsed_s <= 0.0:
+            if self.windows_observed <= 0:
+                return None
+            return self.ops_committed_total / self.total_ops
         commit_rate = self.ops_committed_total / elapsed_s
         remaining_s = max(0.0, self.time_limit_s - elapsed_s)
         projected_final = self.ops_committed_total + commit_rate * remaining_s

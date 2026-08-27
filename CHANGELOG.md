@@ -77,6 +77,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   KI-N14 scaling study no longer requires LBBD-10 `results.feasible is True`.
   Windows local 2026-08-27: that node passed (128.79 s).
   Linux: **не проверено на Linux**.
+- **Unify `main` / K3-R / KI-N15 (2026-08-27):** GitHub default branch is
+  `main` (CI, CodeQL, Scorecards, CONTRIBUTING, SECURITY). Independent
+  `verify_schedule_result` runs the notary on ERROR/TIMEOUT when assignments
+  are nonempty; `feasible` stays True only for FEASIBLE/OPTIMAL with empty
+  `proven_hard_violations` (KI-N15). ALNS `no_improve` early-stop stamps `no_improve`,
+  not `completed`. In-search native greedy repair skips when
+  `max(n_ops, n_destroyed) >= APPEND_GAP_SCAN_MIN_OPS`. Linux N3 recapture
+  session `benchmark/evidence/deadzone-5k-2026-08-25/sessions/n3-linux-2026-08-27/`
+  (run [33021109132](https://github.com/KonkovDV/SynAPS/actions/runs/33021109132));
+  hashed epoch remainder JSON not rewritten. Untracked BEAM seed42/999 not
+  added. Linux `test-slow` on `main`: **не проверено на Linux**.
+  RHC `coverage_pace_final_ratio` is realized coverage on a
+  zero-duration finish after at least one window
+  (`docs/rfc/REDTEAM_TRIAGE_UNIFY_MAIN_2026_08_27.md`).
 - **Honesty gates (2026-08-26 Ж):** contract schemas include `WorkCenter.calendar`.
   Claims lint uses explicit `<!-- claims-ok -->` / `<!-- non-claims -->` markers
   instead of a `не`/`not` proximity skip. CLI and the benchmark harness emit
