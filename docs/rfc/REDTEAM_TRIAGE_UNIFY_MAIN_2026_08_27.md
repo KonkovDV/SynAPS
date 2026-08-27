@@ -1,7 +1,8 @@
 # Red Team triage — unify `main` / KI-N15 / K3-R (2026-08-27)
 
 Claim level: **honesty**. Not a COVER rewrite. Not ALNS completeness.
-Not a Yes on 5k@8. Not Linux-green until a `main` `test-slow` run id exists.
+Not a Yes on 5k@8. Required CI on `main` is green including `test-slow`
+([33103963622](https://github.com/KonkovDV/SynAPS/actions/runs/33103963622)).
 
 Kernel tree: `unify/main` on top of `e3768a6` (PR #15 merge).
 
@@ -22,7 +23,8 @@ Untracked BEAM seed42/999 in a hashed folder is **not** added.
 | K3-R3 | P2 | `no_improve` early-stop stamped `completed` | `_alns_wall_clock_honesty_meta(..., no_improve=True)` → `no_improve` |
 | K3-R2 (native n_ops) | P2 | in-search native skip was destroy-size only | `max(n_ops, n_destroyed) >= APPEND_GAP_SCAN_MIN_OPS` |
 | KI-N3 Linux session | P2 | Linux recapture lived only on conflicted PR #14 | session files + SHA256SUMS under `sessions/n3-linux-2026-08-27/`; epoch JSON untouched; status **algorithmic** |
-| Dual default | P1 | Kernel GitHub default `master`; CI listened to `master` | CI/CodeQL/Scorecards/docs → `main` in this commit; GitHub default switch + delete leftover `master` after push |
+| Dual default | P1 | Kernel GitHub default `master`; CI listened to `master` | CI/CodeQL/Scorecards/docs → `main`; GitHub default switch + leftover `master` deleted after protection retarget |
+| KI-N14 | HIGH | Linux `test-slow` unproven on default branch | `main` push [33103963622](https://github.com/KonkovDV/SynAPS/actions/runs/33103963622) `test-slow` success; node is `@pytest.mark.slow` |
 | UM-RHC | P2 | RHC coverage pace `final_ratio` None on 0 ms Windows finish | `pace_ratio` reports realized coverage when elapsed≤0 after ≥1 window |
 
 ## Fell before the fix (node id + text)
@@ -53,7 +55,7 @@ Untracked BEAM seed42/999 in a hashed folder is **not** added.
 | C5a / COVER weights / N-1 / SAIDI / INFIMUM / live EL5 / MAST | **blocked** — no new claims |
 | Python IncrementalRepair in-search at n≥2000 | **lands as residual** |
 | Warm-start skip `FEASIBLE` with `iterations_completed=0` and no stop reason | **lands as residual** (off unless `warm_start_skip_threshold_gap>0`) |
-| KI-N14 Linux `test-slow` | **lands as residual** until a `main` push run id exists |
+| KI-N14 Linux `test-slow` | **blocked** — run 33103963622 `test-slow` success |
 | KI-N1 ALNS completeness / KI-N4 seed 42 / KI-N10 Linux COVER / KI-N12 pin bump | **lands as residual** |
 
 ## Live residuals
@@ -64,13 +66,11 @@ Untracked BEAM seed42/999 in a hashed folder is **not** added.
 | KI-N4 | HIGH | COVER 100k@200 seed 42 not recaptured |
 | KI-N10 | MEDIUM | Linux COVER ladder not in PR CI |
 | KI-N12 | MEDIUM | Domain pins stay until **2026-09-09** |
-| KI-N14 | HIGH | Linux `test-slow` on `main` not yet a run id at commit time |
 | K3-R2b | P2 | In-search **Python** IncrementalRepair still has no wall deadline at n≥2000 |
 | K3-R4 | P2 | Hashed K3.6 JSON omits `iterations_completed` (new runs only) |
 | K3-R5 | P2 | Untracked BEAM seed42/999 leftovers; do not add |
 | K3-R6 | P3 | `synaps recheck` reads caller paths |
 | K3-R7 | P3 | `_solve_core` / slot search / `cli.main` sit at ratchet slack |
-| UM-R1 | P2 | First `main` push runs `test-slow`; a red node is a new close, not a silent skip |
 
 ## CI Linux run id
 
@@ -78,7 +78,7 @@ Untracked BEAM seed42/999 in a hashed folder is **not** added.
 | --- | --- | --- |
 | PR #15 (K3) required jobs | [33063733144](https://github.com/KonkovDV/SynAPS/actions/runs/33063733144) | lint, typecheck, test-fast 3.12/3.13, benchmark-smoke, control-plane, native-accelerator, CodeQL, wheels. `test-slow` skipped on that PR (`if: push && master` at the time). |
 | KI-N3 Linux recapture | [33021109132](https://github.com/KonkovDV/SynAPS/actions/runs/33021109132) | six RHC-GREEDY cells; not `worker_error` |
-| This drop `test-slow` on `main` | **не проверено на Linux** | first push to `main` is the evidence; do not pre-claim green |
+| This drop `test-slow` on `main` | [33103963622](https://github.com/KonkovDV/SynAPS/actions/runs/33103963622) | `test-slow` success 21m24s; test-fast 3.12/3.13, lint, typecheck, benchmark-smoke, control-plane, native-accelerator, wheels green. Scorecards failed on the first create-branch push (`refs/heads/main not supported with push event`). |
 
 MobiRoute PR #3 (driver rest) required jobs after merge-commit `017be9d`:
 [33099405273](https://github.com/KonkovDV/SynAPS-MobiRoute/actions/runs/33099405273)
@@ -93,7 +93,7 @@ GridPlan GitHub default is already `main`. AeroBIM is already `main`.
 - Not a rewrite of hashed COVER / deadzone / cable / ALNS-500 epoch JSON.
 - Not a retune of `global_greedy_cover_min_ops`.
 - Not a Yes on 5k@8 or COVER 100k seed 42.
-- Not Linux-green for kernel `test-slow` in this commit.
+- Not Linux COVER (KI-N10). Required kernel CI including `test-slow` is green on run 33103963622.
 - Not ГОСТ 70314 / 580-FZ (MobiRoute driver rest is policy data).
 - Not an AeroBIM change (already `main`).
 - Do not claim «всё исправлено».
