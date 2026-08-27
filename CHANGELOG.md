@@ -87,10 +87,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   session `benchmark/evidence/deadzone-5k-2026-08-25/sessions/n3-linux-2026-08-27/`
   (run [33021109132](https://github.com/KonkovDV/SynAPS/actions/runs/33021109132));
   hashed epoch remainder JSON not rewritten. Untracked BEAM seed42/999 not
-  added. Linux `test-slow` on `main`: **не проверено на Linux**.
+  added.
   RHC `coverage_pace_final_ratio` is realized coverage on a
   zero-duration finish after at least one window
   (`docs/rfc/REDTEAM_TRIAGE_UNIFY_MAIN_2026_08_27.md`).
+  Linux `main` push [33103963622](https://github.com/KonkovDV/SynAPS/actions/runs/33103963622):
+  `test-slow` success (21m24s); required jobs green. KI-N14 closed.
 - **Honesty gates (2026-08-26 Ж):** contract schemas include `WorkCenter.calendar`.
   Claims lint uses explicit `<!-- claims-ok -->` / `<!-- non-claims -->` markers
   instead of a `не`/`not` proximity skip. CLI and the benchmark harness emit
