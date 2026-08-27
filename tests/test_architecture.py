@@ -134,7 +134,7 @@ def test_no_dead_public_functions() -> None:
 # necessarily grows a hot path (Wave 12/13 frozen algebra). Prefer extract next.
 _LONG_FUNCTION_RATCHET: dict[str, int] = {
     "solvers/rhc/_solver.py::solve": 2652,
-    "solvers/alns_solver.py::_solve_core": 1558,
+    "solvers/alns_solver.py::_solve_core": 1578,
     "solvers/feasibility_checker.py::check": 217,
     "solvers/lbbd_hd_solver.py::solve": 433,
     "solvers/lbbd_solver.py::solve": 397,

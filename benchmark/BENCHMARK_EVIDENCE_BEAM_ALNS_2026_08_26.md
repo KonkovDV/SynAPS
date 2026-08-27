@@ -56,6 +56,11 @@ RHC-GREEDY seed 1, isolate watchdog 210 s. All six cells `status=error`,
 5. BEAM boxed matrix is incomplete; do not cite a BEAM scheduled_ratio from this round.
 6. K3.6 recapture (search starts, still not a Yes) is a different folder:
    `benchmark/BENCHMARK_EVIDENCE_ALNS_500_5K8_APPEND_2026_08_27.md`.
+7. Unconstrained 5k completeness after list-schedule seed is
+   `benchmark/BENCHMARK_EVIDENCE_ALNS_500_5K_LIST_SCHEDULE_2026_08_27.md`
+   (hashed И5.2 JSON still 0.0). BEAM night boxed seed42/999 leftovers live in
+   `sessions/beam-3-night-boxed-leftover-2026-08-26/` and are **not** in this
+   hashed `SHA256SUMS.txt`.
 
 ## Hash provenance
 

@@ -59,6 +59,7 @@ def _record(
         "generate_s": round(generate_s, 3),
         "wall_time_s": round(wall_s, 3),
         "notary_hard_violation_kinds": meta.get("notary_hard_violation_kinds"),
+        "initial_solver": meta.get("initial_solver"),
     }
 
 
@@ -71,6 +72,7 @@ def run_one(
     night_analog: bool,
     boxed: bool,
     store_assignments: bool = False,
+    time_limit_override_s: float | None = None,
 ) -> dict[str, Any]:
     gen_t0 = time.perf_counter()
     if night_analog:
@@ -96,9 +98,13 @@ def run_one(
     generate_s = time.perf_counter() - gen_t0
     solver, kwargs = create_solver(solver_config)
     kwargs = {**kwargs, "random_seed": seed}
-    time_limit_s: float | None = float(kwargs["time_limit_s"]) if boxed else None
-    if not boxed:
-        kwargs["time_limit_s"] = 10**9
+    if time_limit_override_s is not None:
+        kwargs["time_limit_s"] = float(time_limit_override_s)
+        time_limit_s = float(time_limit_override_s)
+    else:
+        time_limit_s = float(kwargs["time_limit_s"]) if boxed else None
+        if not boxed:
+            kwargs["time_limit_s"] = 10**9
     solve_t0 = time.perf_counter()
     result = solver.solve(problem, **kwargs)
     wall_s = time.perf_counter() - solve_t0
@@ -130,12 +136,25 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--seeds", default="1,42,999")
     parser.add_argument(
+        "--session-id",
+        default="",
+        help="Write under out_dir/sessions/<id>/ (does not replace hashed files)",
+    )
+    parser.add_argument(
+        "--time-limit-s",
+        type=float,
+        default=None,
+        help="Override registry time_limit_s for this session",
+    )
+    parser.add_argument(
         "--store-assignments",
         action="store_true",
         help="Write assignment lists into new run JSON (never rewrite hashed COVER)",
     )
     args = parser.parse_args(argv)
     out_dir: Path = args.out_dir
+    if str(args.session_id).strip():
+        out_dir = out_dir / "sessions" / str(args.session_id).strip()
     out_dir.mkdir(parents=True, exist_ok=True)
     seeds = [int(tok) for tok in args.seeds.split(",") if tok.strip()]
     jobs: list[tuple[int, int, str, bool, bool]] = []
@@ -175,6 +194,7 @@ def main(argv: list[str] | None = None) -> int:
                 night_analog=night,
                 boxed=boxed,
                 store_assignments=args.store_assignments,
+                time_limit_override_s=args.time_limit_s,
             )
             path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             print(

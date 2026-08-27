@@ -57,6 +57,26 @@ def test_all_sha256sums_txt_files_match_listed_bytes() -> None:
         _check_sums(path)
 
 
+def test_beam_night_boxed_leftovers_live_outside_hashed_sums() -> None:
+    """K3-R5: seed42/999 BEAM night leftovers are not in the hashed box sums."""
+
+    hashed = _EVIDENCE / "beam-alns-box-2026-08-26" / "SHA256SUMS.txt"
+    text = hashed.read_text(encoding="utf-8")
+    leftover_42 = "run_3000ops_4m_BEAM_3_night_boxed_seed42.json"
+    leftover_999 = "run_3000ops_4m_BEAM_3_night_boxed_seed999.json"
+    assert leftover_42 not in text
+    assert leftover_999 not in text
+    session = (
+        _EVIDENCE
+        / "beam-alns-box-2026-08-26"
+        / "sessions"
+        / "beam-3-night-boxed-leftover-2026-08-26"
+    )
+    assert (session / leftover_42).is_file()
+    assert (session / leftover_999).is_file()
+    _check_sums(session / "SHA256SUMS.txt")
+
+
 def test_deadzone_p2_3_answer_is_no() -> None:
     freeze = json.loads(
         (_EVIDENCE / "deadzone-5k-2026-08-25" / "summary_p2_3_5000x8.json").read_text(

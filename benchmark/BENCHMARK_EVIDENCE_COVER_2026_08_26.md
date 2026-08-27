@@ -85,7 +85,10 @@ Solver `RHC-GREEDY-COVER`. Horizon 43 200 min on every cell. `global_greedy_co
 
 100k seed 42: process killed after >8 min in fallback greedy repair (136 leftovers).
 Sibling seeds finished in ~13 s. This is the CHANGELOG residual-hang limitation,
-not a retune.
+not a retune. **Hashed JSON stays STALL.** A later Python-COVER recapture
+(ratio 1.0, 40.137 s, `native_backend=python`) is
+[`BENCHMARK_EVIDENCE_COVER_100K_SEED42_2026_08_27.md`](BENCHMARK_EVIDENCE_COVER_100K_SEED42_2026_08_27.md).
+Do not mix that session with this hashed native table.
 
 500k packed **500000** ops on all three seeds. CHANGELOG seed=1 said 499 770 —
 order-packing undershoot did not reproduce here. Keep both figures as

@@ -274,6 +274,16 @@ jobs:
             --repeats 3 \
             --output benchmark/results/ci-native-atcs-acceleration.json
 
+      - name: COVER ladder cell on Linux (60k@100 seed 1)
+        timeout-minutes: 15
+        run: |
+          python -m benchmark.study_cover_ladder \
+            --out-dir benchmark/results/ci-cover-linux \
+            --scales 60k@100 \
+            --seeds 1 \
+            --ci-gate \
+            --max-wall-s 180
+
       - name: Upload native acceleration artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

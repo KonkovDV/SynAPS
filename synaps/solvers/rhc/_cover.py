@@ -24,7 +24,11 @@ from typing import TYPE_CHECKING, Any
 from synaps.accelerators import compute_atcs_log_score, resource_capacity_window_is_feasible
 from synaps.calendar import delay_start_to_open_shift, work_centers_have_calendar
 from synaps.model import Assignment
-from synaps.solvers._dispatch_support import MachineIndex, find_earliest_feasible_slot
+from synaps.solvers._dispatch_support import (
+    APPEND_GAP_SCAN_MIN_OPS,
+    MachineIndex,
+    find_earliest_feasible_slot,
+)
 from synaps.solvers._time_windows import operation_latest_finish_offset_minutes
 from synaps.timegrain import duration_minutes_for
 
@@ -76,6 +80,17 @@ def should_use_global_greedy_cover(
     return inner_solver_name == "greedy" and n_ops >= min_ops
 
 
+def _cover_gap_scan_for(n_timeline: int) -> str:
+    """Append-only when the packed timeline is already at the large-n threshold.
+
+    Residual fill against 100k packed assignments used the default full gap
+    walk (O(n^2*m)). That is the same class as KI-N1 ``evaluate_gap``, not a
+    retune of residual placement to chase a Yes.
+    """
+
+    return "append" if n_timeline >= APPEND_GAP_SCAN_MIN_OPS else "all"
+
+
 def select_earliest_horizon_slot(
     *,
     dispatch_context: DispatchContext,
@@ -85,9 +100,11 @@ def select_earliest_horizon_slot(
     earliest_start: float,
     horizon_minutes: float,
     machine_index: MachineIndex,
+    gap_scan: str | None = None,
 ) -> tuple[SlotCandidate | None, UUID | None, int]:
     """Pick the feasible slot with the earliest completion inside the horizon."""
 
+    scan = gap_scan if gap_scan is not None else _cover_gap_scan_for(len(assignments))
     best_slot: SlotCandidate | None = None
     best_wc: UUID | None = None
     clipped = 0
@@ -99,6 +116,7 @@ def select_earliest_horizon_slot(
             wc_id,
             earliest_start,
             machine_index=machine_index,
+            gap_scan=scan,
         )
         if slot is None:
             continue

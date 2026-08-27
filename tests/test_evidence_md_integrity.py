@@ -124,6 +124,8 @@ def test_current_evidence_markdown_files_have_matching_hashes() -> None:
     assert "BENCHMARK_EVIDENCE_ALNS_PROFILE_2026_08_27.md" in names
     assert "BENCHMARK_EVIDENCE_BEAM_ALNS_2026_08_26.md" in names
     assert "BENCHMARK_EVIDENCE_ALNS_500_5K8_APPEND_2026_08_27.md" in names
+    assert "BENCHMARK_EVIDENCE_ALNS_500_5K_LIST_SCHEDULE_2026_08_27.md" in names
+    assert "BENCHMARK_EVIDENCE_COVER_100K_SEED42_2026_08_27.md" in names
     assert "BENCHMARK_EVIDENCE_50K_2026_05_18.md" not in names
     assert "BENCHMARK_EVIDENCE_SEARCH_COVER_2026_07_29.md" not in names
     for md in mds:
@@ -278,6 +280,62 @@ def test_alns_500_5k8_append_enters_search() -> None:
     )
     assert epoch["ops_scheduled"] == 0
     assert epoch["search_stop_reason"] == "wall_clock_before_search"
+
+
+def test_alns_5k_list_schedule_seed_is_full_feasible() -> None:
+    """KI-N1 session: unconstrained 5k ALNS-500 completes via list-schedule seed."""
+
+    folder = _BENCH / "evidence" / "alns-5k-list-schedule-2026-08-27"
+    expected = {
+        1: (5000, 1.0, 92.162, 22),
+        42: (5000, 1.0, 89.706, 33),
+        999: (5000, 1.0, 89.207, 24),
+    }
+    for seed, (ops, ratio, wall, iters) in expected.items():
+        payload = json.loads(
+            (folder / f"run_5000ops_8m_ALNS_500_free_boxed_seed{seed}.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert payload["ops_scheduled"] == ops
+        assert payload["scheduled_ratio"] == ratio
+        assert payload["wall_time_s"] == wall
+        assert payload["status"] == "feasible"
+        assert payload["verified_feasible"] is True
+        assert payload["initial_solver"] == "list_schedule_cover"
+        assert payload["wall_clock_before_search"] is False
+        assert payload["iterations_completed"] == iters
+    epoch = json.loads(
+        (
+            _BENCH
+            / "evidence"
+            / "beam-alns-box-2026-08-26"
+            / "run_5000ops_8m_ALNS_500_free_boxed_seed1.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert epoch["ops_scheduled"] == 0
+
+
+def test_cover_100k_seed42_session_is_full_python_cover() -> None:
+    """KI-N4: hashed stall row stays; session recapture is complete on Python COVER."""
+
+    hashed = json.loads(
+        (_BENCH / "evidence" / "cover-ladder-2026-08-25" / "run_100k_at_200_seed42.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert hashed["stalled"] is True
+    session = json.loads(
+        (
+            _BENCH / "evidence" / "cover-100k-seed42-2026-08-27" / "run_100k_at_200_seed42.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert session.get("stalled") is not True
+    assert session["ops_scheduled"] == 100000
+    assert session["scheduled_ratio"] == 1.0
+    assert session["verified_feasible"] is True
+    assert session["native_backend"] == "python"
+    assert session["wall_time_s"] == 40.137
 
 
 def test_hashed_verified_feasible_cells_have_no_machine_calendar() -> None:

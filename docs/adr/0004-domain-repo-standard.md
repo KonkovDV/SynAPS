@@ -18,42 +18,33 @@
 
 ## Pin lag (P3.3)
 
-GridPlan pin: `bd09d13561b3bd690845d07546def59b4521b16c` (kernel HEAD at the
-2026-08-26 close).
-MobiRoute pin: `5168fc71005653945097e1f07ada1ce9cbc02eec`.
+GridPlan pin (2026-08-26 close): `bd09d13561b3bd690845d07546def59b4521b16c`.
+MobiRoute pin (same era): `5168fc71005653945097e1f07ada1ce9cbc02eec`.
 
-Kernel HEAD at the honesty-gate round is `515488b`. Pins stay. **Sync date:
-2026-09-09.** Until that date, pin lag is allowed under the four conditions
-below. After 2026-09-09 the lag rule closes: a domain pin bump must
-regression-run:
+**2026-08-27:** waiting until 2026-09-09 is no longer the plan. Domain PRs
+must bump to the kernel commit that lands this residuals drop (full 40-char
+SHA, never `main`). That bump must regression-run:
 
 1. Fail-closed coverage (`EMPTY`+`FEASIBLE` is `ERROR`; CLI codes 0/2/3/1).
 2. Non-empty `WorkCenter.calendar` is refused by CP-SAT/ALNS/LBBD and clipped
    by greedy paths.
-3. `python scripts/verify_claims.py` (explicit non-claims markers, not a
-   `не`/`not` skip).
+3. Kernel `python scripts/verify_claims.py` on the pinned SHA (already green
+   in kernel CI).
 
-Until then, night/emergency work in a domain layer is not a kernel calendar
-promise: only greedy-family configs clip shifts, and windowed coverage on the
-night analog is 0.75–0.88 (`benchmark/BENCHMARK_EVIDENCE_DEADZONE_5K_2026_08_26.md`).
+Until the domain PRs merge, KI-N12 stays **open**. After they merge, record
+the new SHAs here and in each domain README.
 
-**Until 2026-09-09**, divergence is allowed when all of the following hold:
+Night/emergency work in a domain layer is not a kernel calendar promise:
+only greedy-family configs clip shifts, and windowed coverage on the night
+analog is 0.75–0.88 (`benchmark/BENCHMARK_EVIDENCE_DEADZONE_5K_2026_08_26.md`).
 
-1. The domain does not call kernel APIs introduced after its pin, or it does not call the kernel solver at all (MobiRoute: engineering reference / adapter pin, own DARP search).
-2. README and a `SYNAPS_COMMIT` constant match.
-3. The lag reason is written (this ADR + domain README).
-4. Bumping the pin is a domain release, not a courtesy sync.
-
-**Not allowed:** floating “latest SynAPS”, or claiming GridPlan/MobiRoute results as kernel 50k/500k evidence (different algebra).
-
-GridPlan is **not** bumped to `fe1c6a8` in this iteration: the kernel added
-`WorkCenter.calendar` after `bd09d13`; a pin bump without a GridPlan
-regression run would be a false hygiene signal. MobiRoute stays `5168fc7`
-(DARP search is not the COVER path).
-
-MobiRoute is **not** bumped to `bd09d13` in this iteration: DARP search is not the kernel COVER path; a pin bump without a domain regression run would be a false hygiene signal.
+**Not allowed:** floating “latest SynAPS”, or claiming GridPlan/MobiRoute
+results as kernel 50k/500k evidence (different algebra).
 
 ## Applied this iteration
 
-- GridPlan README already matches the header table (Version 0.1.1, pin `bd09d13`, TRL 4). `APPLICATION.md` present. Rust checker optional.
-- MobiRoute README header and `APPLICATION.md` brought to this standard. Version on disk is **0.2.1** (not 0.1.1). Pin stays `5168fc7` under the lag rule. Rust insertion kernel is required for the listed heuristics.
+- 2026-08-26: GridPlan README header (Version 0.1.1, pin `bd09d13`, TRL 4).
+  MobiRoute 0.2.1, pin `5168fc7` under the then lag rule.
+- 2026-08-27: lag-until-2026-09-09 is withdrawn as a wait. Domain PRs bump
+  pins to the kernel residuals commit and must pass the three regression
+  bullets above. KI-N12 stays open until those PRs merge.

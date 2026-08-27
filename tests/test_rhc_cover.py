@@ -19,10 +19,15 @@ from synaps.model import (
     State,
     WorkCenter,
 )
-from synaps.solvers._dispatch_support import MachineIndex, build_dispatch_context
+from synaps.solvers._dispatch_support import (
+    APPEND_GAP_SCAN_MIN_OPS,
+    MachineIndex,
+    build_dispatch_context,
+)
 from synaps.solvers.rhc import RhcPolicy, RhcSolver
 from synaps.solvers.rhc._cover import (
     _atcs_window_indices,
+    _cover_gap_scan_for,
     place_operations_greedy,
     place_operations_list_schedule,
     should_use_global_greedy_cover,
@@ -105,6 +110,59 @@ def test_place_operations_greedy_clips_past_horizon() -> None:
     assert stats.clipped >= 1
     assert len(assignments) == 1
     assert assignments[0].operation_id == problem.operations[0].id
+
+
+def test_cover_gap_scan_appends_at_large_n_threshold() -> None:
+    assert _cover_gap_scan_for(APPEND_GAP_SCAN_MIN_OPS - 1) == "all"
+    assert _cover_gap_scan_for(APPEND_GAP_SCAN_MIN_OPS) == "append"
+
+
+def test_residual_greedy_uses_append_scan_when_timeline_is_large(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fell before fix: leftover fill walked every gap on a 100k packed timeline."""
+
+    import synaps.solvers.rhc._cover as cover
+
+    seen: list[str] = []
+    real_find = cover.find_earliest_feasible_slot
+
+    def spy_find(*args: object, **kwargs: object) -> object:
+        seen.append(str(kwargs.get("gap_scan")))
+        return real_find(*args, **kwargs)
+
+    monkeypatch.setattr(cover, "APPEND_GAP_SCAN_MIN_OPS", 1)
+    monkeypatch.setattr(cover, "find_earliest_feasible_slot", spy_find)
+    problem = _two_op_problem(duration=10, horizon_minutes=90)
+    context = build_dispatch_context(problem)
+    first = problem.operations[0]
+    leftover = problem.operations[1]
+    start = problem.planning_horizon_start
+    packed = Assignment(
+        operation_id=first.id,
+        work_center_id=problem.work_centers[0].id,
+        start_time=start,
+        end_time=start + timedelta(minutes=10),
+        setup_minutes=0,
+    )
+    assignments = [packed]
+    by_op = {first.id: packed}
+    scheduled = {first.id}
+    machine_index = MachineIndex(context)
+    machine_index.extend(assignments)
+    place_operations_greedy(
+        operations=[leftover],
+        dispatch_context=context,
+        assignments=assignments,
+        assignment_by_op=by_op,
+        scheduled_ids=scheduled,
+        machine_index=machine_index,
+        horizon_start=start,
+        horizon_minutes=90.0,
+        op_earliest={leftover.id: 0.0},
+        default_wc_ids=[problem.work_centers[0].id],
+    )
+    assert "append" in seen
 
 
 def test_place_operations_list_schedule_sequences_predecessor() -> None:
