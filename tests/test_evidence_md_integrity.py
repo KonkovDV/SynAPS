@@ -365,6 +365,40 @@ def test_night_window_state_session_is_not_a_yes() -> None:
     assert hashed["scheduled_ratio"] == 0.7702
 
 
+def test_night_window_match_session_is_not_a_yes() -> None:
+    """Exclusive 1:1 night homes. Mixed vs FFD packing. Not a P2.3 Yes."""
+
+    folder = (
+        _BENCH
+        / "evidence"
+        / "deadzone-5k-2026-08-25"
+        / "sessions"
+        / "night-window-match-2026-08-28"
+    )
+    expected = {
+        1: (4962, 0.9924, 3.647),
+        42: (4883, 0.9766, 11.0),
+        999: (4878, 0.9756, 9.877),
+    }
+    for seed, (ops, ratio, wall) in expected.items():
+        payload = json.loads(
+            (folder / f"run_5000ops_8m_RHC_GREEDY_seed{seed}.json").read_text(encoding="utf-8")
+        )
+        assert payload["global_greedy_cover"] is True
+        assert payload["ops_scheduled"] == ops
+        assert payload["scheduled_ratio"] == ratio
+        assert payload["wall_time_s"] == wall
+        assert payload["search_stop_reason"] == "completed"
+        assert payload["verified_feasible"] is False
+        assert payload["notary_hard_violation_kinds"] == ["MISSING_ASSIGNMENT"]
+    hashed = json.loads(
+        (
+            _BENCH / "evidence" / "deadzone-5k-2026-08-25" / "run_5000ops_8m_RHC_GREEDY_seed1.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert hashed["scheduled_ratio"] == 0.7702
+
+
 def test_remainder_window_fix_session_is_not_a_yes() -> None:
     """Remainder 5k/8k seed 1 after window-aware list-schedule is still not a Yes."""
 

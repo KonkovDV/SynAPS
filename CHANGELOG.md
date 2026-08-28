@@ -10,18 +10,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Windowed family packing / native Windows (2026-08-28):** Windowed
-  list-schedule ranks slots by FFD family home, same-state continuation,
-  empty-this-night, then min setup (unconstrained earliest-end is unchanged).
-  Leftover gap-retry plus a single 1-swap eject; a 6-pass eject loop
-  worsened density and is not in the tree. Night analog session
-  `night-window-state-2026-08-28/` is 0.9912 / 0.9806 / 0.9818 on seeds
-  1/42/999, not a P2.3 Yes
+  list-schedule ranks slots by exclusive (night, state) home (largest
+  family first, max eligible cover), same-state continuation, empty-this-night,
+  then min setup (unconstrained earliest-end is unchanged). Leftover
+  gap-retry plus a single 1-swap eject; a 6-pass eject loop worsened
+  density and is not in the tree. FFD union-load packing session
+  `night-window-state-2026-08-28/` is 0.9912 / 0.9806 / 0.9818
   (`benchmark/evidence/deadzone-5k-2026-08-25/sessions/night-window-state-2026-08-28/`).
-  Remainder seed 1 `remainder-window-state-2026-08-28/` is 0.547 / 0.9936 /
-  1.0 / 0.3605 / 0.715625 / 0.9815 (5k@4/8/12 then 8k@4/8/12);
-  5k@12 seed 1 is a session Yes; the six-cell remainder is not
+  Exclusive-matching session `night-window-match-2026-08-28/` is 0.9924 /
+  0.9766 / 0.9756 leftover 38 / 117 / 122
+  (`benchmark/evidence/deadzone-5k-2026-08-25/sessions/night-window-match-2026-08-28/`);
+  seed 1 is denser than FFD; seeds 42/999 leftover grew. Neither session
+  is a P2.3 Yes. Remainder seed 1 `remainder-window-state-2026-08-28/`
+  is 0.547 / 0.9936 / 1.0 / 0.3605 / 0.715625 / 0.9815 (5k@4/8/12 then
+  8k@4/8/12); 5k@12 seed 1 is a session Yes; the six-cell remainder is not
   (`benchmark/evidence/deadzone-5k-2026-08-25/sessions/remainder-window-state-2026-08-28/`).
-  COVER 100k@200 seed 42 Windows native session is 100000/100000, wall 9.926 s
+  Processing LB vs 28 nights × 480 min: 5k@4 and 8k@4/8 seed 1 are
+  overloaded (pmin 72543 / 115977 / 111534 vs cap 53760 / 53760 / 107520);
+  not a packing Yes (`docs/rfc/REDTEAM_TRIAGE_NIGHT_WINDOWS_2026_08_28.md`).
+  COVER 100k@200 seed 42 Windows native session is
+  100000/100000, wall 9.926 s
   (`benchmark/evidence/cover-ladder-2026-08-25/sessions/native-100k-seed42-2026-08-28/`);
   hashed `run_100k_at_200_seed42.json` stays STALL. Calendar-3000 seed 1
   native probe (in-process `_NATIVE_LIST_SCHEDULE_MIN_OPS=0`) is ratio 1.0,

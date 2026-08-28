@@ -239,6 +239,187 @@ def test_list_schedule_continues_windowed_state_instead_of_idle_machine() -> Non
     assert by_op[ids[3]].setup_minutes == 0
 
 
+def test_list_schedule_keeps_two_night_families_off_one_machine() -> None:
+    """Two near-full families must not share a night machine and pay SDST.
+
+    Aggregate FFD treated processing-only load as fitting one 8 h bin
+    (250+200 < 480) and leftover the second family after the changeover.
+    Exclusive matching (largest family first, one home each) opens the
+    idle machine.
+    """
+
+    state_a = State(id=uuid4(), code="A", label="A")
+    state_b = State(id=uuid4(), code="B", label="B")
+    machines = [
+        WorkCenter(id=uuid4(), code=f"M{i}", capability_group="g", speed_factor=1.0)
+        for i in range(2)
+    ]
+    night_start = HORIZON_START + timedelta(hours=14)
+    night_end = night_start + timedelta(hours=8)
+    orders = [
+        Order(id=uuid4(), external_ref=f"O{i}", due_date=night_end, priority=1) for i in range(6)
+    ]
+    ids = [uuid4() for _ in range(6)]
+    wc_ids = [m.id for m in machines]
+    ops = [
+        Operation(
+            id=ids[i],
+            order_id=orders[i].id,
+            seq_in_order=0,
+            state_id=state_a.id if i < 3 else state_b.id,
+            base_duration_min=80 if i < 3 else 70,
+            eligible_wc_ids=wc_ids,
+            earliest_start=night_start,
+            latest_finish=night_end,
+        )
+        for i in range(6)
+    ]
+    setup_matrix = [
+        SetupEntry(
+            work_center_id=wc.id,
+            from_state_id=src.id,
+            to_state_id=dst.id,
+            setup_minutes=80,
+        )
+        for wc in machines
+        for src, dst in ((state_a, state_b), (state_b, state_a))
+    ]
+    problem = ScheduleProblem(
+        states=[state_a, state_b],
+        orders=orders,
+        operations=ops,
+        work_centers=machines,
+        setup_matrix=setup_matrix,
+        planning_horizon_start=HORIZON_START,
+        planning_horizon_end=HORIZON_START + timedelta(days=2),
+    )
+    context = build_dispatch_context(problem)
+    assignments: list[Assignment] = []
+    by_op: dict = {}
+    scheduled: set = set()
+    stats = place_operations_list_schedule(
+        operations=problem.operations,
+        dispatch_context=context,
+        assignments=assignments,
+        assignment_by_op=by_op,
+        scheduled_ids=scheduled,
+        horizon_start=HORIZON_START,
+        horizon_minutes=48 * 60.0,
+        op_earliest={op.id: 14 * 60.0 for op in ops},
+        default_wc_ids=wc_ids,
+    )
+    assert stats.placed == 6
+    assert {by_op[ids[i]].work_center_id for i in range(3)} == {by_op[ids[0]].work_center_id}
+    assert {by_op[ids[i]].work_center_id for i in range(3, 6)} == {by_op[ids[3]].work_center_id}
+    assert by_op[ids[0]].work_center_id != by_op[ids[3]].work_center_id
+
+
+def test_list_schedule_overflow_fits_in_home_slack() -> None:
+    """Overflow ineligible on its home still places if the sibling bin has slack.
+
+    4x90 on M1 plus 50+40 SDST is 450 <= 480. Forbidding steal in the main
+    pass left these ops leftover after the resident packed the night full.
+    """
+
+    state_a = State(id=uuid4(), code="A", label="A")
+    state_b = State(id=uuid4(), code="B", label="B")
+    machines = [
+        WorkCenter(id=uuid4(), code=f"M{i}", capability_group="g", speed_factor=1.0)
+        for i in range(2)
+    ]
+    night_start = HORIZON_START + timedelta(hours=14)
+    night_end = night_start + timedelta(hours=8)
+    orders = [
+        Order(id=uuid4(), external_ref=f"O{i}", due_date=night_end, priority=1) for i in range(7)
+    ]
+    ids = [uuid4() for _ in range(7)]
+    m1, m2 = machines[0].id, machines[1].id
+    ops = (
+        [
+            Operation(
+                id=ids[i],
+                order_id=orders[i].id,
+                seq_in_order=0,
+                state_id=state_a.id,
+                base_duration_min=90,
+                eligible_wc_ids=[m1],
+                earliest_start=night_start,
+                latest_finish=night_end,
+            )
+            for i in range(4)
+        ]
+        + [
+            Operation(
+                id=ids[i],
+                order_id=orders[i].id,
+                seq_in_order=0,
+                state_id=state_b.id,
+                base_duration_min=90,
+                eligible_wc_ids=[m2],
+                earliest_start=night_start,
+                latest_finish=night_end,
+            )
+            for i in range(4, 6)
+        ]
+        + [
+            Operation(
+                id=ids[6],
+                order_id=orders[6].id,
+                seq_in_order=0,
+                state_id=state_b.id,
+                base_duration_min=50,
+                eligible_wc_ids=[m1],
+                earliest_start=night_start,
+                latest_finish=night_end,
+            )
+        ]
+    )
+    setup_matrix = [
+        SetupEntry(
+            work_center_id=wc.id,
+            from_state_id=src.id,
+            to_state_id=dst.id,
+            setup_minutes=40,
+        )
+        for wc in machines
+        for src, dst in ((state_a, state_b), (state_b, state_a))
+    ]
+    problem = ScheduleProblem(
+        states=[state_a, state_b],
+        orders=orders,
+        operations=ops,
+        work_centers=machines,
+        setup_matrix=setup_matrix,
+        planning_horizon_start=HORIZON_START,
+        planning_horizon_end=HORIZON_START + timedelta(days=2),
+    )
+    context = build_dispatch_context(problem)
+    assignments: list[Assignment] = []
+    by_op: dict = {}
+    scheduled: set = set()
+    stats = place_operations_list_schedule(
+        operations=problem.operations,
+        dispatch_context=context,
+        assignments=assignments,
+        assignment_by_op=by_op,
+        scheduled_ids=scheduled,
+        horizon_start=HORIZON_START,
+        horizon_minutes=48 * 60.0,
+        op_earliest={op.id: 14 * 60.0 for op in ops},
+        default_wc_ids=[m1, m2],
+    )
+    assert stats.placed == 7
+    assert all(by_op[ids[i]].work_center_id == m1 for i in range(4))
+    assert all(by_op[ids[i]].work_center_id == m2 for i in range(4, 6))
+    assert ids[6] in scheduled
+    overflow = by_op[ids[6]]
+    assert overflow.work_center_id == m1
+    a_end = max(by_op[ids[i]].end_time for i in range(4))
+    assert overflow.start_time >= a_end or overflow.end_time <= min(
+        by_op[ids[i]].start_time for i in range(4)
+    )
+
+
 def test_cover_gap_scan_appends_at_large_n_threshold() -> None:
     assert _cover_gap_scan_for(APPEND_GAP_SCAN_MIN_OPS - 1) == "all"
     assert _cover_gap_scan_for(APPEND_GAP_SCAN_MIN_OPS) == "append"

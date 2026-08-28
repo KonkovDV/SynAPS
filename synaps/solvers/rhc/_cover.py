@@ -1347,26 +1347,22 @@ def _window_night_key(op: Operation) -> object | None:
     return op.earliest_start.date()
 
 
-def _op_window_minutes(op: Operation) -> float:
-    if op.earliest_start is None or op.latest_finish is None:
-        return 8 * 60.0
-    span = (op.latest_finish - op.earliest_start).total_seconds() / 60.0
-    return max(span, 1.0)
-
-
-def _min_eligible_duration(
-    op: Operation,
+def _family_cover_on_machine(
+    ops: Sequence[Operation],
+    wc_id: UUID,
     dispatch_context: DispatchContext,
     default_wc_ids: Sequence[UUID],
 ) -> float:
-    eligible = op.eligible_wc_ids or list(default_wc_ids)
-    best = float("inf")
-    for wc_id in eligible:
-        work_center = dispatch_context.wc_by_id.get(wc_id)
-        if work_center is None:
+    work_center = dispatch_context.wc_by_id.get(wc_id)
+    if work_center is None:
+        return 0.0
+    total = 0.0
+    for op in ops:
+        eligible = op.eligible_wc_ids or default_wc_ids
+        if wc_id not in eligible:
             continue
-        best = min(best, float(duration_minutes_for(op, work_center)))
-    return 1.0 if best == float("inf") else best
+        total += float(duration_minutes_for(op, work_center))
+    return total
 
 
 def _build_window_family_homes(
@@ -1374,7 +1370,13 @@ def _build_window_family_homes(
     dispatch_context: DispatchContext,
     default_wc_ids: Sequence[UUID],
 ) -> dict[tuple[object, UUID], tuple[UUID, ...]]:
-    """FFD: give each (night, state) family the fewest machines that fit the load."""
+    """One exclusive home per (night, state): largest family first, max cover.
+
+    FFD packed union load onto machines some ops cannot use. 8 states on 8
+    machines is a 1:1 assignment. Do not give a second machine to a fat family
+    before every family has a home. Max-weight assignment overpacked homes
+    and starved overflow slack on the night analog.
+    """
 
     grouped: dict[object, dict[UUID, list[Operation]]] = defaultdict(lambda: defaultdict(list))
     for op in operations:
@@ -1383,35 +1385,39 @@ def _build_window_family_homes(
             continue
         grouped[night][op.state_id].append(op)
     homes: dict[tuple[object, UUID], tuple[UUID, ...]] = {}
-    for night, by_state in grouped.items():
-        remaining: dict[UUID, float] = {}
-        loads: list[tuple[float, UUID, list[Operation]]] = []
-        for state, ops in by_state.items():
-            load = sum(_min_eligible_duration(op, dispatch_context, default_wc_ids) for op in ops)
-            loads.append((load, state, ops))
-        loads.sort(key=lambda row: (-row[0], str(row[1])))
-        for load, state, ops in loads:
-            width = min(_op_window_minutes(op) for op in ops)
-            elig: set[UUID] = set()
-            for op in ops:
-                elig.update(op.eligible_wc_ids or default_wc_ids)
-            chosen: list[UUID] = []
-            leftover = load
-            ordered = sorted(
-                elig,
-                key=lambda wc_id: (-remaining.get(wc_id, width), str(wc_id)),
+    for _night, by_state in grouped.items():
+        used: set[UUID] = set()
+        loads = [
+            (
+                max(
+                    (
+                        _family_cover_on_machine(ops, wc_id, dispatch_context, default_wc_ids)
+                        for wc_id in default_wc_ids
+                    ),
+                    default=0.0,
+                ),
+                state,
+                ops,
             )
-            for wc_id in ordered:
-                if leftover <= 1e-9:
-                    break
-                cap = remaining.setdefault(wc_id, width)
-                if cap <= 1e-9:
+            for state, ops in by_state.items()
+        ]
+        loads.sort(key=lambda row: (-row[0], str(row[1])))
+        for _load, state, ops in loads:
+            pick: tuple[tuple[float, str], UUID] | None = None
+            for wc_id in default_wc_ids:
+                if wc_id in used:
                     continue
-                take = min(cap, leftover)
-                remaining[wc_id] = cap - take
-                leftover -= take
-                chosen.append(wc_id)
-            homes[(night, state)] = tuple(chosen)
+                cover = _family_cover_on_machine(ops, wc_id, dispatch_context, default_wc_ids)
+                if cover <= 1e-9:
+                    continue
+                key = (-cover, str(wc_id))
+                if pick is None or key < pick[0]:
+                    pick = (key, wc_id)
+            if pick is None:
+                homes[(_night, state)] = ()
+                continue
+            used.add(pick[1])
+            homes[(_night, state)] = (pick[1],)
     return homes
 
 
