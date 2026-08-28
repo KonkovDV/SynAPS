@@ -135,6 +135,110 @@ def test_cover_placement_floor_ignores_inflated_chain_earliest_on_windows() -> N
     assert floor == 22 * 60 + 10.0
 
 
+def test_list_schedule_continues_windowed_state_instead_of_idle_machine() -> None:
+    """Second same-state night op stays on the loaded machine, not an idle one.
+
+    Earliest-end would put A2 on idle M3 (completion 110 vs 220) and scatter
+    the family. Night analog 5k@8 pays that SDST into 8 h slack.
+    """
+
+    state_a = State(id=uuid4(), code="A", label="A")
+    state_b = State(id=uuid4(), code="B", label="B")
+    machines = [
+        WorkCenter(id=uuid4(), code=f"M{i}", capability_group="g", speed_factor=1.0)
+        for i in range(3)
+    ]
+    night_start = HORIZON_START + timedelta(hours=14)
+    night_end = night_start + timedelta(hours=8)
+    orders = [
+        Order(id=uuid4(), external_ref=f"O{i}", due_date=night_end, priority=1) for i in range(4)
+    ]
+    ids = [uuid4() for _ in range(4)]
+    ops = [
+        Operation(
+            id=ids[0],
+            order_id=orders[0].id,
+            seq_in_order=0,
+            state_id=state_a.id,
+            base_duration_min=110,
+            eligible_wc_ids=[m.id for m in machines],
+            earliest_start=night_start,
+            latest_finish=night_end,
+        ),
+        Operation(
+            id=ids[1],
+            order_id=orders[1].id,
+            seq_in_order=1,
+            state_id=state_b.id,
+            base_duration_min=110,
+            eligible_wc_ids=[m.id for m in machines],
+            earliest_start=night_start,
+            latest_finish=night_end,
+        ),
+        Operation(
+            id=ids[2],
+            order_id=orders[2].id,
+            seq_in_order=2,
+            state_id=state_a.id,
+            base_duration_min=110,
+            eligible_wc_ids=[m.id for m in machines],
+            earliest_start=night_start,
+            latest_finish=night_end,
+        ),
+        Operation(
+            id=ids[3],
+            order_id=orders[3].id,
+            seq_in_order=3,
+            state_id=state_b.id,
+            base_duration_min=110,
+            eligible_wc_ids=[m.id for m in machines],
+            earliest_start=night_start,
+            latest_finish=night_end,
+        ),
+    ]
+    setup_matrix = [
+        SetupEntry(
+            work_center_id=wc.id,
+            from_state_id=src.id,
+            to_state_id=dst.id,
+            setup_minutes=80,
+        )
+        for wc in machines
+        for src, dst in ((state_a, state_b), (state_b, state_a))
+    ]
+    problem = ScheduleProblem(
+        states=[state_a, state_b],
+        orders=orders,
+        operations=ops,
+        work_centers=machines,
+        setup_matrix=setup_matrix,
+        planning_horizon_start=HORIZON_START,
+        planning_horizon_end=HORIZON_START + timedelta(days=2),
+    )
+    context = build_dispatch_context(problem)
+    assignments: list[Assignment] = []
+    by_op: dict = {}
+    scheduled: set = set()
+    stats = place_operations_list_schedule(
+        operations=problem.operations,
+        dispatch_context=context,
+        assignments=assignments,
+        assignment_by_op=by_op,
+        scheduled_ids=scheduled,
+        horizon_start=HORIZON_START,
+        horizon_minutes=48 * 60.0,
+        op_earliest={op.id: 14 * 60.0 for op in ops},
+        default_wc_ids=[m.id for m in machines],
+    )
+    assert stats.placed == 4
+    assert by_op[ids[0]].work_center_id == by_op[ids[2]].work_center_id
+    assert by_op[ids[1]].work_center_id == by_op[ids[3]].work_center_id
+    assert by_op[ids[0]].work_center_id != by_op[ids[1]].work_center_id
+    assert by_op[ids[0]].setup_minutes == 0
+    assert by_op[ids[2]].setup_minutes == 0
+    assert by_op[ids[3]].setup_minutes == 0
+
+
 def test_cover_gap_scan_appends_at_large_n_threshold() -> None:
     assert _cover_gap_scan_for(APPEND_GAP_SCAN_MIN_OPS - 1) == "all"
     assert _cover_gap_scan_for(APPEND_GAP_SCAN_MIN_OPS) == "append"

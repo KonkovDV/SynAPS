@@ -331,6 +331,40 @@ def test_night_window_edd_session_is_not_a_yes() -> None:
     assert hashed["scheduled_ratio"] == 0.7702
 
 
+def test_night_window_state_session_is_not_a_yes() -> None:
+    """Family packing raised night analog density. Still leftover. Not a P2.3 Yes."""
+
+    folder = (
+        _BENCH
+        / "evidence"
+        / "deadzone-5k-2026-08-25"
+        / "sessions"
+        / "night-window-state-2026-08-28"
+    )
+    expected = {
+        1: (4956, 0.9912, 5.616),
+        42: (4903, 0.9806, 7.866),
+        999: (4909, 0.9818, 7.51),
+    }
+    for seed, (ops, ratio, wall) in expected.items():
+        payload = json.loads(
+            (folder / f"run_5000ops_8m_RHC_GREEDY_seed{seed}.json").read_text(encoding="utf-8")
+        )
+        assert payload["global_greedy_cover"] is True
+        assert payload["ops_scheduled"] == ops
+        assert payload["scheduled_ratio"] == ratio
+        assert payload["wall_time_s"] == wall
+        assert payload["search_stop_reason"] == "completed"
+        assert payload["verified_feasible"] is False
+        assert payload["notary_hard_violation_kinds"] == ["MISSING_ASSIGNMENT"]
+    hashed = json.loads(
+        (
+            _BENCH / "evidence" / "deadzone-5k-2026-08-25" / "run_5000ops_8m_RHC_GREEDY_seed1.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert hashed["scheduled_ratio"] == 0.7702
+
+
 def test_remainder_window_fix_session_is_not_a_yes() -> None:
     """Remainder 5k/8k seed 1 after window-aware list-schedule is still not a Yes."""
 
@@ -358,6 +392,41 @@ def test_remainder_window_fix_session_is_not_a_yes() -> None:
         assert payload["wall_time_s"] == wall
         assert payload["verified_feasible"] is False
         assert payload["notary_hard_violation_kinds"] == ["MISSING_ASSIGNMENT"]
+
+
+def test_remainder_window_state_session_pins() -> None:
+    """Family packing remainder seed 1. 5k@12 is a session Yes. Six-cell is not."""
+
+    folder = (
+        _BENCH
+        / "evidence"
+        / "deadzone-5k-2026-08-25"
+        / "sessions"
+        / "remainder-window-state-2026-08-28"
+    )
+    leftover = {
+        "run_5000ops_4m_RHC_GREEDY_seed1.json": (2735, 0.547, 52.285),
+        "run_5000ops_8m_RHC_GREEDY_seed1.json": (4968, 0.9936, 4.344),
+        "run_8000ops_4m_RHC_GREEDY_seed1.json": (2884, 0.3605, 110.263),
+        "run_8000ops_8m_RHC_GREEDY_seed1.json": (5725, 0.715625, 127.733),
+        "run_8000ops_12m_RHC_GREEDY_seed1.json": (7852, 0.9815, 21.673),
+    }
+    for name, (ops, ratio, wall) in leftover.items():
+        payload = json.loads((folder / name).read_text(encoding="utf-8"))
+        assert payload["global_greedy_cover"] is True
+        assert payload["search_stop_reason"] == "completed"
+        assert payload["ops_scheduled"] == ops
+        assert payload["scheduled_ratio"] == ratio
+        assert payload["wall_time_s"] == wall
+        assert payload["verified_feasible"] is False
+        assert payload["notary_hard_violation_kinds"] == ["MISSING_ASSIGNMENT"]
+    yes = json.loads((folder / "run_5000ops_12m_RHC_GREEDY_seed1.json").read_text(encoding="utf-8"))
+    assert yes["ops_scheduled"] == 5000
+    assert yes["scheduled_ratio"] == 1.0
+    assert yes["verified_feasible"] is True
+    assert yes["notary_hard_violation_kinds"] == []
+    assert yes["wall_time_s"] == 0.385
+    assert yes["search_stop_reason"] == "completed"
 
 
 def test_calendar_list_schedule_session_is_three_seed_yes() -> None:
@@ -393,6 +462,40 @@ def test_calendar_list_schedule_session_is_three_seed_yes() -> None:
         ).read_text(encoding="utf-8")
     )
     assert hashed["verified_feasible"] is False
+    assert "CALENDAR_VIOLATION" in hashed["notary_hard_violation_kinds"]
+
+
+def test_calendar_native_probe_session_is_not_a_gate_retune() -> None:
+    """n=3000 native probe bypasses the 10_000 gate in-process. Kernel default stays."""
+
+    from synaps.solvers.rhc._cover import _NATIVE_LIST_SCHEDULE_MIN_OPS
+
+    assert _NATIVE_LIST_SCHEDULE_MIN_OPS == 10_000
+    payload = json.loads(
+        (
+            _BENCH
+            / "evidence"
+            / "calendar-3000-8m-2026-08-27"
+            / "sessions"
+            / "native-calendar-3000-seed1-2026-08-28"
+            / "run_3000ops_8m_RHC_GREEDY_calendar_seed1.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert payload["native_probe"] is True
+    assert payload["bypass_gate"] is True
+    assert payload["native_backend"] == "native"
+    assert payload["scheduled_ratio"] == 1.0
+    assert payload["ops_scheduled"] == 3000
+    assert payload["verified_feasible"] is True
+    assert payload["wall_time_s"] == 0.164
+    hashed = json.loads(
+        (
+            _BENCH
+            / "evidence"
+            / "calendar-3000-8m-2026-08-27"
+            / "run_3000ops_8m_RHC_GREEDY_calendar_seed1.json"
+        ).read_text(encoding="utf-8")
+    )
     assert "CALENDAR_VIOLATION" in hashed["notary_hard_violation_kinds"]
 
 
@@ -507,6 +610,33 @@ def test_cover_100k_seed42_session_is_full_python_cover() -> None:
     assert session["verified_feasible"] is True
     assert session["native_backend"] == "python"
     assert session["wall_time_s"] == 40.137
+
+
+def test_cover_100k_seed42_native_windows_session() -> None:
+    """KI-N4: Windows native recapture. Hashed STALL stays. Not a three-seed Yes."""
+
+    hashed = json.loads(
+        (_BENCH / "evidence" / "cover-ladder-2026-08-25" / "run_100k_at_200_seed42.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert hashed["stalled"] is True
+    session = json.loads(
+        (
+            _BENCH
+            / "evidence"
+            / "cover-ladder-2026-08-25"
+            / "sessions"
+            / "native-100k-seed42-2026-08-28"
+            / "run_100k_at_200_seed42.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert session.get("stalled") is not True
+    assert session["ops_scheduled"] == 100000
+    assert session["scheduled_ratio"] == 1.0
+    assert session["verified_feasible"] is True
+    assert session["native_backend"] == "native"
+    assert session["wall_time_s"] == 9.926
 
 
 def test_hashed_verified_feasible_cells_have_no_machine_calendar() -> None:

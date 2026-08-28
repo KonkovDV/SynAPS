@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Windowed family packing / native Windows (2026-08-28):** Windowed
+  list-schedule ranks slots by FFD family home, same-state continuation,
+  empty-this-night, then min setup (unconstrained earliest-end is unchanged).
+  Leftover gap-retry plus a single 1-swap eject; a 6-pass eject loop
+  worsened density and is not in the tree. Night analog session
+  `night-window-state-2026-08-28/` is 0.9912 / 0.9806 / 0.9818 on seeds
+  1/42/999, not a P2.3 Yes
+  (`benchmark/evidence/deadzone-5k-2026-08-25/sessions/night-window-state-2026-08-28/`).
+  Remainder seed 1 `remainder-window-state-2026-08-28/` is 0.547 / 0.9936 /
+  1.0 / 0.3605 / 0.715625 / 0.9815 (5k@4/8/12 then 8k@4/8/12);
+  5k@12 seed 1 is a session Yes; the six-cell remainder is not
+  (`benchmark/evidence/deadzone-5k-2026-08-25/sessions/remainder-window-state-2026-08-28/`).
+  COVER 100k@200 seed 42 Windows native session is 100000/100000, wall 9.926 s
+  (`benchmark/evidence/cover-ladder-2026-08-25/sessions/native-100k-seed42-2026-08-28/`);
+  hashed `run_100k_at_200_seed42.json` stays STALL. Calendar-3000 seed 1
+  native probe (in-process `_NATIVE_LIST_SCHEDULE_MIN_OPS=0`) is ratio 1.0,
+  wall 0.164 s
+  (`benchmark/evidence/calendar-3000-8m-2026-08-27/sessions/native-calendar-3000-seed1-2026-08-28/`);
+  kernel default stays 10_000. Empty native CSR row is 24/7. Mixed-fleet
+  tests: `tests/test_calendar.py::test_list_schedule_mixed_fleet_empty_calendar_is_24_7`,
+  `tests/test_accelerators.py::test_native_list_schedule_mixed_fleet_empty_row_is_24_7`.
+  `global_greedy_cover_min_ops` stays 10_000. Hashed P2.3 / remainder /
+  calendar-3000 epoch JSON is **not** rewritten.
+
 - **Night / window scan (2026-08-28):** Large-n leftover fill with hard
   per-op windows uses a window-clipped interior gap scan, not append-after-
   last. `global_greedy_cover_min_ops` stays 10_000. Windowed and calendar

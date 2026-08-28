@@ -46,8 +46,10 @@ levers are forbidden as retunes (E4 / honesty protocol).
    intersection of op window, machine open interval, release, and horizon.
 4. Freeze / notary: `CALENDAR_VIOLATION` is a hard checker kind.
    `FEASIBLE` still means `proven_hard_violations = ∅`.
-5. Native `list_schedule_cover` does not encode calendars: skip to Python
-   when any calendar is non-empty.
+5. Native `list_schedule_cover` encodes occupancy `[start-setup, end]` in one
+   published shift. An empty CSR row (no published intervals on that machine)
+   is 24/7. Gate `_NATIVE_LIST_SCHEDULE_MIN_OPS` stays 10_000; n=3000 stays
+   Python unless a process-local probe bypasses the gate.
 
 ## Two estimates (not a schedule)
 
@@ -55,7 +57,7 @@ levers are forbidden as retunes (E4 / honesty protocol).
 | --- | --- | --- |
 | What | `ShiftInterval` on `WorkCenter` | GridPlan/signs emit many `earliest_start`/`latest_finish` |
 | Notary | New kind `CALENDAR_VIOLATION` | Existing window kinds only; night analog already measured |
-| Native COVER | Must skip or gain a calendar ABI | Unchanged; still blind to “machine closed” |
+| Native COVER | Encodes occupancy; empty CSR row is 24/7 | Unchanged; still blind to “machine closed” |
 | Conformance matrix | GREED/COVER/BEAM clip; CP-SAT/ALNS/LBBD encode occupancy | No new field; same 5k hole |
 | 25 named configs | Same names; windowed or calendar 5k@400s must not route to ALNS-500 | Domain unrolling still looks like per-op windows |
 | Breaks | CP-SAT `FEASIBLE` can fail the checker until shifts are in the model | Urban night ТОиР still cannot say “the crew is off at 06:00” as a resource |
@@ -98,7 +100,8 @@ ADR-0004 until 2026-09-09.
 ## Partial ship
 
 Kernel field + checker occupancy `[start − setup, end]` + greedy/COVER/BEAM
-clip of **setup and processing** + native skip are in the tree. CP-SAT encodes
+clip of **setup and processing** + native occupancy ABI (empty CSR row
+24/7) are in the tree. CP-SAT encodes
 occupancy in one published shift (processing literals + `su_start >= open` on
 SDST arcs). ALNS/LBBD inherit that encoding (greedy clip / CP-SAT
 subproblem). Auto-route for a non-empty calendar remains `CALENDAR_AWARE`.

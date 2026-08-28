@@ -293,7 +293,7 @@ def _try_unconstrained_list_schedule_seed(
     """Complete large-n seed via COVER list-schedule.
 
     Does not change ``global_greedy_cover_min_ops``. Machine calendar skips
-    this path (native COVER has no calendar ABI). Hard per-op windows are
+    this ALNS seed path (auto-route stays ``CALENDAR_AWARE``). Hard per-op windows are
     allowed: list-schedule already clips ``latest_finish``. Frozen RHC inner
     windows skip it.
     """
@@ -1588,11 +1588,15 @@ def _window_notary_violations(
 
 
 def _native_repair_skip_reason(problem: ScheduleProblem) -> str | None:
-    """Native greedy is serial and aux-blind; skip rather than inject faults."""
+    """Native greedy_repair has no calendar ABI; skip rather than inject 24/7."""
+    from synaps.calendar import work_centers_have_calendar
+
     if problem.aux_requirements:
         return "aux_requirements"
     if any(int(getattr(wc, "max_parallel", 1) or 1) > 1 for wc in problem.work_centers):
         return "parallel_machines"
+    if work_centers_have_calendar(problem.work_centers):
+        return "calendar"
     return None
 
 

@@ -38,7 +38,7 @@ Unconstrained 5k@400s (no calendar) still → `ALNS-500`.
 | `RHC-ALNS-SEARCH-COVER` | yes via inner ALNS clip | via inner ALNS | no |
 | `RHC-CPSAT` | yes via inner CP-SAT | via inner CP-SAT | no |
 | `RHC-GREEDY` | yes clip | yes | yes |
-| `RHC-GREEDY-COVER` | yes (Python clip; native skips) | yes | yes |
+| `RHC-GREEDY-COVER` | yes clip; native encodes occupancy at n>=10_000 | yes | yes |
 
 Typical calendar route:
 
