@@ -29,16 +29,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   occupancy `[start-setup, end]` in one shift. Machine-calendar 3000@8
   session seeds 1/42/999 are ratio 1.0 / `verified_feasible=true`
   (`benchmark/evidence/calendar-3000-8m-2026-08-27/sessions/calendar-list-schedule-2026-08-28/`);
-  hashed calendar JSON keeps `CALENDAR_VIOLATION`. Linux PR CI runs COVER
-  100k@200 seed 42 `--ci-gate` and calendar-3000 seed 1. Hashed P2.3 /
-  remainder / ALNS-500 epoch JSON is **not** rewritten
-  (`docs/rfc/REDTEAM_TRIAGE_NIGHT_WINDOWS_2026_08_28.md`).
+  hashed calendar JSON keeps `CALENDAR_VIOLATION`. Linux PR CI run
+  [33159561321](https://github.com/KonkovDV/SynAPS/actions/runs/33159561321)
+  (`docs/rfc/REDTEAM_TRIAGE_NIGHT_WINDOWS_2026_08_28.md`): native COVER 100k@200
+  seed 42 wall 18.068 s; calendar-3000 seed 1 wall 0.492 s (119 leftover then
+  greedy repair; n=3000 stays Python list-schedule). Hashed P2.3 / remainder /
+  ALNS-500 epoch JSON is **not** rewritten.
 
 - **Calendar occupancy encode (2026-08-28):** CP-SAT places processing in one
   published shift and tightens setup occupancy (`su_start >= open`). ALNS
   clips via greedy insertion; LBBD uses the CP-SAT subproblem. Native
   `list_schedule_cover` delays occupancy into a published shift. Auto-route
   for a non-empty calendar stays `CALENDAR_AWARE`. Not a 24/7 allow.
+
+- **Native list-schedule wrapper (2026-08-28):** Calendar kwargs had grown
+  `list_schedule_cover_native` to 83 lines; optional ATCS and shift arrays
+  are packed in `_list_schedule_cover_native_extra` so the 80-line ratchet
+  holds (`tests/test_architecture.py::test_function_length_ratchet`).
+  Linux `test-fast` failed on
+  [33159561321](https://github.com/KonkovDV/SynAPS/actions/runs/33159561321).
 
 - **Residuals / KI-N1 N4 N10 (2026-08-27):** Unconstrained ALNS-500 at n>=2000
   seeds from COVER list-schedule (not a `global_greedy_cover_min_ops` retune).

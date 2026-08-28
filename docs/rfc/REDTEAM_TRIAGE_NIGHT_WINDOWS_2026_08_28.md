@@ -16,8 +16,10 @@ Not a hashed calendar-3000 Yes.
 | Calendar in CP-SAT/ALNS/LBBD/native | Occupancy encoded in CP-SAT, ALNS clip, LBBD via CP-SAT, native `list_schedule_cover` shift delay. Auto-route stays `CALENDAR_AWARE` | Not a live plant calendar |
 | Machine-calendar 3000@8 | Session seeds 1/42/999 ratio 1.0 / `verified_feasible=true` (`calendar-list-schedule-2026-08-28/`). Python list-schedule (`native_available=false` here) | Hashed JSON keeps `CALENDAR_VIOLATION` |
 | Unboxed BEAM 12-cell | Still deferred past 2026-09-14 | Measurement, not a code box |
-| Linux BEAM timebox | Job on `native-accelerator` | Run [33151732222](https://github.com/KonkovDV/SynAPS/actions/runs/33151732222) |
-| COVER 100k seed 42 papers | Hashed STALL kept; Python session 40.137 s. PR CI adds 100k@200 seed 42 `--ci-gate` | This Windows process has `native_available=false`. Hashed 100k@200 remains two of three |
+| Linux BEAM timebox | Job on `native-accelerator` | Runs [33151732222](https://github.com/KonkovDV/SynAPS/actions/runs/33151732222) and [33159561321](https://github.com/KonkovDV/SynAPS/actions/runs/33159561321) |
+| COVER 100k seed 42 papers | Hashed STALL kept; Python session 40.137 s. Linux CI 100k@200 seed 42 `--ci-gate` on [33159561321](https://github.com/KonkovDV/SynAPS/actions/runs/33159561321): ratio 1.0, native, wall 18.068 s, 119 leftover then greedy repair | This Windows process has `native_available=false`. Hashed 100k@200 remains two of three. Not a hashed three-seed Yes |
+| Native calendar occupancy | Shift delay in `list_schedule_cover`. Occupancy pytest 2 passed on [33159561321](https://github.com/KonkovDV/SynAPS/actions/runs/33159561321) | n<10_000 still Python list-schedule. Empty CSR row is 24/7 |
+| 80-line ratchet | `list_schedule_cover_native` was 83 lines on `4b9990b`; optional kwargs extracted | Do not grandfather the wrapper onto `_LONG_FUNCTION_RATCHET` |
 | Two 500k columns | Cite only `cover-ladder-2026-08-25/` | Historical dump stays behind `non-claims` |
 
 ## Fell before the fix (node id + text)
@@ -33,6 +35,7 @@ Not a hashed calendar-3000 Yes.
 | `tests/test_calendar.py::test_list_schedule_cover_clips_setup_into_open_shift` | list-schedule without occupancy delay would start at t=0 on a closed shift |
 | list-schedule 5k@8 seed 1 | ratio 0.7446 in 1.165 s, `global_greedy_cover=true` — not a Yes |
 | rolling 5k@8 three seeds | `wall_clock` at ~128 s, ratios 0.7688 / 0.7836 / 0.7714 — same class as hashed |
+| `tests/test_architecture.py::test_function_length_ratchet` | `accelerators.py::list_schedule_cover_native` 83 lines, new, on [33159561321](https://github.com/KonkovDV/SynAPS/actions/runs/33159561321) |
 
 ## Attacks
 
@@ -48,6 +51,10 @@ Not a hashed calendar-3000 Yes.
 | Drop CP-SAT calendar refuse without occupancy encoding | **blocked** — occupancy is in the model; auto-route still clip family |
 | Silent 24/7 on a non-empty calendar | **blocked** — `test_cpsat_alns_lbbd_encode_nonempty_calendar` |
 | C5a / COVER weights / N-1 / SAIDI / INFIMUM / live EL5 / MAST | **blocked** |
+| Grandfather `list_schedule_cover_native` onto the 80-line ratchet | **blocked** — kwargs extracted; wrapper stays a new function under 80 |
+| Cite Linux 18.068 s as hashed 100k@200 seed 42 Yes | **blocked** — hashed JSON stays STALL; CI cell is a different artifact |
+| Cite calendar-3000 CI 0.492 s as native COVER | **blocked** — n=3000 is below `_NATIVE_LIST_SCHEDULE_MIN_OPS`; Python list-schedule |
+| Silent 24/7 when calendar kwargs are omitted on n>=10_000 | **blocked** — `_pack_native_calendars` adds CSR when any WC publishes a shift; empty CSR is 24/7 by contract |
 
 ## Session numbers (not hashed)
 
@@ -59,7 +66,9 @@ Not a hashed calendar-3000 Yes.
 | 5k@8 window-aware list-schedule | RHC-GREEDY | 1/42/999 | 0.8352 / 0.8258 / 0.8198 | 4.978 / 5.636 / 5.879 | `completed`; not a Yes |
 | remainder seed 1 (scan) | RHC-GREEDY | 1 | 0.401 / 0.7714 / 0.8514 / 0.25975 / 0.547375 / 0.766375 | ~128–136 | 5k@4/8/12 then 8k@4/8/12; `wall_clock` |
 | remainder seed 1 (fix) | RHC-GREEDY | 1 | 0.4058 / 0.8376 / 0.9994 / 0.2695 / 0.564875 / 0.836125 | 5.319 / 5.756 / 0.69 / 8.507 / 10.824 / 10.367 | `completed`; 5k@12 has 3 leftover |
-| calendar 3000@8 list-schedule | RHC-GREEDY | 1/42/999 | 1.0 / 1.0 / 1.0 | 0.282 / 0.303 / 0.286 | `verified_feasible=true`; not hashed; not P2.3 |
+| calendar 3000@8 list-schedule | RHC-GREEDY | 1/42/999 | 1.0 / 1.0 / 1.0 | 0.282 / 0.303 / 0.286 | `verified_feasible=true`; not hashed; not P2.3; Python |
+| Linux COVER 100k@200 | RHC-GREEDY | 42 | 1.0 | 18.068 | native; 119 leftover then greedy repair; run 33159561321; not hashed |
+| Linux calendar 3000 seed 1 | RHC-GREEDY | 1 | 1.0 | 0.492 | Python list-schedule; run 33159561321 |
 
 Folders:
 `benchmark/evidence/deadzone-5k-2026-08-25/sessions/night-window-scan-2026-08-28/`
@@ -76,3 +85,5 @@ Folders:
 - Not a live plant calendar. Night analog is per-op windows. Calendar-3000 is `WorkCenter.calendar`.
 - Not a P2.3 Yes from list-schedule or rolling recapture.
 - Unboxed BEAM 12-cell stays after 2026-09-14.
+- Linux 18.068 s is the CI cell, not a rewrite of hashed `run_100k_at_200_seed42.json`.
+- Empty native calendar CSR row is 24/7. Mixed fleets: a WC with no published shifts stays open.
