@@ -11,8 +11,8 @@ Not a kernel retune of `_NATIVE_LIST_SCHEDULE_MIN_OPS` (still 10_000).
 
 | Problem | This drop | Still open |
 | --- | --- | --- |
-| Night analog 0.75–0.88 | Window leftover scan kept. Family packing: FFD homes, same-state continuation, empty-this-night, min setup, leftover retry, single 1-swap eject. Session `night-window-state-2026-08-28/` 0.9912 / 0.9806 / 0.9818. EDD session 0.8352 / 0.8258 / 0.8198 kept. Fell-before 0.7446 kept. Rolling still `wall_clock` | Hashed P2.3 freeze stays **no**. Leftover 44 / 97 / 91. Not a three-seed Yes |
-| 5k/8k remainder holes | Session `remainder-window-state-2026-08-28/` 0.547 / 0.9936 / 1.0 / 0.3605 / 0.715625 / 0.9815. 5k@12 seed 1 is a session Yes. Hashed epoch kept | Six-cell remainder is not a Yes. 5k@4 / 8k@* leftover |
+| Night analog 0.75–0.88 | Window leftover scan kept. Exclusive 1:1 homes, same-night fifo home-before-steal, home tail+gap before steal tail, leftover retry, single 1-swap eject. Matching session `night-window-match-2026-08-28/` 0.9924 / 0.9766 / 0.9756 leftover 38 / 117 / 122. FFD packing session `night-window-state-2026-08-28/` 0.9912 / 0.9806 / 0.9818 kept. EDD 0.8352 / 0.8258 / 0.8198 kept. Fell-before 0.7446 kept. Rolling still `wall_clock` | Hashed P2.3 freeze stays **no**. Matching is not uniformly denser than FFD. Not a three-seed Yes. Do not restore global (all-nights) home-before-steal |
+| 5k/8k remainder holes | Session `remainder-window-state-2026-08-28/` 0.547 / 0.9936 / 1.0 / 0.3605 / 0.715625 / 0.9815. 5k@12 seed 1 is a session Yes. Hashed epoch kept. Processing LB vs 28×480×m: 5k@4 and 8k@4/8 seed 1 are overloaded (pmin 72543 / 115977 / 111534 vs cap 53760 / 53760 / 107520) | Six-cell remainder is not a Yes. Overloaded cells are not a packing hole |
 | Hashed ALNS 5k unconstrained 0.0 | Already closed in `alns-5k-list-schedule-2026-08-27/` | Epoch JSON stays 0.0 |
 | Calendar in CP-SAT/ALNS/LBBD/native | Occupancy encoded in CP-SAT, ALNS clip, LBBD via CP-SAT, native `list_schedule_cover` shift delay. Auto-route stays `CALENDAR_AWARE` | Not a live plant calendar |
 | Machine-calendar 3000@8 | Python session seeds 1/42/999 ratio 1.0 (`calendar-list-schedule-2026-08-28/`). Native probe seed 1 ratio 1.0 wall 0.164 s (`native-calendar-3000-seed1-2026-08-28/`, `bypass_gate=true`) | Hashed JSON keeps `CALENDAR_VIOLATION`. Kernel gate stays 10_000 |
@@ -32,6 +32,10 @@ Not a kernel retune of `_NATIVE_LIST_SCHEDULE_MIN_OPS` (still 10_000).
 | `tests/test_rhc_cover.py::test_list_schedule_inserts_into_idle_gap_when_tail_blocked` | unconstrained 64-insert cap left windowed ops on a closed tail |
 | `tests/test_rhc_cover.py::test_cover_placement_floor_ignores_inflated_chain_earliest_on_windows` | RHC chain-LB sat past realized pred end inside the night |
 | `tests/test_rhc_cover.py::test_list_schedule_continues_windowed_state_instead_of_idle_machine` | earliest-end put the second same-state night op on idle M3 and paid SDST |
+| `tests/test_rhc_cover.py::test_list_schedule_keeps_two_night_families_off_one_machine` | aggregate FFD put two near-full families on one 8 h machine and leftover the second after SDST |
+| `tests/test_rhc_cover.py::test_list_schedule_fills_home_before_steal_when_family_uuid_sorts_later` | fifo `(due, state_id)` popped a steal onto empty M1 before the resident 150-min family |
+| `tests/test_rhc_cover.py::test_list_schedule_same_night_fifo_does_not_defer_steal_behind_later_nights` | global home-before-steal delayed night-1 leftover past `latest_finish` |
+| `tests/test_rhc_cover.py::test_list_schedule_inserts_home_gap_before_steal_tail` | appending SGS stole idle M2 instead of inserting into the 0-200 hole on the home |
 | `tests/test_alns_append_seed.py::test_list_schedule_seed_allows_hard_windows` | ALNS seed returned `None` on any `earliest_start`/`latest_finish` |
 | `tests/test_calendar.py::test_cpsat_alns_lbbd_encode_nonempty_calendar` | CPSAT/ALNS/LBBD returned empty `ERROR` / `calendar_unsupported` |
 | `tests/test_calendar.py::test_list_schedule_cover_clips_setup_into_open_shift` | list-schedule without occupancy delay would start at t=0 on a closed shift |
@@ -53,7 +57,11 @@ Not a kernel retune of `_NATIVE_LIST_SCHEDULE_MIN_OPS` (still 10_000).
 | Rewrite hashed deadzone / COVER / ALNS / calendar epoch JSON | **blocked** |
 | Cite hashed P2.3 as Yes | **blocked** — freeze answer stays `no` |
 | Cite hashed calendar-3000 as Yes | **blocked** — hashed keeps `CALENDAR_VIOLATION` |
-| Cite night analog 0.8352 or 0.9912 as a P2.3 Yes | **blocked** — `verified_feasible=false`, leftovers |
+| Cite night analog 0.8352, 0.9912, or 0.9924 as a P2.3 Yes | **blocked** — `verified_feasible=false`, leftovers |
+| Cite exclusive matching as uniformly denser than FFD packing | **blocked** — seeds 42/999 leftover grew (117 / 122 vs 97 / 91) |
+| Restore global (all-nights) home-before-steal | **blocked** — seed 1 leftover 553, ratio 0.8900 |
+| Cite a scratch 5k fifo probe as denser than matching | **blocked** — generator IDs are `uuid4`; leftover is not a recapture delta |
+| `_window_night_key` is calendar `date()` | **residual** — 22:00-06:00 can split after midnight; generator stamps 22:00 |
 | Cite remainder 5k@12 session Yes as a six-cell / P2.3 Yes | **blocked** — one cell, seed 1; hashed epoch untouched |
 | Drop CP-SAT calendar refuse without occupancy encoding | **blocked** — occupancy is in the model; auto-route still clip family |
 | Native greedy_repair 24/7 on a published calendar | **blocked** — `_native_repair_skip_reason` returns `calendar`; Python ALNS clips |
@@ -72,7 +80,8 @@ Not a kernel retune of `_NATIVE_LIST_SCHEDULE_MIN_OPS` (still 10_000).
 | 5k@8 list-schedule fell-before | RHC-GREEDY | 1 | 0.7446 | 1.165 | `global_greedy_cover=true`; not a Yes |
 | 5k@8 rolling | RHC-GREEDY | 1/42/999 | 0.7688 / 0.7836 / 0.7714 | 128.074 / 128.046 / 127.661 | `wall_clock`; hashed 0.7702 / 0.7812 / 0.7708 |
 | 5k@8 window-aware list-schedule | RHC-GREEDY | 1/42/999 | 0.8352 / 0.8258 / 0.8198 | 4.978 / 5.636 / 5.879 | `completed`; not a Yes |
-| 5k@8 family packing | RHC-GREEDY | 1/42/999 | 0.9912 / 0.9806 / 0.9818 | 5.616 / 7.866 / 7.51 | leftover 44 / 97 / 91; not a P2.3 Yes |
+| 5k@8 family packing (FFD) | RHC-GREEDY | 1/42/999 | 0.9912 / 0.9806 / 0.9818 | 5.616 / 7.866 / 7.51 | leftover 44 / 97 / 91; not a P2.3 Yes |
+| 5k@8 exclusive matching | RHC-GREEDY | 1/42/999 | 0.9924 / 0.9766 / 0.9756 | 3.647 / 11.0 / 9.877 | leftover 38 / 117 / 122; not uniformly denser than FFD; not a P2.3 Yes |
 | remainder seed 1 (scan) | RHC-GREEDY | 1 | 0.401 / 0.7714 / 0.8514 / 0.25975 / 0.547375 / 0.766375 | ~128–136 | 5k@4/8/12 then 8k@4/8/12; `wall_clock` |
 | remainder seed 1 (fix) | RHC-GREEDY | 1 | 0.4058 / 0.8376 / 0.9994 / 0.2695 / 0.564875 / 0.836125 | 5.319 / 5.756 / 0.69 / 8.507 / 10.824 / 10.367 | `completed`; 5k@12 has 3 leftover |
 | remainder seed 1 (packing) | RHC-GREEDY | 1 | 0.547 / 0.9936 / 1.0 / 0.3605 / 0.715625 / 0.9815 | 52.285 / 4.344 / 0.385 / 110.263 / 127.733 / 21.673 | 5k@12 seed 1 session Yes; six-cell not a Yes |
@@ -87,6 +96,7 @@ Folders:
 `.../night-rhc-rolling-2026-08-28/`
 `.../night-window-edd-2026-08-28/`
 `.../night-window-state-2026-08-28/`
+`.../night-window-match-2026-08-28/`
 `.../remainder-window-scan-2026-08-28/`
 `.../remainder-window-fix-2026-08-28/`
 `.../remainder-window-state-2026-08-28/`
@@ -97,7 +107,7 @@ Folders:
 ## Non-claims
 
 - Not a Yes on hashed 5k@8, hashed COVER 100k seed 42, hashed remainder, or hashed calendar-3000.
-- Not a P2.3 Yes from EDD list-schedule, family packing, or rolling recapture.
+- Not a P2.3 Yes from EDD list-schedule, FFD family packing, exclusive matching, or rolling recapture.
 - Not a six-cell remainder Yes. 5k@12 seed 1 is a session Yes only.
 - Not a live plant calendar. Night analog is per-op windows. Calendar-3000 is `WorkCenter.calendar`.
 - Unboxed BEAM 12-cell stays after 2026-09-14.

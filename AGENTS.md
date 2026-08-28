@@ -9,6 +9,7 @@ Live roots only:
 - `C:\AeroBIM` — IFC/IDS pack checker (separate product)
 
 Workspace: `C:\SynAPS\APS.code-workspace`.
+Work only on `main`. Do not create extra git branches or extra PRs.
 Do not put GridPlan/MobiRoute/AeroBIM into `synaps/domains/`.
 Do not open C5a, do not put weights into COVER, do not claim N-1 / SAIDI / INFIMUM / live EL5 / MAST.
 `FEASIBLE` ⇒ `proven_hard_violations = ∅`.

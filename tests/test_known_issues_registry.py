@@ -69,6 +69,8 @@ def test_known_issues_registry_exists_and_lists_ki_ids() -> None:
     assert "KI-N1" in text
     assert "KI-N7" in text
     assert "KI-N12" in text
+    n12 = next(line for line in text.splitlines() if line.startswith("| KI-N12 "))
+    assert "| closed |" in n12
     assert "KI-N13" in text
     assert "KI-N14" in text
     assert "KI-N15" in text

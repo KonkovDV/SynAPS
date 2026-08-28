@@ -31,8 +31,15 @@ SHA, never `main`). That bump must regression-run:
 3. Kernel `python scripts/verify_claims.py` on the pinned SHA (already green
    in kernel CI).
 
-Until the domain PRs merge, KI-N12 stays **open**. After they merge, record
-the new SHAs here and in each domain README.
+Those domain PRs merged on 2026-08-28. Record the SHAs here and in each
+domain README.
+
+**2026-08-28:** GridPlan #7 and MobiRoute #4 merged. Both origin READMEs pin
+`54ebf9f32bc871cc27283331d7536c1068c7e606`. KI-N12 is **closed**. Kernel origin
+`main` is `8be2830` (night-window papers); local packing may be ahead of
+origin. The next domain bump is a new pin to a kernel SHA on origin, still
+before 2026-09-09. Do not treat a diverged local GridPlan checkout as the
+product pin.
 
 Night/emergency work in a domain layer is not a kernel calendar promise:
 greedy-family configs clip shifts; exact/ALNS encode when selected; windowed
@@ -52,3 +59,4 @@ results as kernel 50k/500k evidence (different algebra).
   [MobiRoute #4](https://github.com/KonkovDV/SynAPS-MobiRoute/pull/4))
   and must pass the three regression bullets above. KI-N12 stays open
   until those PRs merge.
+- 2026-08-28: those PRs merged. Origin pins recorded. KI-N12 closed.

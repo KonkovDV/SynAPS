@@ -10,18 +10,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Windowed family packing / native Windows (2026-08-28):** Windowed
-  list-schedule ranks slots by FFD family home, same-state continuation,
-  empty-this-night, then min setup (unconstrained earliest-end is unchanged).
-  Leftover gap-retry plus a single 1-swap eject; a 6-pass eject loop
-  worsened density and is not in the tree. Night analog session
-  `night-window-state-2026-08-28/` is 0.9912 / 0.9806 / 0.9818 on seeds
-  1/42/999, not a P2.3 Yes
+  list-schedule ranks slots by exclusive (night, state) home (largest
+  family first, max eligible cover), same-state continuation, empty-this-night,
+  then min setup (unconstrained earliest-end is unchanged). Leftover
+  gap-retry plus a single 1-swap eject; a 6-pass eject loop worsened
+  density and is not in the tree. FFD union-load packing session
+  `night-window-state-2026-08-28/` is 0.9912 / 0.9806 / 0.9818
   (`benchmark/evidence/deadzone-5k-2026-08-25/sessions/night-window-state-2026-08-28/`).
-  Remainder seed 1 `remainder-window-state-2026-08-28/` is 0.547 / 0.9936 /
-  1.0 / 0.3605 / 0.715625 / 0.9815 (5k@4/8/12 then 8k@4/8/12);
-  5k@12 seed 1 is a session Yes; the six-cell remainder is not
+  Exclusive-matching session `night-window-match-2026-08-28/` is 0.9924 /
+  0.9766 / 0.9756 leftover 38 / 117 / 122
+  (`benchmark/evidence/deadzone-5k-2026-08-25/sessions/night-window-match-2026-08-28/`);
+  seed 1 is denser than FFD; seeds 42/999 leftover grew. Neither session
+  is a P2.3 Yes. Remainder seed 1 `remainder-window-state-2026-08-28/`
+  is 0.547 / 0.9936 / 1.0 / 0.3605 / 0.715625 / 0.9815 (5k@4/8/12 then
+  8k@4/8/12); 5k@12 seed 1 is a session Yes; the six-cell remainder is not
   (`benchmark/evidence/deadzone-5k-2026-08-25/sessions/remainder-window-state-2026-08-28/`).
-  COVER 100k@200 seed 42 Windows native session is 100000/100000, wall 9.926 s
+  Processing LB vs 28 nights × 480 min: 5k@4 and 8k@4/8 seed 1 are
+  overloaded (pmin 72543 / 115977 / 111534 vs cap 53760 / 53760 / 107520);
+  not a packing Yes (`docs/rfc/REDTEAM_TRIAGE_NIGHT_WINDOWS_2026_08_28.md`).
+  COVER 100k@200 seed 42 Windows native session is
+  100000/100000, wall 9.926 s
   (`benchmark/evidence/cover-ladder-2026-08-25/sessions/native-100k-seed42-2026-08-28/`);
   hashed `run_100k_at_200_seed42.json` stays STALL. Calendar-3000 seed 1
   native probe (in-process `_NATIVE_LIST_SCHEDULE_MIN_OPS=0`) is ratio 1.0,
@@ -30,6 +38,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   kernel default stays 10_000. Empty native CSR row is 24/7. Mixed-fleet
   tests: `tests/test_calendar.py::test_list_schedule_mixed_fleet_empty_calendar_is_24_7`,
   `tests/test_accelerators.py::test_native_list_schedule_mixed_fleet_empty_row_is_24_7`.
+- **KI-N12 closed (2026-08-28):** GridPlan
+  [#7](https://github.com/KonkovDV/SynAPS-GridPlan/pull/7) and MobiRoute
+  [#4](https://github.com/KonkovDV/SynAPS-MobiRoute/pull/4) merged. Origin
+  domain pins are kernel `54ebf9f32bc871cc27283331d7536c1068c7e606`.
+  Kernel origin `main` is past that pin (`8be2830`); the next domain bump
+  is a new pin, not a reopen of KI-N12 (`docs/adr/0004-domain-repo-standard.md`).
+- **Windowed fifo home-before-steal:** night list-schedule keeps
+  same-night home/continuation ops ahead of steal in the ready heap so a
+  smaller family uuid cannot occupy an empty home while that resident is
+  still ready. Preference is per night: a global scan across all nights
+  delayed night-1 steal until the window closed and leftover jumped by
+  hundreds. Do not restore that global scan.
+  (`tests/test_rhc_cover.py::test_list_schedule_fills_home_before_steal_when_family_uuid_sorts_later`,
+  `tests/test_rhc_cover.py::test_list_schedule_same_night_fifo_does_not_defer_steal_behind_later_nights`).
+  Windowed placement tries the exclusive home tail and home gap before a
+  steal tail (`tests/test_rhc_cover.py::test_list_schedule_inserts_home_gap_before_steal_tail`).
+  Matching session `night-window-match-2026-08-28/` stays the 5k packing
+  pin. Generator IDs are `uuid4`, so leftover at 5k is not a recapture
+  delta. Not a P2.3 Yes. Red Team:
+  `docs/rfc/REDTEAM_TRIAGE_FIFO_HOME_GAP_2026_08_28.md`.
   `global_greedy_cover_min_ops` stays 10_000. Hashed P2.3 / remainder /
   calendar-3000 epoch JSON is **not** rewritten.
 
