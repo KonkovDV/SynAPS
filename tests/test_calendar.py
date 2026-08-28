@@ -85,6 +85,13 @@ def test_delay_start_none_when_duration_exceeds_shift() -> None:
     assert delay_start_to_open_shift(0.0, 9 * 60, [shift], H0) is None
 
 
+def test_shift_minute_spans_ceils_open_floors_close() -> None:
+    from synaps.calendar import shift_minute_spans
+
+    spans = shift_minute_spans([_night_shift()], H0)
+    assert spans == [(8 * 60, 16 * 60)]
+
+
 def test_checker_emits_calendar_violation() -> None:
     problem = _one_op_problem(calendar=[_night_shift()])
     wc = problem.work_centers[0]
@@ -298,24 +305,71 @@ def test_route_calendar_instance_returns_calendar_aware_whitelist() -> None:
     assert exact_none.solver_config in CALENDAR_AWARE, exact_none.solver_config
 
 
-def test_cpsat_alns_lbbd_refuse_nonempty_calendar() -> None:
+def test_cpsat_alns_lbbd_encode_nonempty_calendar() -> None:
+    """Named exact/ALNS configs encode occupancy; they do not schedule 24/7."""
+
     problem = _one_op_problem(calendar=[_night_shift()])
     for name in ("CPSAT-10", "ALNS-300", "LBBD-5"):
         solver, kwargs = create_solver(name)
-        result = solver.solve(problem, **kwargs)
-        assert result.status is SolverStatus.ERROR, name
-        assert result.assignments == []
-        assert result.metadata.get("calendar_unsupported") is True
+        result = solver.solve(problem, **kwargs, auto_greedy_warm_start=False)
+        assert result.assignments, name
+        assert result.assignments[0].start_time >= H0 + timedelta(hours=8), name
+        assert not FeasibilityChecker().check(problem, result.assignments, exhaustive=True), name
+        assert result.metadata.get("calendar_unsupported") is not True, name
 
 
-def test_cli_calendar_cpsat_exits_3(tmp_path: Path) -> None:
+def test_cpsat_clips_setup_into_open_shift() -> None:
+    from synaps.model import SetupEntry
+
+    state_a = State(code="a")
+    state_b = State(code="b")
+    wc = WorkCenter(code="M", capability_group="G", calendar=[_night_shift()])
+    order = Order(external_ref="O", due_date=HE)
+    op_a = Operation(
+        order_id=order.id,
+        seq_in_order=1,
+        state_id=state_a.id,
+        base_duration_min=30,
+        eligible_wc_ids=[wc.id],
+    )
+    op_b = Operation(
+        order_id=order.id,
+        seq_in_order=2,
+        state_id=state_b.id,
+        predecessor_op_id=op_a.id,
+        base_duration_min=30,
+        eligible_wc_ids=[wc.id],
+    )
+    problem = ScheduleProblem(
+        states=[state_a, state_b],
+        orders=[order],
+        operations=[op_a, op_b],
+        work_centers=[wc],
+        setup_matrix=[
+            SetupEntry(
+                work_center_id=wc.id,
+                from_state_id=state_a.id,
+                to_state_id=state_b.id,
+                setup_minutes=60,
+            )
+        ],
+        planning_horizon_start=H0,
+        planning_horizon_end=HE,
+    )
+    solver, kwargs = create_solver("CPSAT-10")
+    result = solver.solve(problem, **kwargs, auto_greedy_warm_start=False)
+    assert result.assignments
+    assert not FeasibilityChecker().check(problem, result.assignments, exhaustive=True)
+
+
+def test_cli_calendar_cpsat_exits_0(tmp_path: Path) -> None:
     from synaps.cli import main
 
     problem = _one_op_problem(calendar=[_night_shift()])
     instance = tmp_path / "cal.json"
     instance.write_text(problem.model_dump_json(), encoding="utf-8")
     code = main(["solve", str(instance), "--solver-config", "CPSAT-10", "--no-verify-feasibility"])
-    assert code == 3
+    assert code == 0
 
 
 def test_verify_error_with_assignments_still_runs_notary() -> None:

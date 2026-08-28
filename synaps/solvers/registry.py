@@ -388,6 +388,8 @@ _SOLVER_REGISTRY: dict[str, SolverRegistration] = {
 
 # ADR-0005: occupancy clip vs explicit refuse. Native COVER skips to Python
 # when a calendar is set; RHC-GREEDY-COVER stays in the clip set.
+# CP-SAT/ALNS/LBBD now encode occupancy when selected; they are still not
+# the auto-route for a non-empty calendar (CALENDAR_AWARE only).
 CALENDAR_AWARE: frozenset[str] = frozenset(
     {
         "GREED",

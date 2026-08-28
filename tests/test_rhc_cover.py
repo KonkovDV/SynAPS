@@ -86,7 +86,7 @@ def test_should_use_global_greedy_cover_only_for_large_greedy() -> None:
     assert not should_use_global_greedy_cover(
         inner_solver_name="alns", n_ops=50_000, min_ops=10_000
     )
-    assert should_use_global_greedy_cover(
+    assert not should_use_global_greedy_cover(
         inner_solver_name="greedy",
         n_ops=APPEND_GAP_SCAN_MIN_OPS,
         min_ops=10_000,

@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 from synaps.model import (
     ScheduleResult,
-    SolverErrorCategory,
     SolverStatus,
 )
 
@@ -75,24 +74,3 @@ def stamp_honest_coverage(problem: ScheduleProblem, result: ScheduleResult) -> S
     result.metadata["coverage_class"] = coverage.value
     result.status = honest_status(result.status, coverage)
     return result
-
-
-def refuse_unsupported_calendar(
-    problem: ScheduleProblem, solver_name: str
-) -> ScheduleResult | None:
-    """Explicit refuse: CP-SAT/ALNS/LBBD do not encode shifts (KI-N7)."""
-
-    from synaps.calendar import work_centers_have_calendar
-
-    if not work_centers_have_calendar(problem.work_centers):
-        return None
-    return ScheduleResult(
-        solver_name=solver_name,
-        status=SolverStatus.ERROR,
-        error_category=SolverErrorCategory.CONSTRUCTIVE_FAILURE,
-        metadata={
-            "calendar_unsupported": True,
-            "search_stop_reason": "calendar_unsupported",
-            "coverage_class": CoverageClass.EMPTY.value,
-        },
-    )

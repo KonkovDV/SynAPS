@@ -5,13 +5,14 @@ from __future__ import annotations
 import itertools
 import math
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import timedelta
 from typing import Any
 from uuid import NAMESPACE_DNS, UUID, uuid5
 
 from ortools.sat.python import cp_model
 
+from synaps.calendar import shift_minute_spans
 from synaps.model import (
     Assignment,
     ObjectiveValues,
@@ -24,7 +25,7 @@ from synaps.solvers._time_windows import (
     operation_earliest_offset_minutes,
     operation_latest_finish_offset_minutes,
 )
-from synaps.solvers.coverage_outcome import refuse_unsupported_calendar, stamp_honest_coverage
+from synaps.solvers.coverage_outcome import stamp_honest_coverage
 from synaps.timegrain import duration_minutes_for
 
 # N3 (audit v3): time limits are owned by ``time_limit_s`` and may not be set
@@ -61,6 +62,44 @@ _STRICT_WALL_SAFETY_FACTOR = 2.0
 # reported, non-minimized residual) rather than overflowing silently. 2**62
 # leaves headroom below the int64 max (2**63 - 1) for CP-SAT's internal sums.
 _SAFE_OBJECTIVE_MAX = 2**62
+
+
+def _add_calendar_shift_literals(
+    model: cp_model.CpModel,
+    problem: ScheduleProblem,
+    starts: dict[tuple[Any, Any], Any],
+    ends: dict[tuple[Any, Any], Any],
+    presences: dict[tuple[Any, Any], Any],
+) -> dict[tuple[Any, Any], list[tuple[int, int, Any]]]:
+    """Force processing into one published shift. Empty calendar is 24/7.
+
+    Occupancy including setup is tightened on SDST arcs via ``su_start >= open``.
+    """
+
+    by_pair: dict[tuple[Any, Any], list[tuple[int, int, Any]]] = {}
+    horizon_start = problem.planning_horizon_start
+    for work_center in problem.work_centers:
+        spans = shift_minute_spans(work_center.calendar, horizon_start)
+        if not spans:
+            continue
+        for operation in problem.operations:
+            key = (operation.id, work_center.id)
+            presence = presences.get(key)
+            if presence is None:
+                continue
+            start_var = starts[key]
+            end_var = ends[key]
+            lits: list[Any] = []
+            choices: list[tuple[int, int, Any]] = []
+            for index, (open_m, close_m) in enumerate(spans):
+                lit = model.new_bool_var(f"cal_{operation.id}_{work_center.id}_{index}")
+                model.add(start_var >= open_m).only_enforce_if(lit)
+                model.add(end_var <= close_m).only_enforce_if(lit)
+                lits.append(lit)
+                choices.append((open_m, close_m, lit))
+            model.add(sum(lits) == presence)
+            by_pair[key] = choices
+    return by_pair
 
 
 def _objective_product_overflows(term_bound: int, multiplier_bound: int) -> bool:
@@ -431,6 +470,7 @@ class CpSatSolver(BaseSolver):
         horizon: int,
         frozen_assignments: list[Assignment] | None = None,
         context_ops_by_id: Mapping[Any, Any] | None = None,
+        calendar_shifts: Mapping[tuple[Any, Any], Sequence[tuple[int, int, Any]]] | None = None,
     ) -> tuple[list[Any], list[Any], list[Any], dict[Any, list[tuple[Any, Any]]]]:
         """Model SDST via AddCircuit (O(N²) arcs per machine, not O(N³) booleans).
 
@@ -621,6 +661,10 @@ class CpSatSolver(BaseSolver):
                             f"setup_interval_{op_i.id}_{op_j.id}_{work_center.id}",
                         )
                         setup_intervals_by_op.setdefault(op_j.id, []).append((setup_interval, lit))
+                        for open_m, _close_m, shift_lit in (calendar_shifts or {}).get(
+                            (op_j.id, work_center.id), ()
+                        ):
+                            model.add(su_start >= open_m).only_enforce_if([lit, shift_lit])
 
                     material_loss = setup_material_lookup.get(
                         (work_center.id, op_i.state_id, op_j.state_id), 0
@@ -1003,9 +1047,6 @@ class CpSatSolver(BaseSolver):
         return assignments, objective, metadata
 
     def solve(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
-        refused = refuse_unsupported_calendar(problem, self.name)
-        if refused is not None:
-            return refused
         time_limit_s = int(kwargs.get("time_limit_s", 30))
         random_seed = int(kwargs.get("random_seed", 42))
         num_workers = int(kwargs.get("num_workers", 8))
@@ -1175,6 +1216,9 @@ class CpSatSolver(BaseSolver):
             if latest_offset is not None:
                 model.add(selected_ends[operation.id] <= int(latest_offset))
 
+        calendar_shifts = _add_calendar_shift_literals(
+            model, solve_problem, starts, ends, presences
+        )
         setup_terms, material_terms, energy_terms, setup_intervals_by_op = (
             self._add_machine_order_and_adjacency(
                 model,
@@ -1190,6 +1234,7 @@ class CpSatSolver(BaseSolver):
                 horizon=horizon,
                 frozen_assignments=frozen_assignments,
                 context_ops_by_id=context_ops_by_id,
+                calendar_shifts=calendar_shifts,
             )
         )
         self._add_aux_resource_cumulative_constraints(
@@ -1440,6 +1485,7 @@ class CpSatSolver(BaseSolver):
                 "determinism": determinism,
                 "determinism_violated": determinism_violated,
                 "objective_bigm_overflow_degraded": bigm_degraded,
+                "calendar_encoded": bool(calendar_shifts),
                 "sat_parameters": effective_sat_parameters,
                 "parallel_virtualization": {
                     "enabled": bool(virtual_to_original),

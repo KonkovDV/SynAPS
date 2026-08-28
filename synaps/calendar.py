@@ -9,6 +9,7 @@ straddle a closed period). Dispatch clips setup together with processing
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -32,6 +33,25 @@ def processing_fits_calendar(
     if not calendar:
         return True
     return any(interval.start <= start and end <= interval.end for interval in calendar)
+
+
+def shift_minute_spans(
+    calendar: Sequence[Any],
+    horizon_start: datetime,
+) -> list[tuple[int, int]]:
+    """Integer-minute [open, close] spans that sit inside published shifts.
+
+    Open is ceiled and close is floored so a CP-SAT grid point cannot sit
+    outside the interval (same conservative direction as release / horizon).
+    """
+
+    spans: list[tuple[int, int]] = []
+    for interval in calendar:
+        open_m = math.ceil((interval.start - horizon_start).total_seconds() / 60.0)
+        close_m = math.floor((interval.end - horizon_start).total_seconds() / 60.0)
+        if close_m > open_m:
+            spans.append((open_m, close_m))
+    return spans
 
 
 def delay_start_to_open_shift(

@@ -78,17 +78,17 @@ def should_use_global_greedy_cover(
 ) -> bool:
     """True when RHC should skip rolling windows and list-schedule in one pass.
 
-    ``min_ops`` stays 10_000 for unconstrained COVER. Windowed night/remainder
-    cells at n>=2000 use the same list-schedule path: append residual cannot
-    place an 8 h window after a packed daytime tail. Not a retune of
-    ``global_greedy_cover_min_ops``.
+    ``min_ops`` stays 10_000. Windowed 5k night cells keep rolling windows;
+    leftover fill uses a window-clipped gap scan, not this gate. A 5k@8
+    list-schedule session (seed 1) completed in 1.165 s at ratio 0.7446 —
+    not a Yes, and worse than hashed rolling RHC-GREEDY 0.7702.
+    ``has_hard_windows`` is accepted for call-site compatibility.
     """
 
+    del has_hard_windows
     if inner_solver_name != "greedy":
         return False
-    if n_ops >= min_ops:
-        return True
-    return bool(has_hard_windows) and n_ops >= APPEND_GAP_SCAN_MIN_OPS
+    return n_ops >= min_ops
 
 
 def _cover_gap_scan_for(n_timeline: int, operation: Any | None = None) -> str:

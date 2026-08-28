@@ -12,6 +12,7 @@ from synaps.solvers._time_windows import operation_latest_finish_offset_minutes
 from synaps.timegrain import duration_minutes_for
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from datetime import datetime
     from uuid import UUID
 
@@ -708,7 +709,7 @@ def _gap_latest_start(
 
 def _scan_all_gaps(
     machine_assignments: list[Assignment],
-    evaluate_gap: Any,
+    evaluate_gap: Callable[[Assignment | None, Assignment | None], SlotCandidate | None],
 ) -> SlotCandidate | None:
     previous_assignment: Assignment | None = None
     for assignment in machine_assignments:
@@ -721,7 +722,7 @@ def _scan_all_gaps(
 
 def _scan_gaps_overlapping_window(
     machine_assignments: list[Assignment],
-    evaluate_gap: Any,
+    evaluate_gap: Callable[[Assignment | None, Assignment | None], SlotCandidate | None],
     context: DispatchContext,
     window_lo: float,
     window_hi: float,

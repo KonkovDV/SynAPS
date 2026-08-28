@@ -2,42 +2,43 @@
 
 Router input: non-empty `WorkCenter.calendar`. Sets live in
 `synaps.solvers.registry`: `CALENDAR_AWARE` (clip occupancy into a shift) and
-`CALENDAR_REFUSING` (explicit empty `ERROR`, `calendar_unsupported`).
-
-`route_solver_config` returns a name from `CALENDAR_AWARE` for any
-`(portfolio_policy × latency ∈ {None, 1, 60, 180, 400, 900} × exact_required)`.
+`CALENDAR_REFUSING` (not auto-routed). Configs in `CALENDAR_REFUSING`
+**encode** occupancy `[start − setup, end]` in one `ShiftInterval` when
+selected. `route_solver_config` still returns a name from `CALENDAR_AWARE`
+for any `(portfolio_policy × latency ∈ {None, 1, 60, 180, 400, 900} ×
+exact_required)`. A 5k calendar instance is not a CP-SAT/ALNS coverage route.
 Per-op windows without a calendar are a different bit (`has_per_op_windows`).
 
 Default 5k + calendar + BALANCED + no latency hint → `RHC-GREEDY` (clips).
 Unconstrained 5k@400s (no calendar) still → `ALNS-500`.
 
-| Config | Understands calendar (clips) | Understands per-op windows | Refuses non-empty calendar |
+| Config | Understands calendar (clips / encodes) | Understands per-op windows | Auto-route on non-empty calendar |
 | --- | --- | --- | --- |
-| `GREED` | yes | yes | no |
-| `GREED-K1-3` | yes | yes | no |
-| `BEAM-3` | yes | yes | no |
-| `BEAM-5` | yes | yes | no |
-| `CPSAT-10` | no | yes | yes |
-| `CPSAT-30` | no | yes | yes |
-| `CPSAT-120` | no | yes | yes |
-| `CPSAT-PARETO-SKETCH-SETUP` | no | yes | yes (inner CP-SAT) |
-| `CPSAT-EPS-SETUP-110` | no | yes | yes (inner CP-SAT) |
-| `CPSAT-EPS-TARD-110` | no | yes | yes (inner CP-SAT) |
-| `CPSAT-EPS-MATERIAL-110` | no | yes | yes (inner CP-SAT) |
-| `LBBD-5` | no | yes | yes |
-| `LBBD-10` | no | yes | yes |
-| `LBBD-5-HD` | no | yes | yes |
-| `LBBD-10-HD` | no | yes | yes |
-| `LBBD-20-HD` | no | yes | yes |
-| `ALNS-300` | no | yes (but not a coverage route on windows) | yes |
-| `ALNS-500` | no | yes (but not a coverage route on windows) | yes |
-| `ALNS-1000` | no | yes (but not a coverage route on windows) | yes |
-| `RHC-ALNS` | no | via inner ALNS | yes (non-greedy inner) |
-| `RHC-ALNS-100K` | no | via inner ALNS | yes (non-greedy inner) |
-| `RHC-ALNS-SEARCH-COVER` | no | via inner ALNS | yes (non-greedy inner) |
-| `RHC-CPSAT` | no | via inner CP-SAT | yes (non-greedy inner) |
-| `RHC-GREEDY` | yes | yes | no |
-| `RHC-GREEDY-COVER` | yes (Python clip; native skips) | yes | no |
+| `GREED` | yes clip | yes | yes |
+| `GREED-K1-3` | yes clip | yes | yes |
+| `BEAM-3` | yes clip | yes | yes |
+| `BEAM-5` | yes clip | yes | yes |
+| `CPSAT-10` | yes encode occupancy | yes | no |
+| `CPSAT-30` | yes encode occupancy | yes | no |
+| `CPSAT-120` | yes encode occupancy | yes | no |
+| `CPSAT-PARETO-SKETCH-SETUP` | yes encode (inner CP-SAT) | yes | no |
+| `CPSAT-EPS-SETUP-110` | yes encode (inner CP-SAT) | yes | no |
+| `CPSAT-EPS-TARD-110` | yes encode (inner CP-SAT) | yes | no |
+| `CPSAT-EPS-MATERIAL-110` | yes encode (inner CP-SAT) | yes | no |
+| `LBBD-5` | yes encode (CP-SAT subproblem) | yes | no |
+| `LBBD-10` | yes encode (CP-SAT subproblem) | yes | no |
+| `LBBD-5-HD` | yes encode (CP-SAT subproblem) | yes | no |
+| `LBBD-10-HD` | yes encode (CP-SAT subproblem) | yes | no |
+| `LBBD-20-HD` | yes encode (CP-SAT subproblem) | yes | no |
+| `ALNS-300` | yes clip (greedy seed / repair) | yes (but not a coverage route on windows) | no |
+| `ALNS-500` | yes clip | yes (but not a coverage route on windows) | no |
+| `ALNS-1000` | yes clip | yes (but not a coverage route on windows) | no |
+| `RHC-ALNS` | yes via inner ALNS clip | via inner ALNS | no |
+| `RHC-ALNS-100K` | yes via inner ALNS clip | via inner ALNS | no |
+| `RHC-ALNS-SEARCH-COVER` | yes via inner ALNS clip | via inner ALNS | no |
+| `RHC-CPSAT` | yes via inner CP-SAT | via inner CP-SAT | no |
+| `RHC-GREEDY` | yes clip | yes | yes |
+| `RHC-GREEDY-COVER` | yes (Python clip; native skips) | yes | yes |
 
 Typical calendar route:
 

@@ -7,9 +7,9 @@
   (`lint`, `contract-schema-drift`, `typecheck`, `test-fast (3.12)`,
   `test-fast (3.13)`, `benchmark-smoke`, `control-plane` all success).
   Occupancy notary, calendar-aware routing whitelist, empty-success
-  demotion. Implementation remaining: CP-SAT/ALNS/LBBD still refuse rather
-  than encode shifts; native COVER still skips. Fourth domain repository
-  is not created in this commit.
+  demotion. CP-SAT encodes occupancy in one `ShiftInterval`; ALNS clips via
+  greedy insertion; LBBD uses the CP-SAT subproblem. Auto-route for a
+  non-empty calendar stays in `CALENDAR_AWARE`. Native COVER still skips.
 - **Date:** 2026-08-26
 - **Related:** ADR-0003 (domain placement), night-window dead-zone evidence
 
@@ -54,7 +54,7 @@ levers are forbidden as retunes (E4 / honesty protocol).
 | What | `ShiftInterval` on `WorkCenter` | GridPlan/signs emit many `earliest_start`/`latest_finish` |
 | Notary | New kind `CALENDAR_VIOLATION` | Existing window kinds only; night analog already measured |
 | Native COVER | Must skip or gain a calendar ABI | Unchanged; still blind to “machine closed” |
-| Conformance matrix | GREED/COVER/BEAM clip processing; CP-SAT/ALNS/LBBD refuse calendar | No new field; same 5k hole |
+| Conformance matrix | GREED/COVER/BEAM clip; CP-SAT/ALNS/LBBD encode occupancy | No new field; same 5k hole |
 | 25 named configs | Same names; windowed or calendar 5k@400s must not route to ALNS-500 | Domain unrolling still looks like per-op windows |
 | Breaks | CP-SAT `FEASIBLE` can fail the checker until shifts are in the model | Urban night ТОиР still cannot say “the crew is off at 06:00” as a resource |
 
@@ -96,8 +96,9 @@ ADR-0004 until 2026-09-09.
 ## Partial ship
 
 Kernel field + checker occupancy `[start − setup, end]` + greedy/COVER/BEAM
-clip of **setup and processing** + native skip are in the tree. CP-SAT/ALNS/LBBD
-do not encode shifts: they **refuse** a non-empty calendar (`calendar_unsupported`,
-empty `ERROR`). CLI/harness process codes 0/2/3/1 are implemented. Pareto-slice
-stamps empty inner results. KI-N7 notary gap is closed; remaining work is encoding
-shifts in exact/ALNS models, not silent allow.
+clip of **setup and processing** + native skip are in the tree. CP-SAT encodes
+occupancy in one published shift (processing literals + `su_start >= open` on
+SDST arcs). ALNS/LBBD inherit that encoding (greedy clip / CP-SAT
+subproblem). Auto-route for a non-empty calendar remains `CALENDAR_AWARE`.
+CLI/harness process codes 0/2/3/1 are implemented. Pareto-slice stamps empty
+inner results. KI-N7 notary gap is closed.

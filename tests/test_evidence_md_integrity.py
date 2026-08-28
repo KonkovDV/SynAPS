@@ -225,6 +225,89 @@ def test_deadzone_p2_3_table_matches_run_json() -> None:
     assert worker["stalled"] is True
 
 
+def test_night_list_schedule_5k_session_is_not_a_yes() -> None:
+    """Windowed 5k list-schedule is complete-and-fast, not a P2.3 Yes."""
+
+    session = json.loads(
+        (
+            _BENCH
+            / "evidence"
+            / "deadzone-5k-2026-08-25"
+            / "sessions"
+            / "night-window-scan-2026-08-28"
+            / "run_5000ops_8m_RHC_GREEDY_seed1.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert session["global_greedy_cover"] is True
+    assert session["scheduled_ratio"] == 0.7446
+    assert session["ops_scheduled"] == 3723
+    assert session["verified_feasible"] is False
+    assert session["wall_time_s"] == 1.165
+    hashed = json.loads(
+        (
+            _BENCH
+            / "evidence"
+            / "deadzone-5k-2026-08-25"
+            / "run_5000ops_8m_RHC_GREEDY_seed1.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert hashed["scheduled_ratio"] == 0.7702
+
+
+def test_night_rhc_rolling_5k_session_is_not_a_yes() -> None:
+    """Rolling 5k@8 after window leftover scan is still wall_clock, not a Yes."""
+
+    folder = (
+        _BENCH
+        / "evidence"
+        / "deadzone-5k-2026-08-25"
+        / "sessions"
+        / "night-rhc-rolling-2026-08-28"
+    )
+    expected = {
+        1: (3844, 0.7688, 128.074),
+        42: (3918, 0.7836, 128.046),
+        999: (3857, 0.7714, 127.661),
+    }
+    for seed, (ops, ratio, wall) in expected.items():
+        payload = json.loads(
+            (folder / f"run_5000ops_8m_RHC_GREEDY_seed{seed}.json").read_text(encoding="utf-8")
+        )
+        assert payload["global_greedy_cover"] is False
+        assert payload["ops_scheduled"] == ops
+        assert payload["scheduled_ratio"] == ratio
+        assert payload["wall_time_s"] == wall
+        assert payload["search_stop_reason"] == "wall_clock"
+        assert payload["verified_feasible"] is False
+
+
+def test_remainder_window_scan_session_is_wall_clock_not_yes() -> None:
+    """Remainder 5k/8k seed 1 after window leftover scan is still not a Yes."""
+
+    folder = (
+        _BENCH
+        / "evidence"
+        / "deadzone-5k-2026-08-25"
+        / "sessions"
+        / "remainder-window-scan-2026-08-28"
+    )
+    expected = {
+        "run_5000ops_4m_RHC_GREEDY_seed1.json": (2005, 0.401),
+        "run_5000ops_8m_RHC_GREEDY_seed1.json": (3857, 0.7714),
+        "run_5000ops_12m_RHC_GREEDY_seed1.json": (4257, 0.8514),
+        "run_8000ops_4m_RHC_GREEDY_seed1.json": (2078, 0.25975),
+        "run_8000ops_8m_RHC_GREEDY_seed1.json": (4379, 0.547375),
+        "run_8000ops_12m_RHC_GREEDY_seed1.json": (6131, 0.766375),
+    }
+    for name, (ops, ratio) in expected.items():
+        payload = json.loads((folder / name).read_text(encoding="utf-8"))
+        assert payload["search_stop_reason"] == "wall_clock"
+        assert payload["ops_scheduled"] == ops
+        assert payload["scheduled_ratio"] == ratio
+        assert payload["verified_feasible"] is False
+        assert payload["notary_hard_violation_kinds"] == ["MISSING_ASSIGNMENT"]
+
+
 def test_hashed_8k4_remainder_stays_worker_error() -> None:
     folder = _BENCH / "evidence" / "deadzone-5k-2026-08-25"
     hashed = json.loads(
