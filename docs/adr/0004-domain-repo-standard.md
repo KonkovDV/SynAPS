@@ -46,5 +46,8 @@ results as kernel 50k/500k evidence (different algebra).
 - 2026-08-26: GridPlan README header (Version 0.1.1, pin `bd09d13`, TRL 4).
   MobiRoute 0.2.1, pin `5168fc7` under the then lag rule.
 - 2026-08-27: lag-until-2026-09-09 is withdrawn as a wait. Domain PRs bump
-  pins to the kernel residuals commit and must pass the three regression
-  bullets above. KI-N12 stays open until those PRs merge.
+  pins to kernel `54ebf9f32bc871cc27283331d7536c1068c7e606`
+  ([GridPlan #7](https://github.com/KonkovDV/SynAPS-GridPlan/pull/7),
+  [MobiRoute #4](https://github.com/KonkovDV/SynAPS-MobiRoute/pull/4))
+  and must pass the three regression bullets above. KI-N12 stays open
+  until those PRs merge.

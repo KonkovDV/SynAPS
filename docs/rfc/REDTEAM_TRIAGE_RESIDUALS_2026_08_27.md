@@ -2,8 +2,8 @@
 
 Claim level: **honesty**. Not a COVER rewrite. Not a hashed 5k@8 Yes.
 Not a native-wheel Yes on the 100k seed 42 session. Required CI Linux COVER
-cell is added; run id is **не проверено на Linux** until this PR's
-`native-accelerator` job.
+cell ran on [33119219605](https://github.com/KonkovDV/SynAPS/actions/runs/33119219605)
+(`native-accelerator`): 60k@100 seed 1, ratio 1.0, native, wall 8.919 s.
 
 ## Verdict
 
@@ -46,8 +46,7 @@ uses append scan. Hashed epoch JSON is **not** rewritten.
 
 | ID | Sev | Finding |
 | --- | --- | --- |
-| KI-N10 Linux run | MEDIUM | COVER 60k cell **не проверено на Linux** until PR `native-accelerator` |
-| KI-N12 | MEDIUM | GridPlan/MobiRoute pin bump is a domain PR on this kernel SHA |
+| KI-N12 | MEDIUM | GridPlan [#7](https://github.com/KonkovDV/SynAPS-GridPlan/pull/7) and MobiRoute [#4](https://github.com/KonkovDV/SynAPS-MobiRoute/pull/4) pin `54ebf9f`; open until merge |
 | KI-N1 night | CRITICAL | Night analog still not an ALNS Yes |
 | Hashed 5k@8 ALNS | CRITICAL | Epoch remains 0.0 / `wall_clock_before_search` |
 
@@ -55,7 +54,7 @@ uses append scan. Hashed epoch JSON is **not** rewritten.
 
 | Surface | Run | Note |
 | --- | --- | --- |
-| This drop `native-accelerator` COVER 60k | **не проверено на Linux** | job added; wait for the PR run |
+| This drop `native-accelerator` COVER 60k | [33119219605](https://github.com/KonkovDV/SynAPS/actions/runs/33119219605) | 60k@100 seed 1, ratio 1.0, native, wall 8.919 s, RSS 438.7 MB |
 | Prior `main` required including `test-slow` | [33103963622](https://github.com/KonkovDV/SynAPS/actions/runs/33103963622) | unchanged this drop |
 
 ## Non-claims
@@ -64,4 +63,4 @@ uses append scan. Hashed epoch JSON is **not** rewritten.
 - Not a retune of `global_greedy_cover_min_ops`.
 - Not a Yes on hashed 5k@8 or hashed COVER 100k seed 42.
 - Not native COVER on the 100k seed 42 session.
-- Not Linux-green for the new COVER cell until the PR job id exists.
+- Not a hashed 500k re-run. The Linux cell is 60k@100 seed 1 only.

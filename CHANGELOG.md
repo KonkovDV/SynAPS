@@ -18,9 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hashed 100k@200 seed 42 stays STALL; Python recapture ratio 1.0 in 40.137 s
   (`benchmark/BENCHMARK_EVIDENCE_COVER_100K_SEED42_2026_08_27.md`).
   PR CI `native-accelerator` runs COVER 60k@100 seed 1 `--ci-gate`.
-  Linux COVER: **не проверено на Linux**. BEAM night leftovers moved to
-  `sessions/beam-3-night-boxed-leftover-2026-08-26/`
+  Linux COVER 60k@100 seed 1: [33119219605](https://github.com/KonkovDV/SynAPS/actions/runs/33119219605),
+  ratio 1.0, native, wall 8.919 s
   (`docs/rfc/REDTEAM_TRIAGE_RESIDUALS_2026_08_27.md`).
+  BEAM night leftovers moved to
+  `sessions/beam-3-night-boxed-leftover-2026-08-26/`.
 
 - **Honesty close (2026-08-26):** GitHub About and README portfolio count are
   25 configs (CI: `tests/test_readme_portfolio_count.py`). Scale protocol in

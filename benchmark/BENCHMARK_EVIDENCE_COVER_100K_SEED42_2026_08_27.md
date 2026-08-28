@@ -34,7 +34,9 @@ on the packed timeline hung >480 s).
 1. Not a rewrite of hashed COVER JSON. Hashed 100k@200 remains two of three.
 2. Not native list-schedule (this process had no `synaps_native` wheel).
 3. Not a retune of `global_greedy_cover_min_ops` or residual placement policy.
-4. Not Linux. Linux COVER in PR CI is the 60k@100 seed 1 cell, not this file.
+4. Not this 100k file on Linux. Linux PR CI 60k@100 seed 1 is
+   [33119219605](https://github.com/KonkovDV/SynAPS/actions/runs/33119219605)
+   (`docs/rfc/REDTEAM_TRIAGE_RESIDUALS_2026_08_27.md`).
 5. Not a three-seed hashed Yes at 100k.
 
 ## Artifact SHA-256
