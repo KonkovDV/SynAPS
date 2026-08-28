@@ -167,6 +167,29 @@ def aggregate(runs: list[dict[str, Any]]) -> dict[str, Any]:
     return summary
 
 
+def _ci_gate_failures(runs: list[dict[str, Any]], *, max_wall_s: float) -> list[str]:
+    """Linux PR COVER cell: native list-schedule, full coverage, not a stall."""
+
+    failures: list[str] = []
+    if not runs:
+        return ["no COVER runs"]
+    for record in runs:
+        label = f"{record.get('scale_id')} seed={record.get('seed')}"
+        if record.get("stalled"):
+            failures.append(f"{label}: stalled")
+            continue
+        if record.get("scheduled_ratio") != 1.0:
+            failures.append(f"{label}: scheduled_ratio={record.get('scheduled_ratio')}")
+        if record.get("verified_feasible") is not True:
+            failures.append(f"{label}: verified_feasible={record.get('verified_feasible')}")
+        if record.get("native_backend") != "native":
+            failures.append(f"{label}: native_backend={record.get('native_backend')}")
+        wall = record.get("wall_time_s")
+        if not isinstance(wall, int | float) or wall > max_wall_s:
+            failures.append(f"{label}: wall_time_s={wall} exceeds {max_wall_s}")
+    return failures
+
+
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT)
@@ -181,6 +204,17 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--session-id",
         default="",
         help="Write this run under out_dir/sessions/<id>/ (does not replace historical files)",
+    )
+    parser.add_argument(
+        "--ci-gate",
+        action="store_true",
+        help="Exit 1 unless every run is native, ratio 1.0, verified, and under --max-wall-s",
+    )
+    parser.add_argument(
+        "--max-wall-s",
+        type=float,
+        default=180.0,
+        help="CI gate wall-time cap per cell (seconds)",
     )
     return parser.parse_args(argv)
 
@@ -238,6 +272,13 @@ def main(argv: list[str] | None = None) -> int:
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     write_hashes(out_dir, sorted(out_dir.glob("*.json")))
     print(f"wrote {out_dir}", flush=True)
+    if args.ci_gate:
+        failures = _ci_gate_failures(runs, max_wall_s=float(args.max_wall_s))
+        if failures:
+            print("COVER CI gate failed:", flush=True)
+            for item in failures:
+                print(f"  {item}", flush=True)
+            return 1
     return 0
 
 

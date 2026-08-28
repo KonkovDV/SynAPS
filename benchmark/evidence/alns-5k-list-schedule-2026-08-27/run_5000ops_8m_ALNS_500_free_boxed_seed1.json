@@ -1,0 +1,23 @@
+{
+  "coverage_class": "full",
+  "generate_s": 0.186,
+  "initial_solver": "list_schedule_cover",
+  "iterations_completed": 22,
+  "n_machines": 8,
+  "n_operations_requested": 5000,
+  "night_analog": false,
+  "notary_hard_violation_kinds": null,
+  "ops_generated": 5000,
+  "ops_scheduled": 5000,
+  "scheduled_ratio": 1.0,
+  "search_stop_reason": "wall_clock",
+  "seed": 1,
+  "solver_config": "ALNS-500",
+  "status": "feasible",
+  "time_limit_exhausted_before_search": false,
+  "time_limit_reached": null,
+  "time_limit_s_kwarg": 90.0,
+  "verified_feasible": true,
+  "wall_clock_before_search": false,
+  "wall_time_s": 92.162
+}

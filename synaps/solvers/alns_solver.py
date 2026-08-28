@@ -282,6 +282,62 @@ def _maybe_prefer_python_seed(
     return "native_greedy", native_assignments
 
 
+def _try_unconstrained_list_schedule_seed(
+    problem: ScheduleProblem,
+    *,
+    dispatch_context: Any,
+    n_ops: int,
+    frozen_assignments: list[Assignment],
+    deadline_exceeded: Callable[[], bool] | None,
+) -> ScheduleResult | None:
+    """Complete unconstrained large-n seed via COVER list-schedule.
+
+    Does not change ``global_greedy_cover_min_ops``. Hard windows / calendar
+    skip this path. Frozen RHC inner windows skip it too.
+    """
+
+    if frozen_assignments or n_ops < APPEND_GAP_SCAN_MIN_OPS:
+        return None
+    from synaps.calendar import work_centers_have_calendar
+    from synaps.solvers.rhc._cover import place_operations_list_schedule
+    from synaps.solvers.rhc._solver import RhcSolver
+
+    if work_centers_have_calendar(problem.work_centers):
+        return None
+    if any(
+        operation.earliest_start is not None or operation.latest_finish is not None
+        for operation in problem.operations
+    ):
+        return None
+    horizon_start = problem.planning_horizon_start
+    horizon_minutes = (problem.planning_horizon_end - horizon_start).total_seconds() / 60.0
+    op_earliest: dict[Any, float] = {}
+    RhcSolver._compute_earliest_starts(problem, op_earliest)
+    assignments: list[Assignment] = []
+    assignment_by_op: dict[Any, Assignment] = {}
+    scheduled_ids: set[Any] = set()
+    place_operations_list_schedule(
+        operations=problem.operations,
+        dispatch_context=dispatch_context,
+        assignments=assignments,
+        assignment_by_op=assignment_by_op,
+        scheduled_ids=scheduled_ids,
+        horizon_start=horizon_start,
+        horizon_minutes=horizon_minutes,
+        op_earliest=op_earliest,
+        default_wc_ids=[work_center.id for work_center in problem.work_centers],
+        deadline_exceeded=deadline_exceeded,
+    )
+    if not assignments:
+        return None
+    status = SolverStatus.FEASIBLE if len(assignments) == n_ops else SolverStatus.TIMEOUT
+    return ScheduleResult(
+        solver_name="list_schedule_cover",
+        status=status,
+        assignments=assignments,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Incremental objective evaluation (P2.1 — avoids full re-sort every iter)
 # ---------------------------------------------------------------------------
@@ -3627,6 +3683,17 @@ class AlnsSolver(BaseSolver):
                 else:
                     native_initial_seed_fallback_reason = "native_unavailable_or_failed"
 
+        if initial_result is None:
+            cover_seed = _try_unconstrained_list_schedule_seed(
+                problem,
+                dispatch_context=dispatch_context,
+                n_ops=n_ops,
+                frozen_assignments=frozen_assignments,
+                deadline_exceeded=_phase1_budget_exhausted,
+            )
+            if cover_seed is not None:
+                initial_solver_name = "list_schedule_cover"
+                initial_result = cover_seed
         if initial_result is None:
             if n_ops <= initial_beam_op_limit:
                 seed_kw = {"time_limit_s": _initial_seed_budget_s()}

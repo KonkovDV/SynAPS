@@ -59,6 +59,10 @@ benchmark/studies/
 !benchmark/studies/.gitkeep
 benchmark/evidence/**/*.job
 
+# Local leftovers must not land in the hashed BEAM/ALNS box folder (K3-R5).
+benchmark/evidence/beam-alns-box-2026-08-26/run_3000ops_4m_BEAM_3_night_boxed_seed42.json
+benchmark/evidence/beam-alns-box-2026-08-26/run_3000ops_4m_BEAM_3_night_boxed_seed999.json
+
 # Cursor / agent local probes (never publish)
 .cursor-*
 

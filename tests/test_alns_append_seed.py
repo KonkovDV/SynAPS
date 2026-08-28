@@ -5,11 +5,23 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
-from synaps.model import Assignment, ScheduleProblem, ScheduleResult, SolverStatus
+from synaps.model import (
+    Assignment,
+    Operation,
+    Order,
+    ScheduleProblem,
+    ScheduleResult,
+    ShiftInterval,
+    SolverStatus,
+    State,
+    WorkCenter,
+)
+from synaps.solvers._dispatch_support import build_dispatch_context
 from synaps.solvers.alns_solver import (
     AlnsSolver,
     _try_native_greedy_repair,
     _try_native_initial_seed,
+    _try_unconstrained_list_schedule_seed,
 )
 from tests.conftest import HORIZON_START, make_simple_problem
 
@@ -130,3 +142,67 @@ def test_alns_enters_search_without_completion_repair_at_append_threshold(
     assert result.metadata["search_stop_reason"] != "wall_clock_before_search"
     assert int(result.metadata.get("iterations_completed") or 0) >= 1
     assert result.assignments
+
+
+def test_alns_list_schedule_seed_covers_unconstrained_at_append_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fell before fix: ALNS-500 at n>=2000 seeded incomplete greedy and never closed."""
+
+    import synaps.solvers.alns_solver as alns
+
+    monkeypatch.setattr(alns, "APPEND_GAP_SCAN_MIN_OPS", 1)
+    problem = make_simple_problem(n_orders=2, ops_per_order=2)
+    result = AlnsSolver().solve(
+        problem,
+        max_iterations=2,
+        time_limit_s=20,
+        use_cpsat_repair=False,
+        sa_auto_calibration_enabled=False,
+        native_initial_seed_enabled=True,
+        random_seed=1,
+        min_destroy=1,
+        max_destroy=2,
+    )
+    assert result.metadata["initial_solver"] == "list_schedule_cover"
+    assert len(result.assignments) == len(problem.operations)
+
+
+def test_list_schedule_seed_skips_calendar_instances(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import synaps.solvers.alns_solver as alns
+
+    monkeypatch.setattr(alns, "APPEND_GAP_SCAN_MIN_OPS", 1)
+    horizon_end = HORIZON_START + timedelta(hours=12)
+    state = State(code="s")
+    work_center = WorkCenter(
+        code="M",
+        capability_group="G",
+        calendar=[ShiftInterval(start=HORIZON_START + timedelta(hours=8), end=horizon_end)],
+    )
+    order = Order(external_ref="O", due_date=horizon_end)
+    operation = Operation(
+        order_id=order.id,
+        seq_in_order=1,
+        state_id=state.id,
+        base_duration_min=60,
+        eligible_wc_ids=[work_center.id],
+    )
+    problem = ScheduleProblem(
+        states=[state],
+        orders=[order],
+        operations=[operation],
+        work_centers=[work_center],
+        setup_matrix=[],
+        planning_horizon_start=HORIZON_START,
+        planning_horizon_end=horizon_end,
+    )
+    seed = _try_unconstrained_list_schedule_seed(
+        problem,
+        dispatch_context=build_dispatch_context(problem),
+        n_ops=1,
+        frozen_assignments=[],
+        deadline_exceeded=lambda: False,
+    )
+    assert seed is None

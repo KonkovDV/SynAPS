@@ -1,0 +1,19 @@
+{
+  "generate_s": 0.118,
+  "n_machines": 4,
+  "n_operations_requested": 3000,
+  "night_analog": true,
+  "notary_hard_violation_kinds": null,
+  "ops_generated": 3000,
+  "ops_scheduled": 656,
+  "scheduled_ratio": 0.21866666666666668,
+  "search_stop_reason": null,
+  "seed": 999,
+  "solver_config": "BEAM-3",
+  "status": "timeout",
+  "time_limit_reached": null,
+  "time_limit_s_kwarg": 120.0,
+  "verified_feasible": false,
+  "wall_clock_before_search": false,
+  "wall_time_s": 14141.052
+}

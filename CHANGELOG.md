@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Residuals / KI-N1 N4 N10 (2026-08-27):** Unconstrained ALNS-500 at n>=2000
+  seeds from COVER list-schedule (not a `global_greedy_cover_min_ops` retune).
+  Session 5k@8 90 s box, walls 92.162 s / 89.706 s / 89.207 s
+  (`benchmark/BENCHMARK_EVIDENCE_ALNS_500_5K_LIST_SCHEDULE_2026_08_27.md`):
+  ratio 1.0 / `verified_feasible=true` / `list_schedule_cover` on seeds 1/42/999.
+  Hashed И5.2 JSON stays 0.0. COVER residual fill uses append scan at n>=2000;
+  hashed 100k@200 seed 42 stays STALL; Python recapture ratio 1.0 in 40.137 s
+  (`benchmark/BENCHMARK_EVIDENCE_COVER_100K_SEED42_2026_08_27.md`).
+  PR CI `native-accelerator` runs COVER 60k@100 seed 1 `--ci-gate`.
+  Linux COVER 60k@100 seed 1: [33119219605](https://github.com/KonkovDV/SynAPS/actions/runs/33119219605),
+  ratio 1.0, native, wall 8.919 s
+  (`docs/rfc/REDTEAM_TRIAGE_RESIDUALS_2026_08_27.md`).
+  BEAM night leftovers moved to
+  `sessions/beam-3-night-boxed-leftover-2026-08-26/`.
+
 - **Honesty close (2026-08-26):** GitHub About and README portfolio count are
   25 configs (CI: `tests/test_readme_portfolio_count.py`). Scale protocol in
   README now points at
