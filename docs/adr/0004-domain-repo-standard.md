@@ -18,12 +18,14 @@
 
 ## Pin lag (P3.3)
 
-GridPlan pin (2026-08-26 close): `bd09d13561b3bd690845d07546def59b4521b16c`.
-MobiRoute pin (same era): `5168fc71005653945097e1f07ada1ce9cbc02eec`.
+GridPlan pin: `54ebf9f32bc871cc27283331d7536c1068c7e606`
+([b795361](https://github.com/KonkovDV/SynAPS-GridPlan/commit/b795361116739e0f613112d636f9027cb22e75b4)).
+MobiRoute pin: the same kernel SHA
+([066579b](https://github.com/KonkovDV/SynAPS-MobiRoute/commit/066579b561a93b36b2b55ae7b89a6fbca5fa2bc2)).
 
 **2026-08-27:** waiting until 2026-09-09 is no longer the plan. Domain PRs
-must bump to the kernel commit that lands this residuals drop (full 40-char
-SHA, never `main`). That bump must regression-run:
+bumped to that kernel commit (full 40-char SHA, never `main`). The bump
+regression-ran:
 
 1. Fail-closed coverage (`EMPTY`+`FEASIBLE` is `ERROR`; CLI codes 0/2/3/1).
 2. Non-empty `WorkCenter.calendar` is refused by CP-SAT/ALNS/LBBD and clipped
@@ -31,8 +33,8 @@ SHA, never `main`). That bump must regression-run:
 3. Kernel `python scripts/verify_claims.py` on the pinned SHA (already green
    in kernel CI).
 
-Until the domain PRs merge, KI-N12 stays **open**. After they merge, record
-the new SHAs here and in each domain README.
+KI-N12 is **closed** on those domain SHAs. A later kernel merge-commit
+(`09f7322`) is a descendant of the pin; domains do not float on `main`.
 
 Night/emergency work in a domain layer is not a kernel calendar promise:
 only greedy-family configs clip shifts, and windowed coverage on the night
@@ -45,9 +47,7 @@ results as kernel 50k/500k evidence (different algebra).
 
 - 2026-08-26: GridPlan README header (Version 0.1.1, pin `bd09d13`, TRL 4).
   MobiRoute 0.2.1, pin `5168fc7` under the then lag rule.
-- 2026-08-27: lag-until-2026-09-09 is withdrawn as a wait. Domain PRs bump
-  pins to kernel `54ebf9f32bc871cc27283331d7536c1068c7e606`
-  ([GridPlan #7](https://github.com/KonkovDV/SynAPS-GridPlan/pull/7),
-  [MobiRoute #4](https://github.com/KonkovDV/SynAPS-MobiRoute/pull/4))
-  and must pass the three regression bullets above. KI-N12 stays open
-  until those PRs merge.
+- 2026-08-27: lag-until-2026-09-09 is withdrawn as a wait. Domain PRs
+  merged: GridPlan [#7](https://github.com/KonkovDV/SynAPS-GridPlan/pull/7)
+  `b795361`, MobiRoute [#4](https://github.com/KonkovDV/SynAPS-MobiRoute/pull/4)
+  `066579b`, pin `54ebf9f`. KI-N12 closed.

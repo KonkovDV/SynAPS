@@ -46,7 +46,6 @@ uses append scan. Hashed epoch JSON is **not** rewritten.
 
 | ID | Sev | Finding |
 | --- | --- | --- |
-| KI-N12 | MEDIUM | GridPlan [#7](https://github.com/KonkovDV/SynAPS-GridPlan/pull/7) and MobiRoute [#4](https://github.com/KonkovDV/SynAPS-MobiRoute/pull/4) pin `54ebf9f`; open until merge |
 | KI-N1 night | CRITICAL | Night analog still not an ALNS Yes |
 | Hashed 5k@8 ALNS | CRITICAL | Epoch remains 0.0 / `wall_clock_before_search` |
 

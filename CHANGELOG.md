@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`docs/rfc/REDTEAM_TRIAGE_RESIDUALS_2026_08_27.md`).
   BEAM night leftovers moved to
   `sessions/beam-3-night-boxed-leftover-2026-08-26/`.
+  KI-N12 closed: GridPlan
+  [b795361](https://github.com/KonkovDV/SynAPS-GridPlan/commit/b795361116739e0f613112d636f9027cb22e75b4),
+  MobiRoute
+  [066579b](https://github.com/KonkovDV/SynAPS-MobiRoute/commit/066579b561a93b36b2b55ae7b89a6fbca5fa2bc2),
+  pin `54ebf9f` (`docs/adr/0004-domain-repo-standard.md`).
 
 - **Honesty close (2026-08-26):** GitHub About and README portfolio count are
   25 configs (CI: `tests/test_readme_portfolio_count.py`). Scale protocol in
