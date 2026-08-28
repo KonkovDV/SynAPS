@@ -1,4 +1,4 @@
-"""Work-center shift calendar (KI-N7): checker, greedy clip, native skip."""
+"""Work-center shift calendar (KI-N7): checker, greedy clip, native occupancy."""
 
 from __future__ import annotations
 
@@ -83,6 +83,13 @@ def test_delay_start_jumps_to_shift_open() -> None:
 def test_delay_start_none_when_duration_exceeds_shift() -> None:
     shift = _night_shift()
     assert delay_start_to_open_shift(0.0, 9 * 60, [shift], H0) is None
+
+
+def test_shift_minute_spans_ceils_open_floors_close() -> None:
+    from synaps.calendar import shift_minute_spans
+
+    spans = shift_minute_spans([_night_shift()], H0)
+    assert spans == [(8 * 60, 16 * 60)]
 
 
 def test_checker_emits_calendar_violation() -> None:
@@ -192,6 +199,90 @@ def test_greed_clips_to_shift() -> None:
     assert not FeasibilityChecker().check(problem, result.assignments, exhaustive=True)
 
 
+def test_list_schedule_cover_clips_setup_into_open_shift() -> None:
+    """Python COVER list-schedule delays occupancy [start-setup, end] into one shift."""
+
+    from synaps.solvers._dispatch_support import build_dispatch_context
+    from synaps.solvers.rhc._cover import place_operations_list_schedule
+
+    problem = _one_op_problem(calendar=[_night_shift()])
+    context = build_dispatch_context(problem)
+    assignments: list[Assignment] = []
+    by_op: dict = {}
+    scheduled: set = set()
+    stats = place_operations_list_schedule(
+        operations=problem.operations,
+        dispatch_context=context,
+        assignments=assignments,
+        assignment_by_op=by_op,
+        scheduled_ids=scheduled,
+        horizon_start=H0,
+        horizon_minutes=24 * 60.0,
+        op_earliest={op.id: 0.0 for op in problem.operations},
+        default_wc_ids=[problem.work_centers[0].id],
+    )
+    assert stats.placed == 1
+    assert assignments[0].start_time >= H0 + timedelta(hours=8)
+    assert not FeasibilityChecker().check(problem, assignments, exhaustive=True)
+
+
+def test_list_schedule_mixed_fleet_empty_calendar_is_24_7() -> None:
+    """A work center with no published shifts stays 24/7 when a sibling has a calendar."""
+
+    from synaps.solvers._dispatch_support import build_dispatch_context
+    from synaps.solvers.rhc._cover import place_operations_list_schedule
+
+    state = State(code="s")
+    closed = WorkCenter(code="NIGHT", capability_group="G", calendar=[_night_shift()])
+    always = WorkCenter(code="DAY", capability_group="G", calendar=[])
+    night_order = Order(external_ref="NIGHT", due_date=HE)
+    open_order = Order(external_ref="DAY", due_date=HE)
+    night_op = Operation(
+        order_id=night_order.id,
+        seq_in_order=0,
+        state_id=state.id,
+        base_duration_min=60,
+        eligible_wc_ids=[closed.id],
+    )
+    open_op = Operation(
+        order_id=open_order.id,
+        seq_in_order=0,
+        state_id=state.id,
+        base_duration_min=60,
+        eligible_wc_ids=[always.id],
+    )
+    problem = ScheduleProblem(
+        states=[state],
+        orders=[night_order, open_order],
+        operations=[night_op, open_op],
+        work_centers=[closed, always],
+        setup_matrix=[],
+        planning_horizon_start=H0,
+        planning_horizon_end=HE,
+    )
+    context = build_dispatch_context(problem)
+    assignments: list[Assignment] = []
+    by_op: dict = {}
+    scheduled: set = set()
+    stats = place_operations_list_schedule(
+        operations=problem.operations,
+        dispatch_context=context,
+        assignments=assignments,
+        assignment_by_op=by_op,
+        scheduled_ids=scheduled,
+        horizon_start=H0,
+        horizon_minutes=24 * 60.0,
+        op_earliest={op.id: 0.0 for op in problem.operations},
+        default_wc_ids=[closed.id, always.id],
+    )
+    assert stats.placed == 2
+    assert by_op[night_op.id].work_center_id == closed.id
+    assert by_op[open_op.id].work_center_id == always.id
+    assert by_op[night_op.id].start_time >= H0 + timedelta(hours=8)
+    assert by_op[open_op.id].start_time == H0
+    assert not FeasibilityChecker().check(problem, assignments, exhaustive=True)
+
+
 def test_profile_and_router_see_machine_calendar() -> None:
     problem = _one_op_problem(calendar=[_night_shift()])
     assert build_problem_profile(problem).has_hard_time_windows is True
@@ -298,24 +389,80 @@ def test_route_calendar_instance_returns_calendar_aware_whitelist() -> None:
     assert exact_none.solver_config in CALENDAR_AWARE, exact_none.solver_config
 
 
-def test_cpsat_alns_lbbd_refuse_nonempty_calendar() -> None:
+def test_cpsat_alns_lbbd_encode_nonempty_calendar() -> None:
+    """Named exact/ALNS configs encode occupancy; they do not schedule 24/7."""
+
     problem = _one_op_problem(calendar=[_night_shift()])
     for name in ("CPSAT-10", "ALNS-300", "LBBD-5"):
         solver, kwargs = create_solver(name)
-        result = solver.solve(problem, **kwargs)
-        assert result.status is SolverStatus.ERROR, name
-        assert result.assignments == []
-        assert result.metadata.get("calendar_unsupported") is True
+        result = solver.solve(problem, **kwargs, auto_greedy_warm_start=False)
+        assert result.assignments, name
+        assert result.assignments[0].start_time >= H0 + timedelta(hours=8), name
+        assert not FeasibilityChecker().check(problem, result.assignments, exhaustive=True), name
+        assert result.metadata.get("calendar_unsupported") is not True, name
 
 
-def test_cli_calendar_cpsat_exits_3(tmp_path: Path) -> None:
+def test_alns_native_greedy_skips_nonempty_calendar() -> None:
+    """greedy_repair_batch has no occupancy ABI; skip to Python clip."""
+
+    from synaps.solvers.alns_solver import _native_repair_skip_reason
+
+    assert _native_repair_skip_reason(_one_op_problem(calendar=[_night_shift()])) == "calendar"
+    assert _native_repair_skip_reason(_one_op_problem(calendar=[])) is None
+
+
+def test_cpsat_clips_setup_into_open_shift() -> None:
+    from synaps.model import SetupEntry
+
+    state_a = State(code="a")
+    state_b = State(code="b")
+    wc = WorkCenter(code="M", capability_group="G", calendar=[_night_shift()])
+    order = Order(external_ref="O", due_date=HE)
+    op_a = Operation(
+        order_id=order.id,
+        seq_in_order=1,
+        state_id=state_a.id,
+        base_duration_min=30,
+        eligible_wc_ids=[wc.id],
+    )
+    op_b = Operation(
+        order_id=order.id,
+        seq_in_order=2,
+        state_id=state_b.id,
+        predecessor_op_id=op_a.id,
+        base_duration_min=30,
+        eligible_wc_ids=[wc.id],
+    )
+    problem = ScheduleProblem(
+        states=[state_a, state_b],
+        orders=[order],
+        operations=[op_a, op_b],
+        work_centers=[wc],
+        setup_matrix=[
+            SetupEntry(
+                work_center_id=wc.id,
+                from_state_id=state_a.id,
+                to_state_id=state_b.id,
+                setup_minutes=60,
+            )
+        ],
+        planning_horizon_start=H0,
+        planning_horizon_end=HE,
+    )
+    solver, kwargs = create_solver("CPSAT-10")
+    result = solver.solve(problem, **kwargs, auto_greedy_warm_start=False)
+    assert result.assignments
+    assert not FeasibilityChecker().check(problem, result.assignments, exhaustive=True)
+
+
+def test_cli_calendar_cpsat_exits_0(tmp_path: Path) -> None:
     from synaps.cli import main
 
     problem = _one_op_problem(calendar=[_night_shift()])
     instance = tmp_path / "cal.json"
     instance.write_text(problem.model_dump_json(), encoding="utf-8")
     code = main(["solve", str(instance), "--solver-config", "CPSAT-10", "--no-verify-feasibility"])
-    assert code == 3
+    assert code == 0
 
 
 def test_verify_error_with_assignments_still_runs_notary() -> None:

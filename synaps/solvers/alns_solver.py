@@ -40,7 +40,7 @@ from synaps.solvers._dispatch_support import (
     recompute_assignment_setups,
 )
 from synaps.solvers._time_windows import operation_earliest_offset_minutes
-from synaps.solvers.coverage_outcome import refuse_unsupported_calendar, stamp_honest_coverage
+from synaps.solvers.coverage_outcome import stamp_honest_coverage
 from synaps.solvers.feasibility_checker import FeasibilityChecker
 
 try:
@@ -290,10 +290,12 @@ def _try_unconstrained_list_schedule_seed(
     frozen_assignments: list[Assignment],
     deadline_exceeded: Callable[[], bool] | None,
 ) -> ScheduleResult | None:
-    """Complete unconstrained large-n seed via COVER list-schedule.
+    """Complete large-n seed via COVER list-schedule.
 
-    Does not change ``global_greedy_cover_min_ops``. Hard windows / calendar
-    skip this path. Frozen RHC inner windows skip it too.
+    Does not change ``global_greedy_cover_min_ops``. Machine calendar skips
+    this ALNS seed path (auto-route stays ``CALENDAR_AWARE``). Hard per-op windows are
+    allowed: list-schedule already clips ``latest_finish``. Frozen RHC inner
+    windows skip it.
     """
 
     if frozen_assignments or n_ops < APPEND_GAP_SCAN_MIN_OPS:
@@ -303,11 +305,6 @@ def _try_unconstrained_list_schedule_seed(
     from synaps.solvers.rhc._solver import RhcSolver
 
     if work_centers_have_calendar(problem.work_centers):
-        return None
-    if any(
-        operation.earliest_start is not None or operation.latest_finish is not None
-        for operation in problem.operations
-    ):
         return None
     horizon_start = problem.planning_horizon_start
     horizon_minutes = (problem.planning_horizon_end - horizon_start).total_seconds() / 60.0
@@ -1591,11 +1588,15 @@ def _window_notary_violations(
 
 
 def _native_repair_skip_reason(problem: ScheduleProblem) -> str | None:
-    """Native greedy is serial and aux-blind; skip rather than inject faults."""
+    """Native greedy_repair has no calendar ABI; skip rather than inject 24/7."""
+    from synaps.calendar import work_centers_have_calendar
+
     if problem.aux_requirements:
         return "aux_requirements"
     if any(int(getattr(wc, "max_parallel", 1) or 1) > 1 for wc in problem.work_centers):
         return "parallel_machines"
+    if work_centers_have_calendar(problem.work_centers):
+        return "calendar"
     return None
 
 
@@ -3090,9 +3091,6 @@ class AlnsSolver(BaseSolver):
         return "alns"
 
     def solve(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
-        refused = refuse_unsupported_calendar(problem, self.name)
-        if refused is not None:
-            return refused
         # M2: virtualize max_parallel>1 work centers into disjunctive lanes so
         # the destroy/repair loop (which has no cumulative-capacity concept)
         # can run ops concurrently on a parallel machine instead of serializing

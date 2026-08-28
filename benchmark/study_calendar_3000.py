@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from benchmark.evidence_common import REPO_ROOT, collect_environment, write_hashes
+from synaps.accelerators import get_acceleration_status
 from synaps.benchmarks.instance_generator import generate_large_instance
 from synaps.calendar import delay_start_to_open_shift
 from synaps.model import (
@@ -202,6 +203,7 @@ def run_one(*, seed: int) -> dict[str, Any]:
     scheduled = len(result.assignments)
     total = len(problem.operations)
     meta = dict(result.metadata or {})
+    accel = get_acceleration_status()
     return {
         "protocol": "machine-calendar-3000-8-2026-08-27",
         "geometry": "work_center.calendar night 22:00-06:00; per-op windows empty",
@@ -229,6 +231,10 @@ def run_one(*, seed: int) -> dict[str, Any]:
         "night_hours": NIGHT_HOURS,
         "reason_counts": tallies,
         "unplaced": unplaced,
+        "native_probe": False,
+        "bypass_gate": False,
+        "native_available": accel.get("native_available"),
+        "native_backend": accel.get("list_schedule_cover_backend"),
     }
 
 
@@ -236,10 +242,26 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--seeds", default="1,42,999")
+    parser.add_argument(
+        "--session-id",
+        default="",
+        help="Write under out_dir/sessions/<id>/ (does not replace hashed JSON)",
+    )
+    parser.add_argument(
+        "--native-probe",
+        action="store_true",
+        help="Bypass n>=10000 native gate in this process only. Kernel default stays 10_000.",
+    )
     args = parser.parse_args(argv)
     out_dir: Path = args.out_dir
+    if str(args.session_id).strip():
+        out_dir = out_dir / "sessions" / str(args.session_id).strip()
     out_dir.mkdir(parents=True, exist_ok=True)
     seeds = [int(tok) for tok in str(args.seeds).split(",") if tok.strip()]
+    if args.native_probe:
+        from synaps.solvers.rhc import _cover as rhc_cover
+
+        rhc_cover._NATIVE_LIST_SCHEDULE_MIN_OPS = 0
     env_path = out_dir / "environment.json"
     env_path.write_text(
         json.dumps(collect_environment(), indent=2, sort_keys=True) + "\n",
@@ -250,6 +272,8 @@ def main(argv: list[str] | None = None) -> int:
         path = out_dir / f"run_3000ops_8m_RHC_GREEDY_calendar_seed{seed}.json"
         print(f"run seed={seed}", flush=True)
         record = run_one(seed=seed)
+        record["native_probe"] = bool(args.native_probe)
+        record["bypass_gate"] = bool(args.native_probe)
         path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(
             f"  ratio={record['scheduled_ratio']:.4f} wall={record['wall_time_s']} "
@@ -267,6 +291,8 @@ def main(argv: list[str] | None = None) -> int:
         "notary_kinds_by_seed": {
             str(row["seed"]): row["notary_hard_violation_kinds"] for row in runs
         },
+        "native_probe": bool(args.native_probe),
+        "bypass_gate": bool(args.native_probe),
     }
     (out_dir / "summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"

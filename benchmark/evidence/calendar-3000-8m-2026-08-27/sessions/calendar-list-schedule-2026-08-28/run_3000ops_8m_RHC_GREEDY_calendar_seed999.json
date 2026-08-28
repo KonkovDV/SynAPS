@@ -1,0 +1,33 @@
+{
+  "generate_s": 0.041,
+  "geometry": "work_center.calendar night 22:00-06:00; per-op windows empty",
+  "has_machine_calendar": true,
+  "has_per_op_windows": false,
+  "independent_violation_kinds": [],
+  "n_machines": 8,
+  "n_operations_requested": 3000,
+  "night_hours": 8,
+  "night_start_hour": 22,
+  "not_the_deadzone_ratio": "0.7702 is per-op windows on 24/7 machines; do not reuse",
+  "notary_hard_violation_count": 0,
+  "notary_hard_violation_kinds": [],
+  "ops_generated": 3000,
+  "ops_scheduled": 3000,
+  "protocol": "machine-calendar-3000-8-2026-08-27",
+  "reason_counts": {
+    "GOST_PRIORITY_PREEMPTED": 0,
+    "IMPOSSIBLE_BY_CONSTRUCTION": 0,
+    "NO_CREW_CAPACITY": 0,
+    "WINDOW_CLOSED": 0
+  },
+  "scheduled_ratio": 1.0,
+  "search_stop_reason": "completed",
+  "seed": 999,
+  "solver_config": "RHC-GREEDY",
+  "status": "feasible",
+  "time_limit_reached": false,
+  "unplaced": [],
+  "unplaced_count": 0,
+  "verified_feasible": true,
+  "wall_time_s": 0.286
+}

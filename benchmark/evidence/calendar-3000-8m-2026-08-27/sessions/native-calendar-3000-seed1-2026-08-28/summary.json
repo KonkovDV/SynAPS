@@ -1,0 +1,26 @@
+{
+  "bypass_gate": true,
+  "native_probe": true,
+  "notary_kinds_by_seed": {
+    "1": []
+  },
+  "protocol": "machine-calendar-3000-8-2026-08-27",
+  "reason_counts_by_seed": {
+    "1": {
+      "GOST_PRIORITY_PREEMPTED": 0,
+      "IMPOSSIBLE_BY_CONSTRUCTION": 0,
+      "NO_CREW_CAPACITY": 0,
+      "WINDOW_CLOSED": 0
+    }
+  },
+  "scheduled_ratios": [
+    1.0
+  ],
+  "seeds": [
+    1
+  ],
+  "solver_config": "RHC-GREEDY",
+  "walls_s": [
+    0.164
+  ]
+}

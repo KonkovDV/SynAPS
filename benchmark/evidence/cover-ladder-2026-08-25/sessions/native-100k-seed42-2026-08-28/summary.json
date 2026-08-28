@@ -1,0 +1,127 @@
+{
+  "by_scale": {
+    "100k@200": {
+      "all_notary_empty": true,
+      "all_verified_feasible": true,
+      "any_determinism_violated": false,
+      "makespan_minutes": {
+        "ci95_note": "Student t, df=0, two-tailed 0.05. n<2 or n>31 \u21d2 no interval. Treat as a dispersion bound, not a quality claim.",
+        "ci95_t_halfwidth": null,
+        "ci95_t_high": 33497.0,
+        "ci95_t_low": 33497.0,
+        "cv": 0.0,
+        "max": 33497.0,
+        "mean": 33497.0,
+        "median": 33497.0,
+        "min": 33497.0,
+        "n": 1,
+        "stdev_population": 0.0,
+        "stdev_sample": 0.0
+      },
+      "n_completed": 1,
+      "n_seeds": 1,
+      "n_stalled": 0,
+      "ops_generated": [
+        100000
+      ],
+      "peak_rss_mb": {
+        "ci95_note": "Student t, df=0, two-tailed 0.05. n<2 or n>31 \u21d2 no interval. Treat as a dispersion bound, not a quality claim.",
+        "ci95_t_halfwidth": null,
+        "ci95_t_high": 845.5,
+        "ci95_t_low": 845.5,
+        "cv": 0.0,
+        "max": 845.5,
+        "mean": 845.5,
+        "median": 845.5,
+        "min": 845.5,
+        "n": 1,
+        "stdev_population": 0.0,
+        "stdev_sample": 0.0
+      },
+      "scheduled_ratio": {
+        "ci95_note": "Student t, df=0, two-tailed 0.05. n<2 or n>31 \u21d2 no interval. Treat as a dispersion bound, not a quality claim.",
+        "ci95_t_halfwidth": null,
+        "ci95_t_high": 1.0,
+        "ci95_t_low": 1.0,
+        "cv": 0.0,
+        "max": 1.0,
+        "mean": 1.0,
+        "median": 1.0,
+        "min": 1.0,
+        "n": 1,
+        "stdev_population": 0.0,
+        "stdev_sample": 0.0
+      },
+      "seeds": [
+        42
+      ],
+      "wall_time_s": {
+        "ci95_note": "Student t, df=0, two-tailed 0.05. n<2 or n>31 \u21d2 no interval. Treat as a dispersion bound, not a quality claim.",
+        "ci95_t_halfwidth": null,
+        "ci95_t_high": 9.926,
+        "ci95_t_low": 9.926,
+        "cv": 0.0,
+        "max": 9.926,
+        "mean": 9.926,
+        "median": 9.926,
+        "min": 9.926,
+        "n": 1,
+        "stdev_population": 0.0,
+        "stdev_sample": 0.0
+      }
+    }
+  },
+  "environment_file": "environment.json",
+  "protocol": "COVER ladder 2026-08-25",
+  "runs": [
+    {
+      "commit_precedence_gate_enabled": false,
+      "determinism": "strict",
+      "determinism_violated": false,
+      "generate_s": 2.651,
+      "generator_kwargs": {
+        "horizon_hours": 720,
+        "n_machines": 200,
+        "n_operations": 100000,
+        "seed": 42
+      },
+      "global_greedy_cover": true,
+      "horizon_clipped_assignments": 149,
+      "horizon_minutes": 43200.0,
+      "independent_violation_count": 0,
+      "independent_violation_kinds": [],
+      "makespan_minutes": 33497.0,
+      "native_available": true,
+      "native_backend": "native",
+      "notary_empty": true,
+      "notary_hard_violation_count": 0,
+      "notary_hard_violation_kinds": [],
+      "ops_generated": 100000,
+      "ops_scheduled": 100000,
+      "ops_unscheduled": 0,
+      "peak_rss_bytes": 886591488,
+      "peak_rss_mb": 845.5,
+      "rss_before_bytes": 470822912,
+      "scale_id": "100k@200",
+      "scheduled_ratio": 1.0,
+      "search_stop_reason": "completed",
+      "seed": 42,
+      "status": "feasible",
+      "temporal_stabilization": {
+        "aux_shifts": 0,
+        "ceiling_blocks": 0,
+        "converged": 1,
+        "machine_shifts": 0,
+        "passes": 1,
+        "precedence_shifts": 0
+      },
+      "time_limit_reached": false,
+      "verified_feasible": true,
+      "wall_time_s": 9.926
+    }
+  ],
+  "seeds": [
+    42
+  ],
+  "solver_config": "RHC-GREEDY-COVER"
+}

@@ -206,3 +206,29 @@ def test_list_schedule_seed_skips_calendar_instances(
         deadline_exceeded=lambda: False,
     )
     assert seed is None
+
+
+def test_list_schedule_seed_allows_hard_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    import synaps.solvers.alns_solver as alns
+
+    monkeypatch.setattr(alns, "APPEND_GAP_SCAN_MIN_OPS", 1)
+    problem = make_simple_problem(n_orders=2, ops_per_order=2)
+    stamped = [
+        operation.model_copy(
+            update={
+                "earliest_start": HORIZON_START,
+                "latest_finish": HORIZON_START + timedelta(hours=12),
+            }
+        )
+        for operation in problem.operations
+    ]
+    problem = problem.model_copy(update={"operations": stamped})
+    seed = _try_unconstrained_list_schedule_seed(
+        problem,
+        dispatch_context=build_dispatch_context(problem),
+        n_ops=len(problem.operations),
+        frozen_assignments=[],
+        deadline_exceeded=lambda: False,
+    )
+    assert seed is not None
+    assert len(seed.assignments) == len(problem.operations)

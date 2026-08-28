@@ -29,6 +29,7 @@ from synaps.accelerators import (
     compute_rhc_candidate_metrics_batch_np,
     get_acceleration_status,
 )
+from synaps.calendar import work_centers_have_calendar
 from synaps.model import (
     Assignment,
     ObjectiveValues,
@@ -42,9 +43,10 @@ from synaps.solvers._dispatch_support import (
     MachineIndex,
     build_dispatch_context,
     find_earliest_feasible_slot,
+    operations_have_hard_windows,
     recompute_assignment_setups,
 )
-from synaps.solvers.coverage_outcome import refuse_unsupported_calendar, stamp_honest_coverage
+from synaps.solvers.coverage_outcome import stamp_honest_coverage
 from synaps.solvers.lower_bounds import compute_relaxed_makespan_lower_bound
 from synaps.solvers.rhc._admission import (
     advance_admission_frontier,
@@ -143,10 +145,6 @@ class RhcSolver(BaseSolver):
         window_minutes: int = int(kwargs.get("window_minutes", 480))
         overlap_minutes: int = int(kwargs.get("overlap_minutes", 120))
         inner_solver_name: str = str(kwargs.get("inner_solver", "alns"))
-        if inner_solver_name != "greedy":
-            refused = refuse_unsupported_calendar(problem, self.name)
-            if refused is not None:
-                return refused
         global_greedy_cover_min_ops: int = max(
             0, int(kwargs.get("global_greedy_cover_min_ops", 10_000))
         )
@@ -923,6 +921,8 @@ class RhcSolver(BaseSolver):
             inner_solver_name=inner_solver_name,
             n_ops=len(problem.operations),
             min_ops=global_greedy_cover_min_ops,
+            has_hard_windows=operations_have_hard_windows(problem.operations),
+            has_machine_calendar=work_centers_have_calendar(problem.work_centers),
         ):
             # Coverage-complete constructive path: one list-schedule instead of
             # repeating greedy insertion across rolling windows.

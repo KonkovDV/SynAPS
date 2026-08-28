@@ -9,6 +9,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Windowed family packing / native Windows (2026-08-28):** Windowed
+  list-schedule ranks slots by FFD family home, same-state continuation,
+  empty-this-night, then min setup (unconstrained earliest-end is unchanged).
+  Leftover gap-retry plus a single 1-swap eject; a 6-pass eject loop
+  worsened density and is not in the tree. Night analog session
+  `night-window-state-2026-08-28/` is 0.9912 / 0.9806 / 0.9818 on seeds
+  1/42/999, not a P2.3 Yes
+  (`benchmark/evidence/deadzone-5k-2026-08-25/sessions/night-window-state-2026-08-28/`).
+  Remainder seed 1 `remainder-window-state-2026-08-28/` is 0.547 / 0.9936 /
+  1.0 / 0.3605 / 0.715625 / 0.9815 (5k@4/8/12 then 8k@4/8/12);
+  5k@12 seed 1 is a session Yes; the six-cell remainder is not
+  (`benchmark/evidence/deadzone-5k-2026-08-25/sessions/remainder-window-state-2026-08-28/`).
+  COVER 100k@200 seed 42 Windows native session is 100000/100000, wall 9.926 s
+  (`benchmark/evidence/cover-ladder-2026-08-25/sessions/native-100k-seed42-2026-08-28/`);
+  hashed `run_100k_at_200_seed42.json` stays STALL. Calendar-3000 seed 1
+  native probe (in-process `_NATIVE_LIST_SCHEDULE_MIN_OPS=0`) is ratio 1.0,
+  wall 0.164 s
+  (`benchmark/evidence/calendar-3000-8m-2026-08-27/sessions/native-calendar-3000-seed1-2026-08-28/`);
+  kernel default stays 10_000. Empty native CSR row is 24/7. Mixed-fleet
+  tests: `tests/test_calendar.py::test_list_schedule_mixed_fleet_empty_calendar_is_24_7`,
+  `tests/test_accelerators.py::test_native_list_schedule_mixed_fleet_empty_row_is_24_7`.
+  `global_greedy_cover_min_ops` stays 10_000. Hashed P2.3 / remainder /
+  calendar-3000 epoch JSON is **not** rewritten.
+
+- **Night / window scan (2026-08-28):** Large-n leftover fill with hard
+  per-op windows uses a window-clipped interior gap scan, not append-after-
+  last. `global_greedy_cover_min_ops` stays 10_000. Windowed and calendar
+  instances at n>=2000 list-schedule in one pass (EDD by `latest_finish`,
+  window-gap inserts, placement floor is realized pred end plus the
+  published window).
+  Fell-before 5k@8 list-schedule was 0.7446 in 1.165 s
+  (`benchmark/evidence/deadzone-5k-2026-08-25/sessions/night-window-scan-2026-08-28/`).
+  Session `night-window-edd-2026-08-28/` is 0.8352 / 0.8258 / 0.8198 on
+  seeds 1/42/999, walls 4.978 / 5.636 / 5.879 s, not a P2.3 Yes
+  (`benchmark/evidence/deadzone-5k-2026-08-25/sessions/night-window-edd-2026-08-28/`).
+  Rolling recapture (`benchmark/evidence/deadzone-5k-2026-08-25/sessions/night-rhc-rolling-2026-08-28/`)
+  is still `wall_clock`. Remainder session
+  `remainder-window-fix-2026-08-28/` is `completed` not `wall_clock`
+  (`benchmark/evidence/deadzone-5k-2026-08-25/sessions/remainder-window-fix-2026-08-28/`);
+  5k@12 seed 1 is 0.9994 (3 leftover), not a Yes.
+  ALNS list-schedule seed allows hard windows. Native COVER encodes
+  occupancy `[start-setup, end]` in one shift. Machine-calendar 3000@8
+  session seeds 1/42/999 are ratio 1.0 / `verified_feasible=true`
+  (`benchmark/evidence/calendar-3000-8m-2026-08-27/sessions/calendar-list-schedule-2026-08-28/`);
+  hashed calendar JSON keeps `CALENDAR_VIOLATION`. Linux PR CI run
+  [33159561321](https://github.com/KonkovDV/SynAPS/actions/runs/33159561321)
+  (`docs/rfc/REDTEAM_TRIAGE_NIGHT_WINDOWS_2026_08_28.md`): native COVER 100k@200
+  seed 42 wall 18.068 s; calendar-3000 seed 1 wall 0.492 s (119 leftover then
+  greedy repair; n=3000 stays Python list-schedule). Hashed P2.3 / remainder /
+  ALNS-500 epoch JSON is **not** rewritten.
+
+- **Calendar occupancy encode (2026-08-28):** CP-SAT places processing in one
+  published shift and tightens setup occupancy (`su_start >= open`). ALNS
+  clips via greedy insertion; LBBD uses the CP-SAT subproblem. Native
+  `list_schedule_cover` delays occupancy into a published shift. Auto-route
+  for a non-empty calendar stays `CALENDAR_AWARE`. Not a 24/7 allow.
+
+- **Native list-schedule wrapper (2026-08-28):** Calendar kwargs had grown
+  `list_schedule_cover_native` to 83 lines; optional ATCS and shift arrays
+  are packed in `_list_schedule_cover_native_extra` so the 80-line ratchet
+  holds (`tests/test_architecture.py::test_function_length_ratchet`).
+  Linux `test-fast` failed on
+  [33159561321](https://github.com/KonkovDV/SynAPS/actions/runs/33159561321).
+
 - **Residuals / KI-N1 N4 N10 (2026-08-27):** Unconstrained ALNS-500 at n>=2000
   seeds from COVER list-schedule (not a `global_greedy_cover_min_ops` retune).
   Session 5k@8 90 s box, walls 92.162 s / 89.706 s / 89.207 s

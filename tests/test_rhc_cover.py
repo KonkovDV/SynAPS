@@ -28,6 +28,7 @@ from synaps.solvers.rhc import RhcPolicy, RhcSolver
 from synaps.solvers.rhc._cover import (
     _atcs_window_indices,
     _cover_gap_scan_for,
+    _cover_placement_floor,
     place_operations_greedy,
     place_operations_list_schedule,
     should_use_global_greedy_cover,
@@ -86,6 +87,175 @@ def test_should_use_global_greedy_cover_only_for_large_greedy() -> None:
     assert not should_use_global_greedy_cover(
         inner_solver_name="alns", n_ops=50_000, min_ops=10_000
     )
+    assert should_use_global_greedy_cover(
+        inner_solver_name="greedy",
+        n_ops=APPEND_GAP_SCAN_MIN_OPS,
+        min_ops=10_000,
+        has_hard_windows=True,
+    )
+    assert not should_use_global_greedy_cover(
+        inner_solver_name="greedy",
+        n_ops=APPEND_GAP_SCAN_MIN_OPS - 1,
+        min_ops=10_000,
+        has_hard_windows=True,
+    )
+    assert should_use_global_greedy_cover(
+        inner_solver_name="greedy",
+        n_ops=APPEND_GAP_SCAN_MIN_OPS,
+        min_ops=10_000,
+        has_machine_calendar=True,
+    )
+    assert not should_use_global_greedy_cover(
+        inner_solver_name="greedy",
+        n_ops=APPEND_GAP_SCAN_MIN_OPS,
+        min_ops=10_000,
+        has_hard_windows=False,
+    )
+
+
+def test_cover_placement_floor_ignores_inflated_chain_earliest_on_windows() -> None:
+    """RHC chain-LB must not sit past the realized pred end inside an 8 h night."""
+
+    op = Operation(
+        id=uuid4(),
+        order_id=uuid4(),
+        seq_in_order=1,
+        state_id=uuid4(),
+        base_duration_min=20,
+        earliest_start=HORIZON_START + timedelta(hours=22),
+        latest_finish=HORIZON_START + timedelta(hours=30),
+    )
+    inflated = {op.id: 22 * 60 + 45.0}
+    floor = _cover_placement_floor(
+        op,
+        pred_end=22 * 60 + 10.0,
+        op_earliest=inflated,
+        horizon_start=HORIZON_START,
+    )
+    assert floor == 22 * 60 + 10.0
+
+
+def test_list_schedule_continues_windowed_state_instead_of_idle_machine() -> None:
+    """Second same-state night op stays on the loaded machine, not an idle one.
+
+    Earliest-end would put A2 on idle M3 (completion 110 vs 220) and scatter
+    the family. Night analog 5k@8 pays that SDST into 8 h slack.
+    """
+
+    state_a = State(id=uuid4(), code="A", label="A")
+    state_b = State(id=uuid4(), code="B", label="B")
+    machines = [
+        WorkCenter(id=uuid4(), code=f"M{i}", capability_group="g", speed_factor=1.0)
+        for i in range(3)
+    ]
+    night_start = HORIZON_START + timedelta(hours=14)
+    night_end = night_start + timedelta(hours=8)
+    orders = [
+        Order(id=uuid4(), external_ref=f"O{i}", due_date=night_end, priority=1) for i in range(4)
+    ]
+    ids = [uuid4() for _ in range(4)]
+    ops = [
+        Operation(
+            id=ids[0],
+            order_id=orders[0].id,
+            seq_in_order=0,
+            state_id=state_a.id,
+            base_duration_min=110,
+            eligible_wc_ids=[m.id for m in machines],
+            earliest_start=night_start,
+            latest_finish=night_end,
+        ),
+        Operation(
+            id=ids[1],
+            order_id=orders[1].id,
+            seq_in_order=1,
+            state_id=state_b.id,
+            base_duration_min=110,
+            eligible_wc_ids=[m.id for m in machines],
+            earliest_start=night_start,
+            latest_finish=night_end,
+        ),
+        Operation(
+            id=ids[2],
+            order_id=orders[2].id,
+            seq_in_order=2,
+            state_id=state_a.id,
+            base_duration_min=110,
+            eligible_wc_ids=[m.id for m in machines],
+            earliest_start=night_start,
+            latest_finish=night_end,
+        ),
+        Operation(
+            id=ids[3],
+            order_id=orders[3].id,
+            seq_in_order=3,
+            state_id=state_b.id,
+            base_duration_min=110,
+            eligible_wc_ids=[m.id for m in machines],
+            earliest_start=night_start,
+            latest_finish=night_end,
+        ),
+    ]
+    setup_matrix = [
+        SetupEntry(
+            work_center_id=wc.id,
+            from_state_id=src.id,
+            to_state_id=dst.id,
+            setup_minutes=80,
+        )
+        for wc in machines
+        for src, dst in ((state_a, state_b), (state_b, state_a))
+    ]
+    problem = ScheduleProblem(
+        states=[state_a, state_b],
+        orders=orders,
+        operations=ops,
+        work_centers=machines,
+        setup_matrix=setup_matrix,
+        planning_horizon_start=HORIZON_START,
+        planning_horizon_end=HORIZON_START + timedelta(days=2),
+    )
+    context = build_dispatch_context(problem)
+    assignments: list[Assignment] = []
+    by_op: dict = {}
+    scheduled: set = set()
+    stats = place_operations_list_schedule(
+        operations=problem.operations,
+        dispatch_context=context,
+        assignments=assignments,
+        assignment_by_op=by_op,
+        scheduled_ids=scheduled,
+        horizon_start=HORIZON_START,
+        horizon_minutes=48 * 60.0,
+        op_earliest={op.id: 14 * 60.0 for op in ops},
+        default_wc_ids=[m.id for m in machines],
+    )
+    assert stats.placed == 4
+    assert by_op[ids[0]].work_center_id == by_op[ids[2]].work_center_id
+    assert by_op[ids[1]].work_center_id == by_op[ids[3]].work_center_id
+    assert by_op[ids[0]].work_center_id != by_op[ids[1]].work_center_id
+    assert by_op[ids[0]].setup_minutes == 0
+    assert by_op[ids[2]].setup_minutes == 0
+    assert by_op[ids[3]].setup_minutes == 0
+
+
+def test_cover_gap_scan_appends_at_large_n_threshold() -> None:
+    assert _cover_gap_scan_for(APPEND_GAP_SCAN_MIN_OPS - 1) == "all"
+    assert _cover_gap_scan_for(APPEND_GAP_SCAN_MIN_OPS) == "append"
+
+
+def test_cover_gap_scan_windows_when_op_has_hard_windows() -> None:
+    assert _cover_gap_scan_for(APPEND_GAP_SCAN_MIN_OPS) == "append"
+    leftover = Operation(
+        id=uuid4(),
+        order_id=uuid4(),
+        seq_in_order=1,
+        state_id=uuid4(),
+        base_duration_min=10,
+        earliest_start=HORIZON_START,
+        latest_finish=HORIZON_START + timedelta(hours=8),
+    )
+    assert _cover_gap_scan_for(APPEND_GAP_SCAN_MIN_OPS, leftover) == "window"
 
 
 def test_place_operations_greedy_clips_past_horizon() -> None:
@@ -110,11 +280,6 @@ def test_place_operations_greedy_clips_past_horizon() -> None:
     assert stats.clipped >= 1
     assert len(assignments) == 1
     assert assignments[0].operation_id == problem.operations[0].id
-
-
-def test_cover_gap_scan_appends_at_large_n_threshold() -> None:
-    assert _cover_gap_scan_for(APPEND_GAP_SCAN_MIN_OPS - 1) == "all"
-    assert _cover_gap_scan_for(APPEND_GAP_SCAN_MIN_OPS) == "append"
 
 
 def test_residual_greedy_uses_append_scan_when_timeline_is_large(
@@ -163,6 +328,58 @@ def test_residual_greedy_uses_append_scan_when_timeline_is_large(
         default_wc_ids=[problem.work_centers[0].id],
     )
     assert "append" in seen
+
+
+def test_residual_greedy_uses_window_scan_when_leftover_has_hard_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import synaps.solvers.rhc._cover as cover
+
+    seen: list[str] = []
+    real_find = cover.find_earliest_feasible_slot
+
+    def spy_find(*args: object, **kwargs: object) -> object:
+        seen.append(str(kwargs.get("gap_scan")))
+        return real_find(*args, **kwargs)
+
+    monkeypatch.setattr(cover, "APPEND_GAP_SCAN_MIN_OPS", 1)
+    monkeypatch.setattr(cover, "find_earliest_feasible_slot", spy_find)
+    problem = _two_op_problem(duration=10, horizon_minutes=90)
+    leftover = problem.operations[1].model_copy(
+        update={
+            "earliest_start": HORIZON_START + timedelta(minutes=20),
+            "latest_finish": HORIZON_START + timedelta(minutes=50),
+        }
+    )
+    problem = problem.model_copy(update={"operations": [problem.operations[0], leftover]})
+    context = build_dispatch_context(problem)
+    first = problem.operations[0]
+    start = problem.planning_horizon_start
+    packed = Assignment(
+        operation_id=first.id,
+        work_center_id=problem.work_centers[0].id,
+        start_time=start,
+        end_time=start + timedelta(minutes=10),
+        setup_minutes=0,
+    )
+    assignments = [packed]
+    by_op = {first.id: packed}
+    scheduled = {first.id}
+    machine_index = MachineIndex(context)
+    machine_index.extend(assignments)
+    place_operations_greedy(
+        operations=[leftover],
+        dispatch_context=context,
+        assignments=assignments,
+        assignment_by_op=by_op,
+        scheduled_ids=scheduled,
+        machine_index=machine_index,
+        horizon_start=start,
+        horizon_minutes=90.0,
+        op_earliest={leftover.id: 0.0},
+        default_wc_ids=[problem.work_centers[0].id],
+    )
+    assert "window" in seen
 
 
 def test_place_operations_list_schedule_sequences_predecessor() -> None:
@@ -295,9 +512,16 @@ def test_list_schedule_respects_latest_finish() -> None:
     assert assignments[0].end_time <= HORIZON_START + timedelta(minutes=30)
 
 
-def test_list_schedule_inserts_into_idle_gap_when_tail_blocked() -> None:
-    """Insertion SGS: aux delay parks a tail and leaves a hole a later op must use."""
+def test_list_schedule_inserts_into_idle_gap_when_tail_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Insertion SGS: aux delay parks a tail and leaves a hole a later op must use.
 
+    Windowed ops must still insert when the unconstrained 64-insert cap is
+    exhausted (5k night analog leftover).
+    """
+
+    monkeypatch.setattr("synaps.solvers.rhc._cover._MAX_LIST_SCHEDULE_GAP_INSERTS", 0)
     state = State(id=uuid4(), code="S0", label="S0")
     m1 = WorkCenter(id=uuid4(), code="M1", capability_group="g", speed_factor=1.0)
     m2 = WorkCenter(id=uuid4(), code="M2", capability_group="g", speed_factor=1.0)

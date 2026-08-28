@@ -1,9 +1,11 @@
 """Constructive coverage kernels for RHC greedy fill.
 
-At ≥10k ops GREEDY_COVER uses a non-delay list-schedule (append after each
-machine's ready time). If the tail is infeasible, insert into the earliest
-idle gap on an eligible machine (active / insertion SGS) and push successors
-in the same pass. Residual gap-fill remains a safety net.
+Unconstrained COVER at ≥10k ops uses a non-delay list-schedule (append
+after each machine's ready time). Windowed and calendar instances at
+n≥2000 use the same one-pass cover (`global_greedy_cover_min_ops` stays
+10_000). If the tail is infeasible, insert into the earliest idle gap
+(active / insertion SGS). Windowed ops are not bound by the 64-insert
+cap. Residual gap-fill remains a safety net.
 
 Academic basis:
     - Pinedo (2016): list scheduling / non-delay dispatch.
@@ -17,7 +19,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from heapq import heappop, heappush
 from typing import TYPE_CHECKING, Any
 
@@ -28,17 +30,23 @@ from synaps.solvers._dispatch_support import (
     APPEND_GAP_SCAN_MIN_OPS,
     MachineIndex,
     find_earliest_feasible_slot,
+    operation_has_hard_windows,
 )
-from synaps.solvers._time_windows import operation_latest_finish_offset_minutes
+from synaps.solvers._time_windows import (
+    operation_earliest_offset_minutes,
+    operation_latest_finish_offset_minutes,
+)
 from synaps.timegrain import duration_minutes_for
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
-    from datetime import datetime
     from uuid import UUID
 
     from synaps.model import Operation
     from synaps.solvers._dispatch_support import DispatchContext, SlotCandidate
+
+    _CoverReadyKey = float | tuple[float, str]
+    _CoverHeapItem = tuple[_CoverReadyKey, int, str, UUID]
 
 _GLOBAL_GREEDY_COVER_MIN_OPS_DEFAULT = 10_000
 _NATIVE_LIST_SCHEDULE_MIN_OPS = 10_000
@@ -74,21 +82,91 @@ def should_use_global_greedy_cover(
     inner_solver_name: str,
     n_ops: int,
     min_ops: int = _GLOBAL_GREEDY_COVER_MIN_OPS_DEFAULT,
+    has_hard_windows: bool = False,
+    has_machine_calendar: bool = False,
 ) -> bool:
-    """True when RHC should skip rolling windows and list-schedule in one pass."""
+    """True when RHC should skip rolling windows and list-schedule in one pass.
 
-    return inner_solver_name == "greedy" and n_ops >= min_ops
+    ``min_ops`` stays 10_000 for unconstrained COVER. Windowed and calendar
+    instances at the leftover-scan scale (n>=2000) list-schedule in one
+    pass: rolling 8 h windows from midnight split a 22:00-06:00 night
+    and exhaust the 120 s box before residual fill. This is not a
+    retune of ``global_greedy_cover_min_ops``.
+    """
+
+    if inner_solver_name != "greedy":
+        return False
+    if n_ops >= min_ops:
+        return True
+    return (has_hard_windows or has_machine_calendar) and n_ops >= APPEND_GAP_SCAN_MIN_OPS
 
 
-def _cover_gap_scan_for(n_timeline: int) -> str:
+def _cover_gap_scan_for(n_timeline: int, operation: Any | None = None) -> str:
     """Append-only when the packed timeline is already at the large-n threshold.
 
     Residual fill against 100k packed assignments used the default full gap
-    walk (O(n^2*m)). That is the same class as KI-N1 ``evaluate_gap``, not a
-    retune of residual placement to chase a Yes.
+    walk (O(n^2*m)). Windowed leftovers use a clipped interior scan.
     """
 
+    if operation is not None and operation_has_hard_windows(operation):
+        return "window" if n_timeline >= APPEND_GAP_SCAN_MIN_OPS else "all"
     return "append" if n_timeline >= APPEND_GAP_SCAN_MIN_OPS else "all"
+
+
+def _allow_list_schedule_gap(
+    *,
+    operation: Operation,
+    n_ops: int,
+    gap_attempts: int,
+) -> bool:
+    """Windowed ops always insertion-SGS; unconstrained keeps the 64/80k cap.
+
+    A 5k night analog with a 64-insert cap left ~25% of ops on the tail
+    after their 8 h window closed. Window-clipped scan is O(gaps in the
+    window), not the 100k full-timeline walk.
+    """
+
+    if operation_has_hard_windows(operation):
+        return True
+    return gap_attempts < _MAX_LIST_SCHEDULE_GAP_INSERTS and n_ops < _MAX_LIST_SCHEDULE_GAP_OPS
+
+
+def _cover_ready_sort_key(
+    op: Operation,
+    *,
+    floor: float,
+    horizon_start: datetime,
+    cover_ready_rule: str,
+) -> float | tuple[float, str]:
+    """EDD by latest_finish for fifo windowed ops; ATCS keeps the ready floor."""
+
+    if cover_ready_rule == "atcs":
+        return floor
+    latest = operation_latest_finish_offset_minutes(op, horizon_start)
+    due = float(latest) if latest is not None else floor
+    family = str(op.state_id) if operation_has_hard_windows(op) else ""
+    return (due, family)
+
+
+def _cover_placement_floor(
+    op: Operation,
+    *,
+    pred_end: float,
+    op_earliest: Mapping[UUID, float],
+    horizon_start: datetime,
+) -> float:
+    """Ready floor: actual pred end plus the published window, not chain-LB.
+
+    RHC ``_propagate_earliest_starts_with_release_and_duration`` adds
+    ``pred.earliest + p_min`` into successor earliest. When that p_min is
+    larger than the grain actually placed, the successor floor sits past
+    ``pred_end`` and closes an 8 h night that still had slack. Windowed
+    cover uses the published window and the realized predecessor end.
+    """
+
+    if operation_has_hard_windows(op):
+        return max(pred_end, operation_earliest_offset_minutes(op, None, horizon_start))
+    return max(pred_end, op_earliest.get(op.id, 0.0))
 
 
 def select_earliest_horizon_slot(
@@ -104,7 +182,7 @@ def select_earliest_horizon_slot(
 ) -> tuple[SlotCandidate | None, UUID | None, int]:
     """Pick the feasible slot with the earliest completion inside the horizon."""
 
-    scan = gap_scan if gap_scan is not None else _cover_gap_scan_for(len(assignments))
+    scan = gap_scan if gap_scan is not None else _cover_gap_scan_for(len(assignments), operation)
     best_slot: SlotCandidate | None = None
     best_wc: UUID | None = None
     clipped = 0
@@ -151,7 +229,19 @@ def place_operations_greedy(
     caller owns logging and claim/notary.
     """
 
-    remaining = sorted(operations, key=lambda op: (op.seq_in_order, str(op.id)))
+    remaining = sorted(
+        operations,
+        key=lambda op: (
+            _cover_ready_sort_key(
+                op,
+                floor=float(op.seq_in_order),
+                horizon_start=horizon_start,
+                cover_ready_rule="fifo",
+            ),
+            op.seq_in_order,
+            str(op.id),
+        ),
+    )
     pass_limit = max_passes if max_passes is not None else max(len(remaining) * 3, 1)
     clipped = 0
     placed = 0
@@ -228,7 +318,12 @@ def _place_ready_ops_once(
             assignments=assignments,
             operation=op,
             eligible_wc_ids=eligible,
-            earliest_start=max(pred_end, op_earliest.get(op.id, 0.0)),
+            earliest_start=_cover_placement_floor(
+                op,
+                pred_end=pred_end,
+                op_earliest=op_earliest,
+                horizon_start=horizon_start,
+            ),
             horizon_minutes=horizon_minutes,
             machine_index=machine_index,
         )
@@ -392,11 +487,18 @@ def _place_operations_list_schedule_python(
 ) -> GreedyCoverStats:
     """Python parallel SGS with capped insertion into idle gaps."""
 
-    heap, successors = _ready_heap(operations, op_earliest, scheduled_ids)
+    heap, successors = _ready_heap(
+        operations,
+        op_earliest,
+        scheduled_ids,
+        horizon_start=horizon_start,
+        cover_ready_rule=cover_ready_rule,
+    )
     tails, aux_windows = _seed_list_schedule_state(
         assignments, dispatch_context, default_wc_ids, horizon_start
     )
-    return _run_python_cover_loop(
+    homes = _build_window_family_homes(operations, dispatch_context, default_wc_ids)
+    stats = _run_python_cover_loop(
         heap=heap,
         successors=successors,
         tails=tails,
@@ -415,12 +517,321 @@ def _place_operations_list_schedule_python(
         order_priority_by_id=order_priority_by_id,
         cover_atcs_floor_window=cover_atcs_floor_window,
         cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+        window_family_homes=homes,
     )
+    extra_placed, extra_gap = _recover_windowed_leftovers(
+        operations=operations,
+        dispatch_context=dispatch_context,
+        assignments=assignments,
+        assignment_by_op=assignment_by_op,
+        scheduled_ids=scheduled_ids,
+        tails=tails,
+        aux_windows=aux_windows,
+        op_earliest=op_earliest,
+        default_wc_ids=default_wc_ids,
+        horizon_start=horizon_start,
+        horizon_minutes=horizon_minutes,
+        window_family_homes=homes,
+        cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+    )
+    return GreedyCoverStats(
+        placed=stats.placed + extra_placed,
+        clipped=max(0, stats.clipped - extra_placed),
+        passes=stats.passes,
+        time_limited=stats.time_limited,
+        gap_inserted=stats.gap_inserted + extra_gap,
+    )
+
+
+def _recover_windowed_leftovers(
+    *,
+    operations: Sequence[Operation],
+    dispatch_context: DispatchContext,
+    assignments: list[Assignment],
+    assignment_by_op: dict[UUID, Assignment],
+    scheduled_ids: set[UUID],
+    tails: dict[UUID, tuple[float, UUID | None]],
+    aux_windows: dict[UUID, list[tuple[float, float, int]]],
+    op_earliest: Mapping[UUID, float],
+    default_wc_ids: Sequence[UUID],
+    horizon_start: datetime,
+    horizon_minutes: float,
+    window_family_homes: Mapping[tuple[object, UUID], Sequence[UUID]] | None,
+    cover_atcs_exhaust_window: float,
+) -> tuple[int, int]:
+    placed, gap = _retry_windowed_leftovers(
+        operations=operations,
+        dispatch_context=dispatch_context,
+        assignments=assignments,
+        assignment_by_op=assignment_by_op,
+        scheduled_ids=scheduled_ids,
+        tails=tails,
+        aux_windows=aux_windows,
+        op_earliest=op_earliest,
+        default_wc_ids=default_wc_ids,
+        horizon_start=horizon_start,
+        horizon_minutes=horizon_minutes,
+        window_family_homes=window_family_homes,
+        cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+    )
+    ejected, eject_gap = _eject_windowed_leftovers(
+        operations=operations,
+        dispatch_context=dispatch_context,
+        assignments=assignments,
+        assignment_by_op=assignment_by_op,
+        scheduled_ids=scheduled_ids,
+        op_earliest=op_earliest,
+        default_wc_ids=default_wc_ids,
+        horizon_start=horizon_start,
+        horizon_minutes=horizon_minutes,
+        window_family_homes=window_family_homes,
+        cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+    )
+    return placed + ejected, gap + eject_gap
+
+
+def _retry_windowed_leftovers(
+    *,
+    operations: Sequence[Operation],
+    dispatch_context: DispatchContext,
+    assignments: list[Assignment],
+    assignment_by_op: dict[UUID, Assignment],
+    scheduled_ids: set[UUID],
+    tails: dict[UUID, tuple[float, UUID | None]],
+    aux_windows: dict[UUID, list[tuple[float, float, int]]],
+    op_earliest: Mapping[UUID, float],
+    default_wc_ids: Sequence[UUID],
+    horizon_start: datetime,
+    horizon_minutes: float,
+    window_family_homes: Mapping[tuple[object, UUID], Sequence[UUID]] | None,
+    cover_atcs_exhaust_window: float,
+) -> tuple[int, int]:
+    """Second pass: gap-insert windowed leftovers after the packed timeline exists."""
+
+    machine_index = MachineIndex(dispatch_context)
+    machine_index.extend(assignments)
+    extra_placed = extra_gap = 0
+    pending = [
+        op for op in operations if op.id not in scheduled_ids and operation_has_hard_windows(op)
+    ]
+    for _ in range(len(pending) + 1):
+        progress = 0
+        for op in pending:
+            if op.id in scheduled_ids:
+                continue
+            if op.predecessor_op_id and op.predecessor_op_id not in scheduled_ids:
+                continue
+            pred_end = 0.0
+            if op.predecessor_op_id:
+                pred_asg = assignment_by_op[op.predecessor_op_id]
+                pred_end = (pred_asg.end_time - horizon_start).total_seconds() / 60.0
+            placed_one, inserted, _end = _place_ready_list_operation(
+                op=op,
+                floor=_cover_placement_floor(
+                    op,
+                    pred_end=pred_end,
+                    op_earliest=op_earliest,
+                    horizon_start=horizon_start,
+                ),
+                dispatch_context=dispatch_context,
+                assignments=assignments,
+                assignment_by_op=assignment_by_op,
+                scheduled_ids=scheduled_ids,
+                tails=tails,
+                aux_windows=aux_windows,
+                default_wc_ids=default_wc_ids,
+                horizon_start=horizon_start,
+                horizon_minutes=horizon_minutes,
+                allow_gap=True,
+                cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+                machine_index=machine_index,
+                window_family_homes=window_family_homes,
+            )
+            if not placed_one:
+                continue
+            extra_placed += 1
+            extra_gap += int(inserted)
+            progress += 1
+        if progress == 0:
+            break
+    return extra_placed, extra_gap
+
+
+def _pop_cover_assignment(
+    assignment: Assignment,
+    assignments: list[Assignment],
+    assignment_by_op: dict[UUID, Assignment],
+    scheduled_ids: set[UUID],
+) -> None:
+    assignments.remove(assignment)
+    del assignment_by_op[assignment.operation_id]
+    scheduled_ids.discard(assignment.operation_id)
+
+
+def _eject_windowed_leftovers(
+    *,
+    operations: Sequence[Operation],
+    dispatch_context: DispatchContext,
+    assignments: list[Assignment],
+    assignment_by_op: dict[UUID, Assignment],
+    scheduled_ids: set[UUID],
+    op_earliest: Mapping[UUID, float],
+    default_wc_ids: Sequence[UUID],
+    horizon_start: datetime,
+    horizon_minutes: float,
+    window_family_homes: Mapping[tuple[object, UUID], Sequence[UUID]] | None,
+    cover_atcs_exhaust_window: float,
+) -> tuple[int, int]:
+    """Eject a blocking tail so a windowed leftover and the victim both re-place."""
+
+    extra_placed = extra_gap = 0
+    pending = [
+        op for op in operations if op.id not in scheduled_ids and operation_has_hard_windows(op)
+    ]
+    for op in pending:
+        if op.id in scheduled_ids:
+            continue
+        if op.predecessor_op_id and op.predecessor_op_id not in scheduled_ids:
+            continue
+        gained = _eject_one_windowed_leftover(
+            op,
+            dispatch_context=dispatch_context,
+            assignments=assignments,
+            assignment_by_op=assignment_by_op,
+            scheduled_ids=scheduled_ids,
+            op_earliest=op_earliest,
+            default_wc_ids=default_wc_ids,
+            horizon_start=horizon_start,
+            horizon_minutes=horizon_minutes,
+            window_family_homes=window_family_homes,
+            cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+        )
+        extra_placed += int(gained)
+        extra_gap += int(gained)
+    return extra_placed, extra_gap
+
+
+def _pred_end_minutes(
+    op: Operation,
+    assignment_by_op: Mapping[UUID, Assignment],
+    horizon_start: datetime,
+) -> float:
+    if not op.predecessor_op_id:
+        return 0.0
+    pred_asg = assignment_by_op.get(op.predecessor_op_id)
+    if pred_asg is None:
+        return 0.0
+    return (pred_asg.end_time - horizon_start).total_seconds() / 60.0
+
+
+def _place_windowed_with_rebuild(
+    op: Operation,
+    *,
+    dispatch_context: DispatchContext,
+    assignments: list[Assignment],
+    assignment_by_op: dict[UUID, Assignment],
+    scheduled_ids: set[UUID],
+    default_wc_ids: Sequence[UUID],
+    horizon_start: datetime,
+    horizon_minutes: float,
+    op_earliest: Mapping[UUID, float],
+    window_family_homes: Mapping[tuple[object, UUID], Sequence[UUID]] | None,
+    cover_atcs_exhaust_window: float,
+) -> bool:
+    tails, aux_windows = _seed_list_schedule_state(
+        assignments, dispatch_context, default_wc_ids, horizon_start
+    )
+    index = MachineIndex(dispatch_context)
+    index.extend(assignments)
+    placed, _, _ = _place_ready_list_operation(
+        op=op,
+        floor=_cover_placement_floor(
+            op,
+            pred_end=_pred_end_minutes(op, assignment_by_op, horizon_start),
+            op_earliest=op_earliest,
+            horizon_start=horizon_start,
+        ),
+        dispatch_context=dispatch_context,
+        assignments=assignments,
+        assignment_by_op=assignment_by_op,
+        scheduled_ids=scheduled_ids,
+        tails=tails,
+        aux_windows=aux_windows,
+        default_wc_ids=default_wc_ids,
+        horizon_start=horizon_start,
+        horizon_minutes=horizon_minutes,
+        allow_gap=True,
+        cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+        machine_index=index,
+        window_family_homes=window_family_homes,
+    )
+    return placed
+
+
+def _eject_one_windowed_leftover(
+    op: Operation,
+    *,
+    dispatch_context: DispatchContext,
+    assignments: list[Assignment],
+    assignment_by_op: dict[UUID, Assignment],
+    scheduled_ids: set[UUID],
+    op_earliest: Mapping[UUID, float],
+    default_wc_ids: Sequence[UUID],
+    horizon_start: datetime,
+    horizon_minutes: float,
+    window_family_homes: Mapping[tuple[object, UUID], Sequence[UUID]] | None,
+    cover_atcs_exhaust_window: float,
+) -> bool:
+    if op.earliest_start is None or op.latest_finish is None:
+        return False
+    eligible = set(op.eligible_wc_ids or default_wc_ids)
+    victims = [
+        row
+        for row in assignments
+        if row.work_center_id in eligible
+        and op.earliest_start <= row.start_time < op.latest_finish
+        and row.operation_id != op.predecessor_op_id
+    ]
+    victims.sort(key=lambda row: row.start_time, reverse=True)
+
+    def place(target: Operation) -> bool:
+        return _place_windowed_with_rebuild(
+            target,
+            dispatch_context=dispatch_context,
+            assignments=assignments,
+            assignment_by_op=assignment_by_op,
+            scheduled_ids=scheduled_ids,
+            default_wc_ids=default_wc_ids,
+            horizon_start=horizon_start,
+            horizon_minutes=horizon_minutes,
+            op_earliest=op_earliest,
+            window_family_homes=window_family_homes,
+            cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+        )
+
+    for victim in victims[:12]:
+        victim_op = dispatch_context.ops_by_id.get(victim.operation_id)
+        if victim_op is None:
+            continue
+        _pop_cover_assignment(victim, assignments, assignment_by_op, scheduled_ids)
+        if not place(op):
+            assignments.append(victim)
+            assignment_by_op[victim.operation_id] = victim
+            scheduled_ids.add(victim.operation_id)
+            continue
+        if place(victim_op):
+            return True
+        leftover_asg = assignment_by_op[op.id]
+        _pop_cover_assignment(leftover_asg, assignments, assignment_by_op, scheduled_ids)
+        assignments.append(victim)
+        assignment_by_op[victim.operation_id] = victim
+        scheduled_ids.add(victim.operation_id)
+    return False
 
 
 def _run_python_cover_loop(
     *,
-    heap: list[tuple[float, int, str, UUID]],
+    heap: list[_CoverHeapItem],
     successors: dict[UUID, list[Operation]],
     tails: dict[UUID, tuple[float, UUID | None]],
     aux_windows: dict[UUID, list[tuple[float, float, int]]],
@@ -438,10 +849,14 @@ def _run_python_cover_loop(
     order_priority_by_id: Mapping[UUID, int] | None,
     cover_atcs_floor_window: float,
     cover_atcs_exhaust_window: float,
+    window_family_homes: Mapping[tuple[object, UUID], Sequence[UUID]] | None = None,
 ) -> GreedyCoverStats:
     clipped = placed = gap_inserted = gap_attempts = 0
     time_limited = False
     ops_by_id = dispatch_context.ops_by_id
+    machine_index = MachineIndex(dispatch_context)
+    if assignments:
+        machine_index.extend(assignments)
     while heap:
         if deadline_exceeded is not None and deadline_exceeded():
             time_limited = True
@@ -476,6 +891,8 @@ def _run_python_cover_loop(
             cover_ready_rule=cover_ready_rule,
             cover_atcs_exhaust_window=cover_atcs_exhaust_window,
             gap_attempts=gap_attempts,
+            machine_index=machine_index,
+            window_family_homes=window_family_homes,
         )
         if step is None:
             continue
@@ -503,7 +920,7 @@ def _place_cover_heap_item(
     tails: dict[UUID, tuple[float, UUID | None]],
     aux_windows: dict[UUID, list[tuple[float, float, int]]],
     successors: dict[UUID, list[Operation]],
-    heap: list[tuple[float, int, str, UUID]],
+    heap: list[_CoverHeapItem],
     horizon_start: datetime,
     horizon_minutes: float,
     op_earliest: Mapping[UUID, float],
@@ -511,6 +928,8 @@ def _place_cover_heap_item(
     cover_ready_rule: str,
     cover_atcs_exhaust_window: float,
     gap_attempts: int,
+    machine_index: MachineIndex,
+    window_family_homes: Mapping[tuple[object, UUID], Sequence[UUID]] | None = None,
 ) -> tuple[int, int, int, int] | None:
     pred_end = 0.0
     if op.predecessor_op_id:
@@ -518,12 +937,17 @@ def _place_cover_heap_item(
         if pred_assignment is None:
             return None
         pred_end = (pred_assignment.end_time - horizon_start).total_seconds() / 60.0
-    allow_gap = gap_attempts < _MAX_LIST_SCHEDULE_GAP_INSERTS and (
-        len(operations) < _MAX_LIST_SCHEDULE_GAP_OPS
+    allow_gap = _allow_list_schedule_gap(
+        operation=op, n_ops=len(operations), gap_attempts=gap_attempts
     )
     placed_one, inserted, end = _place_ready_list_operation(
         op=op,
-        floor=max(pred_end, op_earliest.get(op.id, 0.0)),
+        floor=_cover_placement_floor(
+            op,
+            pred_end=pred_end,
+            op_earliest=op_earliest,
+            horizon_start=horizon_start,
+        ),
         dispatch_context=dispatch_context,
         assignments=assignments,
         assignment_by_op=assignment_by_op,
@@ -535,6 +959,8 @@ def _place_cover_heap_item(
         horizon_minutes=horizon_minutes,
         allow_gap=allow_gap,
         cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+        machine_index=machine_index,
+        window_family_homes=window_family_homes,
     )
     gap_ins = 1 if inserted else 0
     gap_att = 1 if allow_gap and (inserted or not placed_one) else 0
@@ -546,20 +972,40 @@ def _place_cover_heap_item(
         end=end,
         op_earliest=op_earliest,
         as_list=cover_ready_rule == "atcs",
+        horizon_start=horizon_start,
+        cover_ready_rule=cover_ready_rule,
     )
     return (gap_ins, gap_att, 0, 1)
 
 
 def _enqueue_cover_successors(
-    heap: list[tuple[float, int, str, UUID]],
+    heap: list[_CoverHeapItem],
     successors: Sequence[Operation],
     *,
     end: float,
     op_earliest: Mapping[UUID, float],
     as_list: bool,
+    horizon_start: datetime,
+    cover_ready_rule: str,
 ) -> None:
     for succ in successors:
-        item = (max(end, op_earliest.get(succ.id, 0.0)), succ.seq_in_order, str(succ.id), succ.id)
+        floor = _cover_placement_floor(
+            succ,
+            pred_end=end,
+            op_earliest=op_earliest,
+            horizon_start=horizon_start,
+        )
+        item = (
+            _cover_ready_sort_key(
+                succ,
+                floor=floor,
+                horizon_start=horizon_start,
+                cover_ready_rule=cover_ready_rule,
+            ),
+            succ.seq_in_order,
+            str(succ.id),
+            succ.id,
+        )
         if as_list:
             heap.append(item)
         else:
@@ -623,6 +1069,8 @@ def _place_ready_list_operation(
     horizon_minutes: float,
     allow_gap: bool = True,
     cover_atcs_exhaust_window: float = 0.0,
+    machine_index: MachineIndex | None = None,
+    window_family_homes: Mapping[tuple[object, UUID], Sequence[UUID]] | None = None,
 ) -> tuple[bool, bool, float]:
     """Place one ready op. Returns (placed, gap_inserted, end)."""
 
@@ -635,20 +1083,22 @@ def _place_ready_list_operation(
         default_wc_ids=default_wc_ids,
         horizon_minutes=horizon_minutes,
         cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+        window_family_homes=window_family_homes,
     )
     inserted = False
     if slot is None and allow_gap:
-        machine_index = _ensure_list_schedule_index(None, dispatch_context, assignments)
+        index = _ensure_list_schedule_index(machine_index, dispatch_context, assignments)
         slot = _best_gap_cover_slot(
             op=op,
             dispatch_context=dispatch_context,
             assignments=assignments,
-            machine_index=machine_index,
+            machine_index=index,
             floor=floor,
             default_wc_ids=default_wc_ids,
             horizon_minutes=horizon_minutes,
         )
         inserted = slot is not None
+        machine_index = index
     if slot is None:
         return False, False, 0.0
     start, end, setup, wc_id, aux_ids = slot
@@ -666,6 +1116,7 @@ def _place_ready_list_operation(
         tails=tails,
         aux_windows=aux_windows,
         horizon_start=horizon_start,
+        machine_index=machine_index,
     )
     return True, inserted, end
 
@@ -674,10 +1125,13 @@ def _ready_heap(
     operations: Sequence[Operation],
     op_earliest: Mapping[UUID, float],
     scheduled_ids: set[UUID] | None = None,
-) -> tuple[list[tuple[float, int, str, UUID]], dict[UUID, list[Operation]]]:
+    *,
+    horizon_start: datetime,
+    cover_ready_rule: str = "fifo",
+) -> tuple[list[_CoverHeapItem], dict[UUID, list[Operation]]]:
     locked = scheduled_ids or set()
     successors: dict[UUID, list[Operation]] = defaultdict(list)
-    heap: list[tuple[float, int, str, UUID]] = []
+    heap: list[_CoverHeapItem] = []
     for op in operations:
         if op.predecessor_op_id:
             successors[op.predecessor_op_id].append(op)
@@ -687,9 +1141,25 @@ def _ready_heap(
         pred = op.predecessor_op_id
         if pred is not None and pred not in locked:
             continue
+        floor = _cover_placement_floor(
+            op,
+            pred_end=0.0,
+            op_earliest=op_earliest,
+            horizon_start=horizon_start,
+        )
         heappush(
             heap,
-            (op_earliest.get(op.id, 0.0), op.seq_in_order, str(op.id), op.id),
+            (
+                _cover_ready_sort_key(
+                    op,
+                    floor=floor,
+                    horizon_start=horizon_start,
+                    cover_ready_rule=cover_ready_rule,
+                ),
+                op.seq_in_order,
+                str(op.id),
+                op.id,
+            ),
         )
     return heap, successors
 
@@ -721,7 +1191,7 @@ def _seed_list_schedule_state(
 
 
 def _pop_cover_ready(
-    heap: list[tuple[float, int, str, UUID]],
+    heap: list[_CoverHeapItem],
     *,
     cover_ready_rule: str,
     tails: dict[UUID, tuple[float, UUID | None]],
@@ -732,7 +1202,7 @@ def _pop_cover_ready(
     order_priority_by_id: Mapping[UUID, int] | None,
     cover_atcs_floor_window: float = _COVER_ATCS_FLOOR_WINDOW,
     cover_atcs_exhaust_window: float = 0.0,
-) -> tuple[float, int, str, UUID]:
+) -> _CoverHeapItem:
     if cover_ready_rule != "atcs":
         return heappop(heap)
     if len(heap) <= 1:
@@ -786,7 +1256,7 @@ def _min_cover_setup_and_p(
 
 
 def _atcs_pick_index(
-    heap: list[tuple[float, int, str, UUID]],
+    heap: list[_CoverHeapItem],
     *,
     tails: dict[UUID, tuple[float, UUID | None]],
     dispatch_context: DispatchContext,
@@ -809,7 +1279,9 @@ def _atcs_pick_index(
         if material > 0:
             mat_sum += material
             mat_n += 1
-        stats.append((item[0], setup, processing, material))
+        ready = item[0]
+        floor = float(ready[0] if isinstance(ready, tuple) else ready)
+        stats.append((floor, setup, processing, material))
     p_bar = max(p_sum / len(heap), 0.1)
     s_bar = max(setup_sum / setup_n, 1.0) if setup_n else 1.0
     m_bar = max(mat_sum / mat_n, 1.0) if mat_n else 1.0
@@ -869,6 +1341,161 @@ def _atcs_window_indices(
     return [index for index, row in enumerate(stats) if row[0] <= cap + 1e-9]
 
 
+def _window_night_key(op: Operation) -> object | None:
+    if not operation_has_hard_windows(op) or op.earliest_start is None:
+        return None
+    return op.earliest_start.date()
+
+
+def _op_window_minutes(op: Operation) -> float:
+    if op.earliest_start is None or op.latest_finish is None:
+        return 8 * 60.0
+    span = (op.latest_finish - op.earliest_start).total_seconds() / 60.0
+    return max(span, 1.0)
+
+
+def _min_eligible_duration(
+    op: Operation,
+    dispatch_context: DispatchContext,
+    default_wc_ids: Sequence[UUID],
+) -> float:
+    eligible = op.eligible_wc_ids or list(default_wc_ids)
+    best = float("inf")
+    for wc_id in eligible:
+        work_center = dispatch_context.wc_by_id.get(wc_id)
+        if work_center is None:
+            continue
+        best = min(best, float(duration_minutes_for(op, work_center)))
+    return 1.0 if best == float("inf") else best
+
+
+def _build_window_family_homes(
+    operations: Sequence[Operation],
+    dispatch_context: DispatchContext,
+    default_wc_ids: Sequence[UUID],
+) -> dict[tuple[object, UUID], tuple[UUID, ...]]:
+    """FFD: give each (night, state) family the fewest machines that fit the load."""
+
+    grouped: dict[object, dict[UUID, list[Operation]]] = defaultdict(lambda: defaultdict(list))
+    for op in operations:
+        night = _window_night_key(op)
+        if night is None:
+            continue
+        grouped[night][op.state_id].append(op)
+    homes: dict[tuple[object, UUID], tuple[UUID, ...]] = {}
+    for night, by_state in grouped.items():
+        remaining: dict[UUID, float] = {}
+        loads: list[tuple[float, UUID, list[Operation]]] = []
+        for state, ops in by_state.items():
+            load = sum(_min_eligible_duration(op, dispatch_context, default_wc_ids) for op in ops)
+            loads.append((load, state, ops))
+        loads.sort(key=lambda row: (-row[0], str(row[1])))
+        for load, state, ops in loads:
+            width = min(_op_window_minutes(op) for op in ops)
+            elig: set[UUID] = set()
+            for op in ops:
+                elig.update(op.eligible_wc_ids or default_wc_ids)
+            chosen: list[UUID] = []
+            leftover = load
+            ordered = sorted(
+                elig,
+                key=lambda wc_id: (-remaining.get(wc_id, width), str(wc_id)),
+            )
+            for wc_id in ordered:
+                if leftover <= 1e-9:
+                    break
+                cap = remaining.setdefault(wc_id, width)
+                if cap <= 1e-9:
+                    continue
+                take = min(cap, leftover)
+                remaining[wc_id] = cap - take
+                leftover -= take
+                chosen.append(wc_id)
+            homes[(night, state)] = tuple(chosen)
+    return homes
+
+
+def _windowed_list_slot_key(
+    *,
+    preferred: bool,
+    last_state: UUID | None,
+    last_end: float,
+    op_state: UUID,
+    floor: float,
+    setup: int,
+    end: float,
+    wc_id: UUID,
+) -> tuple[int, int, int, int, float, str]:
+    """Pack a night by home family, then continuation, before opening another machine."""
+
+    continues = last_state is not None and last_state == op_state
+    opens_night = last_end <= floor + 1e-9
+    return (
+        0 if preferred else 1,
+        0 if continues else 1,
+        0 if opens_night else 1,
+        int(setup),
+        end,
+        str(wc_id),
+    )
+
+
+def _family_home_wcs(
+    op: Operation,
+    window_family_homes: Mapping[tuple[object, UUID], Sequence[UUID]] | None,
+) -> Sequence[UUID]:
+    night = _window_night_key(op)
+    if night is None or not window_family_homes:
+        return ()
+    return window_family_homes.get((night, op.state_id), ())
+
+
+def _cover_slot_beats_best(
+    *,
+    op: Operation,
+    last_state: UUID | None,
+    last_end: float,
+    floor: float,
+    setup: int,
+    end: float,
+    wc_id: UUID,
+    home_wcs: Sequence[UUID],
+    best: tuple[float, float, int, UUID, list[UUID]] | None,
+    best_last_state: UUID | None,
+    best_last_end: float,
+    cover_atcs_exhaust_window: float,
+) -> bool:
+    """Windowed nights use family homes then continuation; unconstrained keeps earliest end."""
+
+    if best is None:
+        return True
+    if operation_has_hard_windows(op):
+        return _windowed_list_slot_key(
+            preferred=wc_id in home_wcs,
+            last_state=last_state,
+            last_end=last_end,
+            op_state=op.state_id,
+            floor=floor,
+            setup=setup,
+            end=end,
+            wc_id=wc_id,
+        ) < _windowed_list_slot_key(
+            preferred=best[3] in home_wcs,
+            last_state=best_last_state,
+            last_end=best_last_end,
+            op_state=op.state_id,
+            floor=floor,
+            setup=best[2],
+            end=best[1],
+            wc_id=best[3],
+        )
+    continuation = cover_atcs_exhaust_window > 0.0 and setup <= 1e-9
+    best_cont = best[2] <= 1e-9
+    if cover_atcs_exhaust_window > 0.0 and continuation != best_cont:
+        return continuation
+    return end < best[1] or (end == best[1] and str(wc_id) < str(best[3]))
+
+
 def _commit_list_schedule_assignment(
     *,
     op: Operation,
@@ -884,6 +1511,7 @@ def _commit_list_schedule_assignment(
     tails: dict[UUID, tuple[float, UUID | None]],
     aux_windows: dict[UUID, list[tuple[float, float, int]]],
     horizon_start: datetime,
+    machine_index: MachineIndex | None = None,
 ) -> Assignment:
     assignment = Assignment(
         operation_id=op.id,
@@ -904,6 +1532,8 @@ def _commit_list_schedule_assignment(
         aux_windows.setdefault(requirement.aux_resource_id, []).append(
             (aux_start, end, int(requirement.quantity_needed))
         )
+    if machine_index is not None:
+        machine_index.add(assignment)
     return assignment
 
 
@@ -917,13 +1547,17 @@ def _best_list_schedule_slot(
     default_wc_ids: Sequence[UUID],
     horizon_minutes: float,
     cover_atcs_exhaust_window: float = 0.0,
+    window_family_homes: Mapping[tuple[object, UUID], Sequence[UUID]] | None = None,
 ) -> tuple[float, float, int, UUID, list[UUID]] | None:
     """Return (start, end, setup, wc_id, aux_ids). Exhaust prefers setup 0."""
 
     eligible = op.eligible_wc_ids if op.eligible_wc_ids else default_wc_ids
     requirements = dispatch_context.requirements_by_op.get(op.id, [])
     aux_ids = [requirement.aux_resource_id for requirement in requirements]
+    home_wcs = _family_home_wcs(op, window_family_homes)
     best: tuple[float, float, int, UUID, list[UUID]] | None = None
+    best_last_state: UUID | None = None
+    best_last_end = 0.0
     for wc_id in eligible:
         work_center = dispatch_context.wc_by_id.get(wc_id)
         if work_center is None:
@@ -963,15 +1597,23 @@ def _best_list_schedule_slot(
         if delayed is None:
             continue
         end = delayed + duration
-        cont = cover_atcs_exhaust_window > 0.0 and setup <= 1e-9
-        best_cont = best is not None and best[2] <= 1e-9
-        take = best is None
-        if not take and cover_atcs_exhaust_window > 0.0 and cont != best_cont:
-            take = cont
-        elif best is not None:
-            take = end < best[1] or (end == best[1] and str(wc_id) < str(best[3]))
-        if take:
+        if _cover_slot_beats_best(
+            op=op,
+            last_state=last_state,
+            last_end=last_end,
+            floor=floor,
+            setup=setup,
+            end=end,
+            wc_id=wc_id,
+            home_wcs=home_wcs,
+            best=best,
+            best_last_state=best_last_state,
+            best_last_end=best_last_end,
+            cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+        ):
             best = (delayed, end, setup, wc_id, aux_ids)
+            best_last_state = last_state
+            best_last_end = last_end
     return best
 
 
@@ -1004,8 +1646,6 @@ def _try_native_list_schedule(
     if _native_list_schedule_cover is None:
         return None
     if any(op.machine_duration_overrides for op in operations):
-        return None
-    if work_centers_have_calendar(list(dispatch_context.wc_by_id.values())):
         return None
     packed = _pack_list_schedule_native(
         operations=operations,
@@ -1107,6 +1747,9 @@ def _pack_list_schedule_native(
         )
         arrays["floor_window"] = float(max(0.0, cover_atcs_floor_window))
         arrays["exhaust_window"] = float(max(0.0, cover_atcs_exhaust_window))
+    calendars = _pack_native_calendars(dispatch_context, idx_to_wc)
+    if calendars is not None:
+        arrays.update(calendars)
     return arrays, idx_to_wc
 
 
@@ -1184,6 +1827,37 @@ def _sdst_flat_from_context(
             continue
         sdst[wi * n_states * n_states + fi * n_states + ti] = float(minutes)
     return sdst
+
+
+def _pack_native_calendars(
+    dispatch_context: DispatchContext,
+    idx_to_wc: Sequence[Any],
+) -> dict[str, Any] | None:
+    """CSR shift spans per machine. None means every work center is 24/7."""
+
+    import numpy as np
+
+    if not work_centers_have_calendar(list(dispatch_context.wc_by_id.values())):
+        return None
+    opens: list[float] = []
+    closes: list[float] = []
+    offsets = [0]
+    horizon_start = dispatch_context.horizon_start
+    for wc_id in idx_to_wc:
+        work_center = dispatch_context.wc_by_id.get(wc_id)
+        calendar = getattr(work_center, "calendar", None) or []
+        for interval in calendar:
+            open_m = (interval.start - horizon_start).total_seconds() / 60.0
+            close_m = (interval.end - horizon_start).total_seconds() / 60.0
+            if close_m > open_m:
+                opens.append(open_m)
+                closes.append(close_m)
+        offsets.append(len(opens))
+    return {
+        "calendar_offsets": np.asarray(offsets, dtype=np.int64),
+        "calendar_open": np.asarray(opens, dtype=np.float64),
+        "calendar_close": np.asarray(closes, dtype=np.float64),
+    }
 
 
 def _native_cover_array_dict(

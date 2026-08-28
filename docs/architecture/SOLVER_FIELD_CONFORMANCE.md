@@ -18,7 +18,7 @@ cores): `GREED`, `BEAM-3`, `CPSAT-10`, `LBBD-5`, `ALNS-300`.
 | `machine_duration_overrides` | ✅ | ✅ | ✅ | ✅ | ✅ | Wave 9 / T-30: `duration_minutes_for` per WC |
 | `predecessor_op_id` | ✅ | ✅ | ✅ | ✅ | ✅ | successor start ≥ predecessor end |
 | `earliest_start` / `latest_finish` | ✅ | ✅ | ✅ | ✅ | ✅ | Wave 15 / G11: per-op hard window; `RELEASE_DATE_VIOLATION` / `HORIZON_BOUND_VIOLATION` |
-| `WorkCenter.calendar` | ✅ clip occupancy | ✅ clip occupancy | ❌ refuse | ❌ refuse | ❌ refuse | KI-N7 closed for the notary: `[start − setup, end]` must sit in one shift. GREED/BEAM/RHC-GREEDY clip setup with processing. Exact/ALNS/RHC-ALNS refuse. Native COVER skips. |
+| `WorkCenter.calendar` | ✅ clip occupancy | ✅ clip occupancy | ✅ encode occupancy | ✅ encode occupancy | ✅ clip occupancy | KI-N7: `[start − setup, end]` must sit in one shift. GREED/BEAM/RHC-GREEDY clip. CP-SAT encodes shifts; LBBD via CP-SAT; ALNS clips. Native COVER encodes occupancy; empty CSR row is 24/7. Auto-route stays `CALENDAR_AWARE`. |
 | `setup_minutes` | ✅ | ✅ | ✅ | ✅ | ✅ | SDST separation on shared machine |
 | `priority` | ✅ | ✅ | ✅ | ✅ | ✅ | ATCS weight / tardiness objective (not in the fast matrix) |
 | `material_loss` | ✅ | ✅ | ✅ | ✅ | ✅ | secondary objective term (not in the fast matrix) |

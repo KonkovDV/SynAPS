@@ -167,7 +167,6 @@ _LONG_FUNCTION_RATCHET: dict[str, int] = {
     "solvers/rhc/_budget.py::scale_alns_inner_budget": 118,
     "solvers/cpsat_solver.py::_build_weighted_objective": 116,
     "cli.py::_build_parser": 114,
-    "solvers/_dispatch_support.py::find_earliest_feasible_slot": 126,
     "solvers/lbbd_hd_solver.py::_generate_all_cuts": 113,
     "solvers/incremental_repair.py::_cpsat_fallback": 111,
     "portfolio.py::solve_schedule": 110,

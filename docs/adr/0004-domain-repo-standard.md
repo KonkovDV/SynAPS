@@ -26,8 +26,8 @@ must bump to the kernel commit that lands this residuals drop (full 40-char
 SHA, never `main`). That bump must regression-run:
 
 1. Fail-closed coverage (`EMPTY`+`FEASIBLE` is `ERROR`; CLI codes 0/2/3/1).
-2. Non-empty `WorkCenter.calendar` is refused by CP-SAT/ALNS/LBBD and clipped
-   by greedy paths.
+2. Non-empty `WorkCenter.calendar` is encoded by CP-SAT/ALNS/LBBD (occupancy
+   in one shift) and clipped by greedy paths. Auto-route stays `CALENDAR_AWARE`.
 3. Kernel `python scripts/verify_claims.py` on the pinned SHA (already green
    in kernel CI).
 
@@ -35,8 +35,9 @@ Until the domain PRs merge, KI-N12 stays **open**. After they merge, record
 the new SHAs here and in each domain README.
 
 Night/emergency work in a domain layer is not a kernel calendar promise:
-only greedy-family configs clip shifts, and windowed coverage on the night
-analog is 0.75–0.88 (`benchmark/BENCHMARK_EVIDENCE_DEADZONE_5K_2026_08_26.md`).
+greedy-family configs clip shifts; exact/ALNS encode when selected; windowed
+coverage on the night analog is 0.75–0.88
+(`benchmark/BENCHMARK_EVIDENCE_DEADZONE_5K_2026_08_26.md`).
 
 **Not allowed:** floating “latest SynAPS”, or claiming GridPlan/MobiRoute
 results as kernel 50k/500k evidence (different algebra).

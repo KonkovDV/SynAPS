@@ -721,3 +721,88 @@ def test_native_list_schedule_cover_uses_ceil_grain() -> None:
     _starts, ends, machines, _setups = result
     assert int(machines[0]) == 0
     assert ends[0] == pytest.approx(4.0)
+
+
+def test_native_list_schedule_cover_clips_setup_into_open_shift() -> None:
+    """Occupancy [start-setup, end] sits in one shift. Empty calendar stays 24/7."""
+
+    pytest.importorskip("synaps_native", reason="native module not built")
+    if accelerators._native_list_schedule_cover is None:
+        pytest.skip("list_schedule_cover kernel is not in this wheel")
+    empty_i64 = np.array([], dtype=np.int64)
+    empty_i32 = np.array([], dtype=np.int32)
+    kwargs = {
+        "base_durations": np.array([60.0, 60.0]),
+        "predecessor_indices": np.array([-1, -1], dtype=np.int64),
+        "seq_in_order": np.array([0, 1], dtype=np.int32),
+        "uuid_rank": np.array([0, 1], dtype=np.int32),
+        "earliest": np.array([0.0, 0.0]),
+        "latest_finish": np.array([np.inf, np.inf]),
+        "eligible_offsets": np.array([0, 1, 2], dtype=np.int64),
+        "eligible_indices": np.array([0, 0], dtype=np.int64),
+        "state_ids": np.array([0, 1], dtype=np.int64),
+        "sdst_setup_flat": np.array([0.0, 30.0, 0.0, 0.0]),
+        "n_wc": 1,
+        "n_states": 2,
+        "speed_factors": np.array([1.0]),
+        "horizon_minutes": 2000.0,
+        "aux_offsets": np.array([0, 0, 0], dtype=np.int64),
+        "aux_resource_indices": empty_i64,
+        "aux_quantities": empty_i32,
+        "aux_pool_sizes": empty_i32,
+        "calendar_offsets": np.array([0, 1], dtype=np.int64),
+        "calendar_open": np.array([480.0]),
+        "calendar_close": np.array([960.0]),
+    }
+    result = accelerators.list_schedule_cover_native(**kwargs)
+    assert result is not None
+    starts, ends, machines, setups = result
+    assert int(machines[0]) == 0
+    assert starts[0] == pytest.approx(480.0)
+    assert ends[0] == pytest.approx(540.0)
+    assert int(setups[1]) == 30
+    occupancy_start = float(starts[1]) - float(setups[1])
+    assert occupancy_start >= 480.0 - 1e-9
+    assert float(ends[1]) <= 960.0 + 1e-9
+    assert occupancy_start >= float(ends[0]) - 1e-9
+
+
+def test_native_list_schedule_mixed_fleet_empty_row_is_24_7() -> None:
+    """Empty CSR row for one machine stays 24/7 when a sibling publishes a shift."""
+
+    pytest.importorskip("synaps_native", reason="native module not built")
+    if accelerators._native_list_schedule_cover is None:
+        pytest.skip("list_schedule_cover kernel is not in this wheel")
+    empty_i64 = np.array([], dtype=np.int64)
+    empty_i32 = np.array([], dtype=np.int32)
+    result = accelerators.list_schedule_cover_native(
+        base_durations=np.array([60.0, 60.0]),
+        predecessor_indices=np.array([-1, -1], dtype=np.int64),
+        seq_in_order=np.array([0, 1], dtype=np.int32),
+        uuid_rank=np.array([0, 1], dtype=np.int32),
+        earliest=np.array([0.0, 0.0]),
+        latest_finish=np.array([np.inf, np.inf]),
+        eligible_offsets=np.array([0, 1, 2], dtype=np.int64),
+        eligible_indices=np.array([0, 1], dtype=np.int64),
+        state_ids=np.array([0, 0], dtype=np.int64),
+        sdst_setup_flat=np.array([0.0, 0.0]),
+        n_wc=2,
+        n_states=1,
+        speed_factors=np.array([1.0, 1.0]),
+        horizon_minutes=2000.0,
+        aux_offsets=np.array([0, 0, 0], dtype=np.int64),
+        aux_resource_indices=empty_i64,
+        aux_quantities=empty_i32,
+        aux_pool_sizes=empty_i32,
+        calendar_offsets=np.array([0, 1, 1], dtype=np.int64),
+        calendar_open=np.array([480.0]),
+        calendar_close=np.array([960.0]),
+    )
+    assert result is not None
+    starts, ends, machines, _setups = result
+    assert int(machines[0]) == 0
+    assert starts[0] == pytest.approx(480.0)
+    assert ends[0] == pytest.approx(540.0)
+    assert int(machines[1]) == 1
+    assert starts[1] == pytest.approx(0.0)
+    assert ends[1] == pytest.approx(60.0)

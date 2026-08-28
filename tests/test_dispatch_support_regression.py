@@ -178,3 +178,43 @@ def test_append_gap_scan_does_not_fill_interior_hole() -> None:
     assert slot_append is not None
     assert slot_all.start_offset < 100
     assert slot_append.start_offset >= 200
+
+
+def test_window_gap_scan_fills_interior_hole() -> None:
+    """Night leftovers must insert into the window, not append after daytime."""
+
+    problem = make_simple_problem(n_orders=3, ops_per_order=1)
+    context = build_dispatch_context(problem)
+    wc_id = problem.work_centers[0].id
+    first, second, third = problem.operations
+    scheduled = [
+        Assignment(
+            operation_id=first.id,
+            work_center_id=wc_id,
+            start_time=HORIZON_START,
+            end_time=HORIZON_START + timedelta(minutes=30),
+            setup_minutes=0,
+        ),
+        Assignment(
+            operation_id=second.id,
+            work_center_id=wc_id,
+            start_time=HORIZON_START + timedelta(minutes=200),
+            end_time=HORIZON_START + timedelta(minutes=230),
+            setup_minutes=0,
+        ),
+    ]
+    windowed = third.model_copy(
+        update={
+            "earliest_start": HORIZON_START + timedelta(minutes=40),
+            "latest_finish": HORIZON_START + timedelta(minutes=100),
+        }
+    )
+    slot_window = find_earliest_feasible_slot(
+        context, scheduled, windowed, wc_id, 40.0, gap_scan="window"
+    )
+    slot_append = find_earliest_feasible_slot(
+        context, scheduled, windowed, wc_id, 40.0, gap_scan="append"
+    )
+    assert slot_window is not None
+    assert slot_window.start_offset < 100
+    assert slot_append is None

@@ -900,6 +900,42 @@ def greedy_repair_batch_native(
         return None
 
 
+def _list_schedule_cover_native_extra(
+    ready_rule: int,
+    weights: np.ndarray | None,
+    material_loss: np.ndarray | None,
+    k1: float,
+    k2: float,
+    k3: float,
+    floor_window: float,
+    exhaust_window: float,
+    calendar_offsets: np.ndarray | None,
+    calendar_open: np.ndarray | None,
+    calendar_close: np.ndarray | None,
+) -> dict[str, Any]:
+    """Optional ATCS / shift kwargs for ``list_schedule_cover``. Empty is 24/7."""
+
+    extra: dict[str, Any] = {}
+    if int(ready_rule) != 0:
+        extra["ready_rule"] = int(ready_rule)
+        extra["k1"] = float(k1)
+        extra["k2"] = float(k2)
+        extra["k3"] = float(k3)
+        extra["floor_window"] = float(floor_window)
+        extra["exhaust_window"] = float(exhaust_window)
+        if weights is not None:
+            extra["weights"] = np.ascontiguousarray(weights, dtype=np.float64)
+        if material_loss is not None:
+            extra["material_loss"] = np.ascontiguousarray(material_loss, dtype=np.float64)
+    if calendar_offsets is not None:
+        extra["calendar_offsets"] = np.ascontiguousarray(calendar_offsets, dtype=np.int64)
+    if calendar_open is not None:
+        extra["calendar_open"] = np.ascontiguousarray(calendar_open, dtype=np.float64)
+    if calendar_close is not None:
+        extra["calendar_close"] = np.ascontiguousarray(calendar_close, dtype=np.float64)
+    return extra
+
+
 def list_schedule_cover_native(
     base_durations: np.ndarray,
     predecessor_indices: np.ndarray,
@@ -927,24 +963,28 @@ def list_schedule_cover_native(
     k3: float = 0.5,
     floor_window: float = 0.0,
     exhaust_window: float = 0.0,
+    calendar_offsets: np.ndarray | None = None,
+    calendar_open: np.ndarray | None = None,
+    calendar_close: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
     """Try native parallel SGS cover. Returns None if native unavailable."""
 
     if _native_list_schedule_cover is None or not _HAS_NUMPY:
         return None
+    extra = _list_schedule_cover_native_extra(
+        ready_rule,
+        weights,
+        material_loss,
+        k1,
+        k2,
+        k3,
+        floor_window,
+        exhaust_window,
+        calendar_offsets,
+        calendar_open,
+        calendar_close,
+    )
     try:
-        extra: dict[str, Any] = {}
-        if int(ready_rule) != 0:
-            extra["ready_rule"] = int(ready_rule)
-            extra["k1"] = float(k1)
-            extra["k2"] = float(k2)
-            extra["k3"] = float(k3)
-            extra["floor_window"] = float(floor_window)
-            extra["exhaust_window"] = float(exhaust_window)
-            if weights is not None:
-                extra["weights"] = np.ascontiguousarray(weights, dtype=np.float64)
-            if material_loss is not None:
-                extra["material_loss"] = np.ascontiguousarray(material_loss, dtype=np.float64)
         starts, ends, machines, setups = _native_list_schedule_cover(
             np.ascontiguousarray(base_durations, dtype=np.float64),
             np.ascontiguousarray(predecessor_indices, dtype=np.int64),

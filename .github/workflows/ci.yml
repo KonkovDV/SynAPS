@@ -284,6 +284,33 @@ jobs:
             --ci-gate \
             --max-wall-s 180
 
+      - name: COVER ladder cell on Linux (100k@200 seed 42)
+        timeout-minutes: 20
+        run: |
+          python -m benchmark.study_cover_ladder \
+            --out-dir benchmark/results/ci-cover-linux-100k \
+            --scales 100k@200 \
+            --seeds 42 \
+            --ci-gate \
+            --max-wall-s 180
+
+      - name: Native list-schedule calendar occupancy
+        run: |
+          pytest -q tests/test_accelerators.py::test_native_list_schedule_cover_clips_setup_into_open_shift \
+            tests/test_calendar.py::test_list_schedule_cover_clips_setup_into_open_shift
+
+      - name: Calendar 3000 seed 1 on Linux
+        timeout-minutes: 15
+        run: |
+          python -m benchmark.study_calendar_3000 \
+            --out-dir benchmark/results/ci-calendar-3000 \
+            --seeds 1
+
+      - name: BEAM timebox on Linux
+        run: |
+          pytest -q tests/test_timebox_enforcement.py::test_beam_honors_shared_deadline \
+            tests/test_timebox_enforcement.py::test_beam_stops_when_slot_search_is_slow
+
       - name: Upload native acceleration artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

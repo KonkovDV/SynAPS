@@ -53,7 +53,7 @@ from synaps.solvers._lbbd_cuts import (
     cut_pool_fingerprint,
     reported_lower_bound,
 )
-from synaps.solvers.coverage_outcome import refuse_unsupported_calendar, stamp_honest_coverage
+from synaps.solvers.coverage_outcome import stamp_honest_coverage
 from synaps.solvers.cpsat_solver import CpSatSolver
 from synaps.solvers.partitioning import partition_machines
 from synaps.timegrain import duration_minutes_for
@@ -93,9 +93,6 @@ class LbbdHdSolver(BaseSolver):
         return "lbbd_hd"
 
     def solve(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
-        refused = refuse_unsupported_calendar(problem, self.name)
-        if refused is not None:
-            return refused
         t0 = time.monotonic()
 
         # ---- Configuration ----

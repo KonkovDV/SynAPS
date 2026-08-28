@@ -1,0 +1,30 @@
+{
+  "determinism": "strict",
+  "determinism_violated": true,
+  "generate_s": 0.096,
+  "global_greedy_cover": false,
+  "independent_violation_count": 2995,
+  "independent_violation_kinds": [
+    "MISSING_ASSIGNMENT"
+  ],
+  "makespan_minutes": 40536.0,
+  "n_machines": 4,
+  "n_operations_requested": 5000,
+  "night_start_hour": 22,
+  "night_window_hours": 8,
+  "notary_hard_violation_count": 2995,
+  "notary_hard_violation_kinds": [
+    "MISSING_ASSIGNMENT"
+  ],
+  "ops_generated": 5000,
+  "ops_scheduled": 2005,
+  "scheduled_ratio": 0.401,
+  "search_stop_reason": "wall_clock",
+  "seed": 1,
+  "solver_config": "RHC-GREEDY",
+  "status": "error",
+  "time_limit_reached": true,
+  "verified_feasible": false,
+  "wall_time_s": 127.705,
+  "worker_peak_rss_raw": null
+}
