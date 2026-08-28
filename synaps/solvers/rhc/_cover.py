@@ -1279,7 +1279,9 @@ def _atcs_pick_index(
         if material > 0:
             mat_sum += material
             mat_n += 1
-        stats.append((item[0], setup, processing, material))
+        ready = item[0]
+        floor = float(ready[0] if isinstance(ready, tuple) else ready)
+        stats.append((floor, setup, processing, material))
     p_bar = max(p_sum / len(heap), 0.1)
     s_bar = max(setup_sum / setup_n, 1.0) if setup_n else 1.0
     m_bar = max(mat_sum / mat_n, 1.0) if mat_n else 1.0
