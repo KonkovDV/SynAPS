@@ -17,10 +17,10 @@ from synaps.model import (
 from synaps.planning_policy import frozen_ids_for_repair
 from synaps.solvers import BaseSolver
 from synaps.solvers._dispatch_support import (
-    APPEND_GAP_SCAN_MIN_OPS,
     MachineIndex,
     build_dispatch_context,
     find_earliest_feasible_slot,
+    gap_scan_for,
     recompute_assignment_setups,
 )
 from synaps.solvers._time_windows import operation_earliest_offset_minutes
@@ -330,7 +330,7 @@ class IncrementalRepair(BaseSolver):
                 op_positions[operation.id],
             ),
         )
-        gap_scan = "append" if len(problem.operations) >= APPEND_GAP_SCAN_MIN_OPS else "all"
+        n_scan = len(problem.operations)
 
         while remaining_repair:
             ready = [
@@ -390,7 +390,7 @@ class IncrementalRepair(BaseSolver):
                         work_center_id,
                         earliest_start,
                         machine_index=machine_idx,
-                        gap_scan=gap_scan,
+                        gap_scan=gap_scan_for(n_scan, operation),
                     )
                     if slot is None:
                         continue

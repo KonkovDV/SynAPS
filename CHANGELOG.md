@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Night / window scan (2026-08-28):** Large-n leftover fill with hard
+  per-op windows uses a window-clipped interior gap scan, not append-after-
+  last. RHC greedy COVER list-schedule at n>=2000 when windows exist (the
+  10_000 unconstrained gate is unchanged). ALNS list-schedule seed allows
+  hard windows; machine calendar still skips. Linux PR CI runs BEAM
+  timebox sentinels. Hashed P2.3 / remainder / ALNS-500 epoch JSON is
+  **not** rewritten (`docs/rfc/REDTEAM_TRIAGE_NIGHT_WINDOWS_2026_08_28.md`).
+
 - **Residuals / KI-N1 N4 N10 (2026-08-27):** Unconstrained ALNS-500 at n>=2000
   seeds from COVER list-schedule (not a `global_greedy_cover_min_ops` retune).
   Session 5k@8 90 s box, walls 92.162 s / 89.706 s / 89.207 s

@@ -290,10 +290,12 @@ def _try_unconstrained_list_schedule_seed(
     frozen_assignments: list[Assignment],
     deadline_exceeded: Callable[[], bool] | None,
 ) -> ScheduleResult | None:
-    """Complete unconstrained large-n seed via COVER list-schedule.
+    """Complete large-n seed via COVER list-schedule.
 
-    Does not change ``global_greedy_cover_min_ops``. Hard windows / calendar
-    skip this path. Frozen RHC inner windows skip it too.
+    Does not change ``global_greedy_cover_min_ops``. Machine calendar skips
+    this path (native COVER has no calendar ABI). Hard per-op windows are
+    allowed: list-schedule already clips ``latest_finish``. Frozen RHC inner
+    windows skip it.
     """
 
     if frozen_assignments or n_ops < APPEND_GAP_SCAN_MIN_OPS:
@@ -303,11 +305,6 @@ def _try_unconstrained_list_schedule_seed(
     from synaps.solvers.rhc._solver import RhcSolver
 
     if work_centers_have_calendar(problem.work_centers):
-        return None
-    if any(
-        operation.earliest_start is not None or operation.latest_finish is not None
-        for operation in problem.operations
-    ):
         return None
     horizon_start = problem.planning_horizon_start
     horizon_minutes = (problem.planning_horizon_end - horizon_start).total_seconds() / 60.0

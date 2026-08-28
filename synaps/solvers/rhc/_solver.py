@@ -42,6 +42,7 @@ from synaps.solvers._dispatch_support import (
     MachineIndex,
     build_dispatch_context,
     find_earliest_feasible_slot,
+    operations_have_hard_windows,
     recompute_assignment_setups,
 )
 from synaps.solvers.coverage_outcome import refuse_unsupported_calendar, stamp_honest_coverage
@@ -923,6 +924,7 @@ class RhcSolver(BaseSolver):
             inner_solver_name=inner_solver_name,
             n_ops=len(problem.operations),
             min_ops=global_greedy_cover_min_ops,
+            has_hard_windows=operations_have_hard_windows(problem.operations),
         ):
             # Coverage-complete constructive path: one list-schedule instead of
             # repeating greedy insertion across rolling windows.

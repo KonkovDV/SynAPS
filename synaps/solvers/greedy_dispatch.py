@@ -22,10 +22,10 @@ from synaps.model import (
 )
 from synaps.solvers import BaseSolver
 from synaps.solvers._dispatch_support import (
-    APPEND_GAP_SCAN_MIN_OPS,
     MachineIndex,
     build_dispatch_context,
     find_earliest_feasible_slot,
+    gap_scan_for,
     recompute_assignment_setups,
 )
 from synaps.solvers._time_windows import operation_earliest_offset_minutes
@@ -33,10 +33,14 @@ from synaps.solvers.coverage_outcome import stamp_honest_coverage
 from synaps.timegrain import physical_processing_minutes_for
 
 
-def _gap_scan_for(n_ops: int) -> str:
-    """KI-N1: full left-to-right gap walk is O(n^2*m). Large n appends only."""
+def _gap_scan_for(n_ops: int, operation: Any | None = None) -> str:
+    """KI-N1: full left-to-right gap walk is O(n^2*m). Large n appends only.
 
-    return "append" if n_ops >= APPEND_GAP_SCAN_MIN_OPS else "all"
+    Hard per-op windows keep a window-clipped interior scan so night leftovers
+    are not appended after the last daytime job.
+    """
+
+    return gap_scan_for(n_ops, operation)
 
 
 def _dispatch_timeout_result(
@@ -427,7 +431,6 @@ class GreedyDispatch(BaseSolver):
         # Build operation queue (respecting precedence)
         all_ops = problem.operations
         n_total_ops = len(all_ops)
-        gap_scan = _gap_scan_for(n_total_ops)
         scheduled_ops: set[Any] = set()
         op_end_offsets: dict[Any, float] = {}
         assignments: list[Assignment] = []
@@ -519,7 +522,7 @@ class GreedyDispatch(BaseSolver):
                         wc_id,
                         pred_end,
                         machine_index=machine_idx,
-                        gap_scan=gap_scan,
+                        gap_scan=_gap_scan_for(n_total_ops, op),
                     )
                     if slot is None:
                         continue
@@ -744,8 +747,7 @@ def _greedy_complete(
     scheduled = set(scheduled_ops)
     offsets = dict(op_end_offsets)
     todo = list(remaining)
-
-    gap_scan = _gap_scan_for(len(out) + len(todo))
+    n_scan = len(out) + len(todo)
     while todo:
         ready = [
             op for op in todo if op.predecessor_op_id is None or op.predecessor_op_id in scheduled
@@ -774,7 +776,7 @@ def _greedy_complete(
                     wc_id,
                     pred_end,
                     machine_index=machine_idx,
-                    gap_scan=gap_scan,
+                    gap_scan=_gap_scan_for(n_scan, op),
                 )
                 if slot is None:
                     continue
@@ -885,7 +887,6 @@ class BeamSearchDispatch(BaseSolver):
         ]
 
         total_ops = len(problem.operations)
-        gap_scan = _gap_scan_for(total_ops)
 
         # Q1: global incumbent over EVERY completed rollout, not just the beams
         # that survive the last step. A wider beam rolls out a superset of
@@ -1002,7 +1003,7 @@ class BeamSearchDispatch(BaseSolver):
                             wc_id,
                             pred_end,
                             machine_index=machine_idx,
-                            gap_scan=gap_scan,
+                            gap_scan=_gap_scan_for(total_ops, op),
                         )
                         if slot is None:
                             continue

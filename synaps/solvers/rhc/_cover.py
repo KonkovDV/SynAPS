@@ -74,20 +74,34 @@ def should_use_global_greedy_cover(
     inner_solver_name: str,
     n_ops: int,
     min_ops: int = _GLOBAL_GREEDY_COVER_MIN_OPS_DEFAULT,
+    has_hard_windows: bool = False,
 ) -> bool:
-    """True when RHC should skip rolling windows and list-schedule in one pass."""
+    """True when RHC should skip rolling windows and list-schedule in one pass.
 
-    return inner_solver_name == "greedy" and n_ops >= min_ops
+    ``min_ops`` stays 10_000 for unconstrained COVER. Windowed night/remainder
+    cells at n>=2000 use the same list-schedule path: append residual cannot
+    place an 8 h window after a packed daytime tail. Not a retune of
+    ``global_greedy_cover_min_ops``.
+    """
+
+    if inner_solver_name != "greedy":
+        return False
+    if n_ops >= min_ops:
+        return True
+    return bool(has_hard_windows) and n_ops >= APPEND_GAP_SCAN_MIN_OPS
 
 
-def _cover_gap_scan_for(n_timeline: int) -> str:
+def _cover_gap_scan_for(n_timeline: int, operation: Any | None = None) -> str:
     """Append-only when the packed timeline is already at the large-n threshold.
 
     Residual fill against 100k packed assignments used the default full gap
-    walk (O(n^2*m)). That is the same class as KI-N1 ``evaluate_gap``, not a
-    retune of residual placement to chase a Yes.
+    walk (O(n^2*m)). Windowed leftovers use a clipped interior scan.
     """
 
+    from synaps.solvers._dispatch_support import operation_has_hard_windows
+
+    if operation is not None and operation_has_hard_windows(operation):
+        return "window" if n_timeline >= APPEND_GAP_SCAN_MIN_OPS else "all"
     return "append" if n_timeline >= APPEND_GAP_SCAN_MIN_OPS else "all"
 
 
@@ -104,7 +118,7 @@ def select_earliest_horizon_slot(
 ) -> tuple[SlotCandidate | None, UUID | None, int]:
     """Pick the feasible slot with the earliest completion inside the horizon."""
 
-    scan = gap_scan if gap_scan is not None else _cover_gap_scan_for(len(assignments))
+    scan = gap_scan if gap_scan is not None else _cover_gap_scan_for(len(assignments), operation)
     best_slot: SlotCandidate | None = None
     best_wc: UUID | None = None
     clipped = 0

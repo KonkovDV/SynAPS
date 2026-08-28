@@ -86,6 +86,37 @@ def test_should_use_global_greedy_cover_only_for_large_greedy() -> None:
     assert not should_use_global_greedy_cover(
         inner_solver_name="alns", n_ops=50_000, min_ops=10_000
     )
+    assert should_use_global_greedy_cover(
+        inner_solver_name="greedy",
+        n_ops=APPEND_GAP_SCAN_MIN_OPS,
+        min_ops=10_000,
+        has_hard_windows=True,
+    )
+    assert not should_use_global_greedy_cover(
+        inner_solver_name="greedy",
+        n_ops=APPEND_GAP_SCAN_MIN_OPS,
+        min_ops=10_000,
+        has_hard_windows=False,
+    )
+
+
+def test_cover_gap_scan_appends_at_large_n_threshold() -> None:
+    assert _cover_gap_scan_for(APPEND_GAP_SCAN_MIN_OPS - 1) == "all"
+    assert _cover_gap_scan_for(APPEND_GAP_SCAN_MIN_OPS) == "append"
+
+
+def test_cover_gap_scan_windows_when_op_has_hard_windows() -> None:
+    assert _cover_gap_scan_for(APPEND_GAP_SCAN_MIN_OPS) == "append"
+    leftover = Operation(
+        id=uuid4(),
+        order_id=uuid4(),
+        seq_in_order=1,
+        state_id=uuid4(),
+        base_duration_min=10,
+        earliest_start=HORIZON_START,
+        latest_finish=HORIZON_START + timedelta(hours=8),
+    )
+    assert _cover_gap_scan_for(APPEND_GAP_SCAN_MIN_OPS, leftover) == "window"
 
 
 def test_place_operations_greedy_clips_past_horizon() -> None:
@@ -110,11 +141,6 @@ def test_place_operations_greedy_clips_past_horizon() -> None:
     assert stats.clipped >= 1
     assert len(assignments) == 1
     assert assignments[0].operation_id == problem.operations[0].id
-
-
-def test_cover_gap_scan_appends_at_large_n_threshold() -> None:
-    assert _cover_gap_scan_for(APPEND_GAP_SCAN_MIN_OPS - 1) == "all"
-    assert _cover_gap_scan_for(APPEND_GAP_SCAN_MIN_OPS) == "append"
 
 
 def test_residual_greedy_uses_append_scan_when_timeline_is_large(
@@ -163,6 +189,58 @@ def test_residual_greedy_uses_append_scan_when_timeline_is_large(
         default_wc_ids=[problem.work_centers[0].id],
     )
     assert "append" in seen
+
+
+def test_residual_greedy_uses_window_scan_when_leftover_has_hard_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import synaps.solvers.rhc._cover as cover
+
+    seen: list[str] = []
+    real_find = cover.find_earliest_feasible_slot
+
+    def spy_find(*args: object, **kwargs: object) -> object:
+        seen.append(str(kwargs.get("gap_scan")))
+        return real_find(*args, **kwargs)
+
+    monkeypatch.setattr(cover, "APPEND_GAP_SCAN_MIN_OPS", 1)
+    monkeypatch.setattr(cover, "find_earliest_feasible_slot", spy_find)
+    problem = _two_op_problem(duration=10, horizon_minutes=90)
+    leftover = problem.operations[1].model_copy(
+        update={
+            "earliest_start": HORIZON_START + timedelta(minutes=20),
+            "latest_finish": HORIZON_START + timedelta(minutes=50),
+        }
+    )
+    problem = problem.model_copy(update={"operations": [problem.operations[0], leftover]})
+    context = build_dispatch_context(problem)
+    first = problem.operations[0]
+    start = problem.planning_horizon_start
+    packed = Assignment(
+        operation_id=first.id,
+        work_center_id=problem.work_centers[0].id,
+        start_time=start,
+        end_time=start + timedelta(minutes=10),
+        setup_minutes=0,
+    )
+    assignments = [packed]
+    by_op = {first.id: packed}
+    scheduled = {first.id}
+    machine_index = MachineIndex(context)
+    machine_index.extend(assignments)
+    place_operations_greedy(
+        operations=[leftover],
+        dispatch_context=context,
+        assignments=assignments,
+        assignment_by_op=by_op,
+        scheduled_ids=scheduled,
+        machine_index=machine_index,
+        horizon_start=start,
+        horizon_minutes=90.0,
+        op_earliest={leftover.id: 0.0},
+        default_wc_ids=[problem.work_centers[0].id],
+    )
+    assert "window" in seen
 
 
 def test_place_operations_list_schedule_sequences_predecessor() -> None:

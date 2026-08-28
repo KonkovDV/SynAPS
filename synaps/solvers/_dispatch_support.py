@@ -485,6 +485,31 @@ def _clip_start_to_calendar(
 APPEND_GAP_SCAN_MIN_OPS = 2000
 
 
+def operation_has_hard_windows(operation: Any) -> bool:
+    """True when the op publishes a hard ``earliest_start`` or ``latest_finish``."""
+
+    return (
+        getattr(operation, "earliest_start", None) is not None
+        or getattr(operation, "latest_finish", None) is not None
+    )
+
+
+def operations_have_hard_windows(operations: Any) -> bool:
+    return any(operation_has_hard_windows(operation) for operation in operations)
+
+
+def gap_scan_for(n_ops: int, operation: Any | None = None) -> str:
+    """Append on large unconstrained timelines; window-clipped scan when ops have hard windows.
+
+    Does not change ``global_greedy_cover_min_ops``. Night leftover fill cannot
+    append after the last daytime job: that slot sits outside the 8 h window.
+    """
+
+    if operation is not None and operation_has_hard_windows(operation):
+        return "window" if n_ops >= APPEND_GAP_SCAN_MIN_OPS else "all"
+    return "append" if n_ops >= APPEND_GAP_SCAN_MIN_OPS else "all"
+
+
 def find_earliest_feasible_slot(
     context: DispatchContext,
     scheduled_assignments: list[Assignment],
@@ -500,123 +525,220 @@ def find_earliest_feasible_slot(
         from types import SimpleNamespace
 
         work_center = SimpleNamespace(id=work_center_id, speed_factor=1.0)
-    # P0-4 / T-30: canonical integer time grain, including p_{o,m} overrides.
     duration = float(duration_minutes_for(operation, work_center))
     aux_resource_ids = [
         requirement.aux_resource_id
         for requirement in context.requirements_by_op.get(operation.id, [])
     ]
     required_resource_ids = set(aux_resource_ids)
+    resource_windows_by_resource, machine_assignments = _slot_machine_view(
+        context,
+        scheduled_assignments,
+        work_center_id,
+        required_resource_ids,
+        machine_index,
+    )
 
+    def evaluate_gap(
+        previous: Assignment | None, following: Assignment | None
+    ) -> SlotCandidate | None:
+        return _evaluate_slot_gap(
+            context=context,
+            work_center=work_center,
+            work_center_id=work_center_id,
+            operation=operation,
+            duration=duration,
+            earliest_start=earliest_start,
+            scheduled_assignments=scheduled_assignments,
+            resource_windows_by_resource=resource_windows_by_resource,
+            aux_resource_ids=aux_resource_ids,
+            previous=previous,
+            following=following,
+        )
+
+    if gap_scan == "append":
+        if not machine_assignments:
+            return evaluate_gap(None, None)
+        return evaluate_gap(machine_assignments[-1], None)
+    if gap_scan == "window":
+        op_latest = operation_latest_finish_offset_minutes(operation, context.horizon_start)
+        window_hi = float(op_latest) if op_latest is not None else float("inf")
+        return _scan_gaps_overlapping_window(
+            machine_assignments,
+            evaluate_gap,
+            context,
+            float(earliest_start),
+            window_hi,
+        )
+    return _scan_all_gaps(machine_assignments, evaluate_gap)
+
+
+def _slot_machine_view(
+    context: DispatchContext,
+    scheduled_assignments: list[Assignment],
+    work_center_id: UUID,
+    required_resource_ids: set[Any],
+    machine_index: MachineIndex | None,
+) -> tuple[Any, list[Assignment]]:
     if machine_index is not None:
-        setup_window_starts = machine_index.get_setup_window_starts()
-        resource_windows_by_resource = machine_index.get_resource_windows(required_resource_ids)
-        machine_assignments = machine_index.get_machine_assignments(work_center_id)
-    else:
-        setup_window_starts = _assignment_setup_window_starts(context, scheduled_assignments)
-        resource_windows_by_resource = _resource_windows_by_resource(
+        return (
+            machine_index.get_resource_windows(required_resource_ids),
+            machine_index.get_machine_assignments(work_center_id),
+        )
+    setup_window_starts = _assignment_setup_window_starts(context, scheduled_assignments)
+    return (
+        _resource_windows_by_resource(
             context,
             scheduled_assignments,
             setup_window_starts,
             required_resource_ids,
-        )
-        machine_assignments = sorted(
+        ),
+        sorted(
             [
                 assignment
                 for assignment in scheduled_assignments
                 if assignment.work_center_id == work_center_id
             ],
             key=lambda assignment: assignment.start_time,
-        )
+        ),
+    )
 
-    def evaluate_gap(
-        previous: Assignment | None, following: Assignment | None
-    ) -> SlotCandidate | None:
-        previous_end = _offset_minutes(context, previous, end=True) if previous is not None else 0.0
-        previous_state = _assignment_state_id(context, previous)
-        setup_before = (
-            context.setup_minutes.get((work_center_id, previous_state, operation.state_id), 0)
-            if previous_state is not None
+
+def _evaluate_slot_gap(
+    *,
+    context: DispatchContext,
+    work_center: Any,
+    work_center_id: UUID,
+    operation: Operation,
+    duration: float,
+    earliest_start: float,
+    scheduled_assignments: list[Assignment],
+    resource_windows_by_resource: Any,
+    aux_resource_ids: list[Any],
+    previous: Assignment | None,
+    following: Assignment | None,
+) -> SlotCandidate | None:
+    previous_end = _offset_minutes(context, previous, end=True) if previous is not None else 0.0
+    previous_state = _assignment_state_id(context, previous)
+    setup_before = (
+        context.setup_minutes.get((work_center_id, previous_state, operation.state_id), 0)
+        if previous_state is not None
+        else 0
+    )
+    material_loss_before = (
+        context.material_loss.get((work_center_id, previous_state, operation.state_id), 0.0)
+        if previous_state is not None
+        else 0.0
+    )
+    occupancy_earliest = max(previous_end, earliest_start - float(setup_before))
+    occupancy_start = _clip_start_to_calendar(
+        work_center,
+        occupancy_earliest,
+        duration + float(setup_before),
+        context.horizon_start,
+    )
+    if occupancy_start is None:
+        return None
+    gap_start = occupancy_start + float(setup_before)
+    latest_start = _gap_latest_start(
+        context,
+        work_center_id,
+        operation,
+        duration,
+        following,
+    )
+    if gap_start > latest_start + 1e-9:
+        return None
+    for candidate_start in _candidate_starts(
+        context,
+        scheduled_assignments,
+        operation.id,
+        gap_start,
+        latest_start,
+        setup_before,
+        resource_windows_by_resource=resource_windows_by_resource,
+    ):
+        end_offset = candidate_start + duration
+        if candidate_start < gap_start - 1e-9 or candidate_start > latest_start + 1e-9:
+            continue
+        if _resource_is_feasible(
+            context,
+            resource_windows_by_resource,
+            operation.id,
+            candidate_start,
+            end_offset,
+            setup_before,
+        ):
+            return SlotCandidate(
+                start_offset=candidate_start,
+                end_offset=end_offset,
+                setup_minutes=setup_before,
+                material_loss=material_loss_before,
+                aux_resource_ids=aux_resource_ids,
+            )
+    return None
+
+
+def _gap_latest_start(
+    context: DispatchContext,
+    work_center_id: UUID,
+    operation: Operation,
+    duration: float,
+    following: Assignment | None,
+) -> float:
+    if following is not None:
+        following_start = _offset_minutes(context, following, end=False)
+        following_state = _assignment_state_id(context, following)
+        setup_after = (
+            context.setup_minutes.get(
+                (work_center_id, operation.state_id, following_state),
+                0,
+            )
+            if following_state is not None
             else 0
         )
-        material_loss_before = (
-            context.material_loss.get((work_center_id, previous_state, operation.state_id), 0.0)
-            if previous_state is not None
-            else 0.0
-        )
-        occupancy_earliest = max(previous_end, earliest_start - float(setup_before))
-        occupancy_start = _clip_start_to_calendar(
-            work_center,
-            occupancy_earliest,
-            duration + float(setup_before),
-            context.horizon_start,
-        )
-        if occupancy_start is None:
-            return None
-        gap_start = occupancy_start + float(setup_before)
+        latest_start = following_start - setup_after - duration
+    else:
+        latest_start = float("inf")
+    op_latest = operation_latest_finish_offset_minutes(operation, context.horizon_start)
+    if op_latest is not None:
+        latest_start = min(latest_start, op_latest - duration)
+    return latest_start
 
-        if following is not None:
-            following_start = _offset_minutes(context, following, end=False)
-            following_state = _assignment_state_id(context, following)
-            setup_after = (
-                context.setup_minutes.get(
-                    (work_center_id, operation.state_id, following_state),
-                    0,
-                )
-                if following_state is not None
-                else 0
-            )
-            latest_start = following_start - setup_after - duration
-        else:
-            latest_start = float("inf")
 
-        op_latest = operation_latest_finish_offset_minutes(operation, context.horizon_start)
-        if op_latest is not None:
-            latest_start = min(latest_start, op_latest - duration)
-
-        if gap_start > latest_start + 1e-9:
-            return None
-
-        for candidate_start in _candidate_starts(
-            context,
-            scheduled_assignments,
-            operation.id,
-            gap_start,
-            latest_start,
-            setup_before,
-            resource_windows_by_resource=resource_windows_by_resource,
-        ):
-            end_offset = candidate_start + duration
-            if candidate_start < gap_start - 1e-9 or candidate_start > latest_start + 1e-9:
-                continue
-            if _resource_is_feasible(
-                context,
-                resource_windows_by_resource,
-                operation.id,
-                candidate_start,
-                end_offset,
-                setup_before,
-            ):
-                return SlotCandidate(
-                    start_offset=candidate_start,
-                    end_offset=end_offset,
-                    setup_minutes=setup_before,
-                    material_loss=material_loss_before,
-                    aux_resource_ids=aux_resource_ids,
-                )
-
-        return None
-
-    if gap_scan == "append":
-        if not machine_assignments:
-            return evaluate_gap(None, None)
-        return evaluate_gap(machine_assignments[-1], None)
-
+def _scan_all_gaps(
+    machine_assignments: list[Assignment],
+    evaluate_gap: Any,
+) -> SlotCandidate | None:
     previous_assignment: Assignment | None = None
     for assignment in machine_assignments:
         candidate = evaluate_gap(previous_assignment, assignment)
         if candidate is not None:
             return candidate
         previous_assignment = assignment
+    return evaluate_gap(previous_assignment, None)
 
+
+def _scan_gaps_overlapping_window(
+    machine_assignments: list[Assignment],
+    evaluate_gap: Any,
+    context: DispatchContext,
+    window_lo: float,
+    window_hi: float,
+) -> SlotCandidate | None:
+    """Interior gaps that can still meet a hard window; not a full-timeline walk."""
+
+    if not machine_assignments:
+        return evaluate_gap(None, None)
+    starts = [_offset_minutes(context, assignment, end=False) for assignment in machine_assignments]
+    left = bisect.bisect_left(starts, window_lo)
+    right = bisect.bisect_right(starts, window_hi)
+    lo = max(0, left - 1)
+    hi = min(len(machine_assignments), right + 1)
+    previous_assignment: Assignment | None = machine_assignments[lo - 1] if lo > 0 else None
+    for assignment in machine_assignments[lo:hi]:
+        candidate = evaluate_gap(previous_assignment, assignment)
+        if candidate is not None:
+            return candidate
+        previous_assignment = assignment
     return evaluate_gap(previous_assignment, None)
