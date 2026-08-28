@@ -11,7 +11,9 @@ Academic basis:
     - Pinedo (2016): list scheduling / non-delay dispatch.
     - Kolisch (1996): serial SGS = earliest feasible insertion.
     - Artigues, Lopez, Ayache (Ann. OR 2005, arXiv:cs/0606043): appending
-      SGS is not active under SDST; insertion SGS is required.
+      SGS is not active under SDST; insertion SGS is required. Windowed
+      placement on one machine prefers an earlier hole over a feasible
+      late tail.
     - Zhang et al. (Processes 2019): first-fit idle-period / extrusion insert.
 """
 
@@ -1037,6 +1039,36 @@ def _list_schedule_eligible_wcs(
     return [wc_id for wc_id in eligible if wc_id in allowed]
 
 
+def _unconstrained_earliest_gap(
+    *,
+    op: Operation,
+    dispatch_context: DispatchContext,
+    assignments: list[Assignment],
+    machine_index: MachineIndex,
+    floor: float,
+    eligible: Sequence[UUID],
+    horizon_minutes: float,
+) -> tuple[float, float, int, UUID, list[UUID]] | None:
+    best_slot, best_wc, _clipped = select_earliest_horizon_slot(
+        dispatch_context=dispatch_context,
+        assignments=assignments,
+        operation=op,
+        eligible_wc_ids=eligible,
+        earliest_start=floor,
+        horizon_minutes=horizon_minutes,
+        machine_index=machine_index,
+    )
+    if best_slot is None or best_wc is None:
+        return None
+    return (
+        best_slot.start_offset,
+        best_slot.end_offset,
+        best_slot.setup_minutes,
+        best_wc,
+        list(best_slot.aux_resource_ids),
+    )
+
+
 def _best_gap_cover_slot(
     *,
     op: Operation,
@@ -1058,26 +1090,18 @@ def _best_gap_cover_slot(
     if not eligible:
         return None
     if not operation_has_hard_windows(op):
-        best_slot, best_wc, _clipped = select_earliest_horizon_slot(
+        return _unconstrained_earliest_gap(
+            op=op,
             dispatch_context=dispatch_context,
             assignments=assignments,
-            operation=op,
-            eligible_wc_ids=eligible,
-            earliest_start=floor,
-            horizon_minutes=horizon_minutes,
             machine_index=machine_index,
-        )
-        if best_slot is None or best_wc is None:
-            return None
-        return (
-            best_slot.start_offset,
-            best_slot.end_offset,
-            best_slot.setup_minutes,
-            best_wc,
-            list(best_slot.aux_resource_ids),
+            floor=floor,
+            eligible=eligible,
+            horizon_minutes=horizon_minutes,
         )
     home_wcs = _family_home_wcs(op, window_family_homes)
     best: tuple[float, float, int, UUID, list[UUID]] | None = None
+    best_last_state: UUID | None = None
     best_last_end = 0.0
     for wc_id in eligible:
         gap, gap_wc, _clipped = select_earliest_horizon_slot(
@@ -1091,17 +1115,23 @@ def _best_gap_cover_slot(
         )
         if gap is None or gap_wc is None:
             continue
+        last_end, last_state = _predecessor_on_machine(
+            machine_index,
+            gap_wc,
+            gap.start_offset,
+            dispatch_context,
+        )
         if _cover_slot_beats_best(
             op=op,
-            last_state=None,
-            last_end=gap.start_offset,
+            last_state=last_state,
+            last_end=last_end,
             floor=floor,
             setup=gap.setup_minutes,
             end=gap.end_offset,
             wc_id=gap_wc,
             home_wcs=home_wcs,
             best=best,
-            best_last_state=None,
+            best_last_state=best_last_state,
             best_last_end=best_last_end,
             cover_atcs_exhaust_window=cover_atcs_exhaust_window,
         ):
@@ -1112,8 +1142,46 @@ def _best_gap_cover_slot(
                 gap_wc,
                 list(gap.aux_resource_ids),
             )
-            best_last_end = gap.start_offset
+            best_last_state = last_state
+            best_last_end = last_end
     return best
+
+
+def _predecessor_on_machine(
+    machine_index: MachineIndex,
+    wc_id: UUID,
+    start_offset: float,
+    dispatch_context: DispatchContext,
+) -> tuple[float, UUID | None]:
+    """State and end of the assignment that finishes before ``start_offset``."""
+
+    last_end = 0.0
+    last_state: UUID | None = None
+    horizon_start = dispatch_context.horizon_start
+    for assignment in machine_index.get_machine_assignments(wc_id):
+        end = (assignment.end_time - horizon_start).total_seconds() / 60.0
+        if end <= start_offset + 1e-9:
+            last_end = end
+            operation = dispatch_context.ops_by_id.get(assignment.operation_id)
+            last_state = operation.state_id if operation is not None else None
+            continue
+        break
+    return last_end, last_state
+
+
+def _earlier_same_machine_gap(
+    tail: tuple[float, float, int, UUID, list[UUID]] | None,
+    gap: tuple[float, float, int, UUID, list[UUID]] | None,
+) -> tuple[tuple[float, float, int, UUID, list[UUID]] | None, bool]:
+    """On one machine, Artigues insertion SGS beats a feasible late append."""
+
+    if gap is None:
+        return tail, False
+    if tail is None:
+        return gap, True
+    if tail[3] == gap[3] and gap[0] + 1e-9 < tail[0]:
+        return gap, True
+    return tail, False
 
 
 def _try_tail_or_gap_slot(
@@ -1134,7 +1202,7 @@ def _try_tail_or_gap_slot(
 ) -> tuple[tuple[float, float, int, UUID, list[UUID]] | None, bool, MachineIndex | None]:
     if not eligible_wcs:
         return None, False, machine_index
-    slot = _best_list_schedule_slot(
+    tail = _best_list_schedule_slot(
         op=op,
         dispatch_context=dispatch_context,
         tails=tails,
@@ -1146,24 +1214,26 @@ def _try_tail_or_gap_slot(
         window_family_homes=window_family_homes,
         eligible_wcs=eligible_wcs,
     )
-    inserted = False
-    if slot is None and allow_gap:
-        index = _ensure_list_schedule_index(machine_index, dispatch_context, assignments)
-        slot = _best_gap_cover_slot(
-            op=op,
-            dispatch_context=dispatch_context,
-            assignments=assignments,
-            machine_index=index,
-            floor=floor,
-            default_wc_ids=default_wc_ids,
-            horizon_minutes=horizon_minutes,
-            eligible_wcs=eligible_wcs,
-            window_family_homes=window_family_homes,
-            cover_atcs_exhaust_window=cover_atcs_exhaust_window,
-        )
-        inserted = slot is not None
-        machine_index = index
-    return slot, inserted, machine_index
+    windowed = operation_has_hard_windows(op)
+    if not allow_gap or (tail is not None and not windowed):
+        return tail, False, machine_index
+    index = _ensure_list_schedule_index(machine_index, dispatch_context, assignments)
+    gap = _best_gap_cover_slot(
+        op=op,
+        dispatch_context=dispatch_context,
+        assignments=assignments,
+        machine_index=index,
+        floor=floor,
+        default_wc_ids=default_wc_ids,
+        horizon_minutes=horizon_minutes,
+        eligible_wcs=eligible_wcs,
+        window_family_homes=window_family_homes,
+        cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+    )
+    if not windowed:
+        return gap, gap is not None, index
+    slot, inserted = _earlier_same_machine_gap(tail, gap)
+    return slot, inserted, index
 
 
 def _place_ready_list_operation(
@@ -1186,9 +1256,9 @@ def _place_ready_list_operation(
 ) -> tuple[bool, bool, float]:
     """Place one ready op. Returns (placed, gap_inserted, end).
 
-    Windowed ops try the exclusive home tail and home gap before a steal
-    tail: appending SGS on a foreign machine skipped an active hole on the
-    assigned bin (Artigues 2005).
+    Windowed ops try the exclusive home (tail and gap) before a steal
+    tail. On one machine, an earlier home hole beats a feasible late
+    continuation tail (Artigues 2005 insertion SGS).
     """
 
     home_wcs = _family_home_wcs(op, window_family_homes)
@@ -1540,8 +1610,18 @@ def _atcs_window_indices(
 
 
 def _window_night_key(op: Operation) -> object | None:
+    """Group ops that share a hard window close, including after midnight.
+
+    ``earliest_start.date()`` split a 22:00-06:00 night when a sibling's
+    earliest sat after 00:00. Deadzone stamps one earliest per night, but
+    staggered earliest inside the same ``latest_finish`` is one family.
+    """
+
     if not operation_has_hard_windows(op) or op.earliest_start is None:
         return None
+    latest = op.latest_finish
+    if latest is not None:
+        return (latest.date(), latest.hour, latest.minute)
     return op.earliest_start.date()
 
 

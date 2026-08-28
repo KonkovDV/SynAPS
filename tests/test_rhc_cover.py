@@ -29,6 +29,7 @@ from synaps.solvers.rhc._cover import (
     _atcs_window_indices,
     _cover_gap_scan_for,
     _cover_placement_floor,
+    _window_night_key,
     place_operations_greedy,
     place_operations_list_schedule,
     should_use_global_greedy_cover,
@@ -692,6 +693,115 @@ def test_list_schedule_inserts_home_gap_before_steal_tail() -> None:
     assert by_op[ids[1]].work_center_id == m1
     assert by_op[ids[2]].work_center_id == m2
     assert by_op[ids[1]].end_time <= by_op[ids[0]].start_time
+
+
+def test_list_schedule_inserts_home_gap_before_feasible_home_tail() -> None:
+    """A late home continuation that still fits must not skip the hole.
+
+    An 80-min A at minute 200 leaves 0-200 idle. A 90-min sibling can append
+    at 280 inside the 8 h window. Insertion SGS takes the hole (Artigues
+    2005). Daytime window so midnight does not split the night key.
+    """
+
+    state_a = State(id=UUID(int=2), code="A", label="A")
+    night_start = HORIZON_START + timedelta(hours=1)
+    night_end = night_start + timedelta(hours=8)
+    orders = [
+        Order(id=uuid4(), external_ref=f"O{i}", due_date=night_end, priority=1) for i in range(2)
+    ]
+    ids = [UUID(int=10), UUID(int=20)]
+    m1 = UUID(int=100)
+    machines = [WorkCenter(id=m1, code="M1", capability_group="g", speed_factor=1.0)]
+    ops = [
+        Operation(
+            id=ids[0],
+            order_id=orders[0].id,
+            seq_in_order=0,
+            state_id=state_a.id,
+            base_duration_min=80,
+            eligible_wc_ids=[m1],
+            earliest_start=night_start + timedelta(minutes=200),
+            latest_finish=night_end,
+        ),
+        Operation(
+            id=ids[1],
+            order_id=orders[1].id,
+            seq_in_order=0,
+            state_id=state_a.id,
+            base_duration_min=90,
+            eligible_wc_ids=[m1],
+            earliest_start=night_start,
+            latest_finish=night_end,
+        ),
+    ]
+    problem = ScheduleProblem(
+        states=[state_a],
+        orders=orders,
+        operations=ops,
+        work_centers=machines,
+        setup_matrix=[],
+        planning_horizon_start=HORIZON_START,
+        planning_horizon_end=HORIZON_START + timedelta(days=2),
+    )
+    context = build_dispatch_context(problem)
+    assignments: list[Assignment] = []
+    by_op: dict = {}
+    scheduled: set = set()
+    stats = place_operations_list_schedule(
+        operations=problem.operations,
+        dispatch_context=context,
+        assignments=assignments,
+        assignment_by_op=by_op,
+        scheduled_ids=scheduled,
+        horizon_start=HORIZON_START,
+        horizon_minutes=48 * 60.0,
+        op_earliest={op.id: 60.0 for op in ops},
+        default_wc_ids=[m1],
+    )
+    assert stats.placed == 2
+    assert by_op[ids[1]].end_time <= by_op[ids[0]].start_time
+
+
+def test_window_night_key_groups_after_midnight_with_evening_siblings() -> None:
+    """22:00 and 01:00 earliest with the same 06:00 close are one night.
+
+    ``earliest_start.date()`` split the family across calendar days and
+    matching assigned two homes to one state.
+    """
+
+    evening_start = datetime(2026, 4, 1, 22, 0, tzinfo=UTC)
+    night_end = datetime(2026, 4, 2, 6, 0, tzinfo=UTC)
+    order = Order(id=uuid4(), external_ref="O1", due_date=night_end, priority=1)
+    state = State(id=UUID(int=2), code="A", label="A")
+    evening = Operation(
+        id=UUID(int=10),
+        order_id=order.id,
+        seq_in_order=0,
+        state_id=state.id,
+        base_duration_min=60,
+        earliest_start=evening_start,
+        latest_finish=night_end,
+    )
+    after_midnight = Operation(
+        id=UUID(int=20),
+        order_id=order.id,
+        seq_in_order=1,
+        state_id=state.id,
+        base_duration_min=60,
+        earliest_start=evening_start + timedelta(hours=3),
+        latest_finish=night_end,
+    )
+    next_night = Operation(
+        id=UUID(int=30),
+        order_id=order.id,
+        seq_in_order=2,
+        state_id=state.id,
+        base_duration_min=60,
+        earliest_start=evening_start + timedelta(days=1),
+        latest_finish=night_end + timedelta(days=1),
+    )
+    assert _window_night_key(evening) == _window_night_key(after_midnight)
+    assert _window_night_key(evening) != _window_night_key(next_night)
 
 
 def test_cover_gap_scan_appends_at_large_n_threshold() -> None:

@@ -11,7 +11,7 @@ Not a kernel retune of `_NATIVE_LIST_SCHEDULE_MIN_OPS` (still 10_000).
 
 | Problem | This drop | Still open |
 | --- | --- | --- |
-| Night analog 0.75–0.88 | Window leftover scan kept. Exclusive 1:1 homes, same-night fifo home-before-steal, home tail+gap before steal tail, leftover retry, single 1-swap eject. Matching session `night-window-match-2026-08-28/` 0.9924 / 0.9766 / 0.9756 leftover 38 / 117 / 122. FFD packing session `night-window-state-2026-08-28/` 0.9912 / 0.9806 / 0.9818 kept. EDD 0.8352 / 0.8258 / 0.8198 kept. Fell-before 0.7446 kept. Rolling still `wall_clock` | Hashed P2.3 freeze stays **no**. Matching is not uniformly denser than FFD. Not a three-seed Yes. Do not restore global (all-nights) home-before-steal |
+| Night analog 0.75–0.88 | Window leftover scan kept. Exclusive 1:1 homes, same-night fifo home-before-steal, home tail+gap before steal tail, same-machine earlier hole over a feasible late tail, leftover retry, single 1-swap eject. Matching session `night-window-match-2026-08-28/` 0.9924 / 0.9766 / 0.9756 leftover 38 / 117 / 122. FFD packing session `night-window-state-2026-08-28/` 0.9912 / 0.9806 / 0.9818 kept. EDD 0.8352 / 0.8258 / 0.8198 kept. Fell-before 0.7446 kept. Rolling still `wall_clock` | Hashed P2.3 freeze stays **no**. Matching is not uniformly denser than FFD. Not a three-seed Yes. Do not restore global (all-nights) home-before-steal |
 | 5k/8k remainder holes | Session `remainder-window-state-2026-08-28/` 0.547 / 0.9936 / 1.0 / 0.3605 / 0.715625 / 0.9815. 5k@12 seed 1 is a session Yes. Hashed epoch kept. Processing LB vs 28×480×m: 5k@4 and 8k@4/8 seed 1 are overloaded (pmin 72543 / 115977 / 111534 vs cap 53760 / 53760 / 107520) | Six-cell remainder is not a Yes. Overloaded cells are not a packing hole |
 | Hashed ALNS 5k unconstrained 0.0 | Already closed in `alns-5k-list-schedule-2026-08-27/` | Epoch JSON stays 0.0 |
 | Calendar in CP-SAT/ALNS/LBBD/native | Occupancy encoded in CP-SAT, ALNS clip, LBBD via CP-SAT, native `list_schedule_cover` shift delay. Auto-route stays `CALENDAR_AWARE` | Not a live plant calendar |
@@ -36,6 +36,8 @@ Not a kernel retune of `_NATIVE_LIST_SCHEDULE_MIN_OPS` (still 10_000).
 | `tests/test_rhc_cover.py::test_list_schedule_fills_home_before_steal_when_family_uuid_sorts_later` | fifo `(due, state_id)` popped a steal onto empty M1 before the resident 150-min family |
 | `tests/test_rhc_cover.py::test_list_schedule_same_night_fifo_does_not_defer_steal_behind_later_nights` | global home-before-steal delayed night-1 leftover past `latest_finish` |
 | `tests/test_rhc_cover.py::test_list_schedule_inserts_home_gap_before_steal_tail` | appending SGS stole idle M2 instead of inserting into the 0-200 hole on the home |
+| `tests/test_rhc_cover.py::test_list_schedule_inserts_home_gap_before_feasible_home_tail` | a feasible late home tail skipped the interior hole |
+| `tests/test_rhc_cover.py::test_window_night_key_groups_after_midnight_with_evening_siblings` | `earliest_start.date()` split a 22:00-06:00 family after midnight |
 | `tests/test_alns_append_seed.py::test_list_schedule_seed_allows_hard_windows` | ALNS seed returned `None` on any `earliest_start`/`latest_finish` |
 | `tests/test_calendar.py::test_cpsat_alns_lbbd_encode_nonempty_calendar` | CPSAT/ALNS/LBBD returned empty `ERROR` / `calendar_unsupported` |
 | `tests/test_calendar.py::test_list_schedule_cover_clips_setup_into_open_shift` | list-schedule without occupancy delay would start at t=0 on a closed shift |
@@ -61,7 +63,7 @@ Not a kernel retune of `_NATIVE_LIST_SCHEDULE_MIN_OPS` (still 10_000).
 | Cite exclusive matching as uniformly denser than FFD packing | **blocked** — seeds 42/999 leftover grew (117 / 122 vs 97 / 91) |
 | Restore global (all-nights) home-before-steal | **blocked** — seed 1 leftover 553, ratio 0.8900 |
 | Cite a scratch 5k fifo probe as denser than matching | **blocked** — generator IDs are `uuid4`; leftover is not a recapture delta |
-| `_window_night_key` is calendar `date()` | **residual** — 22:00-06:00 can split after midnight; generator stamps 22:00 |
+| `_window_night_key` is calendar `date()` | **closed** — key is the window close; see `docs/rfc/REDTEAM_TRIAGE_HOME_GAP_NIGHT_KEY_2026_08_28.md` |
 | Cite remainder 5k@12 session Yes as a six-cell / P2.3 Yes | **blocked** — one cell, seed 1; hashed epoch untouched |
 | Drop CP-SAT calendar refuse without occupancy encoding | **blocked** — occupancy is in the model; auto-route still clip family |
 | Native greedy_repair 24/7 on a published calendar | **blocked** — `_native_repair_skip_reason` returns `calendar`; Python ALNS clips |

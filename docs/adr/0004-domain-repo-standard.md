@@ -36,8 +36,8 @@ domain README.
 
 **2026-08-28:** GridPlan #7 and MobiRoute #4 merged. Both origin READMEs pin
 `54ebf9f32bc871cc27283331d7536c1068c7e606`. KI-N12 is **closed**. Kernel origin
-`main` is `8be2830` (night-window papers); local packing may be ahead of
-origin. The next domain bump is a new pin to a kernel SHA on origin, still
+`main` is `54577ef` (PR #20: exclusive homes, same-night fifo, home
+insertion). The next domain bump is a new pin to a kernel SHA on origin, still
 before 2026-09-09. Do not treat a diverged local GridPlan checkout as the
 product pin.
 
