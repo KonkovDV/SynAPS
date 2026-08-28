@@ -1,0 +1,208 @@
+{
+  "p2_3": {
+    "answer": "incomplete",
+    "by_solver": {
+      "RHC-GREEDY": {
+        "all_three_seeds_full_feasible": false,
+        "scheduled_ratios": [
+          0.8376
+        ],
+        "seeds": [
+          1
+        ],
+        "stalled": [
+          false
+        ],
+        "verified_feasible": [
+          false
+        ]
+      }
+    },
+    "five_named_configs_complete": false,
+    "question": "Exists a config with scheduled_ratio=1.0 and verified_feasible=true on 5000 ops / 8 machines for seeds 1, 42, and 999?",
+    "winning_configs": []
+  },
+  "protocol": "5k dead-zone 2026-08-25",
+  "runs": [
+    {
+      "determinism": "strict",
+      "determinism_violated": false,
+      "generate_s": 0.242,
+      "global_greedy_cover": true,
+      "independent_violation_count": 3,
+      "independent_violation_kinds": [
+        "MISSING_ASSIGNMENT"
+      ],
+      "makespan_minutes": 40319.0,
+      "n_machines": 12,
+      "n_operations_requested": 5000,
+      "night_start_hour": 22,
+      "night_window_hours": 8,
+      "notary_hard_violation_count": 3,
+      "notary_hard_violation_kinds": [
+        "MISSING_ASSIGNMENT"
+      ],
+      "ops_generated": 5000,
+      "ops_scheduled": 4997,
+      "scheduled_ratio": 0.9994,
+      "search_stop_reason": "completed",
+      "seed": 1,
+      "solver_config": "RHC-GREEDY",
+      "status": "error",
+      "time_limit_reached": false,
+      "verified_feasible": false,
+      "wall_time_s": 0.69
+    },
+    {
+      "determinism": "strict",
+      "determinism_violated": false,
+      "generate_s": 0.176,
+      "global_greedy_cover": true,
+      "independent_violation_count": 2971,
+      "independent_violation_kinds": [
+        "MISSING_ASSIGNMENT"
+      ],
+      "makespan_minutes": 40529.0,
+      "n_machines": 4,
+      "n_operations_requested": 5000,
+      "night_start_hour": 22,
+      "night_window_hours": 8,
+      "notary_hard_violation_count": 2971,
+      "notary_hard_violation_kinds": [
+        "MISSING_ASSIGNMENT"
+      ],
+      "ops_generated": 5000,
+      "ops_scheduled": 2029,
+      "scheduled_ratio": 0.4058,
+      "search_stop_reason": "completed",
+      "seed": 1,
+      "solver_config": "RHC-GREEDY",
+      "status": "error",
+      "time_limit_reached": false,
+      "verified_feasible": false,
+      "wall_time_s": 5.319
+    },
+    {
+      "determinism": "strict",
+      "determinism_violated": false,
+      "generate_s": 0.219,
+      "global_greedy_cover": true,
+      "independent_violation_count": 812,
+      "independent_violation_kinds": [
+        "MISSING_ASSIGNMENT"
+      ],
+      "makespan_minutes": 40408.0,
+      "n_machines": 8,
+      "n_operations_requested": 5000,
+      "night_start_hour": 22,
+      "night_window_hours": 8,
+      "notary_hard_violation_count": 812,
+      "notary_hard_violation_kinds": [
+        "MISSING_ASSIGNMENT"
+      ],
+      "ops_generated": 5000,
+      "ops_scheduled": 4188,
+      "scheduled_ratio": 0.8376,
+      "search_stop_reason": "completed",
+      "seed": 1,
+      "solver_config": "RHC-GREEDY",
+      "status": "error",
+      "time_limit_reached": false,
+      "verified_feasible": false,
+      "wall_time_s": 5.756
+    },
+    {
+      "determinism": "strict",
+      "determinism_violated": false,
+      "generate_s": 0.329,
+      "global_greedy_cover": true,
+      "independent_violation_count": 1311,
+      "independent_violation_kinds": [
+        "MISSING_ASSIGNMENT"
+      ],
+      "makespan_minutes": 40375.0,
+      "n_machines": 12,
+      "n_operations_requested": 8000,
+      "night_start_hour": 22,
+      "night_window_hours": 8,
+      "notary_hard_violation_count": 1311,
+      "notary_hard_violation_kinds": [
+        "MISSING_ASSIGNMENT"
+      ],
+      "ops_generated": 8000,
+      "ops_scheduled": 6689,
+      "scheduled_ratio": 0.836125,
+      "search_stop_reason": "completed",
+      "seed": 1,
+      "solver_config": "RHC-GREEDY",
+      "status": "error",
+      "time_limit_reached": false,
+      "verified_feasible": false,
+      "wall_time_s": 10.367
+    },
+    {
+      "determinism": "strict",
+      "determinism_violated": false,
+      "generate_s": 0.351,
+      "global_greedy_cover": true,
+      "independent_violation_count": 5844,
+      "independent_violation_kinds": [
+        "MISSING_ASSIGNMENT"
+      ],
+      "makespan_minutes": 40557.0,
+      "n_machines": 4,
+      "n_operations_requested": 8000,
+      "night_start_hour": 22,
+      "night_window_hours": 8,
+      "notary_hard_violation_count": 5844,
+      "notary_hard_violation_kinds": [
+        "MISSING_ASSIGNMENT"
+      ],
+      "ops_generated": 8000,
+      "ops_scheduled": 2156,
+      "scheduled_ratio": 0.2695,
+      "search_stop_reason": "completed",
+      "seed": 1,
+      "solver_config": "RHC-GREEDY",
+      "status": "error",
+      "time_limit_reached": false,
+      "verified_feasible": false,
+      "wall_time_s": 8.507
+    },
+    {
+      "determinism": "strict",
+      "determinism_violated": false,
+      "generate_s": 0.251,
+      "global_greedy_cover": true,
+      "independent_violation_count": 3481,
+      "independent_violation_kinds": [
+        "MISSING_ASSIGNMENT"
+      ],
+      "makespan_minutes": 40481.0,
+      "n_machines": 8,
+      "n_operations_requested": 8000,
+      "night_start_hour": 22,
+      "night_window_hours": 8,
+      "notary_hard_violation_count": 3481,
+      "notary_hard_violation_kinds": [
+        "MISSING_ASSIGNMENT"
+      ],
+      "ops_generated": 8000,
+      "ops_scheduled": 4519,
+      "scheduled_ratio": 0.564875,
+      "search_stop_reason": "completed",
+      "seed": 1,
+      "solver_config": "RHC-GREEDY",
+      "status": "error",
+      "time_limit_reached": false,
+      "verified_feasible": false,
+      "wall_time_s": 10.824
+    }
+  ],
+  "seeds": [
+    1
+  ],
+  "solvers": [
+    "RHC-GREEDY"
+  ]
+}

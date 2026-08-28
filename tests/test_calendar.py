@@ -1,4 +1,4 @@
-"""Work-center shift calendar (KI-N7): checker, greedy clip, native skip."""
+"""Work-center shift calendar (KI-N7): checker, greedy clip, native occupancy."""
 
 from __future__ import annotations
 
@@ -197,6 +197,33 @@ def test_greed_clips_to_shift() -> None:
     assert result.assignments
     assert result.assignments[0].start_time >= H0 + timedelta(hours=8)
     assert not FeasibilityChecker().check(problem, result.assignments, exhaustive=True)
+
+
+def test_list_schedule_cover_clips_setup_into_open_shift() -> None:
+    """Python COVER list-schedule delays occupancy [start-setup, end] into one shift."""
+
+    from synaps.solvers._dispatch_support import build_dispatch_context
+    from synaps.solvers.rhc._cover import place_operations_list_schedule
+
+    problem = _one_op_problem(calendar=[_night_shift()])
+    context = build_dispatch_context(problem)
+    assignments: list[Assignment] = []
+    by_op: dict = {}
+    scheduled: set = set()
+    stats = place_operations_list_schedule(
+        operations=problem.operations,
+        dispatch_context=context,
+        assignments=assignments,
+        assignment_by_op=by_op,
+        scheduled_ids=scheduled,
+        horizon_start=H0,
+        horizon_minutes=24 * 60.0,
+        op_earliest={op.id: 0.0 for op in problem.operations},
+        default_wc_ids=[problem.work_centers[0].id],
+    )
+    assert stats.placed == 1
+    assert assignments[0].start_time >= H0 + timedelta(hours=8)
+    assert not FeasibilityChecker().check(problem, assignments, exhaustive=True)
 
 
 def test_profile_and_router_see_machine_calendar() -> None:

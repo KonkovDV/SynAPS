@@ -927,6 +927,9 @@ def list_schedule_cover_native(
     k3: float = 0.5,
     floor_window: float = 0.0,
     exhaust_window: float = 0.0,
+    calendar_offsets: np.ndarray | None = None,
+    calendar_open: np.ndarray | None = None,
+    calendar_close: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
     """Try native parallel SGS cover. Returns None if native unavailable."""
 
@@ -945,6 +948,12 @@ def list_schedule_cover_native(
                 extra["weights"] = np.ascontiguousarray(weights, dtype=np.float64)
             if material_loss is not None:
                 extra["material_loss"] = np.ascontiguousarray(material_loss, dtype=np.float64)
+        if calendar_offsets is not None:
+            extra["calendar_offsets"] = np.ascontiguousarray(calendar_offsets, dtype=np.int64)
+        if calendar_open is not None:
+            extra["calendar_open"] = np.ascontiguousarray(calendar_open, dtype=np.float64)
+        if calendar_close is not None:
+            extra["calendar_close"] = np.ascontiguousarray(calendar_close, dtype=np.float64)
         starts, ends, machines, setups = _native_list_schedule_cover(
             np.ascontiguousarray(base_durations, dtype=np.float64),
             np.ascontiguousarray(predecessor_indices, dtype=np.int64),

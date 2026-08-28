@@ -41,6 +41,42 @@ fn grain_duration(base: f64, speed: f64) -> f64 {
     (base / speed).ceil().max(1.0)
 }
 
+/// Occupancy [start-setup, end] must sit in one published shift (ADR-0005).
+/// Empty CSR is 24/7. Returns the processing start, or None if no shift fits.
+#[inline(always)]
+fn delay_occupancy_to_shift(
+    cal_off: &[i64],
+    cal_open: &[f64],
+    cal_close: &[f64],
+    n_wc: usize,
+    machine: usize,
+    start: f64,
+    setup: f64,
+    duration: f64,
+) -> Option<f64> {
+    if cal_off.len() != n_wc + 1 || machine >= n_wc {
+        return Some(start);
+    }
+    let row_start = cal_off[machine] as usize;
+    let row_end = cal_off[machine + 1] as usize;
+    if row_start == row_end {
+        return Some(start);
+    }
+    let occ_earliest = start - setup;
+    let occ_dur = duration + setup;
+    let last = cal_open.len().min(cal_close.len());
+    for k in row_start..row_end {
+        if k >= last {
+            break;
+        }
+        let candidate = occ_earliest.max(cal_open[k]);
+        if candidate + occ_dur <= cal_close[k] + EPS {
+            return Some(candidate + setup);
+        }
+    }
+    None
+}
+
 #[inline(always)]
 fn capacity_window_ok(
     windows: &[(f64, f64, i32)],
@@ -177,6 +213,9 @@ struct CoverArrays<'a> {
     k3: f64,
     floor_window: f64,
     exhaust_window: f64,
+    cal_off: &'a [i64],
+    cal_open: &'a [f64],
+    cal_close: &'a [f64],
 }
 
 fn run_list_schedule(a: CoverArrays<'_>) -> (Vec<f64>, Vec<f64>, Vec<i64>, Vec<i64>) {
@@ -272,7 +311,11 @@ fn run_list_schedule(a: CoverArrays<'_>) -> (Vec<f64>, Vec<f64>, Vec<i64>, Vec<i
         let row_start = a.elig_off[i] as usize;
         let row_end = a.elig_off[i + 1] as usize;
         let aux_s = if has_aux { a.aux_off[i] as usize } else { 0 };
-        let aux_e = if has_aux { a.aux_off[i + 1] as usize } else { 0 };
+        let aux_e = if has_aux {
+            a.aux_off[i + 1] as usize
+        } else {
+            0
+        };
         let needs_aux = aux_e > aux_s;
 
         let placed = if needs_aux {
@@ -341,12 +384,7 @@ fn run_list_schedule(a: CoverArrays<'_>) -> (Vec<f64>, Vec<f64>, Vec<i64>, Vec<i
     (starts, ends, machines, setups)
 }
 
-fn setup_on_machine(
-    a: &CoverArrays<'_>,
-    op: usize,
-    machine: usize,
-    last_state: i64,
-) -> f64 {
+fn setup_on_machine(a: &CoverArrays<'_>, op: usize, machine: usize, last_state: i64) -> f64 {
     if last_state >= 0 && a.states[op] >= 0 {
         let prev_s = last_state as usize;
         let curr_s = a.states[op] as usize;
@@ -409,6 +447,18 @@ fn place_append_only(
         let duration = grain_duration(a.durations[i], a.speeds[machine]);
         let setup = setup_on_machine(a, i, machine, machine_last_state[machine]);
         let start = floor.max(machine_tail[machine] + setup);
+        let Some(start) = delay_occupancy_to_shift(
+            a.cal_off,
+            a.cal_open,
+            a.cal_close,
+            a.n_wc,
+            machine,
+            start,
+            setup,
+            duration,
+        ) else {
+            continue;
+        };
         let end = start + duration;
         if end > cap + EPS {
             continue;
@@ -462,6 +512,18 @@ fn place_with_aux_delay(
         let duration = grain_duration(a.durations[i], a.speeds[machine]);
         let setup = setup_on_machine(a, i, machine, machine_last_state[machine]);
         let start = floor.max(machine_tail[machine] + setup);
+        let Some(start) = delay_occupancy_to_shift(
+            a.cal_off,
+            a.cal_open,
+            a.cal_close,
+            a.n_wc,
+            machine,
+            start,
+            setup,
+            duration,
+        ) else {
+            continue;
+        };
         let end = start + duration;
         if end > cap + EPS {
             continue;
@@ -478,30 +540,13 @@ fn place_with_aux_delay(
     for &(_end, start, setup, machine) in cands.iter() {
         let duration = grain_duration(a.durations[i], a.speeds[machine]);
         let Some(delayed) = delay_start_for_aux(
-            start,
-            duration,
-            setup,
-            cap,
-            a.aux_res,
-            a.aux_qty,
-            aux_s,
-            aux_e,
-            occupancy,
-            a.pools,
+            start, duration, setup, cap, a.aux_res, a.aux_qty, aux_s, aux_e, occupancy, a.pools,
         ) else {
             continue;
         };
         let delayed_end = delayed + duration;
         if best.is_none_or(|b| {
-            prefers_cover_slot(
-                a.exhaust_window,
-                delayed_end,
-                setup,
-                machine,
-                b.0,
-                b.2,
-                b.3,
-            )
+            prefers_cover_slot(a.exhaust_window, delayed_end, setup, machine, b.0, b.2, b.3)
         }) {
             best = Some((delayed_end, delayed, setup, machine));
         }
@@ -605,10 +650,7 @@ fn pick_atcs_ready(
     } else {
         1.0
     };
-    let min_floor = stats
-        .iter()
-        .map(|row| row.0)
-        .fold(f64::INFINITY, f64::min);
+    let min_floor = stats.iter().map(|row| row.0).fold(f64::INFINITY, f64::min);
     let has_continuation = a.exhaust_window > 0.0
         && stats.iter().any(|(floor, setup, ..)| {
             *setup <= EPS && *floor <= min_floor + a.exhaust_window + EPS
@@ -684,7 +726,11 @@ fn place_ready_op(
     let row_start = a.elig_off[i] as usize;
     let row_end = a.elig_off[i + 1] as usize;
     let aux_s = if has_aux { a.aux_off[i] as usize } else { 0 };
-    let aux_e = if has_aux { a.aux_off[i + 1] as usize } else { 0 };
+    let aux_e = if has_aux {
+        a.aux_off[i + 1] as usize
+    } else {
+        0
+    };
     if aux_e > aux_s {
         place_with_aux_delay(
             a,
@@ -737,7 +783,11 @@ fn commit_cover_placement(
     machine_tail[machine] = end;
     machine_last_state[machine] = a.states[i];
     let aux_s = if has_aux { a.aux_off[i] as usize } else { 0 };
-    let aux_e = if has_aux { a.aux_off[i + 1] as usize } else { 0 };
+    let aux_e = if has_aux {
+        a.aux_off[i + 1] as usize
+    } else {
+        0
+    };
     if aux_e > aux_s {
         let aux_start = start - setup;
         for k in aux_s..aux_e {
@@ -768,9 +818,7 @@ fn run_atcs_cover(
     setups: &mut [i64],
 ) {
     let n = a.durations.len();
-    let mut ready: Vec<u32> = (0..n as u32)
-        .filter(|&i| a.preds[i as usize] < 0)
-        .collect();
+    let mut ready: Vec<u32> = (0..n as u32).filter(|&i| a.preds[i as usize] < 0).collect();
     while let Some(slot) = pick_atcs_ready(&ready, a, ends, machine_last_state) {
         let i = ready.swap_remove(slot) as usize;
         let Some((start, end, setup, machine)) = place_ready_op(
@@ -836,7 +884,10 @@ fn run_atcs_cover(
     k2=0.5,
     k3=0.5,
     floor_window=0.0,
-    exhaust_window=0.0
+    exhaust_window=0.0,
+    calendar_offsets=None,
+    calendar_open=None,
+    calendar_close=None
 ))]
 pub fn list_schedule_cover<'py>(
     py: Python<'py>,
@@ -866,6 +917,9 @@ pub fn list_schedule_cover<'py>(
     k3: f64,
     floor_window: f64,
     exhaust_window: f64,
+    calendar_offsets: Option<PyReadonlyArray1<'py, i64>>,
+    calendar_open: Option<PyReadonlyArray1<'py, f64>>,
+    calendar_close: Option<PyReadonlyArray1<'py, f64>>,
 ) -> PyResult<(
     Py<PyArray1<f64>>,
     Py<PyArray1<f64>>,
@@ -947,8 +1001,45 @@ pub fn list_schedule_cover<'py>(
         ));
     }
 
+    let empty_cal_off: [i64; 0] = [];
+    let empty_cal_f64: [f64; 0] = [];
+    let cal_off_use: &[i64] = match &calendar_offsets {
+        Some(array) => array.as_slice()?,
+        None => &empty_cal_off,
+    };
+    let cal_open_use: &[f64] = match &calendar_open {
+        Some(array) => array.as_slice()?,
+        None => &empty_cal_f64,
+    };
+    let cal_close_use: &[f64] = match &calendar_close {
+        Some(array) => array.as_slice()?,
+        None => &empty_cal_f64,
+    };
+    if !cal_off_use.is_empty() {
+        if cal_off_use.len() != n_wc + 1 {
+            return Err(PyValueError::new_err(
+                "list_schedule_cover: calendar_offsets must have length n_wc+1",
+            ));
+        }
+        if cal_open_use.len() != cal_close_use.len() {
+            return Err(PyValueError::new_err(
+                "list_schedule_cover: calendar_open and calendar_close must match",
+            ));
+        }
+        let last = cal_off_use[n_wc];
+        if last < 0 || last as usize != cal_open_use.len() {
+            return Err(PyValueError::new_err(
+                "list_schedule_cover: calendar_offsets[n_wc] must equal calendar_open length",
+            ));
+        }
+    }
+
     let empty_off: [i64; 0] = [];
-    let aux_off_use: &[i64] = if aux_off.is_empty() { &empty_off } else { aux_off };
+    let aux_off_use: &[i64] = if aux_off.is_empty() {
+        &empty_off
+    } else {
+        aux_off
+    };
 
     let out_starts = PyArray1::<f64>::zeros(py, n, false);
     let out_ends = PyArray1::<f64>::zeros(py, n, false);
@@ -992,6 +1083,9 @@ pub fn list_schedule_cover<'py>(
             k3,
             floor_window,
             exhaust_window,
+            cal_off: cal_off_use,
+            cal_open: cal_open_use,
+            cal_close: cal_close_use,
         });
         starts_slice.copy_from_slice(&starts_v);
         ends_slice.copy_from_slice(&ends_v);
@@ -1009,12 +1103,32 @@ pub fn list_schedule_cover<'py>(
 
 #[cfg(test)]
 mod tests {
-    use super::grain_duration;
+    use super::{delay_occupancy_to_shift, grain_duration};
 
     #[test]
     fn grain_matches_python_ceil() {
         assert_eq!(grain_duration(10.0, 3.0), 4.0);
         assert_eq!(grain_duration(0.0, 1.0), 1.0);
         assert_eq!(grain_duration(10.0, 0.0), 10.0);
+    }
+
+    #[test]
+    fn occupancy_jumps_to_shift_open() {
+        let off = [0i64, 1];
+        let open = [480.0];
+        let close = [960.0];
+        let start = delay_occupancy_to_shift(&off, &open, &close, 1, 0, 0.0, 10.0, 60.0);
+        assert_eq!(start, Some(490.0));
+    }
+
+    #[test]
+    fn empty_calendar_is_open() {
+        let off: [i64; 0] = [];
+        let open: [f64; 0] = [];
+        let close: [f64; 0] = [];
+        assert_eq!(
+            delay_occupancy_to_shift(&off, &open, &close, 1, 0, 12.0, 5.0, 10.0),
+            Some(12.0)
+        );
     }
 }

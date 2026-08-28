@@ -11,21 +11,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Night / window scan (2026-08-28):** Large-n leftover fill with hard
   per-op windows uses a window-clipped interior gap scan, not append-after-
-  last. COVER list-schedule stays at `global_greedy_cover_min_ops=10_000`.
-  A 5k@8 night list-schedule session (RHC-GREEDY, seed 1) was 0.7446 in 1.165 s
-  (`benchmark/evidence/deadzone-5k-2026-08-25/sessions/night-window-scan-2026-08-28/`), not a Yes.
+  last. `global_greedy_cover_min_ops` stays 10_000. Windowed and calendar
+  instances at n>=2000 list-schedule in one pass (EDD by `latest_finish`,
+  window-gap inserts, placement floor is realized pred end plus the
+  published window).
+  Fell-before 5k@8 list-schedule was 0.7446 in 1.165 s
+  (`benchmark/evidence/deadzone-5k-2026-08-25/sessions/night-window-scan-2026-08-28/`).
+  Session `night-window-edd-2026-08-28/` is 0.8352 / 0.8258 / 0.8198 on
+  seeds 1/42/999, walls 4.978 / 5.636 / 5.879 s, not a P2.3 Yes
+  (`benchmark/evidence/deadzone-5k-2026-08-25/sessions/night-window-edd-2026-08-28/`).
   Rolling recapture (`benchmark/evidence/deadzone-5k-2026-08-25/sessions/night-rhc-rolling-2026-08-28/`)
-  is still `wall_clock`, not a Yes.
-  Remainder session (`benchmark/evidence/deadzone-5k-2026-08-25/sessions/remainder-window-scan-2026-08-28/`)
-  is the same class.
-  ALNS list-schedule seed allows hard windows; machine calendar still skips native COVER. Linux PR CI run
-  [33151732222](https://github.com/KonkovDV/SynAPS/actions/runs/33151732222)
-  ran BEAM timebox sentinels. Hashed P2.3 / remainder / ALNS-500 epoch JSON
-  is **not** rewritten (`docs/rfc/REDTEAM_TRIAGE_NIGHT_WINDOWS_2026_08_28.md`).
+  is still `wall_clock`. Remainder session
+  `remainder-window-fix-2026-08-28/` is `completed` not `wall_clock`
+  (`benchmark/evidence/deadzone-5k-2026-08-25/sessions/remainder-window-fix-2026-08-28/`);
+  5k@12 seed 1 is 0.9994 (3 leftover), not a Yes.
+  ALNS list-schedule seed allows hard windows. Native COVER encodes
+  occupancy `[start-setup, end]` in one shift. Machine-calendar 3000@8
+  session seeds 1/42/999 are ratio 1.0 / `verified_feasible=true`
+  (`benchmark/evidence/calendar-3000-8m-2026-08-27/sessions/calendar-list-schedule-2026-08-28/`);
+  hashed calendar JSON keeps `CALENDAR_VIOLATION`. Linux PR CI runs COVER
+  100k@200 seed 42 `--ci-gate` and calendar-3000 seed 1. Hashed P2.3 /
+  remainder / ALNS-500 epoch JSON is **not** rewritten
+  (`docs/rfc/REDTEAM_TRIAGE_NIGHT_WINDOWS_2026_08_28.md`).
 
 - **Calendar occupancy encode (2026-08-28):** CP-SAT places processing in one
   published shift and tightens setup occupancy (`su_start >= open`). ALNS
-  clips via greedy insertion; LBBD uses the CP-SAT subproblem. Auto-route
+  clips via greedy insertion; LBBD uses the CP-SAT subproblem. Native
+  `list_schedule_cover` delays occupancy into a published shift. Auto-route
   for a non-empty calendar stays `CALENDAR_AWARE`. Not a 24/7 allow.
 
 - **Residuals / KI-N1 N4 N10 (2026-08-27):** Unconstrained ALNS-500 at n>=2000

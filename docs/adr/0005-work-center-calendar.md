@@ -9,7 +9,9 @@
   Occupancy notary, calendar-aware routing whitelist, empty-success
   demotion. CP-SAT encodes occupancy in one `ShiftInterval`; ALNS clips via
   greedy insertion; LBBD uses the CP-SAT subproblem. Auto-route for a
-  non-empty calendar stays in `CALENDAR_AWARE`. Native COVER still skips.
+  non-empty calendar stays in `CALENDAR_AWARE`. Native COVER encodes
+  occupancy `[start-setup, end]` in one published shift (empty calendar
+  stays 24/7).
 - **Date:** 2026-08-26
 - **Related:** ADR-0003 (domain placement), night-window dead-zone evidence
 

@@ -28,6 +28,7 @@ from synaps.solvers.rhc import RhcPolicy, RhcSolver
 from synaps.solvers.rhc._cover import (
     _atcs_window_indices,
     _cover_gap_scan_for,
+    _cover_placement_floor,
     place_operations_greedy,
     place_operations_list_schedule,
     should_use_global_greedy_cover,
@@ -86,7 +87,7 @@ def test_should_use_global_greedy_cover_only_for_large_greedy() -> None:
     assert not should_use_global_greedy_cover(
         inner_solver_name="alns", n_ops=50_000, min_ops=10_000
     )
-    assert not should_use_global_greedy_cover(
+    assert should_use_global_greedy_cover(
         inner_solver_name="greedy",
         n_ops=APPEND_GAP_SCAN_MIN_OPS,
         min_ops=10_000,
@@ -94,10 +95,44 @@ def test_should_use_global_greedy_cover_only_for_large_greedy() -> None:
     )
     assert not should_use_global_greedy_cover(
         inner_solver_name="greedy",
+        n_ops=APPEND_GAP_SCAN_MIN_OPS - 1,
+        min_ops=10_000,
+        has_hard_windows=True,
+    )
+    assert should_use_global_greedy_cover(
+        inner_solver_name="greedy",
+        n_ops=APPEND_GAP_SCAN_MIN_OPS,
+        min_ops=10_000,
+        has_machine_calendar=True,
+    )
+    assert not should_use_global_greedy_cover(
+        inner_solver_name="greedy",
         n_ops=APPEND_GAP_SCAN_MIN_OPS,
         min_ops=10_000,
         has_hard_windows=False,
     )
+
+
+def test_cover_placement_floor_ignores_inflated_chain_earliest_on_windows() -> None:
+    """RHC chain-LB must not sit past the realized pred end inside an 8 h night."""
+
+    op = Operation(
+        id=uuid4(),
+        order_id=uuid4(),
+        seq_in_order=1,
+        state_id=uuid4(),
+        base_duration_min=20,
+        earliest_start=HORIZON_START + timedelta(hours=22),
+        latest_finish=HORIZON_START + timedelta(hours=30),
+    )
+    inflated = {op.id: 22 * 60 + 45.0}
+    floor = _cover_placement_floor(
+        op,
+        pred_end=22 * 60 + 10.0,
+        op_earliest=inflated,
+        horizon_start=HORIZON_START,
+    )
+    assert floor == 22 * 60 + 10.0
 
 
 def test_cover_gap_scan_appends_at_large_n_threshold() -> None:
@@ -373,9 +408,16 @@ def test_list_schedule_respects_latest_finish() -> None:
     assert assignments[0].end_time <= HORIZON_START + timedelta(minutes=30)
 
 
-def test_list_schedule_inserts_into_idle_gap_when_tail_blocked() -> None:
-    """Insertion SGS: aux delay parks a tail and leaves a hole a later op must use."""
+def test_list_schedule_inserts_into_idle_gap_when_tail_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Insertion SGS: aux delay parks a tail and leaves a hole a later op must use.
 
+    Windowed ops must still insert when the unconstrained 64-insert cap is
+    exhausted (5k night analog leftover).
+    """
+
+    monkeypatch.setattr("synaps.solvers.rhc._cover._MAX_LIST_SCHEDULE_GAP_INSERTS", 0)
     state = State(id=uuid4(), code="S0", label="S0")
     m1 = WorkCenter(id=uuid4(), code="M1", capability_group="g", speed_factor=1.0)
     m2 = WorkCenter(id=uuid4(), code="M2", capability_group="g", speed_factor=1.0)

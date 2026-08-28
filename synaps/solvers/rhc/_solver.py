@@ -29,6 +29,7 @@ from synaps.accelerators import (
     compute_rhc_candidate_metrics_batch_np,
     get_acceleration_status,
 )
+from synaps.calendar import work_centers_have_calendar
 from synaps.model import (
     Assignment,
     ObjectiveValues,
@@ -921,6 +922,7 @@ class RhcSolver(BaseSolver):
             n_ops=len(problem.operations),
             min_ops=global_greedy_cover_min_ops,
             has_hard_windows=operations_have_hard_windows(problem.operations),
+            has_machine_calendar=work_centers_have_calendar(problem.work_centers),
         ):
             # Coverage-complete constructive path: one list-schedule instead of
             # repeating greedy insertion across rolling windows.

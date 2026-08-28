@@ -1,9 +1,11 @@
 """Constructive coverage kernels for RHC greedy fill.
 
-At ≥10k ops GREEDY_COVER uses a non-delay list-schedule (append after each
-machine's ready time). If the tail is infeasible, insert into the earliest
-idle gap on an eligible machine (active / insertion SGS) and push successors
-in the same pass. Residual gap-fill remains a safety net.
+Unconstrained COVER at ≥10k ops uses a non-delay list-schedule (append
+after each machine's ready time). Windowed and calendar instances at
+n≥2000 use the same one-pass cover (`global_greedy_cover_min_ops` stays
+10_000). If the tail is infeasible, insert into the earliest idle gap
+(active / insertion SGS). Windowed ops are not bound by the 64-insert
+cap. Residual gap-fill remains a safety net.
 
 Academic basis:
     - Pinedo (2016): list scheduling / non-delay dispatch.
@@ -17,7 +19,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from heapq import heappop, heappush
 from typing import TYPE_CHECKING, Any
 
@@ -28,13 +30,16 @@ from synaps.solvers._dispatch_support import (
     APPEND_GAP_SCAN_MIN_OPS,
     MachineIndex,
     find_earliest_feasible_slot,
+    operation_has_hard_windows,
 )
-from synaps.solvers._time_windows import operation_latest_finish_offset_minutes
+from synaps.solvers._time_windows import (
+    operation_earliest_offset_minutes,
+    operation_latest_finish_offset_minutes,
+)
 from synaps.timegrain import duration_minutes_for
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
-    from datetime import datetime
     from uuid import UUID
 
     from synaps.model import Operation
@@ -75,20 +80,22 @@ def should_use_global_greedy_cover(
     n_ops: int,
     min_ops: int = _GLOBAL_GREEDY_COVER_MIN_OPS_DEFAULT,
     has_hard_windows: bool = False,
+    has_machine_calendar: bool = False,
 ) -> bool:
     """True when RHC should skip rolling windows and list-schedule in one pass.
 
-    ``min_ops`` stays 10_000. Windowed 5k night cells keep rolling windows;
-    leftover fill uses a window-clipped gap scan, not this gate. A 5k@8
-    list-schedule session (seed 1) completed in 1.165 s at ratio 0.7446 —
-    not a Yes, and worse than hashed rolling RHC-GREEDY 0.7702.
-    ``has_hard_windows`` is accepted for call-site compatibility.
+    ``min_ops`` stays 10_000 for unconstrained COVER. Windowed and calendar
+    instances at the leftover-scan scale (n>=2000) list-schedule in one
+    pass: rolling 8 h windows from midnight split a 22:00-06:00 night
+    and exhaust the 120 s box before residual fill. This is not a
+    retune of ``global_greedy_cover_min_ops``.
     """
 
-    del has_hard_windows
     if inner_solver_name != "greedy":
         return False
-    return n_ops >= min_ops
+    if n_ops >= min_ops:
+        return True
+    return (has_hard_windows or has_machine_calendar) and n_ops >= APPEND_GAP_SCAN_MIN_OPS
 
 
 def _cover_gap_scan_for(n_timeline: int, operation: Any | None = None) -> str:
@@ -98,11 +105,63 @@ def _cover_gap_scan_for(n_timeline: int, operation: Any | None = None) -> str:
     walk (O(n^2*m)). Windowed leftovers use a clipped interior scan.
     """
 
-    from synaps.solvers._dispatch_support import operation_has_hard_windows
-
     if operation is not None and operation_has_hard_windows(operation):
         return "window" if n_timeline >= APPEND_GAP_SCAN_MIN_OPS else "all"
     return "append" if n_timeline >= APPEND_GAP_SCAN_MIN_OPS else "all"
+
+
+def _allow_list_schedule_gap(
+    *,
+    operation: Operation,
+    n_ops: int,
+    gap_attempts: int,
+) -> bool:
+    """Windowed ops always insertion-SGS; unconstrained keeps the 64/80k cap.
+
+    A 5k night analog with a 64-insert cap left ~25% of ops on the tail
+    after their 8 h window closed. Window-clipped scan is O(gaps in the
+    window), not the 100k full-timeline walk.
+    """
+
+    if operation_has_hard_windows(operation):
+        return True
+    return gap_attempts < _MAX_LIST_SCHEDULE_GAP_INSERTS and n_ops < _MAX_LIST_SCHEDULE_GAP_OPS
+
+
+def _cover_ready_sort_key(
+    op: Operation,
+    *,
+    floor: float,
+    horizon_start: datetime,
+    cover_ready_rule: str,
+) -> float:
+    """EDD by latest_finish for fifo windowed ops; ATCS keeps the ready floor."""
+
+    if cover_ready_rule == "atcs":
+        return floor
+    latest = operation_latest_finish_offset_minutes(op, horizon_start)
+    return float(latest) if latest is not None else floor
+
+
+def _cover_placement_floor(
+    op: Operation,
+    *,
+    pred_end: float,
+    op_earliest: Mapping[UUID, float],
+    horizon_start: datetime,
+) -> float:
+    """Ready floor: actual pred end plus the published window, not chain-LB.
+
+    RHC ``_propagate_earliest_starts_with_release_and_duration`` adds
+    ``pred.earliest + p_min`` into successor earliest. When that p_min is
+    larger than the grain actually placed, the successor floor sits past
+    ``pred_end`` and closes an 8 h night that still had slack. Windowed
+    cover uses the published window and the realized predecessor end.
+    """
+
+    if operation_has_hard_windows(op):
+        return max(pred_end, operation_earliest_offset_minutes(op, None, horizon_start))
+    return max(pred_end, op_earliest.get(op.id, 0.0))
 
 
 def select_earliest_horizon_slot(
@@ -165,7 +224,19 @@ def place_operations_greedy(
     caller owns logging and claim/notary.
     """
 
-    remaining = sorted(operations, key=lambda op: (op.seq_in_order, str(op.id)))
+    remaining = sorted(
+        operations,
+        key=lambda op: (
+            _cover_ready_sort_key(
+                op,
+                floor=float(op.seq_in_order),
+                horizon_start=horizon_start,
+                cover_ready_rule="fifo",
+            ),
+            op.seq_in_order,
+            str(op.id),
+        ),
+    )
     pass_limit = max_passes if max_passes is not None else max(len(remaining) * 3, 1)
     clipped = 0
     placed = 0
@@ -242,7 +313,12 @@ def _place_ready_ops_once(
             assignments=assignments,
             operation=op,
             eligible_wc_ids=eligible,
-            earliest_start=max(pred_end, op_earliest.get(op.id, 0.0)),
+            earliest_start=_cover_placement_floor(
+                op,
+                pred_end=pred_end,
+                op_earliest=op_earliest,
+                horizon_start=horizon_start,
+            ),
             horizon_minutes=horizon_minutes,
             machine_index=machine_index,
         )
@@ -406,7 +482,13 @@ def _place_operations_list_schedule_python(
 ) -> GreedyCoverStats:
     """Python parallel SGS with capped insertion into idle gaps."""
 
-    heap, successors = _ready_heap(operations, op_earliest, scheduled_ids)
+    heap, successors = _ready_heap(
+        operations,
+        op_earliest,
+        scheduled_ids,
+        horizon_start=horizon_start,
+        cover_ready_rule=cover_ready_rule,
+    )
     tails, aux_windows = _seed_list_schedule_state(
         assignments, dispatch_context, default_wc_ids, horizon_start
     )
@@ -456,6 +538,9 @@ def _run_python_cover_loop(
     clipped = placed = gap_inserted = gap_attempts = 0
     time_limited = False
     ops_by_id = dispatch_context.ops_by_id
+    machine_index = MachineIndex(dispatch_context)
+    if assignments:
+        machine_index.extend(assignments)
     while heap:
         if deadline_exceeded is not None and deadline_exceeded():
             time_limited = True
@@ -490,6 +575,7 @@ def _run_python_cover_loop(
             cover_ready_rule=cover_ready_rule,
             cover_atcs_exhaust_window=cover_atcs_exhaust_window,
             gap_attempts=gap_attempts,
+            machine_index=machine_index,
         )
         if step is None:
             continue
@@ -525,6 +611,7 @@ def _place_cover_heap_item(
     cover_ready_rule: str,
     cover_atcs_exhaust_window: float,
     gap_attempts: int,
+    machine_index: MachineIndex,
 ) -> tuple[int, int, int, int] | None:
     pred_end = 0.0
     if op.predecessor_op_id:
@@ -532,12 +619,17 @@ def _place_cover_heap_item(
         if pred_assignment is None:
             return None
         pred_end = (pred_assignment.end_time - horizon_start).total_seconds() / 60.0
-    allow_gap = gap_attempts < _MAX_LIST_SCHEDULE_GAP_INSERTS and (
-        len(operations) < _MAX_LIST_SCHEDULE_GAP_OPS
+    allow_gap = _allow_list_schedule_gap(
+        operation=op, n_ops=len(operations), gap_attempts=gap_attempts
     )
     placed_one, inserted, end = _place_ready_list_operation(
         op=op,
-        floor=max(pred_end, op_earliest.get(op.id, 0.0)),
+        floor=_cover_placement_floor(
+            op,
+            pred_end=pred_end,
+            op_earliest=op_earliest,
+            horizon_start=horizon_start,
+        ),
         dispatch_context=dispatch_context,
         assignments=assignments,
         assignment_by_op=assignment_by_op,
@@ -549,6 +641,7 @@ def _place_cover_heap_item(
         horizon_minutes=horizon_minutes,
         allow_gap=allow_gap,
         cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+        machine_index=machine_index,
     )
     gap_ins = 1 if inserted else 0
     gap_att = 1 if allow_gap and (inserted or not placed_one) else 0
@@ -560,6 +653,8 @@ def _place_cover_heap_item(
         end=end,
         op_earliest=op_earliest,
         as_list=cover_ready_rule == "atcs",
+        horizon_start=horizon_start,
+        cover_ready_rule=cover_ready_rule,
     )
     return (gap_ins, gap_att, 0, 1)
 
@@ -571,9 +666,27 @@ def _enqueue_cover_successors(
     end: float,
     op_earliest: Mapping[UUID, float],
     as_list: bool,
+    horizon_start: datetime,
+    cover_ready_rule: str,
 ) -> None:
     for succ in successors:
-        item = (max(end, op_earliest.get(succ.id, 0.0)), succ.seq_in_order, str(succ.id), succ.id)
+        floor = _cover_placement_floor(
+            succ,
+            pred_end=end,
+            op_earliest=op_earliest,
+            horizon_start=horizon_start,
+        )
+        item = (
+            _cover_ready_sort_key(
+                succ,
+                floor=floor,
+                horizon_start=horizon_start,
+                cover_ready_rule=cover_ready_rule,
+            ),
+            succ.seq_in_order,
+            str(succ.id),
+            succ.id,
+        )
         if as_list:
             heap.append(item)
         else:
@@ -637,6 +750,7 @@ def _place_ready_list_operation(
     horizon_minutes: float,
     allow_gap: bool = True,
     cover_atcs_exhaust_window: float = 0.0,
+    machine_index: MachineIndex | None = None,
 ) -> tuple[bool, bool, float]:
     """Place one ready op. Returns (placed, gap_inserted, end)."""
 
@@ -652,17 +766,18 @@ def _place_ready_list_operation(
     )
     inserted = False
     if slot is None and allow_gap:
-        machine_index = _ensure_list_schedule_index(None, dispatch_context, assignments)
+        index = _ensure_list_schedule_index(machine_index, dispatch_context, assignments)
         slot = _best_gap_cover_slot(
             op=op,
             dispatch_context=dispatch_context,
             assignments=assignments,
-            machine_index=machine_index,
+            machine_index=index,
             floor=floor,
             default_wc_ids=default_wc_ids,
             horizon_minutes=horizon_minutes,
         )
         inserted = slot is not None
+        machine_index = index
     if slot is None:
         return False, False, 0.0
     start, end, setup, wc_id, aux_ids = slot
@@ -680,6 +795,7 @@ def _place_ready_list_operation(
         tails=tails,
         aux_windows=aux_windows,
         horizon_start=horizon_start,
+        machine_index=machine_index,
     )
     return True, inserted, end
 
@@ -688,6 +804,9 @@ def _ready_heap(
     operations: Sequence[Operation],
     op_earliest: Mapping[UUID, float],
     scheduled_ids: set[UUID] | None = None,
+    *,
+    horizon_start: datetime,
+    cover_ready_rule: str = "fifo",
 ) -> tuple[list[tuple[float, int, str, UUID]], dict[UUID, list[Operation]]]:
     locked = scheduled_ids or set()
     successors: dict[UUID, list[Operation]] = defaultdict(list)
@@ -701,9 +820,25 @@ def _ready_heap(
         pred = op.predecessor_op_id
         if pred is not None and pred not in locked:
             continue
+        floor = _cover_placement_floor(
+            op,
+            pred_end=0.0,
+            op_earliest=op_earliest,
+            horizon_start=horizon_start,
+        )
         heappush(
             heap,
-            (op_earliest.get(op.id, 0.0), op.seq_in_order, str(op.id), op.id),
+            (
+                _cover_ready_sort_key(
+                    op,
+                    floor=floor,
+                    horizon_start=horizon_start,
+                    cover_ready_rule=cover_ready_rule,
+                ),
+                op.seq_in_order,
+                str(op.id),
+                op.id,
+            ),
         )
     return heap, successors
 
@@ -898,6 +1033,7 @@ def _commit_list_schedule_assignment(
     tails: dict[UUID, tuple[float, UUID | None]],
     aux_windows: dict[UUID, list[tuple[float, float, int]]],
     horizon_start: datetime,
+    machine_index: MachineIndex | None = None,
 ) -> Assignment:
     assignment = Assignment(
         operation_id=op.id,
@@ -918,6 +1054,8 @@ def _commit_list_schedule_assignment(
         aux_windows.setdefault(requirement.aux_resource_id, []).append(
             (aux_start, end, int(requirement.quantity_needed))
         )
+    if machine_index is not None:
+        machine_index.add(assignment)
     return assignment
 
 
@@ -1019,8 +1157,6 @@ def _try_native_list_schedule(
         return None
     if any(op.machine_duration_overrides for op in operations):
         return None
-    if work_centers_have_calendar(list(dispatch_context.wc_by_id.values())):
-        return None
     packed = _pack_list_schedule_native(
         operations=operations,
         dispatch_context=dispatch_context,
@@ -1121,6 +1257,9 @@ def _pack_list_schedule_native(
         )
         arrays["floor_window"] = float(max(0.0, cover_atcs_floor_window))
         arrays["exhaust_window"] = float(max(0.0, cover_atcs_exhaust_window))
+    calendars = _pack_native_calendars(dispatch_context, idx_to_wc)
+    if calendars is not None:
+        arrays.update(calendars)
     return arrays, idx_to_wc
 
 
@@ -1198,6 +1337,37 @@ def _sdst_flat_from_context(
             continue
         sdst[wi * n_states * n_states + fi * n_states + ti] = float(minutes)
     return sdst
+
+
+def _pack_native_calendars(
+    dispatch_context: DispatchContext,
+    idx_to_wc: Sequence[Any],
+) -> dict[str, Any] | None:
+    """CSR shift spans per machine. None means every work center is 24/7."""
+
+    import numpy as np
+
+    if not work_centers_have_calendar(list(dispatch_context.wc_by_id.values())):
+        return None
+    opens: list[float] = []
+    closes: list[float] = []
+    offsets = [0]
+    horizon_start = dispatch_context.horizon_start
+    for wc_id in idx_to_wc:
+        work_center = dispatch_context.wc_by_id.get(wc_id)
+        calendar = getattr(work_center, "calendar", None) or []
+        for interval in calendar:
+            open_m = (interval.start - horizon_start).total_seconds() / 60.0
+            close_m = (interval.end - horizon_start).total_seconds() / 60.0
+            if close_m > open_m:
+                opens.append(open_m)
+                closes.append(close_m)
+        offsets.append(len(opens))
+    return {
+        "calendar_offsets": np.asarray(offsets, dtype=np.int64),
+        "calendar_open": np.asarray(opens, dtype=np.float64),
+        "calendar_close": np.asarray(closes, dtype=np.float64),
+    }
 
 
 def _native_cover_array_dict(
