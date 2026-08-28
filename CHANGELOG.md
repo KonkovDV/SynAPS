@@ -38,6 +38,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   kernel default stays 10_000. Empty native CSR row is 24/7. Mixed-fleet
   tests: `tests/test_calendar.py::test_list_schedule_mixed_fleet_empty_calendar_is_24_7`,
   `tests/test_accelerators.py::test_native_list_schedule_mixed_fleet_empty_row_is_24_7`.
+- **KI-N12 closed (2026-08-28):** GridPlan
+  [#7](https://github.com/KonkovDV/SynAPS-GridPlan/pull/7) and MobiRoute
+  [#4](https://github.com/KonkovDV/SynAPS-MobiRoute/pull/4) merged. Origin
+  domain pins are kernel `54ebf9f32bc871cc27283331d7536c1068c7e606`.
+  Kernel origin `main` is past that pin (`8be2830`); the next domain bump
+  is a new pin, not a reopen of KI-N12 (`docs/adr/0004-domain-repo-standard.md`).
+- **Windowed fifo home-before-steal:** night list-schedule keeps
+  same-night home/continuation ops ahead of steal in the ready heap so a
+  smaller family uuid cannot occupy an empty home while that resident is
+  still ready. Preference is per night: a global scan across all nights
+  delayed night-1 steal until the window closed and leftover jumped by
+  hundreds. Do not restore that global scan.
+  (`tests/test_rhc_cover.py::test_list_schedule_fills_home_before_steal_when_family_uuid_sorts_later`,
+  `tests/test_rhc_cover.py::test_list_schedule_same_night_fifo_does_not_defer_steal_behind_later_nights`).
+  Windowed placement tries the exclusive home tail and home gap before a
+  steal tail (`tests/test_rhc_cover.py::test_list_schedule_inserts_home_gap_before_steal_tail`).
+  Matching session `night-window-match-2026-08-28/` stays the 5k packing
+  pin. Generator IDs are `uuid4`, so leftover at 5k is not a recapture
+  delta. Not a P2.3 Yes. Red Team:
+  `docs/rfc/REDTEAM_TRIAGE_FIFO_HOME_GAP_2026_08_28.md`.
   `global_greedy_cover_min_ops` stays 10_000. Hashed P2.3 / remainder /
   calendar-3000 epoch JSON is **not** rewritten.
 

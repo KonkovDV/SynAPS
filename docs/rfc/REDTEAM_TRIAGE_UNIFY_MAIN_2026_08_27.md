@@ -65,7 +65,7 @@ Untracked BEAM seed42/999 in a hashed folder is **not** added.
 | KI-N1 | CRITICAL | ALNS is not a complete ≥5k solver. K3.6 recapture is partial `error`. |
 | KI-N4 | HIGH | COVER 100k@200 seed 42 not recaptured |
 | KI-N10 | MEDIUM | Linux COVER ladder not in PR CI |
-| KI-N12 | MEDIUM | Domain pins stay until **2026-09-09** |
+| KI-N12 | MEDIUM | Domain pins stay until **2026-09-09**. **Update 2026-08-28:** GridPlan #7 and MobiRoute #4 merged; KI-N12 closed. |
 | K3-R2b | P2 | In-search **Python** IncrementalRepair still has no wall deadline at n≥2000 |
 | K3-R4 | P2 | Hashed K3.6 JSON omits `iterations_completed` (new runs only) |
 | K3-R5 | P2 | Untracked BEAM seed42/999 leftovers; do not add |
