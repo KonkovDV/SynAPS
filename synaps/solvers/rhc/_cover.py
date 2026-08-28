@@ -45,6 +45,9 @@ if TYPE_CHECKING:
     from synaps.model import Operation
     from synaps.solvers._dispatch_support import DispatchContext, SlotCandidate
 
+    _CoverReadyKey = float | tuple[float, str]
+    _CoverHeapItem = tuple[_CoverReadyKey, int, str, UUID]
+
 _GLOBAL_GREEDY_COVER_MIN_OPS_DEFAULT = 10_000
 _NATIVE_LIST_SCHEDULE_MIN_OPS = 10_000
 _MAX_LIST_SCHEDULE_GAP_INSERTS = 64
@@ -609,9 +612,7 @@ def _retry_windowed_leftovers(
     machine_index.extend(assignments)
     extra_placed = extra_gap = 0
     pending = [
-        op
-        for op in operations
-        if op.id not in scheduled_ids and operation_has_hard_windows(op)
+        op for op in operations if op.id not in scheduled_ids and operation_has_hard_windows(op)
     ]
     for _ in range(len(pending) + 1):
         progress = 0
@@ -792,29 +793,33 @@ def _eject_one_windowed_leftover(
         and row.operation_id != op.predecessor_op_id
     ]
     victims.sort(key=lambda row: row.start_time, reverse=True)
-    place_kw = {
-        "dispatch_context": dispatch_context,
-        "assignments": assignments,
-        "assignment_by_op": assignment_by_op,
-        "scheduled_ids": scheduled_ids,
-        "default_wc_ids": default_wc_ids,
-        "horizon_start": horizon_start,
-        "horizon_minutes": horizon_minutes,
-        "op_earliest": op_earliest,
-        "window_family_homes": window_family_homes,
-        "cover_atcs_exhaust_window": cover_atcs_exhaust_window,
-    }
+
+    def place(target: Operation) -> bool:
+        return _place_windowed_with_rebuild(
+            target,
+            dispatch_context=dispatch_context,
+            assignments=assignments,
+            assignment_by_op=assignment_by_op,
+            scheduled_ids=scheduled_ids,
+            default_wc_ids=default_wc_ids,
+            horizon_start=horizon_start,
+            horizon_minutes=horizon_minutes,
+            op_earliest=op_earliest,
+            window_family_homes=window_family_homes,
+            cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+        )
+
     for victim in victims[:12]:
         victim_op = dispatch_context.ops_by_id.get(victim.operation_id)
         if victim_op is None:
             continue
         _pop_cover_assignment(victim, assignments, assignment_by_op, scheduled_ids)
-        if not _place_windowed_with_rebuild(op, **place_kw):
+        if not place(op):
             assignments.append(victim)
             assignment_by_op[victim.operation_id] = victim
             scheduled_ids.add(victim.operation_id)
             continue
-        if _place_windowed_with_rebuild(victim_op, **place_kw):
+        if place(victim_op):
             return True
         leftover_asg = assignment_by_op[op.id]
         _pop_cover_assignment(leftover_asg, assignments, assignment_by_op, scheduled_ids)
@@ -826,7 +831,7 @@ def _eject_one_windowed_leftover(
 
 def _run_python_cover_loop(
     *,
-    heap: list[tuple[float, int, str, UUID]],
+    heap: list[_CoverHeapItem],
     successors: dict[UUID, list[Operation]],
     tails: dict[UUID, tuple[float, UUID | None]],
     aux_windows: dict[UUID, list[tuple[float, float, int]]],
@@ -915,7 +920,7 @@ def _place_cover_heap_item(
     tails: dict[UUID, tuple[float, UUID | None]],
     aux_windows: dict[UUID, list[tuple[float, float, int]]],
     successors: dict[UUID, list[Operation]],
-    heap: list[tuple[float, int, str, UUID]],
+    heap: list[_CoverHeapItem],
     horizon_start: datetime,
     horizon_minutes: float,
     op_earliest: Mapping[UUID, float],
@@ -974,7 +979,7 @@ def _place_cover_heap_item(
 
 
 def _enqueue_cover_successors(
-    heap: list[tuple[float, int, str, UUID]],
+    heap: list[_CoverHeapItem],
     successors: Sequence[Operation],
     *,
     end: float,
@@ -1123,10 +1128,10 @@ def _ready_heap(
     *,
     horizon_start: datetime,
     cover_ready_rule: str = "fifo",
-) -> tuple[list[tuple[float, int, str, UUID]], dict[UUID, list[Operation]]]:
+) -> tuple[list[_CoverHeapItem], dict[UUID, list[Operation]]]:
     locked = scheduled_ids or set()
     successors: dict[UUID, list[Operation]] = defaultdict(list)
-    heap: list[tuple[float, int, str, UUID]] = []
+    heap: list[_CoverHeapItem] = []
     for op in operations:
         if op.predecessor_op_id:
             successors[op.predecessor_op_id].append(op)
@@ -1186,7 +1191,7 @@ def _seed_list_schedule_state(
 
 
 def _pop_cover_ready(
-    heap: list[tuple[float, int, str, UUID]],
+    heap: list[_CoverHeapItem],
     *,
     cover_ready_rule: str,
     tails: dict[UUID, tuple[float, UUID | None]],
@@ -1197,7 +1202,7 @@ def _pop_cover_ready(
     order_priority_by_id: Mapping[UUID, int] | None,
     cover_atcs_floor_window: float = _COVER_ATCS_FLOOR_WINDOW,
     cover_atcs_exhaust_window: float = 0.0,
-) -> tuple[float, int, str, UUID]:
+) -> _CoverHeapItem:
     if cover_ready_rule != "atcs":
         return heappop(heap)
     if len(heap) <= 1:
@@ -1251,7 +1256,7 @@ def _min_cover_setup_and_p(
 
 
 def _atcs_pick_index(
-    heap: list[tuple[float, int, str, UUID]],
+    heap: list[_CoverHeapItem],
     *,
     tails: dict[UUID, tuple[float, UUID | None]],
     dispatch_context: DispatchContext,
