@@ -29,7 +29,7 @@ mdurl==0.1.2
 more-itertools==11.0.2
 mypy==2.1.0
 mypy-extensions==1.1.0
-nh3==0.3.5
+nh3==0.3.7
 nodeenv==1.10.0
 numpy==2.4.5
 ortools==9.15.6755
