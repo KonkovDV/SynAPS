@@ -1470,9 +1470,7 @@ def _windowed_op_has_direct_tail(
     for wc_id in eligible:
         last_end, last_state = tails.get(wc_id, (0.0, None))
         continues_tonight = (
-            last_state is not None
-            and last_state == op.state_id
-            and last_end > night_start + 1e-9
+            last_state is not None and last_state == op.state_id and last_end > night_start + 1e-9
         )
         if continues_tonight:
             return True
