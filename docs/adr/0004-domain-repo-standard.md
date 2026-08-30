@@ -41,6 +41,13 @@ The next domain bump is a new pin to a kernel SHA on origin, still
 before 2026-09-09. Do not treat a diverged local GridPlan checkout as the
 product pin.
 
+**2026-08-30:** GridPlan #8 and MobiRoute #5 merged. Origin READMEs pin
+`6178c93b705ff58be21fa74a98651883a2da1169` (GridPlan **0.1.2**, MobiRoute
+**0.2.2**). Fail-closed coverage plus CP-SAT/ALNS/LBBD **encode** a non-empty
+calendar. KI-N12 stays **closed**. Kernel origin `main` is `6178c93`. Do not
+treat a diverged local GridPlan 0.1.10 / `6fd3393` tree as the product pin.
+Open-ended lag after 2026-09-09 remains forbidden.
+
 Night/emergency work in a domain layer is not a kernel calendar promise:
 greedy-family configs clip shifts; exact/ALNS encode when selected; windowed
 coverage on the night analog is 0.75–0.88
@@ -60,3 +67,6 @@ results as kernel 50k/500k evidence (different algebra).
   and must pass the three regression bullets above. KI-N12 stays open
   until those PRs merge.
 - 2026-08-28: those PRs merged. Origin pins recorded. KI-N12 closed.
+- 2026-08-30: GridPlan #8 / MobiRoute #5 merged. Origin pins
+  `6178c93b705ff58be21fa74a98651883a2da1169` (0.1.2 / 0.2.2). Calendar
+  encode, not refuse. KI-N12 stays closed.

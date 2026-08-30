@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Domain pin bump (2026-08-30):** GridPlan **0.1.2** and MobiRoute **0.2.2**
+  pin kernel
+  [`6178c93`](https://github.com/KonkovDV/SynAPS/commit/6178c93b705ff58be21fa74a98651883a2da1169)
+  ([GridPlan #8](https://github.com/KonkovDV/SynAPS-GridPlan/pull/8),
+  [MobiRoute #5](https://github.com/KonkovDV/SynAPS-MobiRoute/pull/5)).
+  ADR-0004 regressions: fail-closed coverage; CP-SAT/ALNS/LBBD encode a
+  non-empty calendar. KI-N12 stays closed. Not a hashed P2.3 Yes and not a
+  float on `main`
+  (`docs/rfc/REDTEAM_TRIAGE_DOMAIN_PIN_6178C93_2026_08_30.md`).
+
 - **Windowed family packing / native Windows (2026-08-28):** Windowed
   list-schedule ranks slots by exclusive (night, state) home (largest
   family first, max eligible cover), same-state continuation, empty-this-night,
