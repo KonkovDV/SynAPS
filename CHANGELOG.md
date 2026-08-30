@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [#7](https://github.com/KonkovDV/SynAPS-GridPlan/pull/7) and MobiRoute
   [#4](https://github.com/KonkovDV/SynAPS-MobiRoute/pull/4) merged. Origin
   domain pins are kernel `54ebf9f32bc871cc27283331d7536c1068c7e606`.
-  Kernel origin `main` is past that pin (`54577ef`); the next domain bump
+  Kernel origin `main` is past that pin (`501f449`); the next domain bump
   is a new pin, not a reopen of KI-N12 (`docs/adr/0004-domain-repo-standard.md`).
 - **Windowed fifo home-before-steal:** night list-schedule keeps
   same-night home/continuation ops ahead of steal in the ready heap so a
@@ -60,11 +60,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Night key is the window close `(latest_finish.date(), hour, minute)` so a
   22:00 sibling and a 01:00 sibling stay one family
   (`tests/test_rhc_cover.py::test_window_night_key_groups_after_midnight_with_evening_siblings`).
+  Main-pass steal skips a foreign exclusive home while that resident still
+  has unscheduled same-night ops; leftover retry then steals into slack
+  (`tests/test_rhc_cover.py::test_list_schedule_reserves_foreign_home_when_heap_pops_steal_first`).
+  Fifo continuation is same-night only, so yesterday's last_state cannot
+  pop a steal ahead of tonight's home
+  (`tests/test_rhc_cover.py::test_list_schedule_previous_night_state_does_not_steal_before_resident`).
   Matching session `night-window-match-2026-08-28/` stays the 5k packing
   pin. Generator IDs are `uuid4`, so leftover at 5k is not a recapture
   delta. Not a P2.3 Yes. Red Team:
   `docs/rfc/REDTEAM_TRIAGE_FIFO_HOME_GAP_2026_08_28.md`,
-  `docs/rfc/REDTEAM_TRIAGE_HOME_GAP_NIGHT_KEY_2026_08_28.md`.
+  `docs/rfc/REDTEAM_TRIAGE_HOME_GAP_NIGHT_KEY_2026_08_28.md`,
+  `docs/rfc/REDTEAM_TRIAGE_FOREIGN_HOME_RESERVE_2026_08_30.md`.
   `global_greedy_cover_min_ops` stays 10_000. Hashed P2.3 / remainder /
   calendar-3000 epoch JSON is **not** rewritten.
 
