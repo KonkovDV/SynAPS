@@ -60,13 +60,13 @@ stays **no**.
 
 | Residual | Why it stays |
 | --- | --- |
-| `_window_night_key` is `earliest_start.date()` | A 22:00-06:00 window can split at midnight if earliest is after 00:00. Deadzone generator stamps one earliest per night (22:00), so 5k analog is one key. Staggered earliest inside that window is untested |
-| Home tail still before home gap | If a late home tail fits, the interior hole is not used. Pre-existing tail-then-gap. Home-first only wins when the home tail is infeasible |
-| Gap rank uses `last_state=None` | Interior insert does not score same-state continuation. Home preferred still wins on `wc_id in home_wcs` |
+| `_window_night_key` is `earliest_start.date()` | **closed in follow-up** — key is `(latest_finish.date(), hour, minute)`. `tests/test_rhc_cover.py::test_window_night_key_groups_after_midnight_with_evening_siblings` |
+| Home tail still before home gap | **closed in follow-up** — same-machine earlier gap beats a feasible late tail. `tests/test_rhc_cover.py::test_list_schedule_inserts_home_gap_before_feasible_home_tail` |
+| Gap rank uses `last_state=None` | **closed in follow-up** — interior insert ranks the predecessor on that machine |
 | Continuation is machine-global | `_windowed_op_has_direct_tail` treats `last_state == op.state_id` as direct even when `last_end` is a previous night. Slot ranking still prefers the night home |
 | No new 5k session | `uuid4` IDs. Pin stays `night-window-match-2026-08-28/` leftover 38 / 117 / 122 |
 | Hashed P2.3 / remainder / 5k@4 / 8k@4/8 | Freeze and processing LB unchanged |
-| Origin `main` ruleset | Direct push may still require a PR. Local `29258e3` plus this drop sit on `main` |
+| Origin `main` ruleset | Direct push requires a PR. Follow-up: `docs/rfc/REDTEAM_TRIAGE_HOME_GAP_NIGHT_KEY_2026_08_28.md` |
 
 ## Non-claims
 
