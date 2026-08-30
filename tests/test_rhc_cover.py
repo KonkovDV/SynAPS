@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from heapq import heappop
 from uuid import UUID, uuid4
 
 import pytest
@@ -802,6 +803,190 @@ def test_window_night_key_groups_after_midnight_with_evening_siblings() -> None:
     )
     assert _window_night_key(evening) == _window_night_key(after_midnight)
     assert _window_night_key(evening) != _window_night_key(next_night)
+
+
+def test_list_schedule_previous_night_state_does_not_steal_before_resident() -> None:
+    """Yesterday's family on M1 must not open tonight ahead of the new home.
+
+    Night-1 B leaves last_state=B. Night-2 steal B is eligible on A's home.
+    Machine-global continuation popped the steal first and paid SDST into
+    the 3x150 resident (510 > 480). Continuation is same-night only.
+    """
+
+    state_a = State(id=UUID(int=2), code="A", label="A")
+    state_b = State(id=UUID(int=1), code="B", label="B")
+    night1 = HORIZON_START + timedelta(hours=14)
+    night1_end = night1 + timedelta(hours=8)
+    night2 = night1 + timedelta(days=1)
+    night2_end = night2 + timedelta(hours=8)
+    orders = [
+        Order(id=uuid4(), external_ref=f"O{i}", due_date=night2_end, priority=1) for i in range(6)
+    ]
+    ids = [UUID(int=i) for i in (1, 3, 10, 11, 12, 20)]
+    m1, m2 = UUID(int=100), UUID(int=200)
+    machines = [
+        WorkCenter(id=m1, code="M1", capability_group="g", speed_factor=1.0),
+        WorkCenter(id=m2, code="M2", capability_group="g", speed_factor=1.0),
+    ]
+
+    def _op(i: int, state, duration: int, wcs, start, finish) -> Operation:
+        return Operation(
+            id=ids[i],
+            order_id=orders[i].id,
+            seq_in_order=0,
+            state_id=state.id,
+            base_duration_min=duration,
+            eligible_wc_ids=wcs,
+            earliest_start=start,
+            latest_finish=finish,
+        )
+
+    ops = [
+        _op(0, state_b, 50, [m1], night2, night2_end),
+        _op(1, state_b, 400, [m1], night1, night1_end),
+        _op(2, state_a, 150, [m1], night2, night2_end),
+        _op(3, state_a, 150, [m1], night2, night2_end),
+        _op(4, state_a, 150, [m1], night2, night2_end),
+        _op(5, state_b, 400, [m2], night2, night2_end),
+    ]
+    setup_matrix = [
+        SetupEntry(
+            work_center_id=wc.id,
+            from_state_id=src.id,
+            to_state_id=dst.id,
+            setup_minutes=40,
+        )
+        for wc in machines
+        for src, dst in ((state_a, state_b), (state_b, state_a))
+    ]
+    problem = ScheduleProblem(
+        states=[state_a, state_b],
+        orders=orders,
+        operations=ops,
+        work_centers=machines,
+        setup_matrix=setup_matrix,
+        planning_horizon_start=HORIZON_START,
+        planning_horizon_end=HORIZON_START + timedelta(days=4),
+    )
+    context = build_dispatch_context(problem)
+    assignments: list[Assignment] = []
+    by_op: dict = {}
+    scheduled: set = set()
+    stats = place_operations_list_schedule(
+        operations=problem.operations,
+        dispatch_context=context,
+        assignments=assignments,
+        assignment_by_op=by_op,
+        scheduled_ids=scheduled,
+        horizon_start=HORIZON_START,
+        horizon_minutes=96 * 60.0,
+        op_earliest={op.id: 14 * 60.0 for op in ops},
+        default_wc_ids=[m1, m2],
+    )
+    assert stats.placed >= 5
+    assert all(ids[i] in scheduled for i in (2, 3, 4))
+    assert all(by_op[ids[i]].work_center_id == m1 for i in (2, 3, 4))
+
+
+def test_list_schedule_reserves_foreign_home_when_heap_pops_steal_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Main-pass steal must not occupy a home while that family is unfinished.
+
+    Heap order (due, state_id) pops B-20 onto empty M1 before 3x150 A.
+    Fifo home-before-steal is disabled so this is only the placement reserve.
+    Leftover retry may still steal after A packed (overflow test).
+    """
+
+    monkeypatch.setattr(
+        "synaps.solvers.rhc._cover._pop_fifo_cover_ready",
+        lambda heap, **_kwargs: heappop(heap),
+    )
+    state_a = State(id=UUID(int=2), code="A", label="A")
+    state_b = State(id=UUID(int=1), code="B", label="B")
+    night_start = HORIZON_START + timedelta(hours=14)
+    night_end = night_start + timedelta(hours=8)
+    orders = [
+        Order(id=uuid4(), external_ref=f"O{i}", due_date=night_end, priority=1) for i in range(5)
+    ]
+    ids = [UUID(int=1), UUID(int=3), UUID(int=10), UUID(int=11), UUID(int=12)]
+    m1, m2 = UUID(int=100), UUID(int=200)
+    machines = [
+        WorkCenter(id=m1, code="M1", capability_group="g", speed_factor=1.0),
+        WorkCenter(id=m2, code="M2", capability_group="g", speed_factor=1.0),
+    ]
+    ops = [
+        Operation(
+            id=ids[0],
+            order_id=orders[0].id,
+            seq_in_order=0,
+            state_id=state_b.id,
+            base_duration_min=20,
+            eligible_wc_ids=[m1],
+            earliest_start=night_start,
+            latest_finish=night_end,
+        ),
+        Operation(
+            id=ids[1],
+            order_id=orders[1].id,
+            seq_in_order=0,
+            state_id=state_b.id,
+            base_duration_min=400,
+            eligible_wc_ids=[m2],
+            earliest_start=night_start,
+            latest_finish=night_end,
+        ),
+        *[
+            Operation(
+                id=ids[i],
+                order_id=orders[i].id,
+                seq_in_order=0,
+                state_id=state_a.id,
+                base_duration_min=150,
+                eligible_wc_ids=[m1],
+                earliest_start=night_start,
+                latest_finish=night_end,
+            )
+            for i in range(2, 5)
+        ],
+    ]
+    setup_matrix = [
+        SetupEntry(
+            work_center_id=wc.id,
+            from_state_id=src.id,
+            to_state_id=dst.id,
+            setup_minutes=40,
+        )
+        for wc in machines
+        for src, dst in ((state_a, state_b), (state_b, state_a))
+    ]
+    problem = ScheduleProblem(
+        states=[state_a, state_b],
+        orders=orders,
+        operations=ops,
+        work_centers=machines,
+        setup_matrix=setup_matrix,
+        planning_horizon_start=HORIZON_START,
+        planning_horizon_end=HORIZON_START + timedelta(days=2),
+    )
+    context = build_dispatch_context(problem)
+    assignments: list[Assignment] = []
+    by_op: dict = {}
+    scheduled: set = set()
+    stats = place_operations_list_schedule(
+        operations=problem.operations,
+        dispatch_context=context,
+        assignments=assignments,
+        assignment_by_op=by_op,
+        scheduled_ids=scheduled,
+        horizon_start=HORIZON_START,
+        horizon_minutes=48 * 60.0,
+        op_earliest={op.id: 14 * 60.0 for op in ops},
+        default_wc_ids=[m1, m2],
+    )
+    assert stats.placed >= 4
+    assert all(ids[i] in scheduled for i in (2, 3, 4))
+    assert all(by_op[ids[i]].work_center_id == m1 for i in (2, 3, 4))
 
 
 def test_cover_gap_scan_appends_at_large_n_threshold() -> None:

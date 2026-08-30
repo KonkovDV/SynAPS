@@ -59,8 +59,8 @@ PR #20 is `54577ef`; this drop needs a follow-up PR.
 
 | Residual | Why it stays |
 | --- | --- |
-| Continuation is machine-global | `_windowed_op_has_direct_tail` treats `last_state == op.state_id` as direct even when `last_end` is a previous night. Slot ranking still prefers the night home |
-| Foreign-home reserve while the resident is unfinished | Full no-steal leftover 417. Leftover retry must still steal |
+| Continuation is machine-global | **closed in follow-up** — same-night only. `tests/test_rhc_cover.py::test_list_schedule_previous_night_state_does_not_steal_before_resident` |
+| Foreign-home reserve while the resident is unfinished | **closed in follow-up** — main pass reserves; leftover retry steals. `tests/test_rhc_cover.py::test_list_schedule_reserves_foreign_home_when_heap_pops_steal_first` |
 | No new 5k session | `uuid4` IDs. Pin stays `night-window-match-2026-08-28/` leftover 38 / 117 / 122 |
 | Hashed P2.3 / remainder / 5k@4 / 8k@4/8 | Freeze and processing LB unchanged |
 | Origin `main` ruleset | Direct push requires a PR |

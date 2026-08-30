@@ -41,7 +41,7 @@ from synaps.solvers._time_windows import (
 from synaps.timegrain import duration_minutes_for
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Collection, Mapping, Sequence
     from uuid import UUID
 
     from synaps.model import Operation
@@ -608,7 +608,61 @@ def _retry_windowed_leftovers(
     window_family_homes: Mapping[tuple[object, UUID], Sequence[UUID]] | None,
     cover_atcs_exhaust_window: float,
 ) -> tuple[int, int]:
-    """Second pass: gap-insert windowed leftovers after the packed timeline exists."""
+    """Home leftovers first; steal only after residents have packed."""
+
+    placed, gap = _retry_windowed_leftover_wave(
+        operations=operations,
+        dispatch_context=dispatch_context,
+        assignments=assignments,
+        assignment_by_op=assignment_by_op,
+        scheduled_ids=scheduled_ids,
+        tails=tails,
+        aux_windows=aux_windows,
+        op_earliest=op_earliest,
+        default_wc_ids=default_wc_ids,
+        horizon_start=horizon_start,
+        horizon_minutes=horizon_minutes,
+        window_family_homes=window_family_homes,
+        cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+        reserve_foreign=True,
+    )
+    extra, extra_gap = _retry_windowed_leftover_wave(
+        operations=operations,
+        dispatch_context=dispatch_context,
+        assignments=assignments,
+        assignment_by_op=assignment_by_op,
+        scheduled_ids=scheduled_ids,
+        tails=tails,
+        aux_windows=aux_windows,
+        op_earliest=op_earliest,
+        default_wc_ids=default_wc_ids,
+        horizon_start=horizon_start,
+        horizon_minutes=horizon_minutes,
+        window_family_homes=window_family_homes,
+        cover_atcs_exhaust_window=cover_atcs_exhaust_window,
+        reserve_foreign=False,
+    )
+    return placed + extra, gap + extra_gap
+
+
+def _retry_windowed_leftover_wave(
+    *,
+    operations: Sequence[Operation],
+    dispatch_context: DispatchContext,
+    assignments: list[Assignment],
+    assignment_by_op: dict[UUID, Assignment],
+    scheduled_ids: set[UUID],
+    tails: dict[UUID, tuple[float, UUID | None]],
+    aux_windows: dict[UUID, list[tuple[float, float, int]]],
+    op_earliest: Mapping[UUID, float],
+    default_wc_ids: Sequence[UUID],
+    horizon_start: datetime,
+    horizon_minutes: float,
+    window_family_homes: Mapping[tuple[object, UUID], Sequence[UUID]] | None,
+    cover_atcs_exhaust_window: float,
+    reserve_foreign: bool,
+) -> tuple[int, int]:
+    """One leftover pass. Reserve keeps steal off a home that still has residents."""
 
     machine_index = MachineIndex(dispatch_context)
     machine_index.extend(assignments)
@@ -627,6 +681,12 @@ def _retry_windowed_leftovers(
             if op.predecessor_op_id:
                 pred_asg = assignment_by_op[op.predecessor_op_id]
                 pred_end = (pred_asg.end_time - horizon_start).total_seconds() / 60.0
+            remaining = _remaining_family_counts(operations, scheduled_ids)
+            reserved = (
+                _foreign_homes_to_reserve(op, window_family_homes, remaining)
+                if reserve_foreign
+                else ()
+            )
             placed_one, inserted, _end = _place_ready_list_operation(
                 op=op,
                 floor=_cover_placement_floor(
@@ -648,6 +708,7 @@ def _retry_windowed_leftovers(
                 cover_atcs_exhaust_window=cover_atcs_exhaust_window,
                 machine_index=machine_index,
                 window_family_homes=window_family_homes,
+                reserved_foreign_wcs=reserved,
             )
             if not placed_one:
                 continue
@@ -856,9 +917,8 @@ def _run_python_cover_loop(
     clipped = placed = gap_inserted = gap_attempts = 0
     time_limited = False
     ops_by_id = dispatch_context.ops_by_id
-    machine_index = MachineIndex(dispatch_context)
-    if assignments:
-        machine_index.extend(assignments)
+    machine_index = _ensure_list_schedule_index(None, dispatch_context, assignments)
+    remaining = _remaining_family_counts(operations, scheduled_ids)
     while heap:
         if deadline_exceeded is not None and deadline_exceeded():
             time_limited = True
@@ -897,6 +957,7 @@ def _run_python_cover_loop(
             gap_attempts=gap_attempts,
             machine_index=machine_index,
             window_family_homes=window_family_homes,
+            remaining_families=remaining,
         )
         if step is None:
             continue
@@ -934,6 +995,7 @@ def _place_cover_heap_item(
     gap_attempts: int,
     machine_index: MachineIndex,
     window_family_homes: Mapping[tuple[object, UUID], Sequence[UUID]] | None = None,
+    remaining_families: dict[tuple[object, UUID], int] | None = None,
 ) -> tuple[int, int, int, int] | None:
     pred_end = 0.0
     if op.predecessor_op_id:
@@ -944,6 +1006,7 @@ def _place_cover_heap_item(
     allow_gap = _allow_list_schedule_gap(
         operation=op, n_ops=len(operations), gap_attempts=gap_attempts
     )
+    reserved = _foreign_homes_to_reserve(op, window_family_homes, remaining_families)
     placed_one, inserted, end = _place_ready_list_operation(
         op=op,
         floor=_cover_placement_floor(
@@ -965,11 +1028,13 @@ def _place_cover_heap_item(
         cover_atcs_exhaust_window=cover_atcs_exhaust_window,
         machine_index=machine_index,
         window_family_homes=window_family_homes,
+        reserved_foreign_wcs=reserved,
     )
     gap_ins = 1 if inserted else 0
     gap_att = 1 if allow_gap and (inserted or not placed_one) else 0
     if not placed_one:
         return (gap_ins, gap_att, 1, 0)
+    _note_family_scheduled(op, remaining_families)
     _enqueue_cover_successors(
         heap,
         successors[op.id],
@@ -1253,12 +1318,15 @@ def _place_ready_list_operation(
     cover_atcs_exhaust_window: float = 0.0,
     machine_index: MachineIndex | None = None,
     window_family_homes: Mapping[tuple[object, UUID], Sequence[UUID]] | None = None,
+    reserved_foreign_wcs: Collection[UUID] = (),
 ) -> tuple[bool, bool, float]:
     """Place one ready op. Returns (placed, gap_inserted, end).
 
     Windowed ops try the exclusive home (tail and gap) before a steal
     tail. On one machine, an earlier home hole beats a feasible late
-    continuation tail (Artigues 2005 insertion SGS).
+    continuation tail (Artigues 2005 insertion SGS). Main-pass steal
+    skips a foreign home while that resident still has unscheduled
+    same-night ops; leftover retry then steals into leftover slack.
     """
 
     home_wcs = _family_home_wcs(op, window_family_homes)
@@ -1267,8 +1335,11 @@ def _place_ready_list_operation(
         groups = [home_wcs, None]
     slot: tuple[float, float, int, UUID, list[UUID]] | None = None
     inserted = False
+    blocked = set(reserved_foreign_wcs)
     for restrict in groups:
         eligible = _list_schedule_eligible_wcs(op, default_wc_ids, restrict)
+        if restrict is None and blocked:
+            eligible = [wc_id for wc_id in eligible if wc_id not in blocked]
         slot, inserted, machine_index = _try_tail_or_gap_slot(
             op=op,
             dispatch_context=dispatch_context,
@@ -1385,10 +1456,12 @@ def _windowed_op_has_direct_tail(
     default_wc_ids: Sequence[UUID],
     horizon_start: datetime,
 ) -> bool:
-    """True when the op can open its home or continue a live family without steal.
+    """True when the op can open its home or continue tonight without steal.
 
-    Steal into another family's slack waits in the fifo heap until those
-    home/continuation ops are gone (Mahmoodi/Dooley group scheduling).
+    Continuation is same-night only: a previous night's last_state must not
+    let a steal pop ahead of the resident opening this night. Steal into
+    another family's slack waits until those home/continuation ops are gone
+    (Mahmoodi/Dooley group scheduling).
     """
 
     night_start = operation_earliest_offset_minutes(op, None, horizon_start)
@@ -1396,7 +1469,10 @@ def _windowed_op_has_direct_tail(
     eligible = op.eligible_wc_ids or default_wc_ids
     for wc_id in eligible:
         last_end, last_state = tails.get(wc_id, (0.0, None))
-        if last_state is not None and last_state == op.state_id:
+        continues_tonight = (
+            last_state is not None and last_state == op.state_id and last_end > night_start + 1e-9
+        )
+        if continues_tonight:
             return True
         opens_night = last_end <= night_start + 1e-9
         if wc_id in homes and opens_night:
@@ -1732,6 +1808,55 @@ def _family_home_wcs(
     if night is None or not window_family_homes:
         return ()
     return window_family_homes.get((night, op.state_id), ())
+
+
+def _remaining_family_counts(
+    operations: Sequence[Operation],
+    scheduled_ids: set[UUID],
+) -> dict[tuple[object, UUID], int]:
+    counts: dict[tuple[object, UUID], int] = defaultdict(int)
+    for op in operations:
+        if op.id in scheduled_ids:
+            continue
+        night = _window_night_key(op)
+        if night is None:
+            continue
+        counts[(night, op.state_id)] += 1
+    return counts
+
+
+def _note_family_scheduled(
+    op: Operation,
+    remaining: dict[tuple[object, UUID], int] | None,
+) -> None:
+    if remaining is None:
+        return
+    night = _window_night_key(op)
+    if night is None:
+        return
+    key = (night, op.state_id)
+    remaining[key] = remaining.get(key, 0) - 1
+
+
+def _foreign_homes_to_reserve(
+    op: Operation,
+    window_family_homes: Mapping[tuple[object, UUID], Sequence[UUID]] | None,
+    remaining: Mapping[tuple[object, UUID], int] | None,
+) -> tuple[UUID, ...]:
+    """Work centers that still belong to another unfinished same-night family."""
+
+    night = _window_night_key(op)
+    if night is None or not window_family_homes or not remaining:
+        return ()
+    mine = set(_family_home_wcs(op, window_family_homes))
+    reserved: list[UUID] = []
+    for (home_night, state), wcs in window_family_homes.items():
+        if home_night != night or state == op.state_id:
+            continue
+        if remaining.get((home_night, state), 0) <= 0:
+            continue
+        reserved.extend(wc_id for wc_id in wcs if wc_id not in mine)
+    return tuple(reserved)
 
 
 def _cover_slot_beats_best(
