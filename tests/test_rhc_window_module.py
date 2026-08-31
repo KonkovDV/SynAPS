@@ -333,6 +333,36 @@ class TestStabilizeTemporalConsistency:
         # And its duration must be preserved (10 min original duration).
         assert b.end_time == HORIZON_START + timedelta(minutes=40.0)
 
+    def test_precedence_closed_after_same_pass_machine_push(self) -> None:
+        """A later machine push of the predecessor must not leave the successor overlapping.
+
+        One pass used to run precedence, then machine, then stop. Cross-machine
+        successors stayed at the old pred end. The pass now closes order
+        precedence after resource shifts.
+        """
+        machine_pred = uuid4()
+        machine_succ = uuid4()
+        blocker = _OpStub(id=uuid4())
+        pred = _OpStub(id=uuid4(), seq_in_order=1)
+        succ = _OpStub(id=uuid4(), seq_in_order=2, predecessor_op_id=pred.id)
+        blocker_asg = _make_assignment(
+            blocker.id, work_center_id=machine_pred, start_minutes=0.0, end_minutes=40.0
+        )
+        pred_asg = _make_assignment(
+            pred.id, work_center_id=machine_pred, start_minutes=5.0, end_minutes=15.0
+        )
+        succ_asg = _make_assignment(
+            succ.id, work_center_id=machine_succ, start_minutes=10.0, end_minutes=20.0
+        )
+        stats = stabilize_temporal_consistency(
+            [blocker_asg, pred_asg, succ_asg],
+            ops_by_id={blocker.id: blocker, pred.id: pred, succ.id: succ},
+            setup_minutes={},
+            max_passes=1,
+        )
+        assert stats["machine_shifts"] >= 1
+        assert succ_asg.start_time >= pred_asg.end_time
+
     def test_machine_overlap_is_repaired_with_setup(self) -> None:
         # Two ops on the same work center, overlapping by 5 min, with a
         # required setup of 4 min between their states.

@@ -739,6 +739,50 @@ def _topo_order_assigned_ops(
     return topo_order
 
 
+def _stabilize_one_pass(
+    topo_order: list[UUID],
+    *,
+    ops_by_id: Mapping[UUID, Operation],
+    assignment_by_op: dict[UUID, Assignment],
+    setup_minutes: Mapping[tuple[UUID, UUID, UUID], int],
+    sealed: set[UUID],
+    horizon_end: datetime | None,
+    dispatch_context: Any,
+) -> tuple[int, int, int, int]:
+    """One stabilize pass: resources, then a closing order-precedence sweep."""
+
+    pred_shift, pred_block = _shift_later_for_precedence(
+        topo_order,
+        ops_by_id=ops_by_id,
+        assignment_by_op=assignment_by_op,
+        immutable_op_ids=sealed,
+        horizon_end=horizon_end,
+    )
+    mach_shift, mach_block = _shift_later_for_machine_setup(
+        assignment_by_op,
+        ops_by_id=ops_by_id,
+        setup_minutes=setup_minutes,
+        immutable_op_ids=sealed,
+        horizon_end=horizon_end,
+    )
+    aux_shift, aux_block = _shift_later_for_aux(
+        assignment_by_op,
+        dispatch_context=dispatch_context,
+        immutable_op_ids=sealed,
+        ops_by_id=ops_by_id,
+        horizon_end=horizon_end,
+    )
+    pred_close, pred_close_block = _shift_later_for_precedence(
+        topo_order,
+        ops_by_id=ops_by_id,
+        assignment_by_op=assignment_by_op,
+        immutable_op_ids=sealed,
+        horizon_end=horizon_end,
+    )
+    blocks = pred_block + mach_block + aux_block + pred_close_block
+    return pred_shift + pred_close, mach_shift, aux_shift, blocks
+
+
 def stabilize_temporal_consistency(
     assignments: list[Assignment],
     *,
@@ -753,7 +797,9 @@ def stabilize_temporal_consistency(
 
     Forward-only and bounded. Shifts that would exceed ``latest_finish`` or
     ``horizon_end`` are refused (ceiling block) and count as non-convergence.
-    ``immutable_op_ids`` (A15-P1-6) are never moved.
+    ``immutable_op_ids`` (A15-P1-6) are never moved. Each pass re-closes
+    order precedence after machine/aux pushes so a resource shift cannot
+    leave ``start < pred_end`` as the last mutation.
 
     Returns passes/shift counters plus ``converged`` (1/0).
     """
@@ -784,33 +830,21 @@ def stabilize_temporal_consistency(
 
     for pass_index in range(max_passes):
         passes = pass_index + 1
-        pred_shift, pred_block = _shift_later_for_precedence(
+        pred_shift, mach_shift, aux_shift, pass_blocks = _stabilize_one_pass(
             topo_order,
             ops_by_id=ops_by_id,
             assignment_by_op=assignment_by_op,
-            immutable_op_ids=sealed,
-            horizon_end=horizon_end,
-        )
-        mach_shift, mach_block = _shift_later_for_machine_setup(
-            assignment_by_op,
-            ops_by_id=ops_by_id,
             setup_minutes=setup_minutes,
-            immutable_op_ids=sealed,
+            sealed=sealed,
             horizon_end=horizon_end,
-        )
-        aux_shift, aux_block = _shift_later_for_aux(
-            assignment_by_op,
             dispatch_context=dispatch_context,
-            immutable_op_ids=sealed,
-            ops_by_id=ops_by_id,
-            horizon_end=horizon_end,
         )
         precedence_shifts += pred_shift
         machine_shifts += mach_shift
         aux_shifts += aux_shift
-        ceiling_blocks += pred_block + mach_block + aux_block
+        ceiling_blocks += pass_blocks
         if pred_shift == 0 and mach_shift == 0 and aux_shift == 0:
-            if pred_block or mach_block or aux_block:
+            if pass_blocks:
                 converged = False
             break
     else:

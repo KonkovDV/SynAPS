@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **RHC stabilize closes order precedence after resource shifts
+  (2026-08-31):** Each temporal-stabilize pass re-runs the precedence
+  sweep after machine/aux later-shifts so a same-pass machine push of
+  the predecessor cannot leave a movable successor with
+  ``start < pred_end``. Linux ``test-slow`` industrial seed42
+  (`tests/test_commit_precedence_gate.py::TestGateEliminatesPrecedenceViolations::test_industrial_seed42_zero_precedence_violations`)
+  had 3 ``PRECEDENCE_VIOLATION`` after PR #32. Not a hashed P2.3 Yes.
+  Gates stay 10_000
+  (`docs/rfc/REDTEAM_TRIAGE_PREC_GATE_STABILIZE_2026_08_31.md`).
+
 - **Domain pin bump (2026-08-30):** GridPlan **0.1.2** and MobiRoute **0.2.2**
   pin kernel
   [`6178c93`](https://github.com/KonkovDV/SynAPS/commit/6178c93b705ff58be21fa74a98651883a2da1169)

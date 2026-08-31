@@ -153,7 +153,6 @@ _LONG_FUNCTION_RATCHET: dict[str, int] = {
     "solvers/lower_bounds.py::compute_relaxed_makespan_lower_bound": 180,
     "solvers/alns_solver.py::_repair_cpsat_outcome": 173,
     "solvers/alns_solver.py::_reanchor_against_frozen": 160,
-    "solvers/rhc/_window.py::stabilize_temporal_consistency": 90,
     "solvers/pareto_slice_solver.py::solve": 148,
     "solvers/alns_solver.py::_destroy_due_pressure": 135,
     "cli.py::main": 130,
