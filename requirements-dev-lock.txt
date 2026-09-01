@@ -65,4 +65,4 @@ typing-extensions==4.15.0
 typing-inspection==0.4.2
 tzdata==2026.2
 urllib3==2.7.0
-virtualenv==21.3.3
+virtualenv==21.7.5
