@@ -43,7 +43,7 @@ dependencies = [
     # (undefined symbol Highs::releaseMemory) that break import on CI.
     "highspy>=1.11,<1.15",
     "pydantic>=2.9",
-    "numpy>=2.1",
+    "numpy>=2.5.2",
 ]
 
 [project.optional-dependencies]

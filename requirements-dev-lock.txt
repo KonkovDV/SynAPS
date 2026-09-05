@@ -31,7 +31,7 @@ mypy==2.1.0
 mypy-extensions==1.1.0
 nh3==0.3.5
 nodeenv==1.10.0
-numpy==2.4.5
+numpy==2.5.2
 ortools==9.15.6755
 packaging==26.2
 pandas==3.0.3
