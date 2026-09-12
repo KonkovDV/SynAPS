@@ -60,7 +60,7 @@ rich==15.0.0
 ruff==0.15.13
 six==1.17.0
 sortedcontainers==2.4.0
-twine==6.2.0
+twine==7.0.0
 typing-extensions==4.15.0
 typing-inspection==0.4.2
 tzdata==2026.2
