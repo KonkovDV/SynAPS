@@ -102,6 +102,53 @@ def _add_calendar_shift_literals(
     return by_pair
 
 
+def _add_aux_calendar_shift_literals(
+    model: cp_model.CpModel,
+    problem: ScheduleProblem,
+    starts: dict[tuple[Any, Any], Any],
+    ends: dict[tuple[Any, Any], Any],
+    presences: dict[tuple[Any, Any], Any],
+) -> dict[tuple[Any, Any], list[tuple[int, int, Any]]]:
+    """Force an aux-using operation into one published shift of that resource.
+
+    Empty ``AuxiliaryResource.calendar`` stays 24/7. A resource with shifts
+    constrains every machine alternative of each operation that requires it.
+    """
+
+    required: dict[Any, set[Any]] = {}
+    for requirement in problem.aux_requirements:
+        required.setdefault(requirement.operation_id, set()).add(requirement.aux_resource_id)
+    by_pair: dict[tuple[Any, Any], list[tuple[int, int, Any]]] = {}
+    horizon_start = problem.planning_horizon_start
+    for resource in problem.auxiliary_resources:
+        spans = shift_minute_spans(getattr(resource, "calendar", None) or [], horizon_start)
+        if not spans:
+            continue
+        for operation in problem.operations:
+            if resource.id not in required.get(operation.id, set()):
+                continue
+            for work_center in problem.work_centers:
+                key = (operation.id, work_center.id)
+                presence = presences.get(key)
+                if presence is None:
+                    continue
+                start_var = starts[key]
+                end_var = ends[key]
+                lits: list[Any] = []
+                choices: list[tuple[int, int, Any]] = []
+                for index, (open_m, close_m) in enumerate(spans):
+                    lit = model.new_bool_var(
+                        f"auxcal_{resource.id}_{operation.id}_{work_center.id}_{index}"
+                    )
+                    model.add(start_var >= open_m).only_enforce_if(lit)
+                    model.add(end_var <= close_m).only_enforce_if(lit)
+                    lits.append(lit)
+                    choices.append((open_m, close_m, lit))
+                model.add(sum(lits) == presence)
+                by_pair.setdefault(key, []).extend(choices)
+    return by_pair
+
+
 def _objective_product_overflows(term_bound: int, multiplier_bound: int) -> bool:
     """True if ``term * (multiplier_bound + 1)`` can exceed the safe int64 ceiling.
 
@@ -1219,6 +1266,10 @@ class CpSatSolver(BaseSolver):
         calendar_shifts = _add_calendar_shift_literals(
             model, solve_problem, starts, ends, presences
         )
+        for key, choices in _add_aux_calendar_shift_literals(
+            model, solve_problem, starts, ends, presences
+        ).items():
+            calendar_shifts.setdefault(key, []).extend(choices)
         setup_terms, material_terms, energy_terms, setup_intervals_by_op = (
             self._add_machine_order_and_adjacency(
                 model,

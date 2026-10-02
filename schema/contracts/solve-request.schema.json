@@ -23,6 +23,14 @@
           "title": "Pool Size",
           "type": "integer"
         },
+        "calendar": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ShiftInterval"
+          },
+          "title": "Calendar",
+          "type": "array"
+        },
         "resource_type": {
           "title": "Resource Type",
           "type": "string"

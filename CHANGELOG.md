@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `AuxiliaryResource.calendar` uses the work-center contract. An empty list
+  stays 24/7. A non-empty list is enforced by `FeasibilityChecker`
+  (`CALENDAR_VIOLATION` on occupancy `[start - setup, end]`) and by CP-SAT
+  shift literals, including setup on sequence-dependent arcs.
+
 ### Changed
 
 - **RHC stabilize closes order precedence after resource shifts

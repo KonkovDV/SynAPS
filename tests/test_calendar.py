@@ -18,7 +18,9 @@ from synaps.calendar import (
 )
 from synaps.model import (
     Assignment,
+    AuxiliaryResource,
     Operation,
+    OperationAuxRequirement,
     Order,
     ScheduleProblem,
     ScheduleResult,
@@ -547,3 +549,90 @@ def test_verify_error_with_clean_assignments_is_not_verified_feasible() -> None:
     )
     verification = verify_schedule_result(problem, result)
     assert verification.feasible is False
+
+
+def _aux_problem(
+    *, calendar: list[ShiftInterval], duration_min: int = 60
+) -> tuple[ScheduleProblem, AuxiliaryResource]:
+    problem = _one_op_problem(calendar=[])
+    tool = AuxiliaryResource(code="TOOL", resource_type="fixture", pool_size=1, calendar=calendar)
+    op = problem.operations[0]
+    loaded = problem.model_copy(
+        update={
+            "operations": [op.model_copy(update={"base_duration_min": duration_min})],
+            "auxiliary_resources": [tool],
+            "aux_requirements": [
+                OperationAuxRequirement(
+                    operation_id=op.id, aux_resource_id=tool.id, quantity_needed=1
+                )
+            ],
+        }
+    )
+    return loaded, tool
+
+
+def test_checker_rejects_aux_occupancy_outside_its_shift() -> None:
+    problem, tool = _aux_problem(calendar=[_night_shift()])
+    wc = problem.work_centers[0]
+    op = problem.operations[0]
+    assignment = Assignment(
+        operation_id=op.id,
+        work_center_id=wc.id,
+        start_time=H0,
+        end_time=H0 + timedelta(hours=1),
+        setup_minutes=0,
+        aux_resource_ids=[tool.id],
+    )
+    kinds = {v.kind for v in FeasibilityChecker().check(problem, [assignment], exhaustive=True)}
+    assert "CALENDAR_VIOLATION" in kinds
+
+
+def test_checker_rejects_aux_setup_before_shift_open() -> None:
+    problem, tool = _aux_problem(calendar=[_night_shift()])
+    wc = problem.work_centers[0]
+    op = problem.operations[0]
+    start = H0 + timedelta(hours=8)
+    assignment = Assignment(
+        operation_id=op.id,
+        work_center_id=wc.id,
+        start_time=start,
+        end_time=start + timedelta(hours=1),
+        setup_minutes=60,
+        aux_resource_ids=[tool.id],
+    )
+    kinds = {v.kind for v in FeasibilityChecker().check(problem, [assignment], exhaustive=True)}
+    assert "CALENDAR_VIOLATION" in kinds
+
+
+def test_empty_aux_calendar_stays_open() -> None:
+    problem, tool = _aux_problem(calendar=[])
+    wc = problem.work_centers[0]
+    op = problem.operations[0]
+    assignment = Assignment(
+        operation_id=op.id,
+        work_center_id=wc.id,
+        start_time=H0,
+        end_time=H0 + timedelta(hours=1),
+        setup_minutes=0,
+        aux_resource_ids=[tool.id],
+    )
+    assert FeasibilityChecker().check(problem, [assignment], exhaustive=True) == []
+
+
+def test_cpsat_keeps_processing_inside_aux_shift() -> None:
+    problem, _tool = _aux_problem(calendar=[_night_shift()])
+    solver, kwargs = create_solver("CPSAT-10")
+    result = solver.solve(problem, **kwargs)
+    assert result.status in {SolverStatus.FEASIBLE, SolverStatus.OPTIMAL}
+    assert result.assignments
+    assert result.assignments[0].start_time >= H0 + timedelta(hours=8)
+    assert result.assignments[0].end_time <= H0 + timedelta(hours=16)
+    assert not FeasibilityChecker().check(problem, result.assignments, exhaustive=True)
+
+
+def test_cpsat_aux_shift_shorter_than_duration_is_infeasible() -> None:
+    problem, _tool = _aux_problem(calendar=[_night_shift()], duration_min=9 * 60)
+    solver, kwargs = create_solver("CPSAT-10")
+    result = solver.solve(problem, **kwargs)
+    assert result.status == SolverStatus.INFEASIBLE
+    assert result.assignments == []

@@ -236,6 +236,9 @@ class FeasibilityChecker:
         9. Work-center shift calendar (CALENDAR_VIOLATION): occupancy
            ``[start - setup, end]`` must sit in one published interval. Empty
            calendar is 24/7. Dispatch clips setup together with processing.
+        10. Auxiliary-resource calendar (CALENDAR_VIOLATION): the same occupancy
+           window must sit in one published interval of each assigned aux that
+           has a non-empty calendar. Empty aux calendar is 24/7.
     """
 
     @staticmethod
@@ -985,6 +988,13 @@ class FeasibilityChecker:
             exhaustive=exhaustive,
             operation_ids=scoped_ops,
         )
+        self._check_aux_calendar(
+            assignments=assignments,
+            resources_by_id=resources_by_id,
+            violations=violations,
+            exhaustive=exhaustive,
+            operation_ids=scoped_ops,
+        )
 
         # 8. Operation durations (P0-3; hardened by F2, audit v4 — see the
         # helper's docstring for the physical-floor contract).
@@ -1098,6 +1108,43 @@ class FeasibilityChecker:
                 )
                 if not exhaustive:
                     return
+
+    @staticmethod
+    def _check_aux_calendar(
+        *,
+        assignments: list[Assignment],
+        resources_by_id: dict[Any, Any],
+        violations: list[FeasibilityViolation],
+        exhaustive: bool,
+        operation_ids: frozenset[Any] | None = None,
+    ) -> None:
+        """Assigned aux occupancy must sit in one of that resource's shifts."""
+
+        for assignment in assignments:
+            if operation_ids is not None and assignment.operation_id not in operation_ids:
+                continue
+            setup_minutes = int(getattr(assignment, "setup_minutes", 0) or 0)
+            occupancy_start = assignment.start_time - timedelta(minutes=setup_minutes)
+            for aux_id in getattr(assignment, "aux_resource_ids", []) or []:
+                resource = resources_by_id.get(aux_id)
+                calendar = getattr(resource, "calendar", None) if resource is not None else None
+                if calendar and not processing_fits_calendar(
+                    occupancy_start, assignment.end_time, calendar
+                ):
+                    violations.append(
+                        FeasibilityViolation(
+                            "CALENDAR_VIOLATION",
+                            (
+                                f"Operation {assignment.operation_id} occupancy "
+                                f"[{occupancy_start}, {assignment.end_time}] "
+                                f"(setup {setup_minutes} min) is not inside a shift on "
+                                f"auxiliary resource {aux_id}."
+                            ),
+                            operation_id=assignment.operation_id,
+                        )
+                    )
+                    if not exhaustive:
+                        return
 
     @staticmethod
     def _check_referential_integrity(

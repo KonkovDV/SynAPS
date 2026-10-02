@@ -1,6 +1,6 @@
-"""Work-center shift calendar.
+"""Shift calendar for a work center or an auxiliary resource.
 
-Empty ``WorkCenter.calendar`` is 24/7 open — that is not a night shift. A
+An empty calendar is 24/7 open — that is not a night shift. A
 non-empty calendar is a hard constraint: occupancy
 ``[start - setup, end]`` must sit inside one interval (an operation cannot
 straddle a closed period). Dispatch clips setup together with processing
