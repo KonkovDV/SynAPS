@@ -60,8 +60,15 @@
       "type": "object"
     },
     "AuxiliaryResource": {
-      "description": "Shared resource (tool, fixture, operator, etc.).",
+      "description": "Shared resource (tool, fixture, operator, etc.).\n\n``calendar`` uses the work-center contract: empty means 24/7 open, and a\nnon-empty list means occupancy ``[start - setup, end]`` must sit in one\npublished interval. It does not mean \"no windows, therefore closed\".",
       "properties": {
+        "calendar": {
+          "items": {
+            "$ref": "#/$defs/ShiftInterval"
+          },
+          "title": "Calendar",
+          "type": "array"
+        },
         "code": {
           "title": "Code",
           "type": "string"
