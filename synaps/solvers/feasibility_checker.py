@@ -988,13 +988,7 @@ class FeasibilityChecker:
             exhaustive=exhaustive,
             operation_ids=scoped_ops,
         )
-        self._check_aux_calendar(
-            assignments=assignments,
-            resources_by_id=resources_by_id,
-            violations=violations,
-            exhaustive=exhaustive,
-            operation_ids=scoped_ops,
-        )
+        self._check_aux_calendar(assignments, resources_by_id, violations, exhaustive, scoped_ops)
 
         # 8. Operation durations (P0-3; hardened by F2, audit v4 — see the
         # helper's docstring for the physical-floor contract).
@@ -1111,7 +1105,6 @@ class FeasibilityChecker:
 
     @staticmethod
     def _check_aux_calendar(
-        *,
         assignments: list[Assignment],
         resources_by_id: dict[Any, Any],
         violations: list[FeasibilityViolation],

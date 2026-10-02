@@ -99,6 +99,10 @@ def _add_calendar_shift_literals(
                 choices.append((open_m, close_m, lit))
             model.add(sum(lits) == presence)
             by_pair[key] = choices
+    for key, choices in _add_aux_calendar_shift_literals(
+        model, problem, starts, ends, presences
+    ).items():
+        by_pair.setdefault(key, []).extend(choices)
     return by_pair
 
 
@@ -1266,10 +1270,6 @@ class CpSatSolver(BaseSolver):
         calendar_shifts = _add_calendar_shift_literals(
             model, solve_problem, starts, ends, presences
         )
-        for key, choices in _add_aux_calendar_shift_literals(
-            model, solve_problem, starts, ends, presences
-        ).items():
-            calendar_shifts.setdefault(key, []).extend(choices)
         setup_terms, material_terms, energy_terms, setup_intervals_by_op = (
             self._add_machine_order_and_adjacency(
                 model,
