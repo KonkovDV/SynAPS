@@ -111,12 +111,18 @@ class SetupEntry(BaseModel):
 
 
 class AuxiliaryResource(BaseModel):
-    """Shared resource (tool, fixture, operator, etc.)."""
+    """Shared resource (tool, fixture, operator, etc.).
+
+    ``calendar`` uses the work-center contract: empty means 24/7 open, and a
+    non-empty list means occupancy ``[start - setup, end]`` must sit in one
+    published interval. It does not mean "no windows, therefore closed".
+    """
 
     id: UUID = Field(default_factory=uuid4)
     code: str
     resource_type: str
     pool_size: int = Field(default=1, ge=1)  # P1-2: a resource pool has >= 1 unit
+    calendar: list[ShiftInterval] = Field(default_factory=list)
     domain_attributes: dict[str, Any] = Field(default_factory=dict)
 
 
