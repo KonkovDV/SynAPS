@@ -20,6 +20,7 @@ from synaps.model import (
     ScheduleResult,
     SolverStatus,
 )
+from synaps.precedence import add_precedence_edge_constraints
 from synaps.solvers import BaseSolver
 from synaps.solvers._time_windows import (
     operation_earliest_offset_minutes,
@@ -167,6 +168,33 @@ def _objective_product_overflows(term_bound: int, multiplier_bound: int) -> bool
 def _bigm_objective_overflows(horizon: int, secondary_bound: int) -> bool:
     """True if the big-M objective coefficient product exceeds the safe int64 ceiling."""
     return _objective_product_overflows(secondary_bound, horizon)
+
+
+def _add_operation_time_bounds(
+    model: cp_model.CpModel,
+    problem: ScheduleProblem,
+    selected_starts: dict[Any, Any],
+    selected_ends: dict[Any, Any],
+    *,
+    frozen_predecessor_end_offsets: dict[Any, int],
+    release_offset_by_op: dict[Any, int],
+) -> None:
+    """Chain precedence, frozen predecessor ends, release, latest finish, edges."""
+    for operation in problem.operations:
+        if operation.predecessor_op_id is not None:
+            model.add(selected_starts[operation.id] >= selected_ends[operation.predecessor_op_id])
+        frozen_predecessor_end_offset = frozen_predecessor_end_offsets.get(operation.id)
+        if frozen_predecessor_end_offset is not None:
+            model.add(selected_starts[operation.id] >= frozen_predecessor_end_offset)
+        release_offset = release_offset_by_op.get(operation.id)
+        if release_offset is not None:
+            model.add(selected_starts[operation.id] >= release_offset)
+        latest_offset = operation_latest_finish_offset_minutes(
+            operation, problem.planning_horizon_start
+        )
+        if latest_offset is not None:
+            model.add(selected_ends[operation.id] <= int(latest_offset))
+    add_precedence_edge_constraints(model, problem.precedence_edges, selected_starts, selected_ends)
 
 
 def _build_tardiness_terms(
@@ -409,6 +437,8 @@ def _apply_sat_parameter_overrides(
 class CpSatSolver(BaseSolver):
     """Exact / time-boxed CP-SAT solver for flexible job-shop with SDST."""
 
+    supports_precedence_edges = True
+
     def _virtualize_parallel_work_centers(
         self,
         problem: ScheduleProblem,
@@ -496,6 +526,7 @@ class CpSatSolver(BaseSolver):
             setup_matrix=new_setup_matrix,
             auxiliary_resources=problem.auxiliary_resources,
             aux_requirements=problem.aux_requirements,
+            precedence_edges=problem.precedence_edges,
             planning_horizon_start=problem.planning_horizon_start,
             planning_horizon_end=problem.planning_horizon_end,
         )
@@ -1250,22 +1281,14 @@ class CpSatSolver(BaseSolver):
             if offset > 0:
                 release_offset_by_op[operation.id] = offset
 
-        for operation in solve_problem.operations:
-            if operation.predecessor_op_id is not None:
-                model.add(
-                    selected_starts[operation.id] >= selected_ends[operation.predecessor_op_id]
-                )
-            frozen_predecessor_end_offset = frozen_predecessor_end_offsets.get(operation.id)
-            if frozen_predecessor_end_offset is not None:
-                model.add(selected_starts[operation.id] >= frozen_predecessor_end_offset)
-            release_offset = release_offset_by_op.get(operation.id)
-            if release_offset is not None:
-                model.add(selected_starts[operation.id] >= release_offset)
-            latest_offset = operation_latest_finish_offset_minutes(
-                operation, solve_problem.planning_horizon_start
-            )
-            if latest_offset is not None:
-                model.add(selected_ends[operation.id] <= int(latest_offset))
+        _add_operation_time_bounds(
+            model,
+            solve_problem,
+            selected_starts,
+            selected_ends,
+            frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
+            release_offset_by_op=release_offset_by_op,
+        )
 
         calendar_shifts = _add_calendar_shift_literals(
             model, solve_problem, starts, ends, presences

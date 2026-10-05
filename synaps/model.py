@@ -9,6 +9,11 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, model_validator
 
+from synaps.precedence import (
+    MAX_SCHEDULE_PRECEDENCE_EDGES,
+    PrecedenceEdge,
+    precedence_edge_issues,
+)
 from synaps.timegrain import snap_schedule_windows_to_minute_grain
 
 MAX_SCHEDULE_STATES = 10_000
@@ -210,6 +215,12 @@ class ScheduleProblem(BaseModel):
         default_factory=list,
         max_length=MAX_SCHEDULE_AUX_REQUIREMENTS,
     )
+    # Optional generalized relations (any order, FS/SS/FF/SF, min/max lags).
+    # Empty keeps the classic chain-only contract.
+    precedence_edges: list[PrecedenceEdge] = Field(
+        default_factory=list,
+        max_length=MAX_SCHEDULE_PRECEDENCE_EDGES,
+    )
     planning_horizon_start: datetime
     planning_horizon_end: datetime
 
@@ -227,6 +238,7 @@ class ScheduleProblem(BaseModel):
             "setup_matrix": MAX_SCHEDULE_SETUP_ENTRIES,
             "auxiliary_resources": MAX_SCHEDULE_AUX_RESOURCES,
             "aux_requirements": MAX_SCHEDULE_AUX_REQUIREMENTS,
+            "precedence_edges": MAX_SCHEDULE_PRECEDENCE_EDGES,
         }
         issues: list[str] = []
         for field_name, limit in limits.items():
@@ -449,6 +461,7 @@ class ScheduleProblem(BaseModel):
                     f"{requirement.aux_resource_id}"
                 )
 
+        issues.extend(precedence_edge_issues(self.precedence_edges, self.operations))
         if issues:
             raise ValueError("; ".join(issues))
 

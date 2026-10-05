@@ -286,6 +286,58 @@
       "title": "Order",
       "type": "object"
     },
+    "PrecedenceEdge": {
+      "description": "One generalized temporal relation between two operations.",
+      "properties": {
+        "dst_op_id": {
+          "format": "uuid",
+          "title": "Dst Op Id",
+          "type": "string"
+        },
+        "max_lag": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Lag"
+        },
+        "min_lag": {
+          "default": 0,
+          "title": "Min Lag",
+          "type": "integer"
+        },
+        "src_op_id": {
+          "format": "uuid",
+          "title": "Src Op Id",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/PrecedenceType",
+          "default": "FS"
+        }
+      },
+      "required": [
+        "src_op_id",
+        "dst_op_id"
+      ],
+      "title": "PrecedenceEdge",
+      "type": "object"
+    },
+    "PrecedenceType": {
+      "enum": [
+        "FS",
+        "SS",
+        "FF",
+        "SF"
+      ],
+      "title": "PrecedenceType",
+      "type": "string"
+    },
     "ScheduleProblem": {
       "description": "Complete input to any solver.",
       "properties": {
@@ -330,6 +382,14 @@
           "format": "date-time",
           "title": "Planning Horizon Start",
           "type": "string"
+        },
+        "precedence_edges": {
+          "items": {
+            "$ref": "#/$defs/PrecedenceEdge"
+          },
+          "maxItems": 2000000,
+          "title": "Precedence Edges",
+          "type": "array"
         },
         "setup_matrix": {
           "items": {

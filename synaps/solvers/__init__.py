@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import functools
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -79,8 +79,31 @@ def _attach_canonical_objective(
     result.metadata["published_objective_weights"] = dict(publish_weights)
 
 
+def _precedence_edges_unsupported(solver: BaseSolver, problem: ScheduleProblem) -> ScheduleResult:
+    """Fail closed: a solver that ignores generalized edges must not return a plan."""
+    from synaps.model import ScheduleResult, SolverErrorCategory, SolverStatus
+
+    result = ScheduleResult(
+        solver_name=solver.name,
+        status=SolverStatus.ERROR,
+        error_category=SolverErrorCategory.INTERNAL_ERROR,
+        metadata={
+            "error": "precedence_edges_unsupported",
+            "detail": (
+                f"solver {solver.name!r} does not encode ScheduleProblem.precedence_edges "
+                f"({len(problem.precedence_edges)} edges); use CP-SAT or greedy dispatch"
+            ),
+        },
+    )
+    _attach_coverage(result, problem)
+    return result
+
+
 class BaseSolver(ABC):
     """Common interface for the entire solver portfolio."""
+
+    #: True only for solvers that encode ``ScheduleProblem.precedence_edges``.
+    supports_precedence_edges: ClassVar[bool] = False
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Wrap each concrete ``solve`` so it always publishes ``sdst_metric``.
@@ -98,6 +121,8 @@ class BaseSolver(ABC):
         def _solve_with_metricity(
             self: BaseSolver, problem: ScheduleProblem, **solve_kwargs: object
         ) -> ScheduleResult:
+            if getattr(problem, "precedence_edges", None) and not self.supports_precedence_edges:
+                return _precedence_edges_unsupported(self, problem)
             result: ScheduleResult = original_solve(self, problem, **solve_kwargs)
             _attach_sdst_metric(result, problem)
             _attach_coverage(result, problem)
