@@ -8,6 +8,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from synaps.calendar import processing_fits_calendar
+from synaps.precedence import edge_violation
 from synaps.timegrain import duration_minutes_for, physical_processing_minutes_for
 
 
@@ -114,6 +115,47 @@ _GREEDY_UNPROVEN_TRIGGER_KINDS: frozenset[str] = frozenset(
 )
 
 
+def _operation_at_mode(operation: Any, assignment: Any) -> Any:
+    """Duration checks see the selected mode as a machine override, not the base time."""
+
+    if operation is None or not operation.modes or not assignment.mode_code:
+        return operation
+    for mode in operation.modes:
+        if mode.code == assignment.mode_code:
+            return operation.model_copy(
+                update={
+                    "modes": [],
+                    "machine_duration_overrides": {assignment.work_center_id: mode.duration_min},
+                }
+            )
+    return operation
+
+
+def _bind_mode_requirements(
+    requirements_by_op: dict[Any, list[Any]],
+    ops_by_id: dict[Any, Any],
+    assignments: list[Any],
+    violations: list[FeasibilityViolation],
+) -> None:
+    """Aux checks use the selected mode's demand. A missing mode is a violation."""
+
+    for assignment in assignments:
+        operation = ops_by_id.get(assignment.operation_id)
+        if operation is None or not operation.modes:
+            continue
+        mode = next((item for item in operation.modes if item.code == assignment.mode_code), None)
+        if mode is None:
+            violations.append(
+                FeasibilityViolation(
+                    "UNKNOWN_MODE",
+                    f"Operation {assignment.operation_id} has no mode {assignment.mode_code!r}.",
+                    operation_id=assignment.operation_id,
+                )
+            )
+            continue
+        requirements_by_op[assignment.operation_id] = list(mode.requirements)
+
+
 class FeasibilityViolation:
     """A single constraint violation."""
 
@@ -152,6 +194,40 @@ def _skip_serial_unary(scope: NotaryScope | None, wc_id: Any, max_parallel: int)
     if scope is None or scope.machine_ids is None or max_parallel > 1:
         return False
     return wc_id not in scope.machine_ids
+
+
+def _check_precedence_edges(
+    problem: ScheduleProblem,
+    assigned: dict[Any, Assignment],
+    violations: list[FeasibilityViolation],
+    scope: NotaryScope | None,
+) -> None:
+    """3b. Generalized edges (PRECEDENCE_EDGE_VIOLATION), exact datetime deltas."""
+    origin = problem.planning_horizon_start
+    for edge in problem.precedence_edges:
+        if not (_op_in_scope(scope, edge.src_op_id) or _op_in_scope(scope, edge.dst_op_id)):
+            continue
+        src = assigned.get(edge.src_op_id)
+        dst = assigned.get(edge.dst_op_id)
+        if src is None or dst is None:
+            continue
+        broken = edge_violation(
+            edge,
+            src=(_minutes_from(origin, src.start_time), _minutes_from(origin, src.end_time)),
+            dst=(_minutes_from(origin, dst.start_time), _minutes_from(origin, dst.end_time)),
+        )
+        if broken is not None:
+            violations.append(
+                FeasibilityViolation(
+                    "PRECEDENCE_EDGE_VIOLATION",
+                    f"Edge {edge.src_op_id} -> {edge.dst_op_id}: {broken}.",
+                    operation_id=edge.dst_op_id,
+                )
+            )
+
+
+def _minutes_from(origin: Any, moment: Any) -> float:
+    return float((moment - origin).total_seconds()) / 60.0
 
 
 def hard_violations(
@@ -216,7 +292,8 @@ class FeasibilityChecker:
     Checks performed (audit v4 numbering):
         1. All operations assigned exactly once (DUPLICATE_/MISSING_ASSIGNMENT).
         2. Assigned machine is in the eligible set (INELIGIBLE_MACHINE).
-        3. Precedence respected (PRECEDENCE_VIOLATION).
+        3. Precedence respected (PRECEDENCE_VIOLATION); generalized
+           FS/SS/FF/SF edges with min/max lags (PRECEDENCE_EDGE_VIOLATION).
         4. Per-machine no-overlap + capacity: serial machines and parallel lanes
            run the same setup-gap walk (MACHINE_OVERLAP, SETUP_GAP_VIOLATION,
            MISSING_SETUP_ENTRY under a strict matrix); parallel machines
@@ -801,6 +878,7 @@ class FeasibilityChecker:
         requirements_by_op: dict[Any, list[Any]] = {}
         for requirement in problem.aux_requirements:
             requirements_by_op.setdefault(requirement.operation_id, []).append(requirement)
+        _bind_mode_requirements(requirements_by_op, ops_by_id, assignments, violations)
         assigned: dict[Any, Assignment] = {}
 
         # 1. All operations assigned exactly once
@@ -872,6 +950,7 @@ class FeasibilityChecker:
                             operation_id=op.id,
                         )
                     )
+        _check_precedence_edges(problem, assigned, violations, scope)
 
         # 4. No overlap per machine: parallel machines get per-lane sequences
         # (which fill the right-justified setup windows) and then a sweep-line
@@ -1208,7 +1287,7 @@ class FeasibilityChecker:
         for a in assignments:
             if operation_ids is not None and a.operation_id not in operation_ids:
                 continue
-            checked_op = ops_by_id.get(a.operation_id)
+            checked_op = _operation_at_mode(ops_by_id.get(a.operation_id), a)
             if checked_op is None:
                 continue
             work_center = work_centers_by_id.get(a.work_center_id)

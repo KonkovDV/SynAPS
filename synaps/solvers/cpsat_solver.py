@@ -6,7 +6,6 @@ import itertools
 import math
 import time
 from collections.abc import Mapping, Sequence
-from datetime import timedelta
 from typing import Any
 from uuid import NAMESPACE_DNS, UUID, uuid5
 
@@ -20,13 +19,14 @@ from synaps.model import (
     ScheduleResult,
     SolverStatus,
 )
+from synaps.precedence import add_precedence_edge_constraints
 from synaps.solvers import BaseSolver
 from synaps.solvers._time_windows import (
     operation_earliest_offset_minutes,
     operation_latest_finish_offset_minutes,
 )
 from synaps.solvers.coverage_outcome import stamp_honest_coverage
-from synaps.timegrain import duration_minutes_for
+from synaps.solvers.mode_choice import build_presence_intervals, mode_assignment
 
 # N3 (audit v3): time limits are owned by ``time_limit_s`` and may not be set
 # through ``sat_parameters`` — doing so silently defeats the timebox (D3).
@@ -167,6 +167,33 @@ def _objective_product_overflows(term_bound: int, multiplier_bound: int) -> bool
 def _bigm_objective_overflows(horizon: int, secondary_bound: int) -> bool:
     """True if the big-M objective coefficient product exceeds the safe int64 ceiling."""
     return _objective_product_overflows(secondary_bound, horizon)
+
+
+def _add_operation_time_bounds(
+    model: cp_model.CpModel,
+    problem: ScheduleProblem,
+    selected_starts: dict[Any, Any],
+    selected_ends: dict[Any, Any],
+    *,
+    frozen_predecessor_end_offsets: dict[Any, int],
+    release_offset_by_op: dict[Any, int],
+) -> None:
+    """Chain precedence, frozen predecessor ends, release, latest finish, edges."""
+    for operation in problem.operations:
+        if operation.predecessor_op_id is not None:
+            model.add(selected_starts[operation.id] >= selected_ends[operation.predecessor_op_id])
+        frozen_predecessor_end_offset = frozen_predecessor_end_offsets.get(operation.id)
+        if frozen_predecessor_end_offset is not None:
+            model.add(selected_starts[operation.id] >= frozen_predecessor_end_offset)
+        release_offset = release_offset_by_op.get(operation.id)
+        if release_offset is not None:
+            model.add(selected_starts[operation.id] >= release_offset)
+        latest_offset = operation_latest_finish_offset_minutes(
+            operation, problem.planning_horizon_start
+        )
+        if latest_offset is not None:
+            model.add(selected_ends[operation.id] <= int(latest_offset))
+    add_precedence_edge_constraints(model, problem.precedence_edges, selected_starts, selected_ends)
 
 
 def _build_tardiness_terms(
@@ -409,6 +436,9 @@ def _apply_sat_parameter_overrides(
 class CpSatSolver(BaseSolver):
     """Exact / time-boxed CP-SAT solver for flexible job-shop with SDST."""
 
+    supports_precedence_edges = True
+    supports_modes = True
+
     def _virtualize_parallel_work_centers(
         self,
         problem: ScheduleProblem,
@@ -496,6 +526,7 @@ class CpSatSolver(BaseSolver):
             setup_matrix=new_setup_matrix,
             auxiliary_resources=problem.auxiliary_resources,
             aux_requirements=problem.aux_requirements,
+            precedence_edges=problem.precedence_edges,
             planning_horizon_start=problem.planning_horizon_start,
             planning_horizon_end=problem.planning_horizon_end,
         )
@@ -758,6 +789,7 @@ class CpSatSolver(BaseSolver):
         horizon: int | None = None,
         frozen_assignments: list[Assignment] | None = None,
         frozen_aux_requirements: list[Any] | None = None,
+        mode_load: dict[Any, list[tuple[Any, list[tuple[Any, int]]]]] | None = None,
     ) -> None:
         requirements_by_op: dict[Any, list[Any]] = {}
         for requirement in problem.aux_requirements:
@@ -767,6 +799,13 @@ class CpSatSolver(BaseSolver):
             resource_intervals: list[Any] = []
             demands: list[int] = []
             for operation in problem.operations:
+                if operation.modes:
+                    for interval, pairs in (mode_load or {}).get(operation.id, []):
+                        needed = sum(qty for aux_id, qty in pairs if aux_id == resource.id)
+                        if needed > 0:
+                            resource_intervals.append(interval)
+                            demands.append(needed)
+                    continue
                 demand = sum(
                     requirement.quantity_needed
                     for requirement in requirements_by_op.get(operation.id, [])
@@ -990,6 +1029,7 @@ class CpSatSolver(BaseSolver):
         secondary_bound: int,
         makespan_bound_divisor: float = 1.0,
         bound_is_makespan: bool = True,
+        mode_vars: dict[Any, list[tuple[str, Any]]] | None = None,
     ) -> tuple[list[Assignment], ObjectiveValues, dict[str, Any]]:
         assignments: list[Assignment] = []
         metadata: dict[str, Any] = {
@@ -1012,17 +1052,15 @@ class CpSatSolver(BaseSolver):
                     start_offset = solver.value(starts[(operation.id, work_center_id)])
                     end_offset = solver.value(ends[(operation.id, work_center_id)])
                     assignments.append(
-                        Assignment(
-                            operation_id=operation.id,
-                            work_center_id=work_center_id,
-                            start_time=problem.planning_horizon_start
-                            + timedelta(minutes=start_offset),
-                            end_time=problem.planning_horizon_start + timedelta(minutes=end_offset),
-                            setup_minutes=0,
-                            aux_resource_ids=[
-                                requirement.aux_resource_id
-                                for requirement in requirements_by_op.get(operation.id, [])
-                            ],
+                        mode_assignment(
+                            problem,
+                            operation,
+                            work_center_id,
+                            start_offset,
+                            end_offset,
+                            requirements_by_op,
+                            solver,
+                            mode_vars or {},
                         )
                     )
                     break
@@ -1195,40 +1233,19 @@ class CpSatSolver(BaseSolver):
         presences: dict[tuple[Any, Any], Any] = {}
         selected_starts: dict[Any, Any] = {}
         selected_ends: dict[Any, Any] = {}
-
-        for operation in solve_problem.operations:
-            selected_start = model.new_int_var(0, horizon, f"selected_start_{operation.id}")
-            selected_end = model.new_int_var(0, horizon, f"selected_end_{operation.id}")
-            selected_starts[operation.id] = selected_start
-            selected_ends[operation.id] = selected_end
-
-            presence_vars: list[Any] = []
-            for work_center_id in eligible_by_op[operation.id]:
-                work_center = wc_by_id[work_center_id]
-                duration = duration_minutes_for(operation, work_center)
-
-                suffix = f"_{operation.id}_{work_center_id}"
-                start_var = model.new_int_var(0, horizon, f"start{suffix}")
-                end_var = model.new_int_var(0, horizon, f"end{suffix}")
-                presence = model.new_bool_var(f"presence{suffix}")
-                interval = model.new_optional_interval_var(
-                    start_var,
-                    duration,
-                    end_var,
-                    presence,
-                    f"interval{suffix}",
-                )
-
-                starts[(operation.id, work_center_id)] = start_var
-                ends[(operation.id, work_center_id)] = end_var
-                intervals[(operation.id, work_center_id)] = interval
-                presences[(operation.id, work_center_id)] = presence
-                presence_vars.append(presence)
-
-                model.add(selected_start == start_var).only_enforce_if(presence)
-                model.add(selected_end == end_var).only_enforce_if(presence)
-
-            model.add_exactly_one(presence_vars)
+        mode_vars, mode_load = build_presence_intervals(
+            model,
+            solve_problem,
+            eligible_by_op,
+            wc_by_id,
+            horizon,
+            starts,
+            ends,
+            intervals,
+            presences,
+            selected_starts,
+            selected_ends,
+        )
 
         # M1: release_date lower bound on the start time. An operation may not
         # start before its order becomes available (material release).
@@ -1250,22 +1267,14 @@ class CpSatSolver(BaseSolver):
             if offset > 0:
                 release_offset_by_op[operation.id] = offset
 
-        for operation in solve_problem.operations:
-            if operation.predecessor_op_id is not None:
-                model.add(
-                    selected_starts[operation.id] >= selected_ends[operation.predecessor_op_id]
-                )
-            frozen_predecessor_end_offset = frozen_predecessor_end_offsets.get(operation.id)
-            if frozen_predecessor_end_offset is not None:
-                model.add(selected_starts[operation.id] >= frozen_predecessor_end_offset)
-            release_offset = release_offset_by_op.get(operation.id)
-            if release_offset is not None:
-                model.add(selected_starts[operation.id] >= release_offset)
-            latest_offset = operation_latest_finish_offset_minutes(
-                operation, solve_problem.planning_horizon_start
-            )
-            if latest_offset is not None:
-                model.add(selected_ends[operation.id] <= int(latest_offset))
+        _add_operation_time_bounds(
+            model,
+            solve_problem,
+            selected_starts,
+            selected_ends,
+            frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
+            release_offset_by_op=release_offset_by_op,
+        )
 
         calendar_shifts = _add_calendar_shift_literals(
             model, solve_problem, starts, ends, presences
@@ -1298,6 +1307,7 @@ class CpSatSolver(BaseSolver):
             horizon=horizon,
             frozen_assignments=frozen_assignments,
             frozen_aux_requirements=frozen_aux_requirements or list(solve_problem.aux_requirements),
+            mode_load=mode_load,
         )
 
         makespan = model.new_int_var(0, horizon, "makespan")
@@ -1420,6 +1430,7 @@ class CpSatSolver(BaseSolver):
             and warm_start_assignments is None
             and time_limit_s >= 5
             and not virtual_to_original
+            and not any(operation.modes for operation in solve_problem.operations)
         ):
             from synaps.solvers.greedy_dispatch import GreedyDispatch
 
@@ -1516,6 +1527,7 @@ class CpSatSolver(BaseSolver):
                 # primary the objective is scalarized, so the bound is not.
                 objective_mode != "epsilon_primary" or primary_objective == "makespan"
             ),
+            mode_vars=mode_vars,
         )
         if virtual_to_original:
             for assignment in assignments:

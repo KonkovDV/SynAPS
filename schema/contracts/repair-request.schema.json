@@ -29,6 +29,18 @@
           "default": null,
           "title": "Lane Id"
         },
+        "mode_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mode Code"
+        },
         "operation_id": {
           "format": "uuid",
           "title": "Operation Id",
@@ -101,6 +113,27 @@
       "title": "AuxiliaryResource",
       "type": "object"
     },
+    "ModeRequirement": {
+      "description": "Auxiliary demand that applies only while this execution mode is selected.",
+      "properties": {
+        "aux_resource_id": {
+          "format": "uuid",
+          "title": "Aux Resource Id",
+          "type": "string"
+        },
+        "quantity_needed": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Quantity Needed",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "aux_resource_id"
+      ],
+      "title": "ModeRequirement",
+      "type": "object"
+    },
     "Operation": {
       "description": "Single processing step within a work item.",
       "properties": {
@@ -162,6 +195,13 @@
           },
           "title": "Machine Duration Overrides",
           "type": "object"
+        },
+        "modes": {
+          "items": {
+            "$ref": "#/$defs/OperationMode"
+          },
+          "title": "Modes",
+          "type": "array"
         },
         "order_id": {
           "format": "uuid",
@@ -227,6 +267,36 @@
       "title": "OperationAuxRequirement",
       "type": "object"
     },
+    "OperationMode": {
+      "description": "One alternative way to perform an operation.\n\n``duration_min`` is the reserved processing time before machine speed, the\nsame grain as ``base_duration_min``. An empty ``modes`` list keeps the\nhistorical single-mode model.",
+      "properties": {
+        "code": {
+          "maxLength": 40,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_.:-]+$",
+          "title": "Code",
+          "type": "string"
+        },
+        "duration_min": {
+          "minimum": 0,
+          "title": "Duration Min",
+          "type": "integer"
+        },
+        "requirements": {
+          "items": {
+            "$ref": "#/$defs/ModeRequirement"
+          },
+          "title": "Requirements",
+          "type": "array"
+        }
+      },
+      "required": [
+        "code",
+        "duration_min"
+      ],
+      "title": "OperationMode",
+      "type": "object"
+    },
     "Order": {
       "description": "Work item or service request to schedule.",
       "properties": {
@@ -286,6 +356,58 @@
       "title": "Order",
       "type": "object"
     },
+    "PrecedenceEdge": {
+      "description": "One generalized temporal relation between two operations.",
+      "properties": {
+        "dst_op_id": {
+          "format": "uuid",
+          "title": "Dst Op Id",
+          "type": "string"
+        },
+        "max_lag": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Lag"
+        },
+        "min_lag": {
+          "default": 0,
+          "title": "Min Lag",
+          "type": "integer"
+        },
+        "src_op_id": {
+          "format": "uuid",
+          "title": "Src Op Id",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/PrecedenceType",
+          "default": "FS"
+        }
+      },
+      "required": [
+        "src_op_id",
+        "dst_op_id"
+      ],
+      "title": "PrecedenceEdge",
+      "type": "object"
+    },
+    "PrecedenceType": {
+      "enum": [
+        "FS",
+        "SS",
+        "FF",
+        "SF"
+      ],
+      "title": "PrecedenceType",
+      "type": "string"
+    },
     "ScheduleProblem": {
       "description": "Complete input to any solver.",
       "properties": {
@@ -330,6 +452,14 @@
           "format": "date-time",
           "title": "Planning Horizon Start",
           "type": "string"
+        },
+        "precedence_edges": {
+          "items": {
+            "$ref": "#/$defs/PrecedenceEdge"
+          },
+          "maxItems": 2000000,
+          "title": "Precedence Edges",
+          "type": "array"
         },
         "setup_matrix": {
           "items": {

@@ -20,6 +20,7 @@ from synaps.model import (
     ScheduleResult,
     SolverStatus,
 )
+from synaps.precedence import DispatchPrecedence
 from synaps.solvers import BaseSolver
 from synaps.solvers._dispatch_support import (
     MachineIndex,
@@ -30,7 +31,19 @@ from synaps.solvers._dispatch_support import (
 )
 from synaps.solvers._time_windows import operation_earliest_offset_minutes
 from synaps.solvers.coverage_outcome import stamp_honest_coverage
-from synaps.timegrain import physical_processing_minutes_for
+from synaps.timegrain import duration_minutes_for, physical_processing_minutes_for
+
+
+def _edge_bound(
+    edges: DispatchPrecedence, operation: Any, eligible: list[Any], wc_by_id: dict[Any, Any]
+) -> float:
+    """Earliest start implied by generalized precedence edges (0 when none)."""
+    if operation.id not in edges.incoming:
+        return 0.0
+    durations = [
+        duration_minutes_for(operation, wc_by_id[wc_id]) for wc_id in eligible if wc_id in wc_by_id
+    ]
+    return edges.earliest_start(operation.id, float(min(durations, default=0)))
 
 
 def _gap_scan_for(n_ops: int, operation: Any | None = None) -> str:
@@ -238,6 +251,7 @@ def _virtualize_parallel_lanes(
         setup_matrix=new_setup_matrix,
         auxiliary_resources=problem.auxiliary_resources,
         aux_requirements=problem.aux_requirements,
+        precedence_edges=problem.precedence_edges,
         planning_horizon_start=problem.planning_horizon_start,
         planning_horizon_end=problem.planning_horizon_end,
     )
@@ -323,6 +337,8 @@ class GreedyDispatch(BaseSolver):
         p̄   = mean processing time
         s̄   = mean setup time
     """
+
+    supports_precedence_edges = True
 
     def __init__(self, k1: float = 2.0, k2: float = 0.5, k3: float = 0.5) -> None:
         self._k1 = k1
@@ -435,6 +451,7 @@ class GreedyDispatch(BaseSolver):
         op_end_offsets: dict[Any, float] = {}
         assignments: list[Assignment] = []
         machine_idx = MachineIndex(dispatch_context)
+        edges = DispatchPrecedence.build(problem.precedence_edges)
 
         while len(scheduled_ops) < n_total_ops:
             if time_limit_s is not None and (time.monotonic() - t0) > time_limit_s:
@@ -468,6 +485,7 @@ class GreedyDispatch(BaseSolver):
                 for op in all_ops
                 if op.id not in scheduled_ops
                 and (op.predecessor_op_id is None or op.predecessor_op_id in scheduled_ops)
+                and edges.ready(op.id, scheduled_ops)
             ]
             if not ready:
                 elapsed_ms = int((time.monotonic() - t0) * 1000)
@@ -514,6 +532,7 @@ class GreedyDispatch(BaseSolver):
                     if op.eligible_wc_ids
                     else [work_center.id for work_center in problem.work_centers]
                 )
+                pred_end = max(pred_end, _edge_bound(edges, op, eligible, wc_by_id))
                 for wc_id in eligible:
                     slot = find_earliest_feasible_slot(
                         dispatch_context,
@@ -665,6 +684,7 @@ class GreedyDispatch(BaseSolver):
             machine_idx.add(new_assignment)
 
             op_end_offsets[best_op.id] = end_offset
+            edges.record(best_op.id, best_slot.start_offset, end_offset)
             scheduled_ops.add(best_op.id)
 
         # Recompute per-assignment setup_minutes and aggregate total from the

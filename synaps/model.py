@@ -9,6 +9,11 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, model_validator
 
+from synaps.precedence import (
+    MAX_SCHEDULE_PRECEDENCE_EDGES,
+    PrecedenceEdge,
+    precedence_edge_issues,
+)
 from synaps.timegrain import snap_schedule_windows_to_minute_grain
 
 MAX_SCHEDULE_STATES = 10_000
@@ -75,6 +80,26 @@ class WorkCenter(BaseModel):
     domain_attributes: dict[str, Any] = Field(default_factory=dict)
 
 
+class ModeRequirement(BaseModel):
+    """Auxiliary demand that applies only while this execution mode is selected."""
+
+    aux_resource_id: UUID
+    quantity_needed: int = Field(default=1, ge=1)
+
+
+class OperationMode(BaseModel):
+    """One alternative way to perform an operation.
+
+    ``duration_min`` is the reserved processing time before machine speed, the
+    same grain as ``base_duration_min``. An empty ``modes`` list keeps the
+    historical single-mode model.
+    """
+
+    code: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_.:-]+$")
+    duration_min: int = Field(ge=0)
+    requirements: list[ModeRequirement] = Field(default_factory=list)
+
+
 class Operation(BaseModel):
     """Single processing step within a work item."""
 
@@ -94,6 +119,9 @@ class Operation(BaseModel):
     # Missing key → timegrain.duration_minutes(base, speed). Populated by the
     # .fjs loader for heterogeneous alternatives.
     machine_duration_overrides: dict[UUID, int] = Field(default_factory=dict)
+    # Empty: one mode, duration is base_duration_min, aux_requirements apply.
+    # Non-empty: CP-SAT picks exactly one. Duration and aux demand come from it.
+    modes: list[OperationMode] = Field(default_factory=list)
     domain_attributes: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -191,6 +219,32 @@ def normalize_schedule_problem_data(data: object) -> object:
     return data
 
 
+def _mode_issues(problem: ScheduleProblem, aux_ids: set[UUID]) -> list[str]:
+    """Reject a mode list the solver would otherwise schedule as one anonymous job."""
+
+    issues: list[str] = []
+    mode_ops = [operation for operation in problem.operations if operation.modes]
+    if mode_ops and problem.setup_matrix:
+        issues.append("execution modes cannot be combined with setup_matrix yet")
+    claimed = {requirement.operation_id for requirement in problem.aux_requirements}
+    for operation in mode_ops:
+        if operation.id in claimed:
+            issues.append(
+                f"operation {operation.id} with modes must not also have aux_requirements"
+            )
+        codes = [mode.code for mode in operation.modes]
+        if len(codes) != len(set(codes)):
+            issues.append(f"operation {operation.id} has duplicate mode codes")
+        for mode in operation.modes:
+            for requirement in mode.requirements:
+                if requirement.aux_resource_id not in aux_ids:
+                    issues.append(
+                        f"operation {operation.id} mode {mode.code} references unknown "
+                        f"aux_resource_id {requirement.aux_resource_id}"
+                    )
+    return issues
+
+
 # ---------- Scheduling problem & result ----------
 
 
@@ -210,6 +264,12 @@ class ScheduleProblem(BaseModel):
         default_factory=list,
         max_length=MAX_SCHEDULE_AUX_REQUIREMENTS,
     )
+    # Optional generalized relations (any order, FS/SS/FF/SF, min/max lags).
+    # Empty keeps the classic chain-only contract.
+    precedence_edges: list[PrecedenceEdge] = Field(
+        default_factory=list,
+        max_length=MAX_SCHEDULE_PRECEDENCE_EDGES,
+    )
     planning_horizon_start: datetime
     planning_horizon_end: datetime
 
@@ -227,6 +287,7 @@ class ScheduleProblem(BaseModel):
             "setup_matrix": MAX_SCHEDULE_SETUP_ENTRIES,
             "auxiliary_resources": MAX_SCHEDULE_AUX_RESOURCES,
             "aux_requirements": MAX_SCHEDULE_AUX_REQUIREMENTS,
+            "precedence_edges": MAX_SCHEDULE_PRECEDENCE_EDGES,
         }
         issues: list[str] = []
         for field_name, limit in limits.items():
@@ -449,6 +510,8 @@ class ScheduleProblem(BaseModel):
                     f"{requirement.aux_resource_id}"
                 )
 
+        issues.extend(_mode_issues(self, aux_resource_id_set))
+        issues.extend(precedence_edge_issues(self.precedence_edges, self.operations))
         if issues:
             raise ValueError("; ".join(issues))
 
@@ -525,6 +588,7 @@ class Assignment(BaseModel):
     setup_minutes: int = 0
     aux_resource_ids: list[UUID] = Field(default_factory=list)
     lane_id: UUID | None = None
+    mode_code: str | None = None
 
 
 class ObjectiveValues(BaseModel):
