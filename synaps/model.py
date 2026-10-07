@@ -224,8 +224,12 @@ def _mode_issues(problem: ScheduleProblem, aux_ids: set[UUID]) -> list[str]:
 
     issues: list[str] = []
     mode_ops = [operation for operation in problem.operations if operation.modes]
-    if mode_ops and problem.setup_matrix:
-        issues.append("execution modes cannot be combined with setup_matrix yet")
+    setup_centers = {entry.work_center_id for entry in problem.setup_matrix}
+    for operation in mode_ops:
+        if setup_centers.intersection(operation.eligible_wc_ids):
+            issues.append(
+                "execution modes cannot be combined with setup_matrix on the same work center yet"
+            )
     claimed = {requirement.operation_id for requirement in problem.aux_requirements}
     for operation in mode_ops:
         if operation.id in claimed:
