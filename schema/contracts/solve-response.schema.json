@@ -29,6 +29,18 @@
           "default": null,
           "title": "Lane Id"
         },
+        "mode_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mode Code"
+        },
         "operation_id": {
           "format": "uuid",
           "title": "Operation Id",

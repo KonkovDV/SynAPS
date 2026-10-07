@@ -42,6 +42,27 @@
       "title": "AuxiliaryResource",
       "type": "object"
     },
+    "ModeRequirement": {
+      "description": "Auxiliary demand that applies only while this execution mode is selected.",
+      "properties": {
+        "aux_resource_id": {
+          "format": "uuid",
+          "title": "Aux Resource Id",
+          "type": "string"
+        },
+        "quantity_needed": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Quantity Needed",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "aux_resource_id"
+      ],
+      "title": "ModeRequirement",
+      "type": "object"
+    },
     "Operation": {
       "description": "Single processing step within a work item.",
       "properties": {
@@ -103,6 +124,13 @@
           },
           "title": "Machine Duration Overrides",
           "type": "object"
+        },
+        "modes": {
+          "items": {
+            "$ref": "#/$defs/OperationMode"
+          },
+          "title": "Modes",
+          "type": "array"
         },
         "order_id": {
           "format": "uuid",
@@ -166,6 +194,36 @@
         "aux_resource_id"
       ],
       "title": "OperationAuxRequirement",
+      "type": "object"
+    },
+    "OperationMode": {
+      "description": "One alternative way to perform an operation.\n\n``duration_min`` is the reserved processing time before machine speed, the\nsame grain as ``base_duration_min``. An empty ``modes`` list keeps the\nhistorical single-mode model.",
+      "properties": {
+        "code": {
+          "maxLength": 40,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_.:-]+$",
+          "title": "Code",
+          "type": "string"
+        },
+        "duration_min": {
+          "minimum": 0,
+          "title": "Duration Min",
+          "type": "integer"
+        },
+        "requirements": {
+          "items": {
+            "$ref": "#/$defs/ModeRequirement"
+          },
+          "title": "Requirements",
+          "type": "array"
+        }
+      },
+      "required": [
+        "code",
+        "duration_min"
+      ],
+      "title": "OperationMode",
       "type": "object"
     },
     "Order": {

@@ -115,6 +115,47 @@ _GREEDY_UNPROVEN_TRIGGER_KINDS: frozenset[str] = frozenset(
 )
 
 
+def _operation_at_mode(operation: Any, assignment: Any) -> Any:
+    """Duration checks see the selected mode as a machine override, not the base time."""
+
+    if operation is None or not operation.modes or not assignment.mode_code:
+        return operation
+    for mode in operation.modes:
+        if mode.code == assignment.mode_code:
+            return operation.model_copy(
+                update={
+                    "modes": [],
+                    "machine_duration_overrides": {assignment.work_center_id: mode.duration_min},
+                }
+            )
+    return operation
+
+
+def _bind_mode_requirements(
+    requirements_by_op: dict[Any, list[Any]],
+    ops_by_id: dict[Any, Any],
+    assignments: list[Any],
+    violations: list[FeasibilityViolation],
+) -> None:
+    """Aux checks use the selected mode's demand. A missing mode is a violation."""
+
+    for assignment in assignments:
+        operation = ops_by_id.get(assignment.operation_id)
+        if operation is None or not operation.modes:
+            continue
+        mode = next((item for item in operation.modes if item.code == assignment.mode_code), None)
+        if mode is None:
+            violations.append(
+                FeasibilityViolation(
+                    "UNKNOWN_MODE",
+                    f"Operation {assignment.operation_id} has no mode {assignment.mode_code!r}.",
+                    operation_id=assignment.operation_id,
+                )
+            )
+            continue
+        requirements_by_op[assignment.operation_id] = list(mode.requirements)
+
+
 class FeasibilityViolation:
     """A single constraint violation."""
 
@@ -837,6 +878,7 @@ class FeasibilityChecker:
         requirements_by_op: dict[Any, list[Any]] = {}
         for requirement in problem.aux_requirements:
             requirements_by_op.setdefault(requirement.operation_id, []).append(requirement)
+        _bind_mode_requirements(requirements_by_op, ops_by_id, assignments, violations)
         assigned: dict[Any, Assignment] = {}
 
         # 1. All operations assigned exactly once
@@ -1245,7 +1287,7 @@ class FeasibilityChecker:
         for a in assignments:
             if operation_ids is not None and a.operation_id not in operation_ids:
                 continue
-            checked_op = ops_by_id.get(a.operation_id)
+            checked_op = _operation_at_mode(ops_by_id.get(a.operation_id), a)
             if checked_op is None:
                 continue
             work_center = work_centers_by_id.get(a.work_center_id)
