@@ -26,7 +26,7 @@ import os
 import time
 import warnings
 from collections import defaultdict
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from contextlib import nullcontext
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -54,6 +54,7 @@ from synaps.solvers._lbbd_cuts import (
     cut_pool_fingerprint,
     reported_lower_bound,
 )
+from synaps.solvers._process_pool import SubproblemPool, solve_clusters
 from synaps.solvers.coverage_outcome import stamp_honest_coverage
 from synaps.solvers.cpsat_solver import CpSatSolver
 from synaps.solvers.partitioning import partition_machines
@@ -160,6 +161,8 @@ class _LbbdHdRun:
         self.max_ops_per_cluster = int(kwargs.get("max_ops_per_cluster", 200))
         self.num_workers = int(kwargs.get("num_workers", min(8, os.cpu_count() or 4)))
         self.sub_num_workers = int(kwargs.get("sub_num_workers", 4))
+        # KI-R3: one subproblem process pool for the whole solve.
+        self.pool = SubproblemPool(self.num_workers)
         self.use_warm_start = bool(kwargs.get("use_warm_start", True))
         self.setup_relaxation = bool(kwargs.get("setup_relaxation", True))
         self.setup_cut_top_k = max(1, int(kwargs.get("setup_cut_top_k", 3)))
@@ -196,14 +199,17 @@ class _LbbdHdRun:
                     self.min_setup_by_wc[wc.id] = floor
         if self.use_warm_start:
             self._greedy_warm_start()  # Measure 3
-        for iteration in range(1, self.max_iterations + 1):
-            if time.monotonic() - self.t0 >= self.time_limit_s:
-                break
-            outcome = self._iteration(iteration)
-            if isinstance(outcome, ScheduleResult):
-                return outcome
-            if outcome == "stop":
-                break
+        try:
+            for iteration in range(1, self.max_iterations + 1):
+                if time.monotonic() - self.t0 >= self.time_limit_s:
+                    break
+                outcome = self._iteration(iteration)
+                if isinstance(outcome, ScheduleResult):
+                    return outcome
+                if outcome == "stop":
+                    break
+        finally:
+            self.pool.close()
         return self._final_result()
 
     def _greedy_warm_start(self) -> None:
@@ -250,6 +256,7 @@ class _LbbdHdRun:
                 num_workers=self.num_workers,
                 sub_num_workers=self.sub_num_workers,
                 deadline=self.deadline,
+                pool=self.pool,
             )
         )
         if sub_assignments is None:
@@ -938,8 +945,9 @@ def _solve_subproblems_parallel(
     num_workers: int = 4,
     sub_num_workers: int = 4,
     deadline: float | None = None,
+    pool: SubproblemPool | None = None,
 ) -> tuple[list[Assignment] | None, float, bool, bool]:
-    """Solve CP-SAT subproblems in parallel via ProcessPoolExecutor.
+    """Solve CP-SAT subproblems in parallel on the solve's process pool (KI-R3).
 
     Returns ``(assignments, makespan, proven_optimal, infeasible_proven)`` —
     ``proven_optimal`` is True only when every cluster returned OPTIMAL (S2
@@ -981,36 +989,24 @@ def _solve_subproblems_parallel(
 
     all_assignments: list[Assignment] = []
     overall_makespan = 0.0
+    jobs = [
+        (
+            problem_dict,
+            [str(w) for w in wcs],
+            assignment_items,
+            sub_time_limit_s,
+            random_seed,
+            sub_num_workers,
+        )
+        for wcs in clusters
+    ]
+    with (
+        SubproblemPool(min(num_workers, len(clusters))) if pool is None else nullcontext(pool)
+    ) as active:
+        results_by_index, infeasible_proven = solve_clusters(active, _solve_single_cluster, jobs)
+    if results_by_index is None:
+        return None, 0.0, False, infeasible_proven
     all_proven_optimal = True
-
-    effective_workers = min(num_workers, len(clusters))
-
-    with ProcessPoolExecutor(max_workers=effective_workers) as pool:
-        futures = {}
-        for cluster_index, cluster_wcs in enumerate(clusters):
-            wc_list = [str(w) for w in cluster_wcs]
-            future = pool.submit(
-                _solve_single_cluster,
-                problem_dict,
-                wc_list,
-                assignment_items,
-                sub_time_limit_s,
-                random_seed,
-                sub_num_workers,
-            )
-            futures[future] = cluster_index
-
-        # D2: buffer by cluster index so merge order is independent of
-        # completion order (as_completed is non-deterministic).
-        results_by_index: dict[int, dict[str, Any]] = {}
-        for future in as_completed(futures):
-            cluster_index = futures[future]
-            result = future.result()
-            if result is None or result.get("failed"):
-                infeasible_proven = bool(result.get("infeasible_proven")) if result else False
-                return None, 0.0, False, infeasible_proven
-            results_by_index[cluster_index] = result
-
     for cluster_index in sorted(results_by_index):
         result = results_by_index[cluster_index]
         if not result.get("proven_optimal", False):

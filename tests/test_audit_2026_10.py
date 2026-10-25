@@ -558,3 +558,35 @@ def test_r09_config_clamps_map_nan_to_the_lower_bound_uniformly() -> None:
     assert budget.coverage_time_reserve_fraction == 0.0
     seeding = AlnsSeedConfig.from_kwargs({"phase1_wall_fraction": nan})
     assert seeding.phase1_wall_fraction == 0.1
+
+
+# --------------------------------------------------------------------------- T-02
+
+
+def test_t02_grain_impact_counts_only_exact_quotients_rounded_up() -> None:
+    """``benchmark.study_grain_impact`` flags 57 / 1.14 (= 50 exactly, float 50.000...01)."""
+    from benchmark.study_grain_impact import changed_pairs
+
+    state = State(code="s")
+    fast = WorkCenter(code="F", capability_group="G", speed_factor=1.14)
+    order = Order(external_ref="O", due_date=HE)
+    ops = [
+        Operation(
+            order_id=order.id,
+            seq_in_order=index,
+            state_id=state.id,
+            base_duration_min=base,
+            eligible_wc_ids=[fast.id],
+        )
+        for index, base in enumerate((57, 58, 24))
+    ]
+    problem = ScheduleProblem(
+        states=[state],
+        orders=[order],
+        operations=ops,
+        work_centers=[fast],
+        setup_matrix=[],
+        planning_horizon_start=H0,
+        planning_horizon_end=HE,
+    )
+    assert changed_pairs(problem) == {"operations": 3, "ops_changed": 1, "pairs_changed": 1}

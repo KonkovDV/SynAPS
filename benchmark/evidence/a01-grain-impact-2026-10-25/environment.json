@@ -1,0 +1,8 @@
+{
+ "captured": "2026-10-25",
+ "python": "3.12.3",
+ "platform": "Linux-6.18.44-fc-v153-x86_64-with-glibc2.39",
+ "numpy": "2.5.3",
+ "base_commit": "523d8ba8e155f5ba9ac1d4ae80b8884092389585",
+ "notes": "Deterministic count (no timing). Instances regenerated from the published seeds; A-13 kept the structural RNG stream."
+}

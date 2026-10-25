@@ -228,8 +228,11 @@ def _mode_issues(problem: ScheduleProblem, aux_ids: set[UUID]) -> list[str]:
     issues: list[str] = []
     mode_ops = [operation for operation in problem.operations if operation.modes]
     setup_centers = {entry.work_center_id for entry in problem.setup_matrix}
+    all_centers = [work_center.id for work_center in problem.work_centers]
     for operation in mode_ops:
-        if setup_centers.intersection(operation.eligible_wc_ids):
+        # An empty eligibility list means "every work center" in every solver
+        # and in the notary, so it must be checked as such (audit 2026-10).
+        if setup_centers.intersection(operation.eligible_wc_ids or all_centers):
             issues.append(
                 "execution modes cannot be combined with setup_matrix on the same work center yet"
             )

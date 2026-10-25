@@ -168,7 +168,9 @@ function detectBridgeErrorCode(stderr: string): SynapsPythonBridgeErrorCode {
   if (
     normalized.includes("memoryerror") ||
     normalized.includes("out of memory") ||
-    normalized.includes("oom")
+    // Whole word only: "room" / "zoom" in a traceback must not read as OOM
+    // (an OOM code triggers a solver-chain retry and a 503).
+    /\boom\b/.test(normalized)
   ) {
     return "oom";
   }
@@ -196,6 +198,7 @@ async function executePythonContract(
     }>((resolve, reject) => {
       let timedOut = false;
       let outputLimitExceeded = false;
+      let stdinError: Error | null = null;
       const child = spawn(
         paths.pythonExecutable,
         commandArgs,
@@ -287,9 +290,26 @@ async function executePythonContract(
           return;
         }
 
+        if (stdinError !== null) {
+          reject(
+            new SynapsPythonBridgeError(
+              `Python bridge could not stream the ${subcommand} payload: ${stdinError.message}`,
+              stderr || stdout,
+              detectBridgeErrorCode(stderr || stdout),
+            ),
+          );
+          return;
+        }
+
         resolve({ stdout, stderr, exitCode: code ?? -1 });
       });
 
+      // A child that exits before reading stdin makes the write fail with EPIPE.
+      // Without a listener that error is uncaught and takes the BFF process down;
+      // record it and report it once the child has closed (audit 2026-10).
+      child.stdin?.on("error", (error: Error) => {
+        stdinError = error;
+      });
       child.stdin?.end(JSON.stringify(payload), "utf-8");
     });
 
@@ -357,6 +377,7 @@ export function createPythonContractExecutor(
 
 export const _testInternals = {
   buildPythonBridgeEnv,
+  detectBridgeErrorCode,
   resolveExecutionLimits,
   resolveInstanceDir,
 };

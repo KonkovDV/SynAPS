@@ -32,7 +32,17 @@ pytest -q -m "not slow"                       # плюс slow-набор, есл
 make native-check                              # если трогали native/
 python scripts/golden_snapshot.py capture after.json --suite full   # для рефакторинга
 python scripts/golden_snapshot.py compare before.json after.json
+# любые изменения в synaps/model.py или contracts.py (даже docstring!) — R-12:
+python -m synaps write-contract-schemas --output-dir schema/contracts && git diff --exit-code -- schema/contracts
+# control-plane или его зависимости (в т.ч. Dependabot) — U-03…U-07:
+(cd control-plane && npm ci && npm run build && npm test && npm audit --omit=dev)
+# изменения pyproject.toml / Dependabot pip — U-01 (lock-файлы перегенерировать, не править руками):
+uv pip compile pyproject.toml --output-file requirements-lock.txt --no-annotate
+uv pip compile pyproject.toml --extra dev --universal --output-file requirements-dev-lock.txt --no-annotate
 ```
+
+Слияние веток Dependabot: каждую ветку прогонять через эти ворота
+(Dependabot меняет один пин, не перерешивая транзитивные зависимости — U-01).
 
 Таймбокс-тесты (`test_timebox_enforcement.py`, `test_guard_d3_*`)
 чувствительны к нагрузке (R-07): перезапускать на свободной машине, прежде
@@ -57,19 +67,19 @@ python scripts/golden_snapshot.py compare before.json after.json
 
 | ID | Задача | Критерий приёмки |
 | --- | --- | --- |
-| T-01 | Применить патч / дерево из архива на `main`, прогнать §1 на Linux и Windows | все ворота зелёные; job `native-accelerator` зелёный с новыми шагами `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, parity-тесты |
-| T-02 | Проверить влияние A-01 на опубликованные числа | `benchmark-smoke` зелёный; если какие-то сессионные числа сдвинулись, новая сессия evidence + строка в CHANGELOG; hashed-файлы не трогать |
-| T-03 | Убедиться, что новый clippy в CI (stable новее 1.97) не добавил предупреждений | при новых lint'ах — исправить код, не ослаблять `-D warnings` |
+| T-01 ✅ 2026-10-25 (PR #51, `main` = `523d8ba`) | Применить патч / дерево из архива на `main`, прогнать §1 на Linux и Windows | все ворота зелёные; job `native-accelerator` зелёный с новыми шагами `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, parity-тесты |
+| T-02 ✅ 2026-10-25 | Проверить влияние A-01 на опубликованные числа — закрыто анализом: `benchmark/study_grain_impact.py`, отчёт §13 | `benchmark-smoke` зелёный; если какие-то сессионные числа сдвинулись, новая сессия evidence + строка в CHANGELOG; hashed-файлы не трогать |
+| T-03 ✅ 2026-10-25 (`native-accelerator` на PR #51) | Убедиться, что новый clippy в CI (stable новее 1.97) не добавил предупреждений | при новых lint'ах — исправить код, не ослаблять `-D warnings` |
 | T-03a (R-10/R-11) | Прогнать `release.yml` через `workflow_dispatch` без публикации | колёса собраны на всех трёх ОС; на Linux `objdump -d` по `.so` не содержит `zmm`/`ymm` (база `x86-64-v2`); колесо импортируется на машине без AVX2 (или в `qemu-x86_64 -cpu Nehalem`) |
 
 ### P1 — надёжность и архитектура
 
 | ID | Задача | Шаги | Критерий приёмки |
 | --- | --- | --- | --- |
-| T-04 (R-03) | Убрать `fork()` из многопоточного процесса в LBBD / LBBD-HD | создавать один `ProcessPoolExecutor(mp_context=get_context("forkserver"))` на весь `solve()` (а не на итерацию); на Windows — `spawn` как сейчас | нет `DeprecationWarning: ... fork()`; LBBD-тесты и golden идентичны; замер wall до/после в evidence |
+| T-04 (R-03) ✅ 2026-10-25 (`synaps/solvers/_process_pool.py`, отчёт §14) | Убрать `fork()` из многопоточного процесса в LBBD / LBBD-HD | создавать один `ProcessPoolExecutor(mp_context=get_context("forkserver"))` на весь `solve()` (а не на итерацию); на Windows — `spawn` как сейчас | нет `DeprecationWarning: ... fork()`; LBBD-тесты и golden идентичны; замер wall до/после в evidence |
 | T-05 | Продолжить декомпозицию длинных функций под golden | порядок: `_solve_precedence_aware_master` (269), `_try_native_greedy_repair` (258), `_add_machine_order_and_adjacency` (240), `incremental_repair._solve_core` (239), `route_solver_config` (221), `_try_native_initial_seed` (221), `_destroy_critical_path` (203), `validate_cross_references` (202) | golden `full` идентичен; ratchet уменьшен; каждая новая функция ≤ 80 строк |
 | T-06 | Звуковые отсечения LBBD (critical-path / аналитические) вместо одних no-good | формализовать отсечение, доказать валидность на бумаге, добавить Hypothesis-тест против полного перебора на малых инстансах; включать флагом | тест валидности; `lower_bound ≤ BKS` на Brandimarte (`test_public_instances_bks.py`); уменьшение среднего gap на `gen_120` / Brandimarte при том же бюджете, с evidence |
-| T-07 | Control-plane: прогнать `npm ci && npm test` в CI-окружении | в этом аудите — только статика | зелёный job `control-plane`; отчёт о найденном |
+| T-07 ✅ 2026-10-25 (job `control-plane` зелёный; локально 46 тестов, `npm audit` = 0, отчёт §12) | Control-plane: прогнать `npm ci && npm test` в CI-окружении | в этом аудите — только статика | зелёный job `control-plane`; отчёт о найденном |
 
 ### P2 — качество решений (только с измерениями)
 

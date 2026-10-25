@@ -174,3 +174,29 @@ test("python bridge instance dir defaults under benchmark/instances", () => {
     }
   }
 });
+
+test("python executor rejects (does not crash) when the child exits without reading stdin", async () => {
+  // A child that exits immediately leaves a large stdin write with EPIPE. Without an
+  // error listener on child.stdin that becomes an uncaught exception that would take
+  // the whole BFF process down (audit 2026-10).
+  const repoRoot = resolveSynapsRepoRoot(process.cwd());
+  const executor = createPythonContractExecutor(
+    {
+      repoRoot,
+      contractSchemaDir: path.join(repoRoot, "schema", "contracts"),
+      pythonExecutable: process.platform === "win32" ? "cmd.exe" : "true",
+    },
+    { timeoutMs: 10_000, maxOutputBytes: 1_000_000 },
+  );
+  const payload = { contract_version: "2026-04-03", padding: "x".repeat(4_000_000) };
+  await assert.rejects(executor.executeRepairRequest(payload), {
+    name: "SynapsPythonBridgeError",
+  });
+});
+
+test("bridge error classification only reports oom for memory failures", () => {
+  assert.equal(_testInternals.detectBridgeErrorCode("MemoryError: cannot allocate"), "oom");
+  assert.equal(_testInternals.detectBridgeErrorCode("Killed: out of memory"), "oom");
+  assert.equal(_testInternals.detectBridgeErrorCode("OOM killer terminated the solver"), "oom");
+  assert.equal(_testInternals.detectBridgeErrorCode("no room left in the zoom bloom"), "bridge");
+});

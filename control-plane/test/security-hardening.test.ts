@@ -206,3 +206,58 @@ test("solve route strips assignments when solver status is not success", async (
 
   await app.close();
 });
+
+test("rotating unverified API keys does not open fresh rate-limit buckets", async () => {
+  // Anonymous loopback mode: no keys configured, so a presented key proves nothing
+  // and must not choose the bucket (audit 2026-10).
+  const app = buildControlPlaneApp({
+    executor: feasibleExecutor(),
+    rateLimit: { maxRequests: 2, windowMs: 60_000 },
+    apiKey: null,
+    apiKeyMap: null,
+  });
+  try {
+    const statuses: number[] = [];
+    for (let index = 0; index < 4; index += 1) {
+      const response = await app.inject({
+        method: "GET",
+        url: "/healthz",
+        headers: { "x-api-key": `${index}-forged-key` },
+      });
+      statuses.push(response.statusCode);
+    }
+    assert.deepEqual(statuses, [200, 200, 429, 429]);
+  } finally {
+    await app.close();
+  }
+});
+
+test("failed API key attempts are rate limited per client", async () => {
+  const app = buildControlPlaneApp({
+    executor: feasibleExecutor(),
+    rateLimit: { maxRequests: 2, windowMs: 60_000 },
+    apiKey: "shared-secret",
+  });
+  try {
+    const statuses: number[] = [];
+    for (let index = 0; index < 4; index += 1) {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/solve",
+        headers: { "x-api-key": `guess-${index}` },
+        payload: createSolveRequest(),
+      });
+      statuses.push(response.statusCode);
+    }
+    assert.deepEqual(statuses, [401, 401, 429, 429]);
+    const valid = await app.inject({
+      method: "POST",
+      url: "/api/v1/solve",
+      headers: { "x-api-key": "shared-secret" },
+      payload: createSolveRequest(),
+    });
+    assert.equal(valid.statusCode, 200, "a valid key keeps its own bucket");
+  } finally {
+    await app.close();
+  }
+});

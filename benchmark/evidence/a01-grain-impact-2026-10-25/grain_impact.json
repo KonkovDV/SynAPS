@@ -1,0 +1,371 @@
+{
+ "study": "A-01 grain impact on published benchmark generators (audit 2026-10, T-02)",
+ "grain_epsilon_min": 1e-09,
+ "short_duration_studies": [
+  "deadzone-5k",
+  "calendar-3000",
+  "beam-alns-box"
+ ],
+ "cells": [
+  {
+   "family": "cover-ladder",
+   "cell": "60k@100",
+   "seed": 1,
+   "operations": 60000,
+   "ops_changed": 425,
+   "pairs_changed": 441
+  },
+  {
+   "family": "cover-ladder",
+   "cell": "60k@100",
+   "seed": 42,
+   "operations": 60000,
+   "ops_changed": 450,
+   "pairs_changed": 471
+  },
+  {
+   "family": "cover-ladder",
+   "cell": "60k@100",
+   "seed": 999,
+   "operations": 60000,
+   "ops_changed": 452,
+   "pairs_changed": 470
+  },
+  {
+   "family": "cover-ladder",
+   "cell": "100k@200",
+   "seed": 1,
+   "operations": 100000,
+   "ops_changed": 1467,
+   "pairs_changed": 1726
+  },
+  {
+   "family": "cover-ladder",
+   "cell": "100k@200",
+   "seed": 42,
+   "operations": 100000,
+   "ops_changed": 1092,
+   "pairs_changed": 1215
+  },
+  {
+   "family": "cover-ladder",
+   "cell": "100k@200",
+   "seed": 999,
+   "operations": 100000,
+   "ops_changed": 1163,
+   "pairs_changed": 1274
+  },
+  {
+   "family": "duration-8-24",
+   "cell": "5k@8",
+   "seed": 1,
+   "operations": 5000,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "duration-8-24",
+   "cell": "5k@8",
+   "seed": 42,
+   "operations": 5000,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "duration-8-24",
+   "cell": "5k@8",
+   "seed": 999,
+   "operations": 5000,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "preset",
+   "cell": "food-beverage",
+   "seed": 1,
+   "operations": 102,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "preset",
+   "cell": "food-beverage",
+   "seed": 42,
+   "operations": 99,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "preset",
+   "cell": "food-beverage",
+   "seed": 999,
+   "operations": 96,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "preset",
+   "cell": "industrial",
+   "seed": 1,
+   "operations": 782,
+   "ops_changed": 1,
+   "pairs_changed": 1
+  },
+  {
+   "family": "preset",
+   "cell": "industrial",
+   "seed": 42,
+   "operations": 791,
+   "ops_changed": 5,
+   "pairs_changed": 5
+  },
+  {
+   "family": "preset",
+   "cell": "industrial",
+   "seed": 999,
+   "operations": 778,
+   "ops_changed": 3,
+   "pairs_changed": 3
+  },
+  {
+   "family": "preset",
+   "cell": "industrial-10k",
+   "seed": 1,
+   "operations": 11179,
+   "ops_changed": 70,
+   "pairs_changed": 81
+  },
+  {
+   "family": "preset",
+   "cell": "industrial-10k",
+   "seed": 42,
+   "operations": 11224,
+   "ops_changed": 63,
+   "pairs_changed": 71
+  },
+  {
+   "family": "preset",
+   "cell": "industrial-10k",
+   "seed": 999,
+   "operations": 11241,
+   "ops_changed": 78,
+   "pairs_changed": 88
+  },
+  {
+   "family": "preset",
+   "cell": "industrial-2k",
+   "seed": 1,
+   "operations": 2076,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "preset",
+   "cell": "industrial-2k",
+   "seed": 42,
+   "operations": 2082,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "preset",
+   "cell": "industrial-2k",
+   "seed": 999,
+   "operations": 2124,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "preset",
+   "cell": "industrial-50k",
+   "seed": 1,
+   "operations": 54084,
+   "ops_changed": 460,
+   "pairs_changed": 489
+  },
+  {
+   "family": "preset",
+   "cell": "industrial-50k",
+   "seed": 42,
+   "operations": 54184,
+   "ops_changed": 472,
+   "pairs_changed": 518
+  },
+  {
+   "family": "preset",
+   "cell": "industrial-50k",
+   "seed": 999,
+   "operations": 54150,
+   "ops_changed": 491,
+   "pairs_changed": 527
+  },
+  {
+   "family": "preset",
+   "cell": "industrial-5k",
+   "seed": 1,
+   "operations": 5314,
+   "ops_changed": 46,
+   "pairs_changed": 49
+  },
+  {
+   "family": "preset",
+   "cell": "industrial-5k",
+   "seed": 42,
+   "operations": 5216,
+   "ops_changed": 33,
+   "pairs_changed": 39
+  },
+  {
+   "family": "preset",
+   "cell": "industrial-5k",
+   "seed": 999,
+   "operations": 5276,
+   "ops_changed": 41,
+   "pairs_changed": 46
+  },
+  {
+   "family": "preset",
+   "cell": "large",
+   "seed": 1,
+   "operations": 177,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "preset",
+   "cell": "large",
+   "seed": 42,
+   "operations": 184,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "preset",
+   "cell": "large",
+   "seed": 999,
+   "operations": 185,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "preset",
+   "cell": "medium",
+   "seed": 1,
+   "operations": 105,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "preset",
+   "cell": "medium",
+   "seed": 42,
+   "operations": 108,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "preset",
+   "cell": "medium",
+   "seed": 999,
+   "operations": 104,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "preset",
+   "cell": "pharma",
+   "seed": 1,
+   "operations": 124,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "preset",
+   "cell": "pharma",
+   "seed": 42,
+   "operations": 128,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "preset",
+   "cell": "pharma",
+   "seed": 999,
+   "operations": 129,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "preset",
+   "cell": "semiconductor",
+   "seed": 1,
+   "operations": 579,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "preset",
+   "cell": "semiconductor",
+   "seed": 42,
+   "operations": 577,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "preset",
+   "cell": "semiconductor",
+   "seed": 999,
+   "operations": 564,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "preset",
+   "cell": "small",
+   "seed": 1,
+   "operations": 42,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "preset",
+   "cell": "small",
+   "seed": 42,
+   "operations": 38,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "preset",
+   "cell": "small",
+   "seed": 999,
+   "operations": 40,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "preset",
+   "cell": "tiny",
+   "seed": 1,
+   "operations": 11,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "preset",
+   "cell": "tiny",
+   "seed": 42,
+   "operations": 12,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  },
+  {
+   "family": "preset",
+   "cell": "tiny",
+   "seed": 999,
+   "operations": 10,
+   "ops_changed": 0,
+   "pairs_changed": 0
+  }
+ ]
+}

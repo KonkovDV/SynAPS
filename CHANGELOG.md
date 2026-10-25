@@ -20,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tests/test_cpsat_strict_parallel.py`.
 - **Audit 2026-10 regression suite** `tests/test_audit_2026_10.py` (A-01…A-10,
   A-13, P-01) and the report `docs/rfc/AUDIT_2026_10.md`.
+- **A-01 impact study (T-02)** `benchmark/study_grain_impact.py`: counts the
+  (operation, work center) pairs whose grain the A-01 fix changes on the
+  published generators and seeds 1/42/999. Zero pairs (cannot move):
+  deadzone-5k, calendar-3000 and beam-alns-box (durations 8–24) and presets
+  tiny, small, medium, large, industrial-2k, pharma, semiconductor,
+  food-beverage. Non-zero (may move on re-capture, one minute less per pair):
+  COVER ladder 60k@100 / 100k@200 and presets industrial, industrial-5k /
+  10k / 50k. Hashed evidence is unchanged
+  (`benchmark/evidence/a01-grain-impact-2026-10-25/`).
 - `scripts/golden_snapshot.py` (`capture` / `compare`, suites `fast` and
   `full`): schedule / objective / scrubbed-metadata digests for 33 solver
   configurations, the safety net used for the decomposition below.
@@ -52,6 +61,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   52 → 45, lines inside them 12472 → 6229, longest 2659 → 269).
 - LBBD-HD records `warm_start_error` (exception type) instead of silently
   swallowing a failed greedy warm start.
+- **LBBD subproblem pool (T-04 / KI-R3):** one `SubproblemPool` per solve
+  (`synaps/solvers/_process_pool.py`) instead of a `fork`-started
+  `ProcessPoolExecutor` per Benders iteration. POSIX uses `forkserver` with an
+  empty preload (a NumPy import already starts OpenBLAS threads, so preloading
+  would make the server a multi-threaded process that forks), Windows
+  `spawn`; queued clusters are cancelled when a round fails early. **Behavior
+  note:** like `spawn`, a `forkserver` worker re-imports the caller's main
+  module, so a script without an `if __name__ == "__main__":` guard (or read
+  from stdin) breaks the pool; the solve then warns once (`RuntimeWarning`)
+  and finishes the clusters in-process. Measurements:
+  `benchmark/evidence/lbbd-pool-2026-10-25/`.
 - RHC / ALNS config clamps are uniform `min(high, max(low, x))`; a NaN value
   now maps to the lower bound for every key (two pre-refactor clamps used the
   opposite nesting, which differs only on NaN; R-09).
@@ -321,6 +341,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`CONTRIBUTING.md`). Direct push `7a4083e` is the counter-example.
 
 ### Fixed
+
+Review of the `audit-2026-10` branch update (2026-10-25,
+`docs/rfc/AUDIT_2026_10.md` §12):
+
+- **U-01 dev lock unsatisfiable:** the python-dev Dependabot group pinned
+  `mypy==2.4.0` while `requirements-dev-lock.txt` kept `ast-serialize==0.5.0`
+  (mypy needs `>=0.11.2`), so `pip install -r requirements-dev-lock.txt`
+  failed. Regenerated with `uv pip compile --universal` (Windows and Linux
+  markers in one file); the CI lock step now verifies the dev lock too.
+- **U-02 modes + setup_matrix guard:** an operation with modes and an EMPTY
+  `eligible_wc_ids` (every work center) escaped the per-work-center check
+  added by `changeover-stands`; empty eligibility is now expanded
+  (`tests/test_modes.py`).
+- **U-03 control-plane dependencies:** `npm audit --omit=dev` reported 29
+  vulnerabilities (8 high), among them fastify ≤ 5.12.4 (body-schema
+  validation bypass via a leading space in `Content-Type`, auth bypass via
+  malformed URLs) and `fast-uri` ≤ 3.1.8. Lockfile now resolves fastify
+  5.12.7, fast-uri 3.1.9, `@grpc/grpc-js` 1.14.6; OTel `sdk-node` /
+  `exporter-trace-otlp-http` move to `^0.223.0`. `npm audit`: 0.
+- **U-04 control-plane crash on EPIPE:** a Python child that exited before
+  reading stdin raised an unhandled stream `error` and took the BFF process
+  down; it is now reported as a `SynapsPythonBridgeError`.
+- **U-05 OOM classification** matched the substring `oom` ("room", "zoom")
+  and triggered a solver-chain retry plus a 503; whole word only now.
+- **U-06 503 envelope** said `"Bad Gateway"`; one `bridgeErrorEnvelope` now
+  serves the sync, async-job and error-handler paths.
+- **U-08 coverage artifact:** `test-fast` uploaded `path: .coverage`, but
+  `actions/upload-artifact` ≥ 4.4 skips dot-files by default, so every run
+  warned "No files were found" and no coverage artifact was kept;
+  `include-hidden-files: true` restores it.
+- **U-07 rate limiting:** an unverified `x-api-key` chose the bucket, so
+  rotating forged keys bypassed the limit in anonymous mode, and failed
+  authentication was never throttled. Buckets use a SHA-256 of a verified key
+  (or the client IP); failed attempts count per IP.
 
 Audit 2026-10 (`docs/rfc/AUDIT_2026_10.md`); each item has a regression
 test in `tests/test_audit_2026_10.py`.
