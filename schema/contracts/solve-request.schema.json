@@ -197,7 +197,7 @@
       "type": "object"
     },
     "OperationMode": {
-      "description": "One alternative way to perform an operation.\n\n``duration_min`` is the reserved processing time before machine speed, the\nsame grain as ``base_duration_min``. An empty ``modes`` list keeps the\nhistorical single-mode model.",
+      "description": "One alternative way to perform an operation.\n\n``duration_min`` is the reserved processing time in integer minutes and is\nused AS IS on every eligible machine: CP-SAT and the FeasibilityChecker\ntreat it as a machine override, it is NOT divided by\n``WorkCenter.speed_factor`` (audit 2026-10 corrected the previous docstring,\nwhich claimed the opposite). An empty ``modes`` list keeps the historical\nsingle-mode model.",
       "properties": {
         "code": {
           "maxLength": 40,
