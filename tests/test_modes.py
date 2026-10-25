@@ -250,6 +250,34 @@ def test_a_missing_mode_and_a_mixed_demand_are_rejected() -> None:
             planning_horizon_start=START,
             planning_horizon_end=END,
         )
+    other = WorkCenter(id=uuid4(), code="stand", capability_group="stand")
+    plain = State(id=uuid4(), code="plain")
+    ScheduleProblem(
+        states=[state, plain],
+        orders=[order],
+        operations=[
+            Operation(
+                id=uuid4(),
+                order_id=order.id,
+                seq_in_order=0,
+                state_id=state.id,
+                base_duration_min=10,
+                eligible_wc_ids=[machine.id],
+                modes=[OperationMode(code="only", duration_min=10)],
+            )
+        ],
+        work_centers=[machine, other],
+        setup_matrix=[
+            SetupEntry(
+                work_center_id=other.id,
+                from_state_id=plain.id,
+                to_state_id=plain.id,
+                setup_minutes=5,
+            )
+        ],
+        planning_horizon_start=START,
+        planning_horizon_end=END,
+    )
     crew = AuxiliaryResource(id=uuid4(), code="crew", resource_type="person", pool_size=1)
     state = State(id=uuid4(), code="work")
     machine = WorkCenter(id=uuid4(), code="lane", capability_group="okr")
