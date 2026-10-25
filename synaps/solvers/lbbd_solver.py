@@ -42,7 +42,12 @@ from synaps.model import (
     WorkCenter,
 )
 from synaps.solvers import BaseSolver
-from synaps.solvers._lbbd_assembly import LaneGroupResolver, enforce_lane_gaps
+from synaps.solvers._lbbd_assembly import (
+    LaneGroupResolver,
+    enforce_lane_gaps,
+    notary_rejections,
+    snap_into_shifts,
+)
 from synaps.solvers._lbbd_cuts import (
     compute_assignment_setup_lb_total,
     compute_machine_transition_floor,
@@ -169,6 +174,8 @@ class _LbbdRun:
         )
         self.sound_cut_rounds = int(kwargs.get("sound_cut_rounds", 8))
         self.sound_final: SoundMasterBound | None = None
+        # Candidate incumbents the independent notary refused (source, kinds).
+        self.incumbent_rejections: list[dict[str, Any]] = []
 
     def _register_cut(self, cut: _BendersCut) -> bool:
         fp = cut_pool_fingerprint(cut)
@@ -234,6 +241,10 @@ class _LbbdRun:
         )
         if warm_map is not None:
             self.prev_assignment_map = warm_map
+        if warm_assignments is not None and self._notary_refuses(
+            "greedy_warm_start", warm_assignments
+        ):
+            return
         if warm_assignments is not None and warm_ub is not None:
             self.best_ub = warm_ub
             self.ub_evolution.append(self.best_ub)
@@ -353,7 +364,9 @@ class _LbbdRun:
     ) -> bool:
         """Update the incumbent and the log; True when the gap has closed."""
         ub = sub_makespan
-        if ub < self.best_ub:
+        if ub < self.best_ub and self._notary_refuses("merged_subproblems", sub_assignments):
+            entry["incumbent_rejected"] = self.incumbent_rejections[-1]["kinds"]
+        elif ub < self.best_ub:
             self.best_ub = ub
             self.ub_evolution.append(self.best_ub)
             self.best_assignments = sub_assignments
@@ -376,6 +389,13 @@ class _LbbdRun:
         )
         self.iteration_log.append(entry)
         return (self.best_ub - self.lb) / max(self.best_ub, 1e-9) < self.gap_threshold
+
+    def _notary_refuses(self, source: str, assignments: list[Assignment]) -> bool:
+        """True (and recorded) when a candidate incumbent has proven hard violations."""
+        kinds = notary_rejections(self.problem, assignments)
+        if kinds:
+            self.incumbent_rejections.append({"source": source, "kinds": kinds})
+        return bool(kinds)
 
     def _final_result(self) -> ScheduleResult:
         status = SolverStatus.FEASIBLE if self.best_assignments else SolverStatus.TIMEOUT
@@ -458,6 +478,8 @@ class _LbbdRun:
                 "skipped_unproven_subproblem": self.cuts_skipped_unproven_subproblem,
             },
         }
+        if self.incumbent_rejections:
+            metadata["incumbent_rejections"] = self.incumbent_rejections
         if self.sound is not None:
             metadata["lower_bound_method"] = "sound_master_relaxation"
             metadata["sound_cuts"] = {
@@ -1315,8 +1337,9 @@ def _post_assemble_assignments(
         (e.work_center_id, e.from_state_id, e.to_state_id): timedelta(minutes=e.setup_minutes)
         for e in problem.setup_matrix
     }
+    wc_by_id = {wc.id: wc for wc in problem.work_centers}
     resolver = LaneGroupResolver(
-        wc_by_id={wc.id: wc for wc in problem.work_centers},
+        wc_by_id=wc_by_id,
         ops_by_id=ops_by_id,
         setup_minutes_lookup={
             key: value.total_seconds() / 60.0 for key, value in setup_lookup.items()
@@ -1352,6 +1375,11 @@ def _post_assemble_assignments(
             for lane in resolver.groups(work_center_id, machine_assignments):
                 if enforce_lane_gaps(work_center_id, lane, ops_by_id, setup_lookup):
                     changed = True
+
+        snapped, fits = snap_into_shifts(assignments, wc_by_id, problem.planning_horizon_start)
+        if not fits:
+            return assignments, 0.0, False  # no shift can hold it: unproven (S2)
+        changed = changed or snapped
 
     horizon_start = problem.planning_horizon_start
     horizon_end = problem.planning_horizon_end

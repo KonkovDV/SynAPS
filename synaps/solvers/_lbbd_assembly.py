@@ -10,9 +10,12 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 from uuid import NAMESPACE_DNS, uuid5
 
-from synaps.solvers.feasibility_checker import FeasibilityChecker
+from synaps.calendar import delay_start_to_open_shift, processing_fits_calendar
+from synaps.solvers.feasibility_checker import FeasibilityChecker, proven_hard_violations
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from datetime import datetime
     from uuid import UUID
 
     from synaps.model import Assignment, Operation, ScheduleProblem, WorkCenter
@@ -131,8 +134,58 @@ def enforce_lane_gaps(
     return changed
 
 
+def snap_into_shifts(
+    assignments: list[Assignment],
+    wc_by_id: Mapping[UUID, WorkCenter],
+    horizon_start: datetime,
+) -> tuple[bool, bool]:
+    """Delay assignments whose occupancy ``[start - setup, end]`` leaves the calendar.
+
+    Post-assembly right-shifts operations for cross-cluster precedence and
+    setup gaps; a shift can push one into a closed period of its machine. The
+    occupancy moves to the earliest published shift that holds it whole
+    (ADR-0005). Returns ``(changed, fits)``; ``fits`` is False when no shift
+    after the current position can hold an occupancy.
+    """
+    changed = False
+    for assignment in assignments:
+        work_center = wc_by_id.get(assignment.work_center_id)
+        calendar = work_center.calendar if work_center is not None else []
+        if not calendar:
+            continue
+        occupancy_start = assignment.start_time - timedelta(minutes=assignment.setup_minutes)
+        if processing_fits_calendar(occupancy_start, assignment.end_time, calendar):
+            continue
+        start_m = (occupancy_start - horizon_start).total_seconds() / 60.0
+        span_m = (assignment.end_time - occupancy_start).total_seconds() / 60.0
+        moved = delay_start_to_open_shift(start_m, span_m, calendar, horizon_start)
+        if moved is None:
+            return changed, False
+        shift = timedelta(minutes=moved - start_m)
+        assignment.start_time = assignment.start_time + shift
+        assignment.end_time = assignment.end_time + shift
+        changed = True
+    return changed, True
+
+
+def notary_rejections(problem: ScheduleProblem, assignments: list[Assignment]) -> list[str]:
+    """Proven hard-violation kinds of a candidate incumbent (sorted, unique).
+
+    A merged LBBD schedule is re-timed by post-assembly, and nothing else
+    checks it against calendars, ``latest_finish`` windows or auxiliary pools.
+    ``FEASIBLE ⇒ proven_hard_violations = ∅`` (AGENTS.md) therefore requires
+    the independent notary before a schedule becomes the incumbent.
+    """
+    violations = proven_hard_violations(
+        FeasibilityChecker().check(problem, assignments, exhaustive=True)
+    )
+    return sorted({violation.kind for violation in violations})
+
+
 __all__ = [
     "LaneGroupResolver",
     "enforce_lane_gaps",
+    "notary_rejections",
+    "snap_into_shifts",
     "stamp_parallel_lane_ids",
 ]

@@ -43,7 +43,7 @@ from synaps.model import (
     WorkCenter,
 )
 from synaps.solvers import BaseSolver
-from synaps.solvers._lbbd_assembly import stamp_parallel_lane_ids
+from synaps.solvers._lbbd_assembly import notary_rejections, stamp_parallel_lane_ids
 from synaps.solvers._lbbd_cuts import (
     compute_assignment_setup_lb_total,
     compute_machine_transition_floor,
@@ -144,6 +144,8 @@ class _LbbdHdRun:
         # R10: lb_evolution[N] is the master bound of iteration N; the delta
         # seen in iteration N is attributed to the cuts added in iteration N-1.
         self.lb_evolution: list[float] = []
+        # Candidate incumbents the independent notary refused (source, kinds).
+        self.incumbent_rejections: list[dict[str, Any]] = []
         self.ub_evolution: list[float] = []
         self.prev_master_bound = 0.0
         self.prev_iteration_cut_kinds: list[str] = []
@@ -232,6 +234,8 @@ class _LbbdHdRun:
             self.prev_assignment_map = {
                 a.operation_id: a.work_center_id for a in warm_result.assignments
             }
+            if self._notary_refuses("greedy_warm_start", list(warm_result.assignments)):
+                return
             self.best_assignments = list(warm_result.assignments)
             self.best_objective = warm_result.objective or ObjectiveValues()
             self.best_ub = self.best_objective.makespan_minutes or float("inf")
@@ -372,7 +376,9 @@ class _LbbdHdRun:
     ) -> bool:
         """Update the incumbent and the log; True when the gap has closed."""
         ub = sub_makespan
-        if ub < self.best_ub:
+        if ub < self.best_ub and self._notary_refuses("merged_subproblems", sub_assignments):
+            entry["incumbent_rejected"] = self.incumbent_rejections[-1]["kinds"]
+        elif ub < self.best_ub:
             self.best_ub = ub
             self.ub_evolution.append(self.best_ub)
             self.best_assignments = sub_assignments
@@ -396,6 +402,13 @@ class _LbbdHdRun:
         )
         self.iteration_log.append(entry)
         return (self.best_ub - self.lb) / max(self.best_ub, 1e-9) < self.gap_threshold
+
+    def _notary_refuses(self, source: str, assignments: list[Assignment]) -> bool:
+        """True (and recorded) when a candidate incumbent has proven hard violations."""
+        kinds = notary_rejections(self.problem, assignments)
+        if kinds:
+            self.incumbent_rejections.append({"source": source, "kinds": kinds})
+        return bool(kinds)
 
     def _generate_cuts(
         self,
@@ -518,6 +531,8 @@ class _LbbdHdRun:
         }
         if self.warm_start_error is not None:
             metadata["warm_start_error"] = self.warm_start_error
+        if self.incumbent_rejections:
+            metadata["incumbent_rejections"] = self.incumbent_rejections
         return metadata
 
 
