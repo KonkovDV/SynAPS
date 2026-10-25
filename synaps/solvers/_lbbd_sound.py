@@ -77,6 +77,7 @@ if TYPE_CHECKING:
 STATE_PATH_MAX_STATES = 12
 #: Separation tolerance (minutes): a row must beat the incumbent by more.
 VIOLATION_EPS = 1e-6
+_HIGHS_DEFAULT_MIP_REL_GAP = 1e-4
 
 YKey = tuple["UUID", "UUID"]  # (operation, work center)
 ZKey = tuple["UUID", "UUID"]  # (work center, state)
@@ -465,6 +466,8 @@ class SoundMaster:
         cmax_idx: int,
         deadline: float,
         max_rounds: int,
+        *,
+        polish: bool = False,
     ) -> tuple[bool, float]:
         """Run, then separate lazy rows at each incumbent.
 
@@ -472,28 +475,40 @@ class SoundMaster:
         violated at the last incumbent. ``best_dual``: the largest proven dual
         bound over all runs — every run's model holds only valid rows, so each
         run's bound is valid, and a later run cut short by the clock may prove
-        less than an earlier one.
+        less than an earlier one. ``polish`` re-runs the final model at HiGHS'
+        default gap within the remaining time: a loose ``mip_rel_gap`` stops
+        within that gap of the incumbent (measured: 138 on ``mk07``, where the
+        tight master proves 139), which matters only for a reported bound.
         """
         h.run()
         best = _dual_bound(h)
+        converged = False
         for _ in range(max_rounds):
             if h.getInfoValue("primal_solution_status")[1] != 2:
-                return False, best
+                break
             remaining = deadline - time.monotonic()
             if remaining <= 0.05:
-                return False, best
+                break
             values = h.getSolution().col_value
             assignment = _incumbent_assignment(self.relaxation.eligible, var_index, values)
             fresh = self.add_to_pool(self.relaxation.separate(assignment, float(values[cmax_idx])))
             if not fresh:
-                return True, best
+                converged = True
+                break
             for row in fresh:
                 _add_sound_row(h, row, var_index, z_index, cmax_idx)
             self.rounds += 1
             h.setOptionValue("time_limit", max(0.05, remaining))
             h.run()
             best = max(best, _dual_bound(h))
-        return False, best
+        remaining = deadline - time.monotonic()
+        loose = self.mip_rel_gap is not None and self.mip_rel_gap > _HIGHS_DEFAULT_MIP_REL_GAP
+        if polish and loose and remaining > 0.05:
+            h.setOptionValue("mip_rel_gap", _HIGHS_DEFAULT_MIP_REL_GAP)
+            h.setOptionValue("time_limit", remaining)
+            h.run()
+            best = max(best, _dual_bound(h))
+        return converged, best
 
 
 def _dual_bound(h: Any) -> float:
@@ -585,7 +600,9 @@ def compute_sound_master_lower_bound(
             _add_sound_row(h, relaxation._capacity_row(machine), var_index, {}, cmax_idx)
     z_index = master.attach(h, var_index, cmax_idx)
     rounds_before = master.rounds
-    converged, best_dual = master.solve(h, var_index, z_index, cmax_idx, deadline, max_rounds)
+    converged, best_dual = master.solve(
+        h, var_index, z_index, cmax_idx, deadline, max_rounds, polish=True
+    )
     return SoundMasterBound(
         value=max(0.0, best_dual),
         rows_by_kind=master.rows_by_kind(),

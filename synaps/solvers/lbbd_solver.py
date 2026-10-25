@@ -270,6 +270,8 @@ class _LbbdRun:
             ),
             sound=self.sound,
             sound_rounds=self.sound_cut_rounds,
+            # The first master's bound is reported: prove it at the tight gap.
+            sound_polish=iteration == 1,
         )
         if master_result is None:
             failed = _master_failed_result(
@@ -554,6 +556,7 @@ def _solve_master(
     master_time_limit_s: float | None = None,
     sound: SoundMaster | None = None,
     sound_rounds: int = 0,
+    sound_polish: bool = False,
 ) -> tuple[tuple[dict[UUID, UUID], float] | None, bool]:
     """Solve the assignment master problem via HiGHS MIP.
 
@@ -598,7 +601,13 @@ def _solve_master(
     else:
         budget = float(master_time_limit_s) if master_time_limit_s is not None else 60.0
         _, best_dual = sound.solve(
-            h, var_index, z_index, cmax_idx, started + max(1.0, budget), sound_rounds
+            h,
+            var_index,
+            z_index,
+            cmax_idx,
+            started + max(1.0, budget),
+            sound_rounds,
+            polish=sound_polish,
         )
     return extract_master_solution(h, problem, eligible_by_op, var_index, cmax_idx, best_dual)
 
