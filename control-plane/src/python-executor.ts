@@ -168,7 +168,10 @@ function detectBridgeErrorCode(stderr: string): SynapsPythonBridgeErrorCode {
   if (
     normalized.includes("memoryerror") ||
     normalized.includes("out of memory") ||
-    normalized.includes("oom")
+    // Token "oom", including the glued runtime spelling "oomkilled".
+    // A bare substring matched "room" / "zoom" / "bloom" and forced a 503
+    // retry (audit 2026-10). A whole-word match missed the glued spelling OOMKilled.
+    /\boom(?:killed)?\b/.test(normalized)
   ) {
     return "oom";
   }
@@ -196,6 +199,7 @@ async function executePythonContract(
     }>((resolve, reject) => {
       let timedOut = false;
       let outputLimitExceeded = false;
+      let stdinError: Error | null = null;
       const child = spawn(
         paths.pythonExecutable,
         commandArgs,
@@ -287,9 +291,26 @@ async function executePythonContract(
           return;
         }
 
+        if (stdinError !== null) {
+          reject(
+            new SynapsPythonBridgeError(
+              `Python bridge could not stream the ${subcommand} payload: ${stdinError.message}`,
+              stderr || stdout,
+              detectBridgeErrorCode(stderr || stdout),
+            ),
+          );
+          return;
+        }
+
         resolve({ stdout, stderr, exitCode: code ?? -1 });
       });
 
+      // A child that exits before reading stdin makes the write fail with EPIPE.
+      // Without a listener that error is uncaught and takes the BFF process down;
+      // record it and report it once the child has closed (audit 2026-10).
+      child.stdin?.on("error", (error: Error) => {
+        stdinError = error;
+      });
       child.stdin?.end(JSON.stringify(payload), "utf-8");
     });
 
@@ -357,6 +378,7 @@ export function createPythonContractExecutor(
 
 export const _testInternals = {
   buildPythonBridgeEnv,
+  detectBridgeErrorCode,
   resolveExecutionLimits,
   resolveInstanceDir,
 };

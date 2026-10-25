@@ -206,3 +206,115 @@ test("solve route strips assignments when solver status is not success", async (
 
   await app.close();
 });
+
+test("rotating unverified API keys does not open fresh rate-limit buckets", async () => {
+  // Anonymous loopback mode: no keys configured, so a presented key proves nothing
+  // and must not choose the bucket (audit 2026-10).
+  const app = buildControlPlaneApp({
+    executor: feasibleExecutor(),
+    rateLimit: { maxRequests: 2, windowMs: 60_000 },
+    apiKey: null,
+    apiKeyMap: null,
+  });
+  try {
+    const statuses: number[] = [];
+    for (let index = 0; index < 4; index += 1) {
+      const response = await app.inject({
+        method: "GET",
+        url: "/healthz",
+        headers: { "x-api-key": `${index}-forged-key` },
+      });
+      statuses.push(response.statusCode);
+    }
+    assert.deepEqual(statuses, [200, 200, 429, 429]);
+  } finally {
+    await app.close();
+  }
+});
+
+test("distinct configured keys do not share a rate-limit bucket", async () => {
+  const app = buildControlPlaneApp({
+    executor: feasibleExecutor(),
+    rateLimit: { maxRequests: 1, windowMs: 60_000 },
+    apiKeyMap: {
+      "key-tenant-a": "tenant-a",
+      "key-tenant-b": "tenant-b",
+    },
+  });
+  try {
+    const first = await app.inject({
+      method: "POST",
+      url: "/api/v1/solve",
+      headers: { "x-api-key": "key-tenant-a" },
+      payload: createSolveRequest(),
+    });
+    assert.equal(first.statusCode, 200);
+    const again = await app.inject({
+      method: "POST",
+      url: "/api/v1/solve",
+      headers: { "x-api-key": "key-tenant-a" },
+      payload: createSolveRequest(),
+    });
+    assert.equal(again.statusCode, 429);
+    const other = await app.inject({
+      method: "POST",
+      url: "/api/v1/solve",
+      headers: { "x-api-key": "key-tenant-b" },
+      payload: createSolveRequest(),
+    });
+    assert.equal(other.statusCode, 200);
+  } finally {
+    await app.close();
+  }
+});
+
+test("private discovery routes share the client IP bucket", async () => {
+  // /metrics and /openapi.json return 404 before the main limiter. Those
+  // responses must still consume the IP budget (audit 2026-10, U-09).
+  const app = buildControlPlaneApp({
+    executor: feasibleExecutor(),
+    rateLimit: { maxRequests: 2, windowMs: 60_000 },
+    apiKey: null,
+    apiKeyMap: null,
+  });
+  try {
+    const statuses: number[] = [];
+    for (const url of ["/metrics", "/metrics", "/openapi.json", "/openapi.json"]) {
+      const response = await app.inject({ method: "GET", url });
+      statuses.push(response.statusCode);
+    }
+    assert.deepEqual(statuses, [404, 404, 429, 429]);
+  } finally {
+    await app.close();
+  }
+});
+
+test("failed API key attempts are rate limited per client", async () => {
+  const app = buildControlPlaneApp({
+    executor: feasibleExecutor(),
+    rateLimit: { maxRequests: 2, windowMs: 60_000 },
+    apiKey: "shared-secret",
+  });
+  try {
+    const statuses: number[] = [];
+    for (let index = 0; index < 4; index += 1) {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/solve",
+        headers: { "x-api-key": `guess-${index}` },
+        payload: createSolveRequest(),
+      });
+      statuses.push(response.statusCode);
+    }
+    assert.deepEqual(statuses, [401, 401, 429, 429]);
+    const valid = await app.inject({
+      method: "POST",
+      url: "/api/v1/solve",
+      headers: { "x-api-key": "shared-secret" },
+      payload: createSolveRequest(),
+    });
+    assert.equal(valid.statusCode, 200, "a valid key keeps its own bucket");
+  } finally {
+    await app.close();
+  }
+});

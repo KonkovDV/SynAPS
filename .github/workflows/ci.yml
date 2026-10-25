@@ -127,6 +127,9 @@ jobs:
         with:
           name: coverage-${{ matrix.python-version }}
           path: .coverage
+          # upload-artifact >= 4.4 skips dot-files by default, so `.coverage`
+          # was never uploaded ("No files were found", audit 2026-10).
+          include-hidden-files: true
           retention-days: 1
 
   benchmark-smoke:
@@ -364,6 +367,11 @@ jobs:
           python -m pip install "uv==0.12.5"
           python -m uv pip compile pyproject.toml --output-file requirements-lock.txt --no-annotate --quiet
           git diff --exit-code -- requirements-lock.txt || (echo "Lock file out of date. Run: uv pip compile pyproject.toml --output-file requirements-lock.txt"; exit 1)
+          # The dev lock is universal (Windows + Linux markers). Dependabot bumps
+          # single pins without re-resolving transitive dependencies (mypy 2.4.0
+          # vs ast-serialize 0.5.0 made it unsatisfiable on 2026-10-25).
+          python -m uv pip compile pyproject.toml --extra dev --universal --output-file requirements-dev-lock.txt --no-annotate --quiet
+          git diff --exit-code -- requirements-dev-lock.txt || (echo "Dev lock out of date. Run: uv pip compile pyproject.toml --extra dev --universal --output-file requirements-dev-lock.txt --no-annotate"; exit 1)
 
       - name: Upload built distributions
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
 
 import {
   AdmissionError,
@@ -496,14 +496,45 @@ function resolveRequireAuth(): boolean {
   return !isLoopbackHost(process.env.HOST ?? "127.0.0.1");
 }
 
-function rateLimitBucketKey(request: {
-  ip: string;
-  headers: Record<string, string | string[] | undefined>;
-}): string {
-  const presented = extractPresentedApiKey(request);
+function configuredKeySlot(
+  presented: string,
+  primaryApiKey: string | null,
+  apiKeyMap: Map<string, string>,
+): string | null {
+  // Slot in the configured key list, not a fast hash of the secret. A SHA-256
+  // of the presented key is a password hash with no work factor (CodeQL) and
+  // would let a leaked bucket id be attacked offline if the key is short.
+  if (primaryApiKey !== null && matchesControlPlaneApiKey(presented, primaryApiKey)) {
+    return "primary";
+  }
+  let index = 0;
+  for (const mappedKey of apiKeyMap.keys()) {
+    if (matchesControlPlaneApiKey(presented, mappedKey)) {
+      return `map:${index}`;
+    }
+    index += 1;
+  }
+  return null;
+}
+
+function rateLimitBucketKey(
+  request: {
+    ip: string;
+    headers: Record<string, string | string[] | undefined>;
+  },
+  keyIsVerified: boolean,
+  primaryApiKey: string | null,
+  apiKeyMap: Map<string, string>,
+): string {
+  // Audit 2026-10: only a VERIFIED key may choose the bucket. An unverified
+  // header (anonymous mode, /healthz) let a client rotate forged keys into fresh
+  // buckets; the old `prefix(8):length` key also kept part of the secret.
+  const presented = keyIsVerified ? extractPresentedApiKey(request) : null;
   if (presented !== null) {
-    // Prefer API-key identity over spoofable tenant headers.
-    return `key:${presented.slice(0, 8)}:${presented.length}`;
+    const slot = configuredKeySlot(presented, primaryApiKey, apiKeyMap);
+    if (slot !== null) {
+      return `key:${slot}`;
+    }
   }
   return `ip:${request.ip}`;
 }
@@ -681,7 +712,9 @@ function annotateResponseWithFallback(
   };
 }
 
-function deriveHttpStatusFromBridgeError(error: SynapsPythonBridgeError): number {
+type BridgeHttpStatus = 502 | 503 | 504;
+
+function deriveHttpStatusFromBridgeError(error: SynapsPythonBridgeError): BridgeHttpStatus {
   switch (error.code) {
     case "timeout":
       return 504;
@@ -693,15 +726,32 @@ function deriveHttpStatusFromBridgeError(error: SynapsPythonBridgeError): number
   }
 }
 
+const BRIDGE_STATUS_TEXT: Record<BridgeHttpStatus, string> = {
+  502: "Bad Gateway",
+  503: "Service Unavailable",
+  504: "Gateway Timeout",
+};
+
+// One envelope for every bridge failure path (sync solve, async job, error
+// handler). The 503 reason phrase used to read "Bad Gateway" (audit 2026-10).
+function bridgeErrorEnvelope(error: SynapsPythonBridgeError): {
+  statusCode: BridgeHttpStatus;
+  error: string;
+  message: string;
+  bridge_code: SynapsPythonBridgeError["code"];
+} {
+  const statusCode = deriveHttpStatusFromBridgeError(error);
+  return {
+    statusCode,
+    error: BRIDGE_STATUS_TEXT[statusCode],
+    message: error.message,
+    bridge_code: error.code,
+  };
+}
+
 function serializeSolveJobError(error: unknown): SolveJobError {
   if (error instanceof SynapsPythonBridgeError) {
-    const statusCode = deriveHttpStatusFromBridgeError(error);
-    return {
-      statusCode,
-      error: statusCode === 504 ? "Gateway Timeout" : "Bad Gateway",
-      message: error.message,
-      bridge_code: error.code,
-    };
+    return bridgeErrorEnvelope(error);
   }
 
   const maybeEnvelope = asObject(error);
@@ -745,6 +795,34 @@ export function buildControlPlaneApp(
   const publicMetrics = resolvePublicMetrics(options.publicMetrics);
   const publicOpenApi = resolvePublicOpenApi(options.publicOpenApi);
   const rateLimitBuckets = new Map<string, { resetAt: number; count: number }>();
+  // Returns true when the bucket is over its limit for this window.
+  const rateLimitExceeded = (key: string): boolean => {
+    if (rateLimit === null) {
+      return false;
+    }
+    const now = Date.now();
+    // Opportunistic cleanup to avoid unbounded bucket growth.
+    if (rateLimitBuckets.size > 10_000) {
+      for (const [bucketKey, bucket] of rateLimitBuckets) {
+        if (bucket.resetAt <= now) {
+          rateLimitBuckets.delete(bucketKey);
+        }
+      }
+    }
+    const bucket = rateLimitBuckets.get(key);
+    if (bucket === undefined || bucket.resetAt <= now) {
+      rateLimitBuckets.set(key, { resetAt: now + rateLimit.windowMs, count: 1 });
+      return false;
+    }
+    bucket.count += 1;
+    return bucket.count > rateLimit.maxRequests;
+  };
+  const sendRateLimited = (reply: FastifyReply) =>
+    reply.code(429).send({
+      statusCode: 429,
+      error: "Too Many Requests",
+      message: "SynAPS control-plane rate limit exceeded",
+    });
   const resolveTenant = (request: {
     headers: Record<string, string | string[] | undefined>;
   }): string | null =>
@@ -792,6 +870,11 @@ export function buildControlPlaneApp(
     const isOpenApi = pathOnly === "/openapi.json";
 
     if (requireAuth && !authConfigured && !isHealthz) {
+      // This return is before the shared limiter. Without an IP bucket a
+      // misconfigured bind could be hammered for free (audit 2026-10, U-09).
+      if (rateLimitExceeded(`ip:${request.ip}`)) {
+        return sendRateLimited(reply);
+      }
       reply.code(503).send({
         statusCode: 503,
         error: "Service Unavailable",
@@ -805,6 +888,10 @@ export function buildControlPlaneApp(
     if (authConfigured && !isHealthz) {
       const presentedApiKey = extractPresentedApiKey(request);
       if (!authenticatePresentedApiKey(presentedApiKey, apiKey, apiKeyMap)) {
+        // Failed attempts count per client address so key guessing is throttled.
+        if (rateLimitExceeded(`authfail:${request.ip}`)) {
+          return sendRateLimited(reply);
+        }
         reply.code(401).send({
           statusCode: 401,
           error: "Unauthorized",
@@ -816,6 +903,9 @@ export function buildControlPlaneApp(
 
     // Discovery endpoints are private by default (even on anonymous loopback).
     if (isMetrics && !authConfigured && !publicMetrics) {
+      if (rateLimitExceeded(`ip:${request.ip}`)) {
+        return sendRateLimited(reply);
+      }
       reply.code(404).send({
         statusCode: 404,
         error: "Not Found",
@@ -824,6 +914,9 @@ export function buildControlPlaneApp(
       return;
     }
     if (isOpenApi && !authConfigured && !publicOpenApi) {
+      if (rateLimitExceeded(`ip:${request.ip}`)) {
+        return sendRateLimited(reply);
+      }
       reply.code(404).send({
         statusCode: 404,
         error: "Not Found",
@@ -832,30 +925,12 @@ export function buildControlPlaneApp(
       return;
     }
 
-    if (rateLimit !== null) {
-      const key = rateLimitBucketKey(request);
-      const now = Date.now();
-      // Opportunistic cleanup to avoid unbounded bucket growth.
-      if (rateLimitBuckets.size > 10_000) {
-        for (const [bucketKey, bucket] of rateLimitBuckets) {
-          if (bucket.resetAt <= now) {
-            rateLimitBuckets.delete(bucketKey);
-          }
-        }
-      }
-      const bucket = rateLimitBuckets.get(key);
-      if (bucket === undefined || bucket.resetAt <= now) {
-        rateLimitBuckets.set(key, { resetAt: now + rateLimit.windowMs, count: 1 });
-        return;
-      }
-      bucket.count += 1;
-      if (bucket.count > rateLimit.maxRequests) {
-        return reply.code(429).send({
-          statusCode: 429,
-          error: "Too Many Requests",
-          message: "SynAPS control-plane rate limit exceeded",
-        });
-      }
+    if (
+      rateLimitExceeded(
+        rateLimitBucketKey(request, authConfigured && !isHealthz, apiKey, apiKeyMap),
+      )
+    ) {
+      return sendRateLimited(reply);
     }
   });
 
@@ -1167,31 +1242,8 @@ export function buildControlPlaneApp(
       }
 
       if (lastBridgeError !== null) {
-        const statusCode = deriveHttpStatusFromBridgeError(lastBridgeError);
-        if (statusCode === 504) {
-          return reply.code(504).send({
-            statusCode: 504,
-            error: "Gateway Timeout",
-            message: lastBridgeError.message,
-            bridge_code: lastBridgeError.code,
-          });
-        }
-
-        if (statusCode === 503) {
-          return reply.code(503).send({
-            statusCode: 503,
-            error: "Bad Gateway",
-            message: lastBridgeError.message,
-            bridge_code: lastBridgeError.code,
-          });
-        }
-
-        return reply.code(502).send({
-          statusCode: 502,
-          error: "Bad Gateway",
-          message: lastBridgeError.message,
-          bridge_code: lastBridgeError.code,
-        });
+        const envelope = bridgeErrorEnvelope(lastBridgeError);
+        return reply.code(envelope.statusCode).send(envelope);
       }
 
       return reply.code(502).send({
@@ -1429,31 +1481,8 @@ export function buildControlPlaneApp(
     }
 
     if (knownError instanceof SynapsPythonBridgeError) {
-      const statusCode = deriveHttpStatusFromBridgeError(knownError);
-      if (statusCode === 504) {
-        return reply.code(504).send({
-          statusCode: 504,
-          error: "Gateway Timeout",
-          message: knownError.message,
-          bridge_code: knownError.code,
-        });
-      }
-
-      if (statusCode === 503) {
-        return reply.code(503).send({
-          statusCode: 503,
-          error: "Bad Gateway",
-          message: knownError.message,
-          bridge_code: knownError.code,
-        });
-      }
-
-      return reply.code(502).send({
-        statusCode: 502,
-        error: "Bad Gateway",
-        message: knownError.message,
-        bridge_code: knownError.code,
-      });
+      const envelope = bridgeErrorEnvelope(knownError);
+      return reply.code(envelope.statusCode).send(envelope);
     }
 
     reply.code(500).send({

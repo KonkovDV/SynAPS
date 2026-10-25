@@ -1048,3 +1048,35 @@ test("gantt-model endpoint returns lanes and deltas", async () => {
 
   await app.close();
 });
+test("bridge resource-guard failures answer 503 Service Unavailable", async () => {
+  const previous = process.env.SYNAPS_ENABLE_LIMIT_GUARDS;
+  process.env.SYNAPS_ENABLE_LIMIT_GUARDS = "0";
+  const executor: SynapsContractExecutor = {
+    async executeSolveRequest(): Promise<unknown> {
+      throw new SynapsPythonBridgeError("synthetic oom", "MemoryError", "oom");
+    },
+    async executeRepairRequest(): Promise<unknown> {
+      throw new SynapsPythonBridgeError("synthetic output limit", "", "output_limit");
+    },
+  };
+  const app = buildControlPlaneApp({ executor, rateLimit: null, publicMetrics: true });
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/solve",
+      payload: createSolveRequest(),
+    });
+    assert.equal(response.statusCode, 503);
+    const body = response.json() as { statusCode: number; error: string; bridge_code: string };
+    assert.equal(body.statusCode, 503);
+    assert.equal(body.error, "Service Unavailable");
+    assert.equal(body.bridge_code, "oom");
+  } finally {
+    await app.close();
+    if (previous === undefined) {
+      delete process.env.SYNAPS_ENABLE_LIMIT_GUARDS;
+    } else {
+      process.env.SYNAPS_ENABLE_LIMIT_GUARDS = previous;
+    }
+  }
+});

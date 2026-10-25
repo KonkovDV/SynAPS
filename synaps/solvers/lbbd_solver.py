@@ -25,7 +25,7 @@ import os
 import time
 import warnings
 from collections import defaultdict
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from contextlib import nullcontext
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -53,6 +53,7 @@ from synaps.solvers._lbbd_cuts import (
     cut_pool_fingerprint,
     reported_lower_bound,
 )
+from synaps.solvers._process_pool import SubproblemPool, solve_clusters
 from synaps.solvers.coverage_outcome import stamp_honest_coverage
 from synaps.solvers.cpsat_solver import CpSatSolver
 from synaps.timegrain import duration_minutes_for
@@ -101,6 +102,8 @@ class _LbbdRun:
         self.use_greedy_warm_start = bool(kwargs.get("use_greedy_warm_start", True))
         self.parallel_subproblems = bool(kwargs.get("parallel_subproblems", True))
         self.num_workers = int(kwargs.get("num_workers", min(4, os.cpu_count() or 2)))
+        # KI-R3: one subproblem process pool for the whole solve.
+        self.pool = SubproblemPool(self.num_workers)
         # `enable_machine_tsp_cuts` is accepted for backward compatibility but
         # is a no-op since the 2026-07 S3 validity fix removed those cuts.
         _ = kwargs.get("enable_machine_tsp_cuts", True)
@@ -167,14 +170,17 @@ class _LbbdRun:
                     self.min_setup_by_wc[work_center.id] = floor
         if self.use_greedy_warm_start:
             self._greedy_warm_start()
-        for iteration in range(1, self.max_iterations + 1):
-            if time.monotonic() - self.t0 >= self.time_limit_s:
-                break
-            outcome = self._iteration(iteration)
-            if isinstance(outcome, ScheduleResult):
-                return outcome
-            if outcome == "stop":
-                break
+        try:
+            for iteration in range(1, self.max_iterations + 1):
+                if time.monotonic() - self.t0 >= self.time_limit_s:
+                    break
+                outcome = self._iteration(iteration)
+                if isinstance(outcome, ScheduleResult):
+                    return outcome
+                if outcome == "stop":
+                    break
+        finally:
+            self.pool.close()
         return self._final_result()
 
     def _greedy_warm_start(self) -> None:
@@ -234,6 +240,7 @@ class _LbbdRun:
             parallel_subproblems=self.parallel_subproblems,
             num_workers=self.num_workers,
             deadline=self.deadline,
+            pool=self.pool,
         )
         entry: dict[str, Any] = {
             "iteration": iteration,
@@ -992,8 +999,10 @@ def _solve_single_cluster_worker(
     """Solve one cluster's CP-SAT subproblem in a worker process.
 
     Accepts JSON-serializable arguments to work with ProcessPoolExecutor.
-    Returns a dict with 'assignments' (list of dicts) and 'makespan' (float),
-    or None if the subproblem is infeasible.
+    Returns a dict. A proven INFEASIBLE subproblem is
+    ``{"failed": True, "infeasible_proven": True}``; TIMEOUT/ERROR without
+    assignments is ``{"failed": True, "infeasible_proven": False}``. ``None``
+    is not a proven cut: ``solve_clusters`` treats it as an unproven failure.
     """
     from uuid import UUID
 
@@ -1063,8 +1072,9 @@ def _solve_subproblems_parallel(
     *,
     num_workers: int = 4,
     deadline: float | None = None,
+    pool: SubproblemPool | None = None,
 ) -> tuple[list[Assignment] | None, float, bool, bool]:
-    """Solve CP-SAT subproblems in parallel via ProcessPoolExecutor.
+    """Solve CP-SAT subproblems in parallel on the solve's process pool.
 
     Returns the same 4-tuple contract as :func:`_solve_subproblems`:
     ``(assignments, makespan, proven_optimal, infeasible_proven)``.
@@ -1076,6 +1086,9 @@ def _solve_subproblems_parallel(
     D3: the shared per-cluster budget is clamped to the remaining wall-clock
     budget at submission time; with all clusters running concurrently this
     bounds the wall overshoot to a single clamped cluster budget.
+
+    ``pool`` is the solve-scoped :class:`SubproblemPool` (KI-R3); without one a
+    temporary pool (at most ``num_workers`` processes) serves this call only.
     """
     if deadline is not None:
         remaining_s = deadline - time.monotonic()
@@ -1084,37 +1097,22 @@ def _solve_subproblems_parallel(
         sub_time_limit_s = max(1, min(sub_time_limit_s, int(remaining_s)))
     problem_dict = problem.model_dump(mode="json")
     assignment_items = [(str(k), str(v)) for k, v in assignment_map.items()]
+    jobs = [
+        (problem_dict, [str(w) for w in wcs], assignment_items, sub_time_limit_s, random_seed)
+        for wcs in clusters
+    ]
+    with (
+        SubproblemPool(min(num_workers, len(clusters))) if pool is None else nullcontext(pool)
+    ) as active:
+        results_by_index, infeasible_proven = solve_clusters(
+            active, _solve_single_cluster_worker, jobs
+        )
+    if results_by_index is None:
+        return None, 0.0, False, infeasible_proven
 
     all_assignments: list[Assignment] = []
     overall_makespan = 0.0
     all_proven_optimal = True
-    effective_workers = min(num_workers, len(clusters))
-
-    with ProcessPoolExecutor(max_workers=effective_workers) as pool:
-        futures = {}
-        for cluster_index, cluster_wcs in enumerate(clusters):
-            wc_list = [str(w) for w in cluster_wcs]
-            future = pool.submit(
-                _solve_single_cluster_worker,
-                problem_dict,
-                wc_list,
-                assignment_items,
-                sub_time_limit_s,
-                random_seed,
-            )
-            futures[future] = cluster_index
-
-        # D2: buffer results by cluster index so the merged assignment order is
-        # independent of completion order (as_completed is non-deterministic).
-        results_by_index: dict[int, dict[str, Any]] = {}
-        for future in as_completed(futures):
-            cluster_index = futures[future]
-            result = future.result()
-            if result is None or result.get("failed"):
-                infeasible_proven = bool(result.get("infeasible_proven")) if result else False
-                return None, 0.0, False, infeasible_proven
-            results_by_index[cluster_index] = result
-
     for cluster_index in sorted(results_by_index):
         result = results_by_index[cluster_index]
         if not result.get("proven_optimal", False):
@@ -1185,6 +1183,7 @@ def _dispatch_subproblems(
     parallel_subproblems: bool,
     num_workers: int,
     deadline: float,
+    pool: SubproblemPool | None = None,
 ) -> tuple[list[Assignment] | None, float, bool, bool]:
     """Route to serial or parallel cluster subproblem solves."""
     clusters = _cluster_machines(assignment_map, aux_links)
@@ -1200,6 +1199,7 @@ def _dispatch_subproblems(
             random_seed,
             num_workers=num_workers,
             deadline=deadline,
+            pool=pool,
         )
     return _solve_subproblems(
         problem,
