@@ -21,7 +21,6 @@ Academic basis:
 from __future__ import annotations
 
 import itertools
-import math
 import os
 import time
 import warnings
@@ -53,6 +52,12 @@ from synaps.solvers._lbbd_cuts import (
     cut_kind_lb_contribution,
     cut_pool_fingerprint,
     reported_lower_bound,
+)
+from synaps.solvers._lbbd_master import (
+    add_assignment_rows,
+    add_capacity_rows,
+    add_nogood_row,
+    extract_master_solution,
 )
 from synaps.solvers._process_pool import SubproblemPool, solve_clusters
 from synaps.solvers.coverage_outcome import stamp_honest_coverage
@@ -602,74 +607,94 @@ def _solve_precedence_aware_master(
     Returns ``((assignment_map, master_bound), proven_infeasible)``. When the
     master yields no incumbent, ``proven_infeasible`` is True only for a HiGHS
     ``kInfeasible`` status (F12); a time-limit miss is ``(None, False)``.
+
+    Rows, in order (the order is part of HiGHS' search path): unique
+    assignment, timing linkage ``end = start + Σ P·y``, chain precedence,
+    relaxed capacity, ``C_max ≥ end`` and the Benders cuts.
     """
+    del ops_by_id  # the layout indexes operations by position
     h = highspy.Highs()
     h.silent()
     # D3: bound the master MILP by the remaining wall budget (see lbbd_solver).
     if master_time_limit_s is not None:
         h.setOptionValue("time_limit", max(1.0, float(master_time_limit_s)))
+    layout = _HdMasterLayout.add_columns(h, problem, eligible_by_op)
+    add_assignment_rows(h, problem, eligible_by_op, layout.var_index)
+    _add_timing_rows(h, problem, eligible_by_op, wc_by_id, layout)
+    _add_precedence_rows(h, dag_edges, layout)
+    add_capacity_rows(h, problem, layout.var_index, layout.cmax_idx, min_setup_by_wc)
+    _add_makespan_rows(h, problem, layout)
+    _add_hd_cut_rows(h, cuts, layout.var_index)
+    h.changeObjectiveSense(highspy.ObjSense.kMinimize)
+    if prev_solution is not None and hasattr(h, "setSolution"):
+        _hint_hd_master(h, problem, eligible_by_op, layout, prev_solution)
+    h.run()
+    return extract_master_solution(h, problem, eligible_by_op, layout.var_index, layout.cmax_idx)
 
-    # ---- Index maps ----
-    var_index: dict[tuple[UUID, UUID], int] = {}
-    col_idx = 0
 
+class _HdMasterLayout:
+    """Column layout: ``y[i, k]`` binaries, then ``start[i]``, ``end[i]``, ``C_max``."""
+
+    __slots__ = ("cmax_idx", "end_base", "n_vars", "op_to_idx", "start_base", "var_index")
+
+    def __init__(
+        self,
+        var_index: dict[tuple[UUID, UUID], int],
+        op_to_idx: dict[UUID, int],
+        start_base: int,
+        end_base: int,
+        cmax_idx: int,
+    ) -> None:
+        self.var_index = var_index
+        self.op_to_idx = op_to_idx
+        self.start_base = start_base
+        self.end_base = end_base
+        self.cmax_idx = cmax_idx
+        self.n_vars = cmax_idx + 1
+
+    @classmethod
+    def add_columns(
+        cls, h: Any, problem: ScheduleProblem, eligible_by_op: dict[UUID, list[UUID]]
+    ) -> _HdMasterLayout:
+        var_index: dict[tuple[UUID, UUID], int] = {}
+        col_idx = 0
+        for op in problem.operations:
+            for wc_id in eligible_by_op[op.id]:
+                var_index[(op.id, wc_id)] = col_idx
+                col_idx += 1
+        n_y = col_idx
+        op_to_idx = {op.id: i for i, op in enumerate(problem.operations)}
+        start_base = n_y
+        end_base = start_base + len(problem.operations)
+        layout = cls(var_index, op_to_idx, start_base, end_base, end_base + len(op_to_idx))
+        n_vars = layout.n_vars
+        costs = [0.0] * n_vars
+        costs[layout.cmax_idx] = 1.0  # minimize C_max
+        # y binary in [0, 1]; start, end and C_max continuous in [0, inf).
+        upper = [1.0] * n_y + [highspy.kHighsInf] * (n_vars - n_y)
+        h.addVars(n_vars, np.array([0.0] * n_vars), np.array(upper))
+        h.changeColsCost(n_vars, np.arange(n_vars, dtype=np.int32), np.array(costs))
+        if n_y > 0:
+            h.changeColsIntegrality(
+                n_y,
+                np.arange(n_y, dtype=np.int32),
+                np.array([highspy.HighsVarType.kInteger] * n_y),
+            )
+        return layout
+
+
+def _add_timing_rows(
+    h: Any,
+    problem: ScheduleProblem,
+    eligible_by_op: dict[UUID, list[UUID]],
+    wc_by_id: dict[UUID, WorkCenter],
+    layout: _HdMasterLayout,
+) -> None:
+    """Timing linkage ``end[i] - start[i] - ∑_k P[i,k] · y[i,k] = 0``."""
     for op in problem.operations:
-        for wc_id in eligible_by_op[op.id]:
-            var_index[(op.id, wc_id)] = col_idx
-            col_idx += 1
-
-    n_y = col_idx
-
-    # Continuous timing variables: start[i], end[i] for each operation
-    op_list = list(problem.operations)
-    op_to_idx = {op.id: i for i, op in enumerate(op_list)}
-
-    start_base = n_y
-    end_base = start_base + len(op_list)
-    cmax_idx = end_base + len(op_list)
-    n_vars = cmax_idx + 1
-
-    # ---- Column setup ----
-    costs = [0.0] * n_vars
-    costs[cmax_idx] = 1.0  # minimize C_max
-
-    lower = [0.0] * n_vars
-    upper = [1.0] * n_y  # y binary
-    # start, end, C_max continuous [0, inf)
-    upper.extend([highspy.kHighsInf] * (n_vars - n_y))
-
-    h.addVars(n_vars, np.array(lower), np.array(upper))
-    h.changeColsCost(n_vars, np.arange(n_vars, dtype=np.int32), np.array(costs))
-
-    # Set integrality for binary y vars
-    if n_y > 0:
-        y_indices = np.arange(n_y, dtype=np.int32)
-        y_types = np.array([highspy.HighsVarType.kInteger] * n_y)
-        h.changeColsIntegrality(n_y, y_indices, y_types)
-
-    # ---- Constraint 1: Unique assignment ----
-    for op in problem.operations:
-        indices = [var_index[(op.id, wc_id)] for wc_id in eligible_by_op[op.id]]
-        coeffs = [1.0] * len(indices)
-        h.addRow(
-            1.0,
-            1.0,
-            len(indices),
-            np.array(indices, dtype=np.int32),
-            np.array(coeffs),
-        )
-
-    # ---- Constraint 2: Timing linkage ----
-    # end[i] = start[i] + ∑_k P[i,k] · y[i,k]
-    # Rearranged: end[i] - start[i] - ∑ P·y = 0
-    for op in problem.operations:
-        op_idx = op_to_idx[op.id]
-        s_idx = start_base + op_idx
-        e_idx = end_base + op_idx
-
-        indices = [e_idx, s_idx]
+        op_idx = layout.op_to_idx[op.id]
+        indices = [layout.end_base + op_idx, layout.start_base + op_idx]
         coeffs = [1.0, -1.0]
-
         for wc_id in eligible_by_op[op.id]:
             wc: Any = wc_by_id.get(wc_id)
             if wc is None:
@@ -678,10 +703,8 @@ def _solve_precedence_aware_master(
                 wc = SimpleNamespace(id=wc_id, speed_factor=1.0)
             # CP-SAT duration semantics (T-30 aware) so the master timing
             # model matches what the subproblem model realises (S2/S3 validity).
-            duration = float(duration_minutes_for(op, wc))
-            indices.append(var_index[(op.id, wc_id)])
-            coeffs.append(-duration)
-
+            indices.append(layout.var_index[(op.id, wc_id)])
+            coeffs.append(-float(duration_minutes_for(op, wc)))
         h.addRow(
             0.0,
             0.0,
@@ -690,88 +713,48 @@ def _solve_precedence_aware_master(
             np.array(coeffs),
         )
 
-    # ---- Constraint 3: Precedence ----
-    # start[j] ≥ end[i]  →  start[j] - end[i] ≥ 0
+
+def _add_precedence_rows(
+    h: Any, dag_edges: list[tuple[UUID, UUID]], layout: _HdMasterLayout
+) -> None:
+    """Precedence ``start[j] - end[i] ≥ 0`` for every DAG edge ``i → j``."""
     for pred_id, succ_id in dag_edges:
-        if pred_id not in op_to_idx or succ_id not in op_to_idx:
+        if pred_id not in layout.op_to_idx or succ_id not in layout.op_to_idx:
             continue
-        e_pred = end_base + op_to_idx[pred_id]
-        s_succ = start_base + op_to_idx[succ_id]
         h.addRow(
             0.0,
             highspy.kHighsInf,
             2,
-            np.array([s_succ, e_pred], dtype=np.int32),
+            np.array(
+                [
+                    layout.start_base + layout.op_to_idx[succ_id],
+                    layout.end_base + layout.op_to_idx[pred_id],
+                ],
+                dtype=np.int32,
+            ),
             np.array([1.0, -1.0]),
         )
 
-    # ---- Constraint 4: Relaxed capacity ----
-    for wc in problem.work_centers:
-        cap_indices: list[int] = []
-        cap_coeffs: list[float] = []
-        cap_upper_bound = 0.0
-        for op in problem.operations:
-            key = (op.id, wc.id)
-            if key in var_index:
-                # CP-SAT duration semantics divided by parallel lanes: a
-                # max_parallel-lane machine finishes load L in L / lanes, so
-                # the relaxation stays a valid lower bound (see lbbd_solver).
-                lanes = float(max(1, wc.max_parallel))
-                duration = float(duration_minutes_for(op, wc)) / lanes
-                cap_indices.append(var_index[key])
-                cap_coeffs.append(duration)
-        if not cap_indices:
-            continue
-        if min_setup_by_wc and wc.id in min_setup_by_wc and wc.max_parallel <= 1:
-            ms = min_setup_by_wc[wc.id]
-            if ms > 0:
-                cap_coeffs = [c + ms for c in cap_coeffs]
-                cap_upper_bound = ms
-        # ∑ P·y - C_max ≤ 0
-        cap_indices.append(cmax_idx)
-        cap_coeffs.append(-1.0)
-        h.addRow(
-            -highspy.kHighsInf,
-            cap_upper_bound,
-            len(cap_indices),
-            np.array(cap_indices, dtype=np.int32),
-            np.array(cap_coeffs),
-        )
 
-    # ---- Constraint 5: C_max ≥ end[i] for all ops ----
+def _add_makespan_rows(h: Any, problem: ScheduleProblem, layout: _HdMasterLayout) -> None:
+    """``C_max - end[i] ≥ 0`` for every operation."""
     for op in problem.operations:
-        e_idx = end_base + op_to_idx[op.id]
-        # C_max - end[i] ≥ 0
         h.addRow(
             0.0,
             highspy.kHighsInf,
             2,
-            np.array([cmax_idx, e_idx], dtype=np.int32),
+            np.array([layout.cmax_idx, layout.end_base + layout.op_to_idx[op.id]], dtype=np.int32),
             np.array([1.0, -1.0]),
         )
 
-    # ---- Constraint 6: Benders cuts ----
+
+def _add_hd_cut_rows(
+    h: Any, cuts: list[_BendersCut], var_index: dict[tuple[UUID, UUID], int]
+) -> None:
+    """No-good and local-branching rows; retired or unknown kinds raise."""
     for cut in cuts:
         if cut.kind == "nogood":
-            indices = []
-            coeffs = []
-            for op_id, wc_id in cut.assignment_map.items():
-                key = (op_id, wc_id)
-                if key in var_index:
-                    indices.append(var_index[key])
-                    coeffs.append(1.0)
-            if not indices:
-                raise ValueError(
-                    "LBBD-HD nogood cut has no bindable variables; refusing silent skip "
-                    "(Wave 14 / H14-nogood)."
-                )
-            h.addRow(
-                -highspy.kHighsInf,
-                len(indices) - 1.0,
-                len(indices),
-                np.array(indices, dtype=np.int32),
-                np.array(coeffs),
-            )
+            add_nogood_row(h, cut.assignment_map, var_index, "LBBD-HD")
         elif cut.kind in ("setup_cost", "machine_tsp"):
             # Wave 11 / M1 + KI-S3: generation is retired; refuse to apply if injected.
             raise ValueError(
@@ -779,14 +762,12 @@ def _solve_precedence_aware_master(
                 "refusing to apply sentinel optimality cuts"
             )
         elif cut.kind == "local_branching":
-            lb_indices: list[int] = []
-            for op_id in cut.bottleneck_ops:
-                lb_wc = cut.assignment_map.get(op_id)
-                if lb_wc is None:
-                    continue
-                key = (op_id, lb_wc)
-                if key in var_index:
-                    lb_indices.append(var_index[key])
+            lb_indices = [
+                var_index[(op_id, lb_wc)]
+                for op_id in cut.bottleneck_ops
+                if (lb_wc := cut.assignment_map.get(op_id)) is not None
+                and (op_id, lb_wc) in var_index
+            ]
             if lb_indices:
                 # Enforce at least delta assignment changes in this neighborhood:
                 # sum(match incumbent assignments) <= |S| - delta
@@ -802,59 +783,26 @@ def _solve_precedence_aware_master(
                 f"Unknown LBBD-HD cut kind {cut.kind!r}; refusing silent no-op (Wave 12 / M12-1)."
             )
 
-    # ---- Solve ----
-    h.changeObjectiveSense(highspy.ObjSense.kMinimize)
 
-    if prev_solution is not None and hasattr(h, "setSolution"):
-        hint = [0.0] * n_vars
-        for op in problem.operations:
-            prev_wc = prev_solution.get(op.id)
-            for wc_id in eligible_by_op[op.id]:
-                key = (op.id, wc_id)
-                if key in var_index:
-                    hint[var_index[key]] = 1.0 if wc_id == prev_wc else 0.0
-        # Set timing hints from greedy (rough estimates)
-        horizon_minutes = (
-            problem.planning_horizon_end - problem.planning_horizon_start
-        ).total_seconds() / 60
-        hint[cmax_idx] = horizon_minutes
-        h.setSolution(n_vars, np.arange(n_vars, dtype=np.int32), np.array(hint))
-
-    h.run()
-
-    status = h.getInfoValue("primal_solution_status")[1]
-    if status != 2:  # 2 = feasible
-        proven_infeasible = h.getModelStatus() == highspy.HighsModelStatus.kInfeasible
-        return None, proven_infeasible
-
-    solution = h.getSolution()
-    col_values = solution.col_value
-
-    # Extract assignment
-    assignment_map: dict[UUID, UUID] = {}
+def _hint_hd_master(
+    h: Any,
+    problem: ScheduleProblem,
+    eligible_by_op: dict[UUID, list[UUID]],
+    layout: _HdMasterLayout,
+    prev_solution: dict[UUID, UUID],
+) -> None:
+    """Warm-start ``y`` from the previous assignment; ``C_max`` at the horizon."""
+    hint = [0.0] * layout.n_vars
     for op in problem.operations:
-        best_val = -1.0
-        best_wc: UUID | None = None
+        prev_wc = prev_solution.get(op.id)
         for wc_id in eligible_by_op[op.id]:
             key = (op.id, wc_id)
-            val = col_values[var_index[key]]
-            if val > best_val:
-                best_val = val
-                best_wc = wc_id
-        if best_wc is not None:
-            assignment_map[op.id] = best_wc
-
-    master_bound = col_values[cmax_idx]
-    # D3 validity: a time-limited master returns a primal incumbent (upper
-    # bound on the master optimum); use the proven dual bound so the reported
-    # relaxation lower bound stays valid (equals primal at optimality).
-    try:
-        dual_bound = float(h.getInfoValue("mip_dual_bound")[1])
-    except (IndexError, TypeError, ValueError):
-        dual_bound = master_bound
-    if math.isfinite(dual_bound):
-        master_bound = min(master_bound, dual_bound)
-    return (assignment_map, master_bound), False
+            if key in layout.var_index:
+                hint[layout.var_index[key]] = 1.0 if wc_id == prev_wc else 0.0
+    hint[layout.cmax_idx] = (
+        problem.planning_horizon_end - problem.planning_horizon_start
+    ).total_seconds() / 60
+    h.setSolution(layout.n_vars, np.arange(layout.n_vars, dtype=np.int32), np.array(hint))
 
 
 # ---------------------------------------------------------------------------

@@ -20,7 +20,6 @@ Features:
 
 from __future__ import annotations
 
-import math
 import os
 import time
 import warnings
@@ -53,6 +52,12 @@ from synaps.solvers._lbbd_cuts import (
     cut_pool_fingerprint,
     reported_lower_bound,
 )
+from synaps.solvers._lbbd_master import (
+    add_assignment_rows,
+    add_capacity_rows,
+    add_nogood_row,
+    extract_master_solution,
+)
 from synaps.solvers._lbbd_sound import (
     SoundMaster,
     SoundMasterBound,
@@ -62,7 +67,6 @@ from synaps.solvers._lbbd_sound import (
 from synaps.solvers._process_pool import SubproblemPool, solve_clusters
 from synaps.solvers.coverage_outcome import stamp_honest_coverage
 from synaps.solvers.cpsat_solver import CpSatSolver
-from synaps.timegrain import duration_minutes_for
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -552,8 +556,9 @@ def _solve_master(
     proof of infeasibility.
     """
     started = time.monotonic()
+    del wc_by_id  # capacity rows read the work centers from the problem
     h, var_index, cmax_idx = _build_master_model(
-        problem, eligible_by_op, wc_by_id, min_setup_by_wc, master_time_limit_s
+        problem, eligible_by_op, min_setup_by_wc, master_time_limit_s
     )
     # Constraint 3: Benders cuts from previous iterations
     _add_benders_cut_rows(h, cuts, var_index, cmax_idx)
@@ -573,13 +578,12 @@ def _solve_master(
         _, best_dual = sound.solve(
             h, var_index, z_index, cmax_idx, started + max(1.0, budget), sound_rounds
         )
-    return _extract_master_solution(h, problem, eligible_by_op, var_index, cmax_idx, best_dual)
+    return extract_master_solution(h, problem, eligible_by_op, var_index, cmax_idx, best_dual)
 
 
 def _build_master_model(
     problem: ScheduleProblem,
     eligible_by_op: dict[UUID, list[UUID]],
-    wc_by_id: dict[UUID, WorkCenter],
     min_setup_by_wc: dict[UUID, float] | None,
     master_time_limit_s: float | None,
 ) -> tuple[Any, dict[tuple[UUID, UUID], int], int]:
@@ -621,67 +625,9 @@ def _build_master_model(
     int_types = np.array([highspy.HighsVarType.kInteger] * n_y)
     h.changeColsIntegrality(n_y, col_indices, int_types)
 
-    # Constraint 1: unique assignment — ∑_k y[i,k] = 1 for each operation
-    for op in problem.operations:
-        unique_indices = [var_index[(op.id, wc_id)] for wc_id in eligible_by_op[op.id]]
-        unique_coeffs = [1.0] * len(unique_indices)
-        h.addRow(
-            1.0,
-            1.0,
-            len(unique_indices),
-            np.array(unique_indices, dtype=np.int32),
-            np.array(unique_coeffs),
-        )
-
-    _add_capacity_rows(h, problem, var_index, cmax_idx, min_setup_by_wc)
+    add_assignment_rows(h, problem, eligible_by_op, var_index)
+    add_capacity_rows(h, problem, var_index, cmax_idx, min_setup_by_wc)
     return h, var_index, cmax_idx
-
-
-def _add_capacity_rows(
-    h: Any,
-    problem: ScheduleProblem,
-    var_index: dict[tuple[UUID, UUID], int],
-    cmax_idx: int,
-    min_setup_by_wc: dict[UUID, float] | None,
-) -> None:
-    """Constraint 2: relaxed capacity — ∑_i P[i,k] · y[i,k] ≤ C_max per machine."""
-    for wc in problem.work_centers:
-        capacity_indices: list[int] = []
-        capacity_coeffs: list[float] = []
-        capacity_upper_bound = 0.0
-        for op in problem.operations:
-            key = (op.id, wc.id)
-            if key in var_index:
-                # CP-SAT duration semantics (max(1, round(p))), divided by the
-                # number of parallel lanes: a machine with max_parallel lanes
-                # finishes load L in L / max_parallel, so the relaxation
-                # `Sum p_i y_i / lanes <= C_max` stays a valid lower bound
-                # (matching average_capacity_lb in lower_bounds.py). Without the
-                # division the bound over-claims on max_parallel > 1 machines.
-                lanes = float(max(1, wc.max_parallel))
-                duration = float(duration_minutes_for(op, wc)) / lanes
-                capacity_indices.append(var_index[key])
-                capacity_coeffs.append(duration)
-        if not capacity_indices:
-            continue
-        # The min-setup transition floor assumes n_k - 1 sequential transitions
-        # on a single lane; with parallel lanes that count no longer holds, so
-        # only apply it to single-lane machines (keeps the bound valid).
-        if min_setup_by_wc and wc.id in min_setup_by_wc and wc.max_parallel <= 1:
-            min_setup = min_setup_by_wc[wc.id]
-            if min_setup > 0:
-                capacity_coeffs = [coefficient + min_setup for coefficient in capacity_coeffs]
-                capacity_upper_bound = min_setup
-        # ∑ P·y - C_max ≤ 0
-        capacity_indices.append(cmax_idx)
-        capacity_coeffs.append(-1.0)
-        h.addRow(
-            -highspy.kHighsInf,
-            capacity_upper_bound,
-            len(capacity_indices),
-            np.array(capacity_indices, dtype=np.int32),
-            np.array(capacity_coeffs),
-        )
 
 
 def _hint_master_solution(
@@ -711,58 +657,6 @@ def _hint_master_solution(
     )
     n_vars = len(hint_values)
     h.setSolution(n_vars, np.arange(n_vars, dtype=np.int32), np.array(hint_values))
-
-
-def _extract_master_solution(
-    h: Any,
-    problem: ScheduleProblem,
-    eligible_by_op: dict[UUID, list[UUID]],
-    var_index: dict[tuple[UUID, UUID], int],
-    cmax_idx: int,
-    best_dual: float = float("-inf"),
-) -> tuple[tuple[dict[UUID, UUID], float] | None, bool]:
-    """Assignment and proven master bound of a solved HiGHS master."""
-    status = h.getInfoValue("primal_solution_status")[1]
-    if status != 2:  # 2 = feasible
-        # F12 (audit v4): only HiGHS kInfeasible is a PROOF; a time-limited
-        # master without an incumbent is inconclusive and must not be reported
-        # as SolverStatus.INFEASIBLE upstream.
-        proven_infeasible = h.getModelStatus() == highspy.HighsModelStatus.kInfeasible
-        return None, proven_infeasible
-
-    solution = h.getSolution()
-    col_values = solution.col_value
-
-    # Extract assignment: for each op, pick the machine with y closest to 1
-    assignment_map: dict[UUID, UUID] = {}
-    for op in problem.operations:
-        best_val = -1.0
-        best_wc: UUID | None = None
-        for wc_id in eligible_by_op[op.id]:
-            key = (op.id, wc_id)
-            val = col_values[var_index[key]]
-            if val > best_val:
-                best_val = val
-                best_wc = wc_id
-        if best_wc is not None:
-            assignment_map[op.id] = best_wc
-
-    master_bound = col_values[cmax_idx]
-    # D3 validity: when the master is time-limited it may return a FEASIBLE but
-    # non-optimal incumbent, whose C_max is an UPPER bound on the master
-    # optimum, not a valid lower bound. Use the proven dual bound for the
-    # reported relaxation LB (it equals the primal at optimality) so the S1/S2/
-    # S3 lower-bound-validity invariant is preserved even on time-limited runs.
-    try:
-        dual_bound = float(h.getInfoValue("mip_dual_bound")[1])
-    except (IndexError, TypeError, ValueError):
-        dual_bound = master_bound
-    # T-06: an earlier separation round may have proven more than the last,
-    # clock-limited one; every round's model holds only valid rows.
-    dual_bound = max(dual_bound, best_dual)
-    if math.isfinite(dual_bound):
-        master_bound = min(master_bound, dual_bound)
-    return (assignment_map, master_bound), False
 
 
 # ---------------------------------------------------------------------------
@@ -1389,26 +1283,7 @@ def _add_benders_cut_rows(
     """Append all Benders-cut rows to the HiGHS master model."""
     for cut in cuts:
         if cut.kind == "nogood":
-            # Exclude exact assignment: ∑ y[i, assignment[i]] ≤ |ops| - 1
-            indices = []
-            coeffs = []
-            for op_id, wc_id in cut.assignment_map.items():
-                key = (op_id, wc_id)
-                if key in var_index:
-                    indices.append(var_index[key])
-                    coeffs.append(1.0)
-            if not indices:
-                raise ValueError(
-                    "LBBD nogood cut has no bindable variables; refusing silent skip "
-                    "(Wave 14 / H14-nogood)."
-                )
-            h.addRow(
-                -highspy.kHighsInf,
-                len(indices) - 1.0,
-                len(indices),
-                np.array(indices, dtype=np.int32),
-                np.array(coeffs),
-            )
+            add_nogood_row(h, cut.assignment_map, var_index, "LBBD")
         elif cut.kind in ("setup_cost", "machine_tsp"):
             # Wave 11 / M1 + KI-S3: generation is retired; refuse to apply if injected.
             raise ValueError(

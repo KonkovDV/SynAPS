@@ -527,6 +527,324 @@ def _apply_sat_parameter_overrides(
     return effective_parameters
 
 
+class _SdstTerms:
+    """Objective terms and setup intervals collected while building circuits."""
+
+    __slots__ = ("energy", "material", "setup", "setup_intervals_by_op")
+
+    def __init__(self) -> None:
+        self.setup: list[Any] = []
+        self.material: list[Any] = []
+        self.energy: list[Any] = []
+        # operation_id -> [(setup_interval, arc_literal)] for aux resource tracking
+        self.setup_intervals_by_op: dict[Any, list[tuple[Any, Any]]] = {}
+
+
+def _constrain_machine(
+    model: cp_model.CpModel,
+    work_center: Any,
+    machine_operations: list[Any],
+    variables: tuple[
+        dict[tuple[Any, Any], Any],
+        dict[tuple[Any, Any], Any],
+        dict[tuple[Any, Any], Any],
+        dict[tuple[Any, Any], Any],
+    ],
+    frozen_on_machine: list[Assignment],
+    ops_ctx: Mapping[Any, Any],
+    lookups: tuple[
+        dict[tuple[Any, Any, Any], int],
+        dict[tuple[Any, Any, Any], int],
+        dict[tuple[Any, Any, Any], int],
+    ],
+    *,
+    planning_horizon_start: Any,
+    horizon: int,
+    calendar_shifts: Mapping[tuple[Any, Any], Sequence[tuple[int, int, Any]]] | None,
+    terms: _SdstTerms,
+) -> None:
+    """One machine: frozen intervals, capacity, then (single lane) SDST ordering."""
+    starts, ends, intervals, presences = variables
+    machine_intervals = [
+        intervals[(operation.id, work_center.id)] for operation in machine_operations
+    ]
+    frozen_machine_intervals, frozen_metas = _frozen_machine_intervals(
+        model,
+        work_center.id,
+        frozen_on_machine,
+        planning_horizon_start=planning_horizon_start,
+        horizon=horizon,
+    )
+    constrained_machine_intervals = machine_intervals + frozen_machine_intervals
+    if work_center.max_parallel <= 1:
+        model.add_no_overlap(constrained_machine_intervals)
+    else:
+        model.add_cumulative(
+            constrained_machine_intervals,
+            [1] * len(constrained_machine_intervals),
+            work_center.max_parallel,
+        )
+    if work_center.max_parallel > 1:
+        return
+    _add_frozen_free_sdst(
+        model,
+        work_center.id,
+        frozen_metas,
+        machine_operations,
+        ops_ctx,
+        starts,
+        ends,
+        presences,
+        lookups[0],
+    )
+    _add_sdst_circuit(
+        model,
+        work_center.id,
+        machine_operations,
+        starts,
+        ends,
+        presences,
+        lookups,
+        horizon=horizon,
+        calendar_shifts=calendar_shifts,
+        terms=terms,
+    )
+
+
+def _frozen_machine_intervals(
+    model: cp_model.CpModel,
+    work_center_id: Any,
+    frozen_on_machine: list[Assignment],
+    *,
+    planning_horizon_start: Any,
+    horizon: int,
+) -> tuple[list[Any], list[tuple[Assignment, int, int]]]:
+    """Fixed intervals for frozen assignments on one machine (sorted by start)."""
+    frozen_machine_intervals: list[Any] = []
+    frozen_metas: list[tuple[Assignment, int, int]] = []
+    for frozen_index, frozen_assignment in enumerate(
+        sorted(frozen_on_machine, key=lambda assignment: assignment.start_time)
+    ):
+        raw_start = round(
+            (frozen_assignment.start_time - planning_horizon_start).total_seconds() / 60.0
+        )
+        raw_end = round(
+            (frozen_assignment.end_time - planning_horizon_start).total_seconds() / 60.0
+        )
+        start_offset = max(0, min(raw_start, horizon))
+        end_offset = max(0, min(raw_end, horizon))
+        # Wave 12 / C12-4: refuse silently dropped frozen intervals.
+        if start_offset != raw_start or end_offset != raw_end or end_offset <= start_offset:
+            raise ValueError(
+                "frozen_assignment collapses or clamps outside the CP-SAT horizon "
+                f"(op={frozen_assignment.operation_id}, start={raw_start}, "
+                f"end={raw_end}, horizon={horizon}); refuse loudly (Wave 12 / C12-4)."
+            )
+
+        frozen_start = model.new_int_var(
+            start_offset,
+            start_offset,
+            f"frozen_start_{work_center_id}_{frozen_index}",
+        )
+        frozen_end = model.new_int_var(
+            end_offset,
+            end_offset,
+            f"frozen_end_{work_center_id}_{frozen_index}",
+        )
+        frozen_machine_intervals.append(
+            model.new_interval_var(
+                frozen_start,
+                end_offset - start_offset,
+                frozen_end,
+                f"frozen_interval_{work_center_id}_{frozen_index}",
+            )
+        )
+        frozen_metas.append((frozen_assignment, start_offset, end_offset))
+    return frozen_machine_intervals, frozen_metas
+
+
+def _add_frozen_free_sdst(
+    model: cp_model.CpModel,
+    work_center_id: Any,
+    frozen_metas: list[tuple[Assignment, int, int]],
+    machine_operations: list[Any],
+    ops_ctx: Mapping[Any, Any],
+    starts: dict[tuple[Any, Any], Any],
+    ends: dict[tuple[Any, Any], Any],
+    presences: dict[tuple[Any, Any], Any],
+    setup_minutes_lookup: dict[tuple[Any, Any, Any], int],
+) -> None:
+    """Wave 12 / C12-1: SDST between frozen ↔ free ops (the circuit is free-only)."""
+    for frozen_index, (frozen_assignment, frozen_start_off, frozen_end_off) in enumerate(
+        frozen_metas
+    ):
+        frozen_op = ops_ctx.get(frozen_assignment.operation_id)
+        if frozen_op is None:
+            raise ValueError(
+                "frozen_assignment operation missing from frozen_context_operations "
+                f"(op={frozen_assignment.operation_id}); cannot enforce SDST "
+                "(Wave 12 / C12-1)."
+            )
+        for op_j in machine_operations:
+            presence = presences[(op_j.id, work_center_id)]
+            setup_fj = setup_minutes_lookup.get(
+                (work_center_id, frozen_op.state_id, op_j.state_id), 0
+            )
+            setup_jf = setup_minutes_lookup.get(
+                (work_center_id, op_j.state_id, frozen_op.state_id), 0
+            )
+            j_before = model.new_bool_var(f"frozen_ord_{work_center_id}_{frozen_index}_{op_j.id}")
+            model.add(
+                ends[(op_j.id, work_center_id)] + setup_jf <= frozen_start_off
+            ).only_enforce_if([j_before, presence])
+            model.add(
+                starts[(op_j.id, work_center_id)] >= frozen_end_off + setup_fj
+            ).only_enforce_if([j_before.negated(), presence])
+
+
+def _add_sdst_circuit(
+    model: cp_model.CpModel,
+    work_center_id: Any,
+    machine_operations: list[Any],
+    starts: dict[tuple[Any, Any], Any],
+    ends: dict[tuple[Any, Any], Any],
+    presences: dict[tuple[Any, Any], Any],
+    lookups: tuple[
+        dict[tuple[Any, Any, Any], int],
+        dict[tuple[Any, Any, Any], int],
+        dict[tuple[Any, Any, Any], int],
+    ],
+    *,
+    horizon: int,
+    calendar_shifts: Mapping[tuple[Any, Any], Sequence[tuple[int, int, Any]]] | None,
+    terms: _SdstTerms,
+) -> None:
+    """One machine's circuit: depot arcs, transition arcs, self-loops, unused depot."""
+    n = len(machine_operations)
+    op_index: dict[Any, int] = {op.id: idx for idx, op in enumerate(machine_operations)}
+    depot = n  # virtual depot node
+
+    arcs: list[tuple[int, int, Any]] = []
+
+    # Depot → operation (operation is first on machine)
+    for operation in machine_operations:
+        lit = model.new_bool_var(f"arc_depot_{operation.id}_{work_center_id}")
+        arcs.append((depot, op_index[operation.id], lit))
+        model.add_implication(lit, presences[(operation.id, work_center_id)])
+
+    # Operation → depot (operation is last on machine)
+    for operation in machine_operations:
+        lit = model.new_bool_var(f"arc_{operation.id}_depot_{work_center_id}")
+        arcs.append((op_index[operation.id], depot, lit))
+        model.add_implication(lit, presences[(operation.id, work_center_id)])
+
+    # Operation → operation arcs (j directly follows i)
+    for op_i in machine_operations:
+        for op_j in machine_operations:
+            if op_i.id == op_j.id:
+                continue
+            lit = model.new_bool_var(f"arc_{op_i.id}_{op_j.id}_{work_center_id}")
+            arcs.append((op_index[op_i.id], op_index[op_j.id], lit))
+            _add_transition_arc(
+                model,
+                work_center_id,
+                op_i,
+                op_j,
+                lit,
+                starts,
+                ends,
+                presences,
+                lookups,
+                horizon=horizon,
+                calendar_shifts=calendar_shifts,
+                terms=terms,
+            )
+
+    # Self-loops for absent operations (not assigned to this machine)
+    for operation in machine_operations:
+        absent = presences[(operation.id, work_center_id)].negated()
+        arcs.append((op_index[operation.id], op_index[operation.id], absent))
+
+    # Self-loop for depot when machine is completely unused
+    machine_presences = [
+        presences[(operation.id, work_center_id)] for operation in machine_operations
+    ]
+    unused = model.new_bool_var(f"unused_{work_center_id}")
+    model.add(sum(machine_presences) == 0).only_enforce_if(unused)
+    model.add(sum(machine_presences) >= 1).only_enforce_if(unused.negated())
+    arcs.append((depot, depot, unused))
+
+    model.add_circuit(arcs)
+
+
+def _add_transition_arc(
+    model: cp_model.CpModel,
+    work_center_id: Any,
+    op_i: Any,
+    op_j: Any,
+    lit: Any,
+    starts: dict[tuple[Any, Any], Any],
+    ends: dict[tuple[Any, Any], Any],
+    presences: dict[tuple[Any, Any], Any],
+    lookups: tuple[
+        dict[tuple[Any, Any, Any], int],
+        dict[tuple[Any, Any, Any], int],
+        dict[tuple[Any, Any, Any], int],
+    ],
+    *,
+    horizon: int,
+    calendar_shifts: Mapping[tuple[Any, Any], Sequence[tuple[int, int, Any]]] | None,
+    terms: _SdstTerms,
+) -> None:
+    """Arc ``i → j``: timing with setup, setup window, objective terms."""
+    setup_minutes_lookup, setup_material_lookup, setup_energy_lookup = lookups
+    model.add_implication(lit, presences[(op_i.id, work_center_id)])
+    model.add_implication(lit, presences[(op_j.id, work_center_id)])
+
+    # Timing: j starts after i ends + setup from state(i) → state(j)
+    state_key = (work_center_id, op_i.state_id, op_j.state_id)
+    setup_minutes = setup_minutes_lookup.get(state_key, 0)
+    model.add(
+        starts[(op_j.id, work_center_id)] >= ends[(op_i.id, work_center_id)] + setup_minutes
+    ).only_enforce_if(lit)
+
+    if setup_minutes:
+        terms.setup.append(setup_minutes * lit)
+
+        # Reserve setup as an optional window ending exactly at op_j's start:
+        # [start_j - setup, start_j], with its own start var constrained only
+        # under `lit`. The previous form passed ends[i] as the interval start,
+        # which — since a CP-SAT IntervalVar enforces start + size == end —
+        # welded start_j == end_i + setup and forbade machine idle,
+        # right-shifting op_i and cutting the true optimum (P0-1). This still
+        # feeds the aux-resource cumulative below and matches
+        # FeasibilityChecker's setup-window semantics (start - setup).
+        su_start = model.new_int_var(0, horizon, f"su_start_{op_i.id}_{op_j.id}_{work_center_id}")
+        model.add(su_start == starts[(op_j.id, work_center_id)] - setup_minutes).only_enforce_if(
+            lit
+        )
+        model.add(su_start >= ends[(op_i.id, work_center_id)]).only_enforce_if(lit)
+        setup_interval = model.new_optional_interval_var(
+            su_start,
+            setup_minutes,
+            starts[(op_j.id, work_center_id)],
+            lit,
+            f"setup_interval_{op_i.id}_{op_j.id}_{work_center_id}",
+        )
+        terms.setup_intervals_by_op.setdefault(op_j.id, []).append((setup_interval, lit))
+        for open_m, _close_m, shift_lit in (calendar_shifts or {}).get(
+            (op_j.id, work_center_id), ()
+        ):
+            model.add(su_start >= open_m).only_enforce_if([lit, shift_lit])
+
+    material_loss = setup_material_lookup.get(state_key, 0)
+    if material_loss:
+        terms.material.append(material_loss * lit)
+    energy_scaled = setup_energy_lookup.get(state_key, 0)
+    if energy_scaled:
+        terms.energy.append(energy_scaled * lit)
+
+
 class CpSatSolver(BaseSolver):
     """Exact / time-boxed CP-SAT solver for flexible job-shop with SDST."""
 
@@ -644,13 +962,13 @@ class CpSatSolver(BaseSolver):
         Uses a virtual depot node per machine.  Self-loops model absent operations.
         Arc literals carry both the setup-time implication and the objective terms.
 
+        Per machine, in model-building order (the order is part of the CP-SAT
+        search path): frozen intervals, no-overlap / cumulative capacity, then —
+        single-lane machines only — frozen ↔ free ordering and the circuit.
+
         Returns (setup_terms, material_terms, energy_terms, setup_intervals_by_op).
         """
-        setup_terms: list[Any] = []
-        material_terms: list[Any] = []
-        energy_terms: list[Any] = []
-        # Maps operation_id → [(setup_interval, arc_literal)] for aux resource tracking
-        setup_intervals_by_op: dict[Any, list[tuple[Any, Any]]] = {}
+        terms = _SdstTerms()
         frozen_assignments_by_machine: dict[Any, list[Assignment]] = {}
         if frozen_assignments:
             for assignment in frozen_assignments:
@@ -658,6 +976,8 @@ class CpSatSolver(BaseSolver):
                     assignment.work_center_id,
                     [],
                 ).append(assignment)
+        ops_ctx = context_ops_by_id or {operation.id: operation for operation in problem.operations}
+        lookups = (setup_minutes_lookup, setup_material_lookup, setup_energy_lookup)
 
         for work_center in problem.work_centers:
             machine_operations = [
@@ -667,200 +987,26 @@ class CpSatSolver(BaseSolver):
             ]
             if not machine_operations:
                 continue
+            _constrain_machine(
+                model,
+                work_center,
+                machine_operations,
+                (starts, ends, intervals, presences),
+                frozen_assignments_by_machine.get(work_center.id, []),
+                ops_ctx,
+                lookups,
+                planning_horizon_start=planning_horizon_start,
+                horizon=horizon,
+                calendar_shifts=calendar_shifts,
+                terms=terms,
+            )
 
-            machine_intervals = [
-                intervals[(operation.id, work_center.id)] for operation in machine_operations
-            ]
-            frozen_machine_intervals: list[Any] = []
-            frozen_metas: list[tuple[Assignment, int, int]] = []
-            ops_ctx = context_ops_by_id or {
-                operation.id: operation for operation in problem.operations
-            }
-            for frozen_index, frozen_assignment in enumerate(
-                sorted(
-                    frozen_assignments_by_machine.get(work_center.id, []),
-                    key=lambda assignment: assignment.start_time,
-                )
-            ):
-                raw_start = round(
-                    (frozen_assignment.start_time - planning_horizon_start).total_seconds() / 60.0
-                )
-                raw_end = round(
-                    (frozen_assignment.end_time - planning_horizon_start).total_seconds() / 60.0
-                )
-                start_offset = max(0, min(raw_start, horizon))
-                end_offset = max(0, min(raw_end, horizon))
-                # Wave 12 / C12-4: refuse silently dropped frozen intervals.
-                if start_offset != raw_start or end_offset != raw_end or end_offset <= start_offset:
-                    raise ValueError(
-                        "frozen_assignment collapses or clamps outside the CP-SAT horizon "
-                        f"(op={frozen_assignment.operation_id}, start={raw_start}, "
-                        f"end={raw_end}, horizon={horizon}); refuse loudly (Wave 12 / C12-4)."
-                    )
-
-                frozen_start = model.new_int_var(
-                    start_offset,
-                    start_offset,
-                    f"frozen_start_{work_center.id}_{frozen_index}",
-                )
-                frozen_end = model.new_int_var(
-                    end_offset,
-                    end_offset,
-                    f"frozen_end_{work_center.id}_{frozen_index}",
-                )
-                frozen_machine_intervals.append(
-                    model.new_interval_var(
-                        frozen_start,
-                        end_offset - start_offset,
-                        frozen_end,
-                        f"frozen_interval_{work_center.id}_{frozen_index}",
-                    )
-                )
-                frozen_metas.append((frozen_assignment, start_offset, end_offset))
-
-            constrained_machine_intervals = machine_intervals + frozen_machine_intervals
-
-            if work_center.max_parallel <= 1:
-                model.add_no_overlap(constrained_machine_intervals)
-            else:
-                model.add_cumulative(
-                    constrained_machine_intervals,
-                    [1] * len(constrained_machine_intervals),
-                    work_center.max_parallel,
-                )
-
-            if work_center.max_parallel > 1:
-                continue
-
-            # Wave 12 / C12-1: SDST between frozen ↔ free ops (circuit is free-only).
-            for frozen_index, (frozen_assignment, frozen_start_off, frozen_end_off) in enumerate(
-                frozen_metas
-            ):
-                frozen_op = ops_ctx.get(frozen_assignment.operation_id)
-                if frozen_op is None:
-                    raise ValueError(
-                        "frozen_assignment operation missing from frozen_context_operations "
-                        f"(op={frozen_assignment.operation_id}); cannot enforce SDST "
-                        "(Wave 12 / C12-1)."
-                    )
-                for op_j in machine_operations:
-                    presence = presences[(op_j.id, work_center.id)]
-                    setup_fj = setup_minutes_lookup.get(
-                        (work_center.id, frozen_op.state_id, op_j.state_id), 0
-                    )
-                    setup_jf = setup_minutes_lookup.get(
-                        (work_center.id, op_j.state_id, frozen_op.state_id), 0
-                    )
-                    j_before = model.new_bool_var(
-                        f"frozen_ord_{work_center.id}_{frozen_index}_{op_j.id}"
-                    )
-                    model.add(
-                        ends[(op_j.id, work_center.id)] + setup_jf <= frozen_start_off
-                    ).only_enforce_if([j_before, presence])
-                    model.add(
-                        starts[(op_j.id, work_center.id)] >= frozen_end_off + setup_fj
-                    ).only_enforce_if([j_before.negated(), presence])
-
-            n = len(machine_operations)
-            op_index: dict[Any, int] = {op.id: idx for idx, op in enumerate(machine_operations)}
-            depot = n  # virtual depot node
-
-            arcs: list[tuple[int, int, Any]] = []
-
-            # Depot → operation (operation is first on machine)
-            for operation in machine_operations:
-                lit = model.new_bool_var(f"arc_depot_{operation.id}_{work_center.id}")
-                arcs.append((depot, op_index[operation.id], lit))
-                model.add_implication(lit, presences[(operation.id, work_center.id)])
-
-            # Operation → depot (operation is last on machine)
-            for operation in machine_operations:
-                lit = model.new_bool_var(f"arc_{operation.id}_depot_{work_center.id}")
-                arcs.append((op_index[operation.id], depot, lit))
-                model.add_implication(lit, presences[(operation.id, work_center.id)])
-
-            # Operation → operation arcs (j directly follows i)
-            for op_i in machine_operations:
-                for op_j in machine_operations:
-                    if op_i.id == op_j.id:
-                        continue
-
-                    lit = model.new_bool_var(f"arc_{op_i.id}_{op_j.id}_{work_center.id}")
-                    arcs.append((op_index[op_i.id], op_index[op_j.id], lit))
-
-                    model.add_implication(lit, presences[(op_i.id, work_center.id)])
-                    model.add_implication(lit, presences[(op_j.id, work_center.id)])
-
-                    # Timing: j starts after i ends + setup from state(i) → state(j)
-                    setup_minutes = setup_minutes_lookup.get(
-                        (work_center.id, op_i.state_id, op_j.state_id), 0
-                    )
-                    model.add(
-                        starts[(op_j.id, work_center.id)]
-                        >= ends[(op_i.id, work_center.id)] + setup_minutes
-                    ).only_enforce_if(lit)
-
-                    if setup_minutes:
-                        setup_terms.append(setup_minutes * lit)
-
-                        # Reserve setup as an optional window ending exactly at
-                        # op_j's start: [start_j - setup, start_j], with its own
-                        # start var constrained only under `lit`. The previous
-                        # form passed ends[i] as the interval start, which — since
-                        # a CP-SAT IntervalVar enforces start + size == end —
-                        # welded start_j == end_i + setup and forbade machine
-                        # idle, right-shifting op_i and cutting the true optimum
-                        # (P0-1). This still feeds the aux-resource cumulative
-                        # below and matches FeasibilityChecker's setup-window
-                        # semantics (start - setup).
-                        su_start = model.new_int_var(
-                            0, horizon, f"su_start_{op_i.id}_{op_j.id}_{work_center.id}"
-                        )
-                        model.add(
-                            su_start == starts[(op_j.id, work_center.id)] - setup_minutes
-                        ).only_enforce_if(lit)
-                        model.add(su_start >= ends[(op_i.id, work_center.id)]).only_enforce_if(lit)
-                        setup_interval = model.new_optional_interval_var(
-                            su_start,
-                            setup_minutes,
-                            starts[(op_j.id, work_center.id)],
-                            lit,
-                            f"setup_interval_{op_i.id}_{op_j.id}_{work_center.id}",
-                        )
-                        setup_intervals_by_op.setdefault(op_j.id, []).append((setup_interval, lit))
-                        for open_m, _close_m, shift_lit in (calendar_shifts or {}).get(
-                            (op_j.id, work_center.id), ()
-                        ):
-                            model.add(su_start >= open_m).only_enforce_if([lit, shift_lit])
-
-                    material_loss = setup_material_lookup.get(
-                        (work_center.id, op_i.state_id, op_j.state_id), 0
-                    )
-                    if material_loss:
-                        material_terms.append(material_loss * lit)
-                    energy_scaled = setup_energy_lookup.get(
-                        (work_center.id, op_i.state_id, op_j.state_id), 0
-                    )
-                    if energy_scaled:
-                        energy_terms.append(energy_scaled * lit)
-
-            # Self-loops for absent operations (not assigned to this machine)
-            for operation in machine_operations:
-                absent = presences[(operation.id, work_center.id)].negated()
-                arcs.append((op_index[operation.id], op_index[operation.id], absent))
-
-            # Self-loop for depot when machine is completely unused
-            machine_presences = [
-                presences[(operation.id, work_center.id)] for operation in machine_operations
-            ]
-            unused = model.new_bool_var(f"unused_{work_center.id}")
-            model.add(sum(machine_presences) == 0).only_enforce_if(unused)
-            model.add(sum(machine_presences) >= 1).only_enforce_if(unused.negated())
-            arcs.append((depot, depot, unused))
-
-            model.add_circuit(arcs)
-
-        return setup_terms, material_terms, energy_terms, setup_intervals_by_op
+        return (
+            terms.setup,
+            terms.material,
+            terms.energy,
+            terms.setup_intervals_by_op,
+        )
 
     def _add_aux_resource_cumulative_constraints(
         self,

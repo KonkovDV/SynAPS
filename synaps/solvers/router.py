@@ -17,6 +17,7 @@ from synaps.solvers.registry import CALENDAR_AWARE, create_solver
 
 if TYPE_CHECKING:
     from synaps.model import ScheduleProblem
+    from synaps.problem_profile import ProblemProfile
     from synaps.solvers import BaseSolver
 
 
@@ -216,73 +217,88 @@ def route_solver_config(
     Incremental repair is intentionally not returned here because it requires an
     existing schedule and disrupted-operation context, which is a different call
     surface from the standalone `solve(problem, **kwargs)` portfolio.
+
+    Precedence of the rules: machine calendar, explicit exactness, a latency
+    budget of at most 1 s, the disruption regimes, the analysis regimes, then
+    the nominal size ladder.
     """
 
     ctx = context or SolverRoutingContext()
     profile = build_problem_profile(problem)
-    op_count = profile.operation_count
     if profile.has_machine_calendar:
-        return _route_machine_calendar(op_count, ctx.preferred_max_latency_s)
-    wc_count = profile.work_center_count
-    has_aux_constraints = profile.has_aux_constraints
-    has_nonzero_setups = profile.has_nonzero_setups
-    setup_density = profile.nonzero_setup_density
-    resource_contention = profile.resource_contention
-    precedence_depth = profile.precedence_depth
-
+        return _route_machine_calendar(profile.operation_count, ctx.preferred_max_latency_s)
     if ctx.exact_required:
-        if op_count <= 40:
-            return SolverRoutingDecision(
-                solver_config="CPSAT-10",
-                reason="exact solve explicitly required and the instance remains small",
-            )
-        if op_count <= 120:
-            return SolverRoutingDecision(
-                solver_config="CPSAT-30",
-                reason=(
-                    "exact solve explicitly required and the instance remains within "
-                    "the CP-SAT comfort zone"
-                ),
-            )
-        if op_count <= 500:
-            return SolverRoutingDecision(
-                solver_config="LBBD-10",
-                reason=(
-                    "exactness requested on a larger instance, so decomposition is the "
-                    "smallest sound path"
-                ),
-            )
-        if op_count <= 50_000:
-            return SolverRoutingDecision(
-                solver_config="LBBD-10-HD",
-                reason=(
-                    "industrial-scale exact solve via hierarchical LBBD with balanced "
-                    "partitioning (≤200 ops/cluster)"
-                ),
-            )
+        return _route_exact_required(profile.operation_count)
+    for route in (_route_low_latency, _route_disruption_regime, _route_analysis_regime):
+        decision = route(ctx, profile)
+        if decision is not None:
+            return decision
+    return _route_nominal(ctx, profile)
+
+
+def _route_exact_required(op_count: int) -> SolverRoutingDecision:
+    if op_count <= 40:
         return SolverRoutingDecision(
-            solver_config="LBBD-20-HD",
+            solver_config="CPSAT-10",
+            reason="exact solve explicitly required and the instance remains small",
+        )
+    if op_count <= 120:
+        return SolverRoutingDecision(
+            solver_config="CPSAT-30",
             reason=(
-                "ultra-large exact solve (50k+ ops) via extended hierarchical LBBD "
-                "with tighter convergence and smaller clusters"
+                "exact solve explicitly required and the instance remains within "
+                "the CP-SAT comfort zone"
             ),
         )
-
-    if ctx.preferred_max_latency_s is not None and ctx.preferred_max_latency_s <= 1:
-        # Beam search produces better SDST solutions within the latency budget
-        if has_nonzero_setups and setup_density > 0.2 and op_count <= 60:
-            return SolverRoutingDecision(
-                solver_config="BEAM-3",
-                reason=(
-                    f"latency budget <=1s with dense setups (density={setup_density:.2f}) "
-                    "benefits from beam search over single-trajectory greedy"
-                ),
-            )
+    if op_count <= 500:
         return SolverRoutingDecision(
-            solver_config="GREED",
-            reason="latency budget <= 1s, so the constructive heuristic is the only safe choice",
+            solver_config="LBBD-10",
+            reason=(
+                "exactness requested on a larger instance, so decomposition is the "
+                "smallest sound path"
+            ),
         )
+    if op_count <= 50_000:
+        return SolverRoutingDecision(
+            solver_config="LBBD-10-HD",
+            reason=(
+                "industrial-scale exact solve via hierarchical LBBD with balanced "
+                "partitioning (≤200 ops/cluster)"
+            ),
+        )
+    return SolverRoutingDecision(
+        solver_config="LBBD-20-HD",
+        reason=(
+            "ultra-large exact solve (50k+ ops) via extended hierarchical LBBD "
+            "with tighter convergence and smaller clusters"
+        ),
+    )
 
+
+def _route_low_latency(
+    ctx: SolverRoutingContext, profile: ProblemProfile
+) -> SolverRoutingDecision | None:
+    if ctx.preferred_max_latency_s is None or ctx.preferred_max_latency_s > 1:
+        return None
+    setup_density = profile.nonzero_setup_density
+    # Beam search produces better SDST solutions within the latency budget
+    if profile.has_nonzero_setups and setup_density > 0.2 and profile.operation_count <= 60:
+        return SolverRoutingDecision(
+            solver_config="BEAM-3",
+            reason=(
+                f"latency budget <=1s with dense setups (density={setup_density:.2f}) "
+                "benefits from beam search over single-trajectory greedy"
+            ),
+        )
+    return SolverRoutingDecision(
+        solver_config="GREED",
+        reason="latency budget <= 1s, so the constructive heuristic is the only safe choice",
+    )
+
+
+def _route_disruption_regime(
+    ctx: SolverRoutingContext, profile: ProblemProfile
+) -> SolverRoutingDecision | None:
     if ctx.regime is SolveRegime.INTERACTIVE:
         return SolverRoutingDecision(
             solver_config="GREED",
@@ -290,22 +306,25 @@ def route_solver_config(
                 "interactive regime prioritizes immediate feasible feedback over global optimality"
             ),
         )
-
-    if ctx.regime in {SolveRegime.BREAKDOWN, SolveRegime.RUSH_ORDER}:
-        if op_count <= 30 and (
-            ctx.preferred_max_latency_s is None or ctx.preferred_max_latency_s >= 10
-        ):
-            return SolverRoutingDecision(
-                solver_config="CPSAT-10",
-                reason=(
-                    "small disruption window fits an exact CP-SAT patch within the latency budget"
-                ),
-            )
+    if ctx.regime not in {SolveRegime.BREAKDOWN, SolveRegime.RUSH_ORDER}:
+        return None
+    if profile.operation_count <= 30 and (
+        ctx.preferred_max_latency_s is None or ctx.preferred_max_latency_s >= 10
+    ):
         return SolverRoutingDecision(
-            solver_config="GREED",
-            reason="disruption regime defaults to the fastest deterministic recovery path",
+            solver_config="CPSAT-10",
+            reason=("small disruption window fits an exact CP-SAT patch within the latency budget"),
         )
+    return SolverRoutingDecision(
+        solver_config="GREED",
+        reason="disruption regime defaults to the fastest deterministic recovery path",
+    )
 
+
+def _route_analysis_regime(
+    ctx: SolverRoutingContext, profile: ProblemProfile
+) -> SolverRoutingDecision | None:
+    op_count = profile.operation_count
     if ctx.regime is SolveRegime.MATERIAL_SHORTAGE:
         if op_count <= 120:
             return SolverRoutingDecision(
@@ -327,84 +346,66 @@ def route_solver_config(
                 "decomposition with balanced partitioning"
             ),
         )
-
-    if ctx.regime is SolveRegime.WHAT_IF:
-        if op_count <= 40 and has_nonzero_setups:
-            return SolverRoutingDecision(
-                solver_config="CPSAT-PARETO-SKETCH-SETUP",
-                reason=(
-                    "what-if analysis on a small setup-sensitive instance benefits "
-                    "from an adaptive Pareto sketch over multiple epsilon slices"
-                ),
-            )
-        if op_count <= 120:
-            return SolverRoutingDecision(
-                solver_config="CPSAT-30",
-                reason="what-if analysis favors stronger optimality on medium instances",
-            )
-        if op_count <= 500:
-            return SolverRoutingDecision(
-                solver_config="LBBD-10",
-                reason=(
-                    "large scenario analysis benefits from the slower but more scalable "
-                    "LBBD portfolio member"
-                ),
-            )
+    if ctx.regime is not SolveRegime.WHAT_IF:
+        return None
+    if op_count <= 40 and profile.has_nonzero_setups:
         return SolverRoutingDecision(
-            solver_config="LBBD-10-HD",
+            solver_config="CPSAT-PARETO-SKETCH-SETUP",
             reason=(
-                "industrial-scale what-if analysis routed to hierarchical LBBD "
-                "with parallel subproblems"
+                "what-if analysis on a small setup-sensitive instance benefits "
+                "from an adaptive Pareto sketch over multiple epsilon slices"
             ),
         )
+    if op_count <= 120:
+        return SolverRoutingDecision(
+            solver_config="CPSAT-30",
+            reason="what-if analysis favors stronger optimality on medium instances",
+        )
+    if op_count <= 500:
+        return SolverRoutingDecision(
+            solver_config="LBBD-10",
+            reason=(
+                "large scenario analysis benefits from the slower but more scalable "
+                "LBBD portfolio member"
+            ),
+        )
+    return SolverRoutingDecision(
+        solver_config="LBBD-10-HD",
+        reason=(
+            "industrial-scale what-if analysis routed to hierarchical LBBD "
+            "with parallel subproblems"
+        ),
+    )
 
+
+def _route_nominal(ctx: SolverRoutingContext, profile: ProblemProfile) -> SolverRoutingDecision:
+    op_count = profile.operation_count
     latency = ctx.preferred_max_latency_s
+    windows = profile.has_per_op_windows or profile.has_machine_calendar
 
     if (
         ctx.portfolio_policy is PortfolioPolicy.FEASIBILITY_FIRST
         and ctx.regime is SolveRegime.NOMINAL
         and op_count > 120
     ):
-        return _route_feasibility_first_nominal(
-            op_count,
-            latency,
-            profile.has_per_op_windows or profile.has_machine_calendar,
-        )
+        return _route_feasibility_first_nominal(op_count, latency, windows)
 
-    if op_count <= 20 and wc_count <= 5 and not has_aux_constraints:
+    if op_count <= 20 and profile.work_center_count <= 5 and not profile.has_aux_constraints:
         return SolverRoutingDecision(
             solver_config="CPSAT-10",
             reason="small nominal instance fits the low-latency exact portfolio member",
         )
 
-    # Dense setups or deep precedence chains benefit from the longer CP-SAT
-    # budget even at moderate sizes — propagation exploits the structure.
-    setup_heavy = setup_density > 0.3
-    deep_chains = precedence_depth > 6
-
-    if op_count <= 120 and (has_nonzero_setups or has_aux_constraints or wc_count <= 20):
-        if (setup_heavy or deep_chains) and op_count > 60:
-            return SolverRoutingDecision(
-                solver_config="CPSAT-120",
-                reason=(
-                    "medium nominal instance with dense setups "
-                    f"(density={setup_density:.2f}) or deep precedence chains "
-                    f"(depth={precedence_depth}) benefits from extended CP-SAT budget"
-                ),
-            )
-        return SolverRoutingDecision(
-            solver_config="CPSAT-30",
-            reason=(
-                "medium nominal instance with richer constraints still fits the exact CP-SAT path"
-            ),
-        )
-
-    # High resource contention means machines are shared heavily — decomposition
-    # with smaller clusters reduces subproblem complexity.
-    contention_heavy = resource_contention > 15.0
+    if op_count <= 120 and (
+        profile.has_nonzero_setups or profile.has_aux_constraints or profile.work_center_count <= 20
+    ):
+        return _route_medium_nominal(profile)
 
     if op_count <= 500:
-        if contention_heavy and op_count > 300:
+        # High resource contention means machines are shared heavily —
+        # decomposition with smaller clusters reduces subproblem complexity.
+        resource_contention = profile.resource_contention
+        if resource_contention > 15.0 and op_count > 300:
             return SolverRoutingDecision(
                 solver_config="LBBD-10",
                 reason=(
@@ -422,10 +423,27 @@ def route_solver_config(
         )
 
     # Long-horizon NOMINAL: rolling-horizon coverage above 10k ops.
-    return _route_long_horizon_balanced(
-        op_count,
-        latency,
-        profile.has_per_op_windows or profile.has_machine_calendar,
+    return _route_long_horizon_balanced(op_count, latency, windows)
+
+
+def _route_medium_nominal(profile: ProblemProfile) -> SolverRoutingDecision:
+    """``<= 120`` ops with setups, aux constraints or few work centers."""
+    # Dense setups or deep precedence chains benefit from the longer CP-SAT
+    # budget even at moderate sizes — propagation exploits the structure.
+    setup_density = profile.nonzero_setup_density
+    precedence_depth = profile.precedence_depth
+    if (setup_density > 0.3 or precedence_depth > 6) and profile.operation_count > 60:
+        return SolverRoutingDecision(
+            solver_config="CPSAT-120",
+            reason=(
+                "medium nominal instance with dense setups "
+                f"(density={setup_density:.2f}) or deep precedence chains "
+                f"(depth={precedence_depth}) benefits from extended CP-SAT budget"
+            ),
+        )
+    return SolverRoutingDecision(
+        solver_config="CPSAT-30",
+        reason=("medium nominal instance with richer constraints still fits the exact CP-SAT path"),
     )
 
 

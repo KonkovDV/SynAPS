@@ -325,207 +325,230 @@ class ScheduleProblem(BaseModel):
 
     @model_validator(mode="after")
     def validate_cross_references(self) -> Self:
+        """Referential integrity: every issue is collected, then raised once."""
         issues: list[str] = []
 
         if self.planning_horizon_end <= self.planning_horizon_start:
             issues.append("planning_horizon_end must be later than planning_horizon_start")
 
-        state_ids = [state.id for state in self.states]
-        order_ids = [order.id for order in self.orders]
-        operation_ids = [operation.id for operation in self.operations]
-        work_center_ids = [work_center.id for work_center in self.work_centers]
-        aux_resource_ids = [resource.id for resource in self.auxiliary_resources]
-
-        duplicate_root_sets = {
-            "state ids": self._duplicate_keys(state_ids),
-            "order ids": self._duplicate_keys(order_ids),
-            "operation ids": self._duplicate_keys(operation_ids),
-            "work center ids": self._duplicate_keys(work_center_ids),
-            "auxiliary resource ids": self._duplicate_keys(aux_resource_ids),
-        }
-        for label, duplicates in duplicate_root_sets.items():
-            if duplicates:
-                issues.append(f"duplicate {label}: {sorted(str(value) for value in duplicates)}")
-
-        state_id_set = set(state_ids)
-        order_id_set = set(order_ids)
-        operation_id_set = set(operation_ids)
-        work_center_id_set = set(work_center_ids)
-        aux_resource_id_set = set(aux_resource_ids)
-        operations_by_id = {operation.id: operation for operation in self.operations}
-        operations_by_order: dict[UUID, list[Operation]] = {}
+        ids = _ProblemIds(self)
+        issues.extend(_duplicate_key_issues(self, ids))
         for operation in self.operations:
-            operations_by_order.setdefault(operation.order_id, []).append(operation)
-
-        setup_keys = [
-            (entry.work_center_id, entry.from_state_id, entry.to_state_id)
-            for entry in self.setup_matrix
-        ]
-        duplicate_setup_keys = self._duplicate_keys(setup_keys)
-        if duplicate_setup_keys:
-            issues.append(
-                "duplicate setup_matrix key(s): "
-                + ", ".join(str(key) for key in sorted(duplicate_setup_keys, key=str))
-            )
-
-        requirement_keys = [
-            (requirement.operation_id, requirement.aux_resource_id)
-            for requirement in self.aux_requirements
-        ]
-        duplicate_requirement_keys = self._duplicate_keys(requirement_keys)
-        if duplicate_requirement_keys:
-            issues.append(
-                "duplicate aux_requirement key(s): "
-                + ", ".join(str(key) for key in sorted(duplicate_requirement_keys, key=str))
-            )
-
-        for operation in self.operations:
-            if operation.order_id not in order_id_set:
-                issues.append(
-                    f"operation {operation.id} references unknown order_id {operation.order_id}"
-                )
-            if operation.state_id not in state_id_set:
-                issues.append(
-                    f"operation {operation.id} references unknown state_id {operation.state_id}"
-                )
-            missing_work_centers = [
-                work_center_id
-                for work_center_id in operation.eligible_wc_ids
-                if work_center_id not in work_center_id_set
-            ]
-            if missing_work_centers:
-                issues.append(
-                    "operation "
-                    f"{operation.id} references unknown eligible_wc_ids "
-                    f"{missing_work_centers}"
-                )
-            override_unknown = [
-                wc_id
-                for wc_id in operation.machine_duration_overrides
-                if wc_id not in work_center_id_set
-            ]
-            if override_unknown:
-                issues.append(
-                    "operation "
-                    f"{operation.id} machine_duration_overrides reference unknown "
-                    f"work centers {override_unknown}"
-                )
-            override_negative = [
-                wc_id
-                for wc_id, minutes in operation.machine_duration_overrides.items()
-                if int(minutes) < 0
-            ]
-            if override_negative:
-                issues.append(
-                    "operation "
-                    f"{operation.id} machine_duration_overrides must be >= 0 "
-                    f"(bad keys {override_negative})"
-                )
-            if operation.predecessor_op_id == operation.id:
-                issues.append(f"operation {operation.id} cannot reference itself as predecessor")
-            elif (
-                operation.predecessor_op_id is not None
-                and operation.predecessor_op_id not in operation_id_set
-            ):
-                issues.append(
-                    "operation "
-                    f"{operation.id} references unknown predecessor_op_id "
-                    f"{operation.predecessor_op_id}"
-                )
-
-        for order_id, order_operations in operations_by_order.items():
-            duplicate_seq_in_order = self._duplicate_keys(
-                [operation.seq_in_order for operation in order_operations]
-            )
-            if duplicate_seq_in_order:
-                issues.append(
-                    f"duplicate seq_in_order values for order {order_id}: "
-                    f"{sorted(duplicate_seq_in_order)}"
-                )
-                continue
-
-            previous_operation: Operation | None = None
-            for operation in sorted(order_operations, key=lambda item: item.seq_in_order):
-                predecessor = (
-                    operations_by_id.get(operation.predecessor_op_id)
-                    if operation.predecessor_op_id is not None
-                    else None
-                )
-                if predecessor is not None and predecessor.order_id != order_id:
-                    issues.append(
-                        "operation "
-                        f"{operation.id} cannot reference predecessor {predecessor.id} "
-                        "from a different order"
-                    )
-                    previous_operation = operation
-                    continue
-
-                if previous_operation is None:
-                    if predecessor is not None:
-                        issues.append(
-                            "first operation "
-                            f"{operation.id} in order {order_id} cannot declare "
-                            f"predecessor_op_id {predecessor.id}"
-                        )
-                    previous_operation = operation
-                    continue
-
-                expected_predecessor_id = previous_operation.id
-                if operation.predecessor_op_id is None:
-                    # Previous behavior mutated the model here, violating
-                    # validator semantics.  The correct path is to run
-                    # normalize_schedule_problem_data() on the raw payload
-                    # before constructing ScheduleProblem.
-                    issues.append(
-                        "operation "
-                        f"{operation.id} is missing predecessor_op_id "
-                        f"(expected {expected_predecessor_id} based on "
-                        f"seq_in_order within order {order_id}); "
-                        "use normalize_schedule_problem_data() to autofill"
-                    )
-                elif operation.predecessor_op_id != expected_predecessor_id:
-                    issues.append(
-                        "operation "
-                        f"{operation.id} must reference predecessor_op_id "
-                        f"{expected_predecessor_id} based on seq_in_order within "
-                        f"order {order_id}"
-                    )
-
-                previous_operation = operation
-
-        for entry in self.setup_matrix:
-            if entry.work_center_id not in work_center_id_set:
-                issues.append(
-                    "setup entry "
-                    f"{entry.id} references unknown work_center_id "
-                    f"{entry.work_center_id}"
-                )
-            if entry.from_state_id not in state_id_set:
-                issues.append(
-                    f"setup entry {entry.id} references unknown from_state_id {entry.from_state_id}"
-                )
-            if entry.to_state_id not in state_id_set:
-                issues.append(
-                    f"setup entry {entry.id} references unknown to_state_id {entry.to_state_id}"
-                )
-
-        for requirement in self.aux_requirements:
-            if requirement.operation_id not in operation_id_set:
-                issues.append(
-                    f"aux requirement references unknown operation_id {requirement.operation_id}"
-                )
-            if requirement.aux_resource_id not in aux_resource_id_set:
-                issues.append(
-                    "aux requirement references unknown aux_resource_id "
-                    f"{requirement.aux_resource_id}"
-                )
-
-        issues.extend(_mode_issues(self, aux_resource_id_set))
+            issues.extend(_operation_reference_issues(operation, ids))
+        issues.extend(_order_chain_issues(self.operations))
+        issues.extend(_setup_and_requirement_reference_issues(self, ids))
+        issues.extend(_mode_issues(self, ids.aux_resource_set))
         issues.extend(precedence_edge_issues(self.precedence_edges, self.operations))
         if issues:
             raise ValueError("; ".join(issues))
 
         return self
+
+
+class _ProblemIds:
+    """Root identifiers of a problem, as lists (for duplicates) and sets."""
+
+    def __init__(self, problem: ScheduleProblem) -> None:
+        self.states = [state.id for state in problem.states]
+        self.orders = [order.id for order in problem.orders]
+        self.operations = [operation.id for operation in problem.operations]
+        self.work_centers = [work_center.id for work_center in problem.work_centers]
+        self.aux_resources = [resource.id for resource in problem.auxiliary_resources]
+        self.state_set = set(self.states)
+        self.order_set = set(self.orders)
+        self.operation_set = set(self.operations)
+        self.work_center_set = set(self.work_centers)
+        self.aux_resource_set = set(self.aux_resources)
+
+
+def _duplicate_key_issues(problem: ScheduleProblem, ids: _ProblemIds) -> list[str]:
+    """Duplicate root ids, setup-matrix keys and aux-requirement keys."""
+    issues: list[str] = []
+    duplicate = ScheduleProblem._duplicate_keys
+    duplicate_root_sets = {
+        "state ids": duplicate(ids.states),
+        "order ids": duplicate(ids.orders),
+        "operation ids": duplicate(ids.operations),
+        "work center ids": duplicate(ids.work_centers),
+        "auxiliary resource ids": duplicate(ids.aux_resources),
+    }
+    for label, duplicates in duplicate_root_sets.items():
+        if duplicates:
+            issues.append(f"duplicate {label}: {sorted(str(value) for value in duplicates)}")
+
+    duplicate_setup_keys = duplicate(
+        [
+            (entry.work_center_id, entry.from_state_id, entry.to_state_id)
+            for entry in problem.setup_matrix
+        ]
+    )
+    if duplicate_setup_keys:
+        issues.append(
+            "duplicate setup_matrix key(s): "
+            + ", ".join(str(key) for key in sorted(duplicate_setup_keys, key=str))
+        )
+
+    duplicate_requirement_keys = duplicate(
+        [
+            (requirement.operation_id, requirement.aux_resource_id)
+            for requirement in problem.aux_requirements
+        ]
+    )
+    if duplicate_requirement_keys:
+        issues.append(
+            "duplicate aux_requirement key(s): "
+            + ", ".join(str(key) for key in sorted(duplicate_requirement_keys, key=str))
+        )
+    return issues
+
+
+def _operation_reference_issues(operation: Operation, ids: _ProblemIds) -> list[str]:
+    """Order, state, work-center, override and predecessor references of one operation."""
+    issues: list[str] = []
+    if operation.order_id not in ids.order_set:
+        issues.append(f"operation {operation.id} references unknown order_id {operation.order_id}")
+    if operation.state_id not in ids.state_set:
+        issues.append(f"operation {operation.id} references unknown state_id {operation.state_id}")
+    missing_work_centers = [
+        work_center_id
+        for work_center_id in operation.eligible_wc_ids
+        if work_center_id not in ids.work_center_set
+    ]
+    if missing_work_centers:
+        issues.append(
+            f"operation {operation.id} references unknown eligible_wc_ids {missing_work_centers}"
+        )
+    override_unknown = [
+        wc_id for wc_id in operation.machine_duration_overrides if wc_id not in ids.work_center_set
+    ]
+    if override_unknown:
+        issues.append(
+            "operation "
+            f"{operation.id} machine_duration_overrides reference unknown "
+            f"work centers {override_unknown}"
+        )
+    override_negative = [
+        wc_id for wc_id, minutes in operation.machine_duration_overrides.items() if int(minutes) < 0
+    ]
+    if override_negative:
+        issues.append(
+            "operation "
+            f"{operation.id} machine_duration_overrides must be >= 0 "
+            f"(bad keys {override_negative})"
+        )
+    if operation.predecessor_op_id == operation.id:
+        issues.append(f"operation {operation.id} cannot reference itself as predecessor")
+    elif (
+        operation.predecessor_op_id is not None
+        and operation.predecessor_op_id not in ids.operation_set
+    ):
+        issues.append(
+            "operation "
+            f"{operation.id} references unknown predecessor_op_id "
+            f"{operation.predecessor_op_id}"
+        )
+    return issues
+
+
+def _order_chain_issues(operations: list[Operation]) -> list[str]:
+    """Each order is ONE chain by ``seq_in_order``: predecessors in-order, no gaps."""
+    issues: list[str] = []
+    operations_by_id = {operation.id: operation for operation in operations}
+    operations_by_order: dict[UUID, list[Operation]] = {}
+    for operation in operations:
+        operations_by_order.setdefault(operation.order_id, []).append(operation)
+
+    for order_id, order_operations in operations_by_order.items():
+        duplicate_seq_in_order = ScheduleProblem._duplicate_keys(
+            [operation.seq_in_order for operation in order_operations]
+        )
+        if duplicate_seq_in_order:
+            issues.append(
+                f"duplicate seq_in_order values for order {order_id}: "
+                f"{sorted(duplicate_seq_in_order)}"
+            )
+            continue
+
+        previous_operation: Operation | None = None
+        for operation in sorted(order_operations, key=lambda item: item.seq_in_order):
+            predecessor = (
+                operations_by_id.get(operation.predecessor_op_id)
+                if operation.predecessor_op_id is not None
+                else None
+            )
+            if predecessor is not None and predecessor.order_id != order_id:
+                issues.append(
+                    "operation "
+                    f"{operation.id} cannot reference predecessor {predecessor.id} "
+                    "from a different order"
+                )
+                previous_operation = operation
+                continue
+
+            if previous_operation is None:
+                if predecessor is not None:
+                    issues.append(
+                        "first operation "
+                        f"{operation.id} in order {order_id} cannot declare "
+                        f"predecessor_op_id {predecessor.id}"
+                    )
+                previous_operation = operation
+                continue
+
+            expected_predecessor_id = previous_operation.id
+            if operation.predecessor_op_id is None:
+                # Previous behavior mutated the model here, violating
+                # validator semantics.  The correct path is to run
+                # normalize_schedule_problem_data() on the raw payload
+                # before constructing ScheduleProblem.
+                issues.append(
+                    "operation "
+                    f"{operation.id} is missing predecessor_op_id "
+                    f"(expected {expected_predecessor_id} based on "
+                    f"seq_in_order within order {order_id}); "
+                    "use normalize_schedule_problem_data() to autofill"
+                )
+            elif operation.predecessor_op_id != expected_predecessor_id:
+                issues.append(
+                    "operation "
+                    f"{operation.id} must reference predecessor_op_id "
+                    f"{expected_predecessor_id} based on seq_in_order within "
+                    f"order {order_id}"
+                )
+
+            previous_operation = operation
+    return issues
+
+
+def _setup_and_requirement_reference_issues(
+    problem: ScheduleProblem, ids: _ProblemIds
+) -> list[str]:
+    """Unknown work centers / states in setup entries; unknown refs in requirements."""
+    issues: list[str] = []
+    for entry in problem.setup_matrix:
+        if entry.work_center_id not in ids.work_center_set:
+            issues.append(
+                f"setup entry {entry.id} references unknown work_center_id {entry.work_center_id}"
+            )
+        if entry.from_state_id not in ids.state_set:
+            issues.append(
+                f"setup entry {entry.id} references unknown from_state_id {entry.from_state_id}"
+            )
+        if entry.to_state_id not in ids.state_set:
+            issues.append(
+                f"setup entry {entry.id} references unknown to_state_id {entry.to_state_id}"
+            )
+
+    for requirement in problem.aux_requirements:
+        if requirement.operation_id not in ids.operation_set:
+            issues.append(
+                f"aux requirement references unknown operation_id {requirement.operation_id}"
+            )
+        if requirement.aux_resource_id not in ids.aux_resource_set:
+            issues.append(
+                f"aux requirement references unknown aux_resource_id {requirement.aux_resource_id}"
+            )
+    return issues
 
 
 class SolverStatus(StrEnum):
