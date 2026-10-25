@@ -11,7 +11,8 @@ was separated. Statements and proofs: ``docs/rfc/T06_SOUND_LBBD_RELAXATION.md``.
 
 Notation (integer-minute reservation grain of every solver, P0-4):
 
-* ``p_jk = duration_minutes_for(j, k)``, ``L_k = max_parallel``;
+* ``p_jk = min_duration_minutes_for(j, k)`` (the shortest mode of a moded
+  operation), ``L_k = max_parallel``;
 * head ``h_j``: the CEIL release / ``earliest_start`` offset raised by the
   predecessor chain at fastest durations — every schedule starts ``j`` at
   ``>= h_j``;
@@ -42,8 +43,9 @@ Row families (``C >= ...``):
 Multi-lane machines get capacity rows only (no setups): CP-SAT does not
 model setups on them, and dropping setups keeps every row valid under any
 lane-setup semantics. Calendars, auxiliary resources and ``latest_finish``
-only remove schedules, so they never invalidate a row; operations with
-execution modes are out of scope (LBBD rejects them up front).
+only remove schedules, so they never invalidate a row. A moded operation
+contributes its shortest mode, a floor on any selected mode (LBBD itself
+rejects modes up front).
 """
 
 from __future__ import annotations
@@ -63,7 +65,7 @@ from synaps.solvers._lbbd_cuts import (
     compute_machine_transition_floor,
 )
 from synaps.solvers._time_windows import operation_earliest_offset_minutes
-from synaps.timegrain import duration_minutes_for
+from synaps.timegrain import min_duration_minutes_for
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -129,7 +131,7 @@ class SoundRelaxation:
             op.id: list(op.eligible_wc_ids or all_wc_ids) for op in problem.operations
         }
         self.duration: dict[YKey, float] = {
-            (op.id, wc_id): float(duration_minutes_for(op, wc_by_id[wc_id]))
+            (op.id, wc_id): float(min_duration_minutes_for(op, wc_by_id[wc_id]))
             for op in problem.operations
             for wc_id in self.eligible[op.id]
         }
