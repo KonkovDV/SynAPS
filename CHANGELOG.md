@@ -373,8 +373,8 @@ Review of the `audit-2026-10` branch update (2026-10-25,
   `include-hidden-files: true` restores it.
 - **U-07 rate limiting:** an unverified `x-api-key` chose the bucket, so
   rotating forged keys bypassed the limit in anonymous mode, and failed
-  authentication was never throttled. Buckets use a SHA-256 of a verified key
-  (or the client IP); failed attempts count per IP.
+  authentication was never throttled.   Buckets are the client IP, or the slot of a verified configured key
+  (not a fast hash of the secret); failed attempts count per IP.
 - **U-09 follow-up:** `/metrics` and `/openapi.json` (and the misconfigured-auth
   503) returned before that limiter, so those routes were unlimited. They now
   share the client IP bucket.
@@ -385,8 +385,11 @@ Review of the `audit-2026-10` branch update (2026-10-25,
   matching the lock.
 - **T-04 follow-up:** `BrokenProcessPool` raised while submitting a later
   cluster escaped the fallback and left the earlier futures unsettled. Submit
-  is inside the same handler. A worker `None` is an unproven failure, not a
-  proven cut (docstring of the LBBD worker matched the old contract).
+  is inside the same handler. A worker `None` does not authorize a
+  feasibility cut (the LBBD worker docstring matched the old contract).
+- **U-13 rate-limit bucket id:** the verified-key bucket was a SHA-256 of the
+  presented secret (no work factor; CodeQL high). It is now the slot of the
+  configured key (`primary` or `map:N`). The secret is not stored in the bucket.
 
 Audit 2026-10 (`docs/rfc/AUDIT_2026_10.md`); each item has a regression
 test in `tests/test_audit_2026_10.py`.

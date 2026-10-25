@@ -232,6 +232,42 @@ test("rotating unverified API keys does not open fresh rate-limit buckets", asyn
   }
 });
 
+test("distinct configured keys do not share a rate-limit bucket", async () => {
+  const app = buildControlPlaneApp({
+    executor: feasibleExecutor(),
+    rateLimit: { maxRequests: 1, windowMs: 60_000 },
+    apiKeyMap: {
+      "key-tenant-a": "tenant-a",
+      "key-tenant-b": "tenant-b",
+    },
+  });
+  try {
+    const first = await app.inject({
+      method: "POST",
+      url: "/api/v1/solve",
+      headers: { "x-api-key": "key-tenant-a" },
+      payload: createSolveRequest(),
+    });
+    assert.equal(first.statusCode, 200);
+    const again = await app.inject({
+      method: "POST",
+      url: "/api/v1/solve",
+      headers: { "x-api-key": "key-tenant-a" },
+      payload: createSolveRequest(),
+    });
+    assert.equal(again.statusCode, 429);
+    const other = await app.inject({
+      method: "POST",
+      url: "/api/v1/solve",
+      headers: { "x-api-key": "key-tenant-b" },
+      payload: createSolveRequest(),
+    });
+    assert.equal(other.statusCode, 200);
+  } finally {
+    await app.close();
+  }
+});
+
 test("private discovery routes share the client IP bucket", async () => {
   // /metrics and /openapi.json return 404 before the main limiter. Those
   // responses must still consume the IP budget (audit 2026-10, U-09).

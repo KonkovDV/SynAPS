@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
 
 import {
@@ -496,20 +496,45 @@ function resolveRequireAuth(): boolean {
   return !isLoopbackHost(process.env.HOST ?? "127.0.0.1");
 }
 
+function configuredKeySlot(
+  presented: string,
+  primaryApiKey: string | null,
+  apiKeyMap: Map<string, string>,
+): string | null {
+  // Slot in the configured key list, not a fast hash of the secret. A SHA-256
+  // of the presented key is a password hash with no work factor (CodeQL) and
+  // would let a leaked bucket id be attacked offline if the key is short.
+  if (primaryApiKey !== null && matchesControlPlaneApiKey(presented, primaryApiKey)) {
+    return "primary";
+  }
+  let index = 0;
+  for (const mappedKey of apiKeyMap.keys()) {
+    if (matchesControlPlaneApiKey(presented, mappedKey)) {
+      return `map:${index}`;
+    }
+    index += 1;
+  }
+  return null;
+}
+
 function rateLimitBucketKey(
   request: {
     ip: string;
     headers: Record<string, string | string[] | undefined>;
   },
   keyIsVerified: boolean,
+  primaryApiKey: string | null,
+  apiKeyMap: Map<string, string>,
 ): string {
   // Audit 2026-10: only a VERIFIED key may choose the bucket. An unverified
   // header (anonymous mode, /healthz) let a client rotate forged keys into fresh
-  // buckets; the old `prefix(8):length` key also kept part of the secret and
-  // merged keys sharing a prefix. Hash the whole verified key instead.
+  // buckets; the old `prefix(8):length` key also kept part of the secret.
   const presented = keyIsVerified ? extractPresentedApiKey(request) : null;
   if (presented !== null) {
-    return `key:${createHash("sha256").update(presented, "utf-8").digest("hex").slice(0, 32)}`;
+    const slot = configuredKeySlot(presented, primaryApiKey, apiKeyMap);
+    if (slot !== null) {
+      return `key:${slot}`;
+    }
   }
   return `ip:${request.ip}`;
 }
@@ -900,7 +925,11 @@ export function buildControlPlaneApp(
       return;
     }
 
-    if (rateLimitExceeded(rateLimitBucketKey(request, authConfigured && !isHealthz))) {
+    if (
+      rateLimitExceeded(
+        rateLimitBucketKey(request, authConfigured && !isHealthz, apiKey, apiKeyMap),
+      )
+    ) {
       return sendRateLimited(reply);
     }
   });
