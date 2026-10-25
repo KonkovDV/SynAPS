@@ -9,12 +9,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **CP-SAT `determinism="strict-parallel"` (audit 2026-10, opt-in):** the
+  strict contract (deterministic-time stop, loose wall safety,
+  `determinism_violated` when the wall safety ends the search) with
+  `num_workers` subsolvers under CP-SAT `interleave_search`. The default stays
+  single-thread `strict`. `determinism_violated` now also fires when the wall
+  safety ended an interleaved search whose deterministic time overshot the
+  stop (`_wall_cap_ended_search`). Measurements and caveats:
+  `benchmark/evidence/cpsat-determinism-2026-10-24/cpsat_strict_parallel_2026_10.json`; ADR-0001 addendum;
+  `tests/test_cpsat_strict_parallel.py`.
+- **Audit 2026-10 regression suite** `tests/test_audit_2026_10.py` (A-01…A-10,
+  A-13, P-01) and the report `docs/rfc/AUDIT_2026_10.md`.
+- `scripts/golden_snapshot.py` (`capture` / `compare`, suites `fast` and
+  `full`): schedule / objective / scrubbed-metadata digests for 33 solver
+  configurations, the safety net used for the decomposition below.
+- `make native-check` (cargo test + clippy). CI `native-accelerator` runs
+  `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo test` and the native/Python parity tests
+  (`test_native_objective_parity.py`, `test_native_stabilize_parity.py`,
+  `test_native_destroy_scoring.py`, `test_alns_native_grain.py`).
+
 - `AuxiliaryResource.calendar` uses the work-center contract. An empty list
   stays 24/7. A non-empty list is enforced by `FeasibilityChecker`
   (`CALENDAR_VIOLATION` on occupancy `[start - setup, end]`) and by CP-SAT
   shift literals, including setup on sequence-dependent arcs.
 
 ### Changed
+
+- **God-function decomposition (audit 2026-10, behavior-preserving):**
+  `RhcSolver.solve` → `_RhcRun` engine + `RhcRunConfig` (`rhc/_config.py`);
+  `AlnsSolver._solve_core` → `_AlnsRun` + `_alns_config.py`;
+  `CpSatSolver.solve` → `_build_model` / `_add_resources` /
+  `_warm_start_assignments` / `_extract_build_solution`;
+  `GreedyDispatch` / `BeamSearchDispatch` cores → `_dispatch_feasible_result`,
+  `_BeamRun`; `LbbdSolver.solve` → `_LbbdRun`; `LbbdHdSolver.solve` →
+  `_LbbdHdRun` (shared `cut_kind_lb_contribution` in `_lbbd_cuts.py`).
+  Golden snapshots (schedule, objective and scrubbed metadata hashes) are
+  identical before and after for every case; the only differences trace to
+  the intentional A-01 grain fix and the new A-08 metadata key (verified by
+  reverting each fix). The function-length ratchet in
+  `tests/test_architecture.py` shrank accordingly (functions over 80 lines
+  52 → 45, lines inside them 12472 → 6229, longest 2659 → 269).
+- LBBD-HD records `warm_start_error` (exception type) instead of silently
+  swallowing a failed greedy warm start.
+- RHC / ALNS config clamps are uniform `min(high, max(low, x))`; a NaN value
+  now maps to the lower bound for every key (two pre-refactor clamps used the
+  opposite nesting, which differs only on NaN; R-09).
+- `validate_setup_matrix_metricity` is vectorized (NumPy, per source state)
+  and takes `limit=`; `is_setup_matrix_metric` stops at the first violation
+  (P-01; equivalence vs brute force in `tests/test_audit_2026_10.py`).
+- Docs: `OperationMode` docstring (`duration_min` is absolute, not divided by
+  `speed_factor`), `lbbd_solver` module docstring, architecture overview /
+  solver portfolio / canonical form (CP-SAT hierarchical objective: the
+  `makespan` weight is not used and material / energy act on milli-units —
+  A-11 / A-12, documented, not changed).
+- `pyproject.toml` project URLs point at `main`; Makefile drops the
+  host-specific `C:/plans` path and defaults to `PYTHON ?= python3`.
 
 - **RHC stabilize closes order precedence after resource shifts
   (2026-08-31):** Each temporal-stabilize pass re-runs the precedence
@@ -269,6 +319,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lint, contract-schema-drift, typecheck, test-fast 3.12/3.13,
   benchmark-smoke, control-plane. `test-slow` is post-merge only
   (`CONTRIBUTING.md`). Direct push `7a4083e` is the counter-example.
+
+### Fixed
+
+Audit 2026-10 (`docs/rfc/AUDIT_2026_10.md`); each item has a regression
+test in `tests/test_audit_2026_10.py`.
+
+- **A-01 integer grain:** `ceil(duration / speed)` on floats reserved one
+  minute too many when the quotient was an integer up to rounding
+  (`21 / 0.7 = 30.000000000000004` → 31). `ceil_minutes` snaps within
+  `GRAIN_EPSILON_MIN = 1e-9` (the checker tolerance) in `synaps/timegrain.py`,
+  the native `list_schedule.rs` and the cable adapter.
+- **A-02 / A-03 notary trusted solver stamps:** the calendar check used the
+  solver's `setup_minutes` and `aux_resource_ids`. It now uses the longer of
+  the stamp and the setup derived from the problem, and the problem's
+  auxiliary requirements.
+- **A-04 CP-SAT weights:** fractional objective weights were truncated to 0
+  and negative weights were accepted. Weights are scaled to exact integers;
+  negative weights raise `ValueError`.
+- **A-05 CP-SAT due offsets** floor instead of truncating toward zero for
+  past-due orders.
+- **A-06 BHK setup bound:** the distinct-state Hamiltonian path over-claimed
+  on non-metric matrices when a machine sequence revisits a state. The bound
+  is now computed on the metric closure (Floyd–Warshall); unchanged on
+  metric matrices. KI-S3 (no subset-monotone cuts) is unchanged.
+- **A-07 coverage outcome** counts distinct operations, so duplicated
+  assignments no longer count as coverage.
+- **A-08 RHC coverage-pace controller** now observes inner-solver windows,
+  not only greedy-fallback windows (`coverage_pace_windows_observed`).
+- **A-09 ALNS repair EMA** averages per-iteration repair times, not
+  cumulative totals.
+- **A-10 CP-SAT fractional `time_limit_s`** is no longer truncated to an
+  integer.
+- **R-10 portable release wheels:** `build-native-wheels` built from the repo
+  root, so `.cargo/config.toml` (`target-cpu=native`) baked the runner's ISA
+  into published wheels; on another CPU the import dies with SIGILL before the
+  Python fallback can engage (reproduced in the audit container after a host
+  change). The release step now pins `RUSTFLAGS` to `x86-64-v2` (`apple-m1`
+  on arm64) and runs under `shell: bash` (R-11: its backslash continuations
+  failed under the Windows PowerShell default). Local builds stay `native`.
+- **A-13 seeded instance generators** drew random `uuid4` IDs, so one seed
+  produced a different instance on every call and, through `str(id)`
+  tie-breaks, a different schedule. IDs now come from a dedicated seeded
+  stream (`synaps/_ids.py`); the structural RNG draws are unchanged.
 
 ### CI conclusions (И1.3)
 

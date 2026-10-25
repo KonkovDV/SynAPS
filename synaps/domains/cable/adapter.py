@@ -8,8 +8,9 @@ are parametric family deltas, not Moskabelmet SMED stopwatch claims.
 
 from __future__ import annotations
 
-import math
 from typing import NamedTuple
+
+from synaps.timegrain import ceil_minutes
 
 
 class CableSku(NamedTuple):
@@ -45,7 +46,7 @@ def duration_minutes_from_length(length_m: float, line_speed_m_per_min: float) -
     """Integer minutes for a length at a line speed. Independent of WC speed_factor."""
 
     speed = line_speed_m_per_min if line_speed_m_per_min > 0 else 1.0
-    return max(1, math.ceil(max(0.0, length_m) / speed))
+    return max(1, ceil_minutes(max(0.0, length_m) / speed))
 
 
 def split_length_into_reels(length_m: float, reel_capacity_m: float) -> list[float]:

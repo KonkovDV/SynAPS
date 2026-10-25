@@ -75,3 +75,32 @@ including load headroom) the run still finishes within ~1.2× the wall budget.
   solve time — intermittent non-reproducibility. Rejected as fragile.
 - **Make `fast` the default:** honest and fast, but abandons the deterministic-
   first guarantee that is a core product promise. Rejected.
+
+## Addendum (2026-10 audit): opt-in `determinism="strict-parallel"`
+
+The 2026-07 analysis rejected interleaved multi-threading because the wall
+limit (= budget) pre-empted the deterministic stop. That failure was the
+*wall cap*, not interleaving itself: CP-SAT `interleave_search` schedules and
+synchronizes subsolver batches deterministically. The 2026-10 audit therefore
+added `determinism="strict-parallel"`: `num_workers` interleaved subsolvers with
+the **same** contract as `strict` (`max_deterministic_time = 0.5 * budget`, wall
+safety `2 * budget`, `determinism_violated` when the safety ends the search).
+`strict` stays the default.
+
+Evidence: `benchmark/evidence/cpsat-determinism-2026-10-24/cpsat_strict_parallel_2026_10.json` (4-core host,
+OR-Tools 9.15, `medium_stress_20x4` and a 120-op generated instance, idle and
+under a busy-loop load):
+
+- Whenever the wall safety did not end the search, repeated runs produced one
+  schedule fingerprint (idle and loaded, 4 and 8 workers).
+- Search quality at equal budget: makespan 165 vs 184 (`strict`) on
+  `medium_stress_20x4`; on the 120-op instance `strict` found no schedule within
+  its budget while `strict-parallel` found one in every run.
+- Under interleaving the deterministic limit is checked between batches and is
+  overshot by a few units; at small budgets (2–3 s here) the wall safety
+  therefore ends the run and the result is flagged, as designed.
+
+The audit also fixed the violation detector: interleaved deterministic time is
+aggregated across batches (9.47 reported for a 3.0 stop), so "budget not
+consumed" never fired; the detector now also checks whether the wall clock
+reached the safety cap (`_wall_cap_ended_search`).

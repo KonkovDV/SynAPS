@@ -19,7 +19,7 @@ silent divergence that would otherwise occur as cut formulations evolve.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -95,6 +95,29 @@ def reported_lower_bound(raw_relaxation: float, best_ub: float) -> tuple[float, 
     return raw_relaxation, invariant_violated
 
 
+def cut_kind_lb_contribution(iteration_log: list[dict[str, Any]]) -> dict[str, float]:
+    """R10: attribute each positive master-LB delta to the cut kinds behind it.
+
+    The delta observed in iteration N is shared equally by the cut kinds added
+    in iteration N-1 (the cuts first active in master N). A delta with no
+    attributable cuts (iteration 1, or after convergence) accrues to the
+    synthetic ``master_relaxation`` source. Shared by LBBD and LBBD-HD.
+    """
+    contribution: dict[str, float] = {}
+    for entry in iteration_log:
+        delta = float(entry.get("lb_delta", 0.0) or 0.0)
+        if delta <= 0.0:
+            continue
+        kinds = entry.get("cut_kinds_attributed") or []
+        if not kinds:
+            contribution["master_relaxation"] = contribution.get("master_relaxation", 0.0) + delta
+            continue
+        share = delta / float(len(kinds))
+        for kind in kinds:
+            contribution[kind] = contribution.get(kind, 0.0) + share
+    return contribution
+
+
 def compute_machine_transition_floor(
     problem: ScheduleProblem,
     eligible_by_op: dict[UUID, list[UUID]],
@@ -151,7 +174,13 @@ def compute_sequence_independent_setup_lower_bound(
     ops_by_id: dict[UUID, Operation],
     setup_lookup: Mapping[tuple[UUID, UUID, UUID], float],
 ) -> float:
-    """Return a sequence-independent setup lower bound for a machine cluster."""
+    """Return a sequence-independent setup lower bound for a machine cluster.
+
+    ``(k - 1) * min cross-state setup`` for ``k`` distinct states: any walk
+    over the multiset leaves each of ``k - 1`` states for a different state at
+    least once. Single disjunctive lane only (``L`` lanes need only ``k - L``
+    cross-state transitions).
+    """
 
     state_ids = [
         operation.state_id
@@ -185,15 +214,25 @@ def compute_machine_tsp_lower_bound(
     setup_lookup: Mapping[tuple[UUID, UUID, UUID], float],
     *,
     max_states: int = 12,
+    metric_closure: bool = True,
 ) -> float:
-    """Sequence-aware setup lower bound on a FIXED set of distinct states (F6).
+    """Sequence-aware setup lower bound on a FIXED multiset of states (F6 / A-06).
 
-    Solves the asymmetric Hamiltonian-path problem on the realised distinct
-    state types via Bellman-Held-Karp dynamic programming. For a FIXED op set
-    the BHK optimum is a valid lower bound on the sequence-dependent setup
-    contribution of any visit order of those distinct types — dominating the
-    sequence-independent floor and the cheap assignment relaxation
-    (:func:`compute_min_out_assignment_setup_lb`).
+    Solves the asymmetric Hamiltonian-path problem on the realised DISTINCT
+    state types via Bellman-Held-Karp dynamic programming, over the METRIC
+    CLOSURE of the setup costs (all-pairs shortest paths among those states,
+    Floyd-Warshall).
+
+    Validity (audit 2026-10, A-06). A machine sequence is a WALK over the
+    multiset of states: a state may repeat. Between two consecutive
+    first-visits the walk pays at least the shortest-path distance, so the
+    Hamiltonian-path optimum over the closure is a valid lower bound on ANY
+    matrix. Without the closure (``metric_closure=False``, the historical
+    behaviour) the bound is valid only when the matrix is metric or no state
+    repeats: the star matrix (hub <-> leaf 1, leaf <-> leaf 100) has the walk
+    ``L1 H L2 H L3`` of cost 4 while every Hamiltonian path over the distinct
+    states costs >= 102. On a metric matrix the closure is the identity, so
+    both modes agree there.
 
     Falls back to 0.0 when the distinct state count exceeds ``max_states``
     (12 by default; BHK cost is O(n^2 * 2^n)) or when fewer than two state
@@ -201,17 +240,14 @@ def compute_machine_tsp_lower_bound(
 
     Contract (F6 / GUARD-S3, audit v4):
 
-    * Valid as a lower bound on the setup cost of a FIXED set on ANY sdst
-      matrix (metric or not): the Hamiltonian-path optimum cannot exceed the
-      cost of any particular path.
-    * NOT safe to *discount* per removed op. ``L(S) - L(S\\\\{j})`` can be
+    * Valid as a lower bound on the setup cost of a FIXED set (with closure).
+    * NOT safe to *discount* per removed op. ``L(S) - L(S\\{j})`` can be
       strictly positive even when the cut only subtracts ``p_j`` (GUARD-S3
       counterexample). That is why the ``machine_tsp`` optimality cut was
       removed from both LBBD solvers; do not reintroduce discounting without
       a covering residual.
-    * For a bound that stays valid under set shrinkage on non-metric matrices
-      without recomputing BHK, prefer
-      :func:`compute_min_out_assignment_setup_lb`.
+    * Single disjunctive lane only: ``L`` parallel lanes may start ``L`` fresh
+      sequences, so the bound must not be applied per multi-lane machine.
 
     Reference: Naderi & Roshanaei (2021), "Critical-Path-Search Logic-Based
     Benders Decomposition Approaches for Flexible Job Shop Scheduling",
@@ -233,7 +269,25 @@ def compute_machine_tsp_lower_bound(
             if i == j:
                 continue
             cost[i][j] = float(setup_lookup.get((work_center_id, from_state, to_state), 0.0))
+    if metric_closure:
+        _close_metrically(cost)
+    return _bhk_shortest_hamiltonian_path(cost)
 
+
+def _close_metrically(cost: list[list[float]]) -> None:
+    """In-place Floyd-Warshall over the off-diagonal costs (A-06)."""
+    n = len(cost)
+    for k in range(n):
+        for i in range(n):
+            for j in range(n):
+                if i != j and cost[i][k] + cost[k][j] < cost[i][j]:
+                    cost[i][j] = cost[i][k] + cost[k][j]
+
+
+def _bhk_shortest_hamiltonian_path(cost: list[list[float]]) -> float:
+    """Bellman-Held-Karp minimum Hamiltonian path (any start, any end)."""
+    n = len(cost)
+    inf = float("inf")
     full = 1 << n
     dp: list[list[float]] = [[inf] * n for _ in range(full)]
     for i in range(n):

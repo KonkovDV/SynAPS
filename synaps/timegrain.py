@@ -26,16 +26,34 @@ import math
 from datetime import datetime, timedelta
 from typing import Any
 
+#: Absolute tolerance (minutes) shared by the reservation grain and the
+#: FeasibilityChecker's physical-floor test (``span + GRAIN_EPSILON_MIN <
+#: physical``). IEEE-754 division is not exact: ``21 / 0.7`` evaluates to
+#: ``30.000000000000004`` and a bare ``ceil`` reserved 31 minutes for a
+#: 30-minute operation (audit 2026-10, A-01). Snapping within this tolerance is
+#: consistent with the checker by construction: a grain ``k`` is produced only
+#: when ``base / speed <= k + GRAIN_EPSILON_MIN``, which the checker accepts.
+#: 1e-9 min (60 ns) dominates the division error for any horizon below ~10^6
+#: minutes (relative error <= 2^-53).
+GRAIN_EPSILON_MIN = 1e-9
+
+
+def ceil_minutes(value: float) -> int:
+    """``ceil`` onto the integer-minute grid, robust to float division noise."""
+    return math.ceil(value - GRAIN_EPSILON_MIN)
+
 
 def duration_minutes(base_duration_min: float, speed_factor: float) -> int:
     """Return the canonical integer processing time in minutes.
 
-    ``max(1, ceil(base_duration_min / speed_factor))``. ``ceil`` never reserves
-    less than the physical time. A non-positive speed factor is treated as 1.0
-    (no speed-up) rather than dividing by zero.
+    ``max(1, ceil(base_duration_min / speed_factor))`` evaluated with the
+    shared :data:`GRAIN_EPSILON_MIN` tolerance. ``ceil`` never reserves less
+    than the physical time (up to that tolerance, which the checker shares). A
+    non-positive speed factor is treated as 1.0 (no speed-up) rather than
+    dividing by zero.
     """
     speed = speed_factor if speed_factor > 0 else 1.0
-    return max(1, math.ceil(base_duration_min / speed))
+    return max(1, ceil_minutes(base_duration_min / speed))
 
 
 def physical_processing_minutes(base_duration_min: float, speed_factor: float) -> float:

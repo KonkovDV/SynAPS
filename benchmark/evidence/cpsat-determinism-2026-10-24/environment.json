@@ -1,0 +1,10 @@
+{
+ "captured": "2026-10-24",
+ "host": {
+  "cpu_count": 4,
+  "python": "3.13.17",
+  "ortools": "9.15.6755"
+ },
+ "os": "Linux x86-64 (cloud container)",
+ "notes": "Session evidence for the CP-SAT determinism modes study (audit 2026-10); not a hashed benchmark epoch."
+}

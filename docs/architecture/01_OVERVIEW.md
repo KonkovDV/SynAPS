@@ -145,25 +145,31 @@ See [Language & Runtime Strategy](06_LANGUAGE_AND_RUNTIME_STRATEGY.md) for the f
 
 ### Solver Portfolio — Implementation Summary
 
-The solver portfolio is the core engineering asset. The current shipped runtime is Python 3.12+ plus a minimal TypeScript BFF for HTTP contract validation.
+The solver portfolio is the core engineering asset. The current shipped runtime is Python 3.12+ plus a minimal TypeScript BFF for HTTP contract validation, and an optional Rust (PyO3) accelerator.
+
+Line counts are a 2026-10 snapshot (`wc -l`, audit `docs/rfc/AUDIT_2026_10.md`); regenerate them instead of editing by hand. The authoritative per-component table lives in [Solver Portfolio §2.1](03_SOLVER_PORTFOLIO.md#21-implementation-evidence--code-line-counts).
 
 | Component | Source | LOC | Primary Algorithm |
 |-----------|--------|-----|-------------------|
-| CP-SAT Exact Solver | `cpsat_solver.py` | 772 | OR-Tools CP-SAT: IntervalVar + Circuit (SDST) + NoOverlap + Cumulative (ARC) |
-| LBBD Decomposition | `lbbd_solver.py` | 969 | HiGHS MIP master + CP-SAT sub + Nogood/Capacity/Setup/Load-Balance cuts |
-| LBBD-HD (Parallel) | `lbbd_hd_solver.py` | 1 324 | + ProcessPoolExecutor + ARC-aware partitioning + topological post-assembly |
-| Greedy ATCS Dispatch | `greedy_dispatch.py` | 296 | Log-space ATCS priority index, $O(N \log N)$ |
-| Pareto Slice | `pareto_slice_solver.py` | 104 | Two-stage $\varepsilon$-constraint |
-| Incremental Repair | `incremental_repair.py` | 318 | Neighbourhood radius + greedy fallback + micro-CP-SAT |
-| Portfolio Router | `router.py` | 252 | Deterministic regime×size→solver decision tree (6 regimes) |
-| Graph Partitioning | `partitioning.py` | 271 | Coarsening (BFS) + FFD Bin-Packing + Refinement |
-| Solver Registry | `registry.py` | 210 | 13 pre-configured profiles (GREED through LBBD-20-HD) |
-| FeasibilityChecker | `feasibility_checker.py` | 280 | 7-class independent validator (event-sweep algorithm) |
-| Data Model | `model.py` | 333 | Pydantic v2, 8 entity classes, DAG + SDST validation |
-| Control-Plane BFF | `control-plane/src/*.ts` | 674 | Fastify + AJV + Python bridge (TypeScript) |
-| **Total** | | **5 803** | |
+| CP-SAT Exact Solver | `synaps/solvers/cpsat_solver.py` | 1 623 | OR-Tools CP-SAT: optional intervals + `AddCircuit` (SDST) + NoOverlap/Cumulative (ARC), hierarchical big-M objective |
+| LBBD Decomposition | `synaps/solvers/lbbd_solver.py` | 1 431 | HiGHS MIP master (assignment + capacity relaxation) + CP-SAT subproblems + no-goods emitted only after optimal-status subproblems |
+| LBBD-HD (Parallel) | `synaps/solvers/lbbd_hd_solver.py` | 1 655 | + ProcessPool subproblems + ARC-aware partitioning + topological post-assembly |
+| Greedy ATCS / Beam | `synaps/solvers/greedy_dispatch.py` | 1 243 | Log-space ATCS index (Lee, Bhaskaran & Pinedo 1997); serial schedule generation, $O(N^2 \cdot \bar{E})$ worst case |
+| ALNS | `synaps/solvers/alns_solver.py` + `_alns_config.py` | 4 915 | 7 destroy operators, greedy / micro-CP-SAT repair, SA acceptance, roulette or UCB1 operator selection |
+| RHC | `synaps/solvers/rhc/` (12 modules) | 7 834 | Rolling-horizon windows over an inner solver; coverage-complete list-schedule path |
+| Pareto Slice | `synaps/solvers/pareto_slice_solver.py` | 294 | Two-stage $\varepsilon$-constraint |
+| Incremental Repair | `synaps/solvers/incremental_repair.py` | 508 | Neighbourhood radius + greedy fallback + micro-CP-SAT |
+| Portfolio Router | `synaps/solvers/router.py` | 499 | Deterministic regime×size→config decision tree (6 regimes) |
+| Graph Partitioning | `synaps/solvers/partitioning.py` | 268 | Coarsening (BFS) + FFD bin packing + refinement |
+| Solver Registry | `synaps/solvers/registry.py` | 456 | 25 named configs |
+| FeasibilityChecker | `synaps/solvers/feasibility_checker.py` | 1 379 | Independent notary: 10 constraint classes, exact lane inference, sweep-line capacity |
+| Data Model | `synaps/model.py` | 622 | Pydantic v2 entities, DAG + SDST + mode validation |
+| Control-Plane BFF | `control-plane/src/*.ts` | 3 964 | Fastify + AJV + Python bridge (TypeScript) |
+| Native accelerator | `native/synaps_native/src/*.rs` | 2 781 | PyO3 + rayon kernels (ATCS scoring, list schedule, repair) |
 
 The **Portfolio Router** automatically selects the solver based on: operational regime (NOMINAL, RUSH_ORDER, BREAKDOWN, MATERIAL_SHORTAGE, INTERACTIVE, WHAT_IF), time budget, and instance size. No ML — deterministic routing.
+
+Since the 2026-10 audit the two largest solvers are explicit pipelines: `RhcSolver.solve` delegates to a single-use run engine (`_RhcRun`, typed `RhcRunConfig`) and `AlnsSolver` to `_AlnsRun` (typed `AlnsRunConfig`); no function in either exceeds 80 lines.
 
 
 ## Technology Stack

@@ -6,6 +6,7 @@ import itertools
 import math
 import time
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Any
 from uuid import NAMESPACE_DNS, UUID, uuid5
 
@@ -51,6 +52,8 @@ _STRICT_MODE_DENIED_PARAMETERS = frozenset({"num_workers", "num_search_workers",
 # tight enough to pre-empt the deterministic stop, is inherently
 # non-reproducible under variable load (the original D1/D3 collision).
 _STRICT_DETERMINISTIC_FRACTION = 0.5
+#: Modes whose binding stop is ``max_deterministic_time`` (reproducible runs).
+_DETERMINISTIC_MODES = ("strict", "strict-parallel")
 _STRICT_WALL_SAFETY_FACTOR = 2.0
 
 # P1-1: the default hierarchical objective is a big-M scalarization
@@ -164,6 +167,68 @@ def _objective_product_overflows(term_bound: int, multiplier_bound: int) -> bool
     return term_bound * (multiplier_bound + 1) > _SAFE_OBJECTIVE_MAX
 
 
+_WEIGHT_DECIMAL_SCALES = tuple(10**exponent for exponent in range(7))
+
+
+def _integer_secondary_weights(
+    objective_weights: Mapping[str, Any] | None,
+) -> tuple[dict[str, int], int]:
+    """Exact integer coefficients for the hierarchical secondary objective.
+
+    Audit 2026-10 (A-04): CP-SAT objectives are integral and the previous
+    ``int(weight)`` silently truncated ``{"setup": 0.5}`` to 0 (the cable
+    domain worked around it with ``round(w * 100)``). The weights are now
+    multiplied by the smallest decimal scale ``K in {1, 10, ..., 10^6}`` that
+    makes all of them integral (rounding at ``10^6`` otherwise). ``K`` only
+    rescales the secondary sum, and ``secondary_bound`` is built from the
+    scaled coefficients, so makespan dominance is unchanged. Integer inputs
+    give ``K == 1`` — bit-for-bit the historical model.
+
+    Negative (or NaN) weights are rejected: a negative coefficient breaks the
+    ``0 <= secondary < secondary_bound`` invariant behind the lexicographic
+    big-M decomposition and the ``floor(bound / S)`` makespan dual bound.
+    """
+    if not objective_weights:
+        return {"setup": 1, "material_loss": 1, "tardiness": 1, "energy": 0}, 1
+    raw = {
+        "setup": float(objective_weights.get("setup", 0)),
+        "material_loss": float(
+            objective_weights.get("material", objective_weights.get("material_loss", 0))
+        ),
+        "tardiness": float(objective_weights.get("tardiness", 0)),
+        "energy": float(objective_weights.get("energy", objective_weights.get("energy_kwh", 0))),
+    }
+    checked = {**raw, "makespan": float(objective_weights.get("makespan", 0))}
+    invalid = sorted(key for key, value in checked.items() if not value >= 0)
+    if invalid:
+        raise ValueError(f"CP-SAT objective weights must be non-negative and finite: {invalid}")
+    for scale in _WEIGHT_DECIMAL_SCALES:
+        scaled = {key: value * scale for key, value in raw.items()}
+        if all(abs(v - round(v)) <= 1e-9 * max(1.0, abs(v)) for v in scaled.values()):
+            return {key: round(v) for key, v in scaled.items()}, scale
+    scale = _WEIGHT_DECIMAL_SCALES[-1]
+    return {key: round(value * scale) for key, value in raw.items()}, scale
+
+
+def _wall_cap_ended_search(solver: cp_model.CpSolver, effective: Mapping[str, Any]) -> bool:
+    """True when the wall-clock safety, not the deterministic stop, ended the search.
+
+    Two signals, either suffices:
+
+    * the deterministic budget was not consumed (single-thread ``strict``:
+      deterministic time is that one worker's clock);
+    * the wall clock reached the runaway cap. Audit 2026-10: under
+      ``interleave_search`` the reported deterministic time is aggregated over
+      the interleaved batches (measured 9.47 for a 3.0 stop), so the first test
+      alone never fired even when the 2x wall cap cut an overloaded run.
+    """
+    deterministic_stop = float(effective["max_deterministic_time"])
+    wall_cap = float(effective["max_time_in_seconds"])
+    budget_unused = float(solver.deterministic_time) < deterministic_stop * 0.99
+    wall_capped = float(solver.wall_time) >= wall_cap * 0.99
+    return budget_unused or wall_capped
+
+
 def _bigm_objective_overflows(horizon: int, secondary_bound: int) -> bool:
     """True if the big-M objective coefficient product exceeds the safe int64 ceiling."""
     return _objective_product_overflows(secondary_bound, horizon)
@@ -208,8 +273,13 @@ def _build_tardiness_terms(
     # the feasibility question: an integer end e is tardy vs a real due d
     # iff e > floor(d). (Contrast with release offsets, which must CEIL —
     # a floor there would admit starts before the release.)
+    # Audit 2026-10 (A-05): math.floor, not int(): int() truncates toward zero,
+    # which is a CEIL for past-due orders (due before the horizon start) and
+    # understated their tardiness by up to one minute.
     due_offsets = {
-        order.id: int((order.due_date - problem.planning_horizon_start).total_seconds() / 60.0)
+        order.id: math.floor(
+            (order.due_date - problem.planning_horizon_start).total_seconds() / 60.0
+        )
         for order in problem.orders
     }
 
@@ -333,10 +403,43 @@ def _scaled_transition_lookups(
     return minutes, material, energy
 
 
+def _configure_determinism(
+    solver: cp_model.CpSolver, *, determinism: str, time_limit_s: float, num_workers: int
+) -> int:
+    """Install the deterministic stop for strict modes; return the worker count."""
+    if determinism not in _DETERMINISTIC_MODES:
+        return num_workers
+    # N1 (audit v3, ADR-0001): single-threaded search has a deterministic
+    # order; stopping on deterministic time (machine-independent) as the
+    # SOLE binding limit makes a fixed seed reproducible regardless of host
+    # speed or CPU load. The original fix left max_time_in_seconds at the
+    # budget, so under load (where the wall/deterministic ratio rises) the
+    # wall cap cut before the deterministic stop and reproducibility was
+    # lost (measured: 4/4 distinct schedules). The wall clock is therefore
+    # relaxed to a loose runaway safety; the deterministic stop binds first.
+    # determinism="fast" keeps the multi-threaded portfolio for throughput.
+    #
+    # Audit 2026-10: "strict-parallel" keeps the same contract with
+    # ``num_workers`` subsolvers under CP-SAT ``interleave_search``, whose
+    # batches are scheduled and synchronized deterministically, so a run is
+    # reproducible whenever the deterministic stop (not the wall safety) ends
+    # it; see the ADR-0001 addendum and tests/test_cpsat_strict_parallel.py.
+    if determinism == "strict":
+        num_workers = 1
+    else:
+        num_workers = max(1, num_workers)
+        solver.parameters.interleave_search = True
+    solver.parameters.num_workers = num_workers
+    deterministic_stop = float(time_limit_s) * _STRICT_DETERMINISTIC_FRACTION
+    solver.parameters.max_deterministic_time = deterministic_stop
+    solver.parameters.max_time_in_seconds = float(time_limit_s) * _STRICT_WALL_SAFETY_FACTOR
+    return num_workers
+
+
 def _apply_sat_parameter_overrides(
     solver: cp_model.CpSolver,
     *,
-    time_limit_s: int,
+    time_limit_s: float,
     random_seed: int,
     num_workers: int,
     determinism: str,
@@ -363,21 +466,9 @@ def _apply_sat_parameter_overrides(
     solver.parameters.random_seed = random_seed
     solver.parameters.num_workers = num_workers
 
-    if determinism == "strict":
-        # N1 (audit v3, ADR-0001): single-threaded search has a deterministic
-        # order; stopping on deterministic time (machine-independent) as the
-        # SOLE binding limit makes a fixed seed reproducible regardless of host
-        # speed or CPU load. The original fix left max_time_in_seconds at the
-        # budget, so under load (where the wall/deterministic ratio rises) the
-        # wall cap cut before the deterministic stop and reproducibility was
-        # lost (measured: 4/4 distinct schedules). The wall clock is therefore
-        # relaxed to a loose runaway safety; the deterministic stop binds first.
-        # determinism="fast" keeps the multi-threaded portfolio for throughput.
-        num_workers = 1
-        solver.parameters.num_workers = 1
-        deterministic_stop = float(time_limit_s) * _STRICT_DETERMINISTIC_FRACTION
-        solver.parameters.max_deterministic_time = deterministic_stop
-        solver.parameters.max_time_in_seconds = float(time_limit_s) * _STRICT_WALL_SAFETY_FACTOR
+    num_workers = _configure_determinism(
+        solver, determinism=determinism, time_limit_s=time_limit_s, num_workers=num_workers
+    )
 
     effective_parameters: dict[str, Any] = {
         "max_time_in_seconds": float(solver.parameters.max_time_in_seconds),
@@ -385,11 +476,13 @@ def _apply_sat_parameter_overrides(
         "num_workers": int(solver.parameters.num_workers),
         "determinism": determinism,
     }
-    if determinism == "strict":
-        # Recorded only in strict mode, where it is the binding stop (N1).
+    if determinism in _DETERMINISTIC_MODES:
+        # Recorded only in deterministic modes, where it is the binding stop (N1).
         effective_parameters["max_deterministic_time"] = float(
             solver.parameters.max_deterministic_time
         )
+        if determinism == "strict-parallel":
+            effective_parameters["interleave_search"] = bool(solver.parameters.interleave_search)
     if not isinstance(overrides, Mapping):
         return effective_parameters
 
@@ -403,7 +496,7 @@ def _apply_sat_parameter_overrides(
                 f"Cannot override CP-SAT time limit {key!r} via sat_parameters; "
                 f"the search budget is controlled only by time_limit_s."
             )
-        if determinism == "strict" and key in _STRICT_MODE_DENIED_PARAMETERS:
+        if determinism in _DETERMINISTIC_MODES and key in _STRICT_MODE_DENIED_PARAMETERS:
             # F9/C7: strict mode is reproducible because it is single-threaded
             # and seeded only via solve(random_seed=). Use determinism="fast"
             # to opt out.
@@ -908,7 +1001,7 @@ class CpSatSolver(BaseSolver):
         epsilon_constraints: dict[str, int] | None = None,
         objective_mode: str = "weighted_sum",
         primary_objective: str = "makespan",
-    ) -> tuple[Any, Any, Any, Any, int, dict[str, int], int, int, bool]:
+    ) -> tuple[Any, Any, Any, Any, int, dict[str, int], int, int, bool, int]:
         max_setup = max((entry.setup_minutes for entry in problem.setup_matrix), default=0)
         max_material_scaled = max(
             (round(entry.material_loss * material_loss_scale) for entry in problem.setup_matrix),
@@ -937,27 +1030,9 @@ class CpSatSolver(BaseSolver):
         # When weights are omitted, keep historical CP-SAT hierarchical secondary
         # defaults (setup/material/tardiness = 1, energy = 0). When provided,
         # accept canonical `material` alias and default missing keys to 0 to
-        # match DEFAULT_WEIGHTS (Wave 12 / H12-2).
-        if objective_weights:
-            material_w = objective_weights.get(
-                "material",
-                objective_weights.get("material_loss", 0),
-            )
-            weights = {
-                "setup": int(objective_weights.get("setup", 0)),
-                "material_loss": int(material_w),
-                "tardiness": int(objective_weights.get("tardiness", 0)),
-                "energy": int(
-                    objective_weights.get("energy", objective_weights.get("energy_kwh", 0))
-                ),
-            }
-        else:
-            weights = {
-                "setup": 1,
-                "material_loss": 1,
-                "tardiness": 1,
-                "energy": 0,
-            }
+        # match DEFAULT_WEIGHTS (Wave 12 / H12-2). Fractional weights are scaled
+        # to exact integers instead of truncated (A-04).
+        weights, weight_scale = _integer_secondary_weights(objective_weights)
         secondary_bound = (
             weights["setup"] * setup_ub
             + weights["material_loss"] * material_ub
@@ -1007,6 +1082,7 @@ class CpSatSolver(BaseSolver):
             material_loss_scale,
             energy_kwh_scale,
             bigm_degraded,
+            weight_scale,
         )
 
     def _extract_solution_and_objective(
@@ -1136,428 +1212,49 @@ class CpSatSolver(BaseSolver):
         return assignments, objective, metadata
 
     def solve(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
-        time_limit_s = int(kwargs.get("time_limit_s", 30))
-        random_seed = int(kwargs.get("random_seed", 42))
-        num_workers = int(kwargs.get("num_workers", 8))
-        # D1: default to reproducible multi-threaded search. "fast" opts back
-        # into the non-deterministic wall-clock portfolio.
-        determinism = str(kwargs.get("determinism", "strict"))
-        if determinism not in ("strict", "fast"):
-            raise ValueError(f"determinism must be 'strict' or 'fast', got {determinism!r}")
-        sat_parameter_overrides = kwargs.get("sat_parameters")
-        auto_greedy_warm_start = bool(kwargs.get("auto_greedy_warm_start", True))
-        objective_weights = dict(kwargs.get("objective_weights", {}))
-        material_loss_scale = int(kwargs.get("material_loss_scale", 1000))
-        energy_kwh_scale = int(kwargs.get("energy_kwh_scale", 1000))
-        epsilon_constraints: dict[str, int] | None = kwargs.get("epsilon_constraints")
-        objective_mode = str(kwargs.get("objective_mode", "weighted_sum"))
-        primary_objective = str(kwargs.get("primary_objective", "makespan"))
-        warm_start_assignments: list[Assignment] | None = kwargs.get("warm_start_assignments")
-        frozen_assignments_raw = kwargs.get("frozen_assignments")
-        frozen_assignments: list[Assignment] = list(frozen_assignments_raw or [])
-        frozen_predecessor_end_offsets = {
-            op_id: int(offset)
-            for op_id, offset in dict(kwargs.get("frozen_predecessor_end_offsets", {})).items()
-        }
-        frozen_context_operations = list(kwargs.get("frozen_context_operations") or [])
-        frozen_aux_requirements = list(kwargs.get("frozen_aux_requirements") or [])
-        enable_symmetry_breaking = bool(kwargs.get("enable_symmetry_breaking", False))
-
+        """Build, solve and extract one CP-SAT model (pipeline below)."""
+        cfg = _CpSatSolveConfig.from_kwargs(kwargs)
         t0 = time.monotonic()
-        model = cp_model.CpModel()
-
-        solve_problem, virtual_to_original = self._virtualize_parallel_work_centers(problem)
-
-        # P1-4: frozen assignments are defined on the ORIGINAL work centers, not
-        # the virtual lanes created for max_parallel > 1. Silently dropping them
-        # (the prior behavior) let a repair overlap frozen work with no signal.
-        # Fail loudly instead; a proper lane mapping is a future enhancement.
-        if frozen_assignments and virtual_to_original:
-            raise ValueError(
-                "frozen_assignments are not supported together with max_parallel>1 "
-                "work-center lane virtualization: the frozen intervals reference the "
-                "original work centers, not the virtual lanes. Provide a single-lane "
-                "instance or omit frozen_assignments (P1-4)."
-            )
-
-        context_ops_by_id: dict[Any, Any] = {
-            operation.id: operation for operation in solve_problem.operations
-        }
-        for operation in frozen_context_operations:
-            context_ops_by_id.setdefault(operation.id, operation)
-        if frozen_assignments:
-            missing_frozen_ops = [
-                assignment.operation_id
-                for assignment in frozen_assignments
-                if assignment.operation_id not in context_ops_by_id
-            ]
-            if missing_frozen_ops:
-                raise ValueError(
-                    "frozen_assignments require frozen_context_operations covering "
-                    f"missing ops {missing_frozen_ops[:5]}"
-                    f"{'...' if len(missing_frozen_ops) > 5 else ''} "
-                    "(Wave 12 / C12-1)."
-                )
-
-        # F8 (audit v4): floor here is the CONSERVATIVE direction — all
-        # start/end vars are bounded by `horizon`, so a sub-minute remainder is
-        # simply lost as schedulable space; extracted datetimes therefore never
-        # exceed planning_horizon_end (the checker's HORIZON_BOUND is safe).
-        horizon = int(
-            (
-                solve_problem.planning_horizon_end - solve_problem.planning_horizon_start
-            ).total_seconds()
-            / 60
-        )
-
-        wc_by_id = {work_center.id: work_center for work_center in solve_problem.work_centers}
-        eligible_by_op = {
-            operation.id: (
-                operation.eligible_wc_ids
-                if operation.eligible_wc_ids
-                else [work_center.id for work_center in solve_problem.work_centers]
-            )
-            for operation in solve_problem.operations
-        }
-        setup_minutes_lookup, setup_material_lookup, setup_energy_lookup = (
-            _scaled_transition_lookups(
-                solve_problem,
-                material_loss_scale=material_loss_scale,
-                energy_kwh_scale=energy_kwh_scale,
-            )
-        )
-
-        starts: dict[tuple[Any, Any], Any] = {}
-        ends: dict[tuple[Any, Any], Any] = {}
-        intervals: dict[tuple[Any, Any], Any] = {}
-        presences: dict[tuple[Any, Any], Any] = {}
-        selected_starts: dict[Any, Any] = {}
-        selected_ends: dict[Any, Any] = {}
-        mode_vars, mode_load = build_presence_intervals(
-            model,
-            solve_problem,
-            eligible_by_op,
-            wc_by_id,
-            horizon,
-            starts,
-            ends,
-            intervals,
-            presences,
-            selected_starts,
-            selected_ends,
-        )
-
-        # M1: release_date lower bound on the start time. An operation may not
-        # start before its order becomes available (material release).
-        # F8 (audit v4): the offset must CEIL, not truncate — the model works on
-        # an integer-minute grid while the FeasibilityChecker compares exact
-        # datetimes. int() admitted starts up to 59.999s before the release
-        # (release at H0+1.5min -> offset 1 -> start at H0+1:00, a
-        # RELEASE_DATE_VIOLATION). ceil lands on the first grid point that is
-        # not before the release.
-        orders_by_id = {order.id: order for order in solve_problem.orders}
-        release_offset_by_op: dict[Any, int] = {}
-        for operation in solve_problem.operations:
-            order = orders_by_id.get(operation.order_id)
-            offset = math.ceil(
-                operation_earliest_offset_minutes(
-                    operation, order, solve_problem.planning_horizon_start
-                )
-            )
-            if offset > 0:
-                release_offset_by_op[operation.id] = offset
-
-        _add_operation_time_bounds(
-            model,
-            solve_problem,
-            selected_starts,
-            selected_ends,
-            frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
-            release_offset_by_op=release_offset_by_op,
-        )
-
-        calendar_shifts = _add_calendar_shift_literals(
-            model, solve_problem, starts, ends, presences
-        )
-        setup_terms, material_terms, energy_terms, setup_intervals_by_op = (
-            self._add_machine_order_and_adjacency(
-                model,
-                solve_problem,
-                starts,
-                ends,
-                intervals,
-                presences,
-                setup_minutes_lookup,
-                setup_material_lookup,
-                setup_energy_lookup,
-                planning_horizon_start=solve_problem.planning_horizon_start,
-                horizon=horizon,
-                frozen_assignments=frozen_assignments,
-                context_ops_by_id=context_ops_by_id,
-                calendar_shifts=calendar_shifts,
-            )
-        )
-        self._add_aux_resource_cumulative_constraints(
-            model,
-            solve_problem,
-            eligible_by_op,
-            intervals,
-            setup_intervals_by_op,
-            planning_horizon_start=solve_problem.planning_horizon_start,
-            horizon=horizon,
-            frozen_assignments=frozen_assignments,
-            frozen_aux_requirements=frozen_aux_requirements or list(solve_problem.aux_requirements),
-            mode_load=mode_load,
-        )
-
-        makespan = model.new_int_var(0, horizon, "makespan")
-        for operation in solve_problem.operations:
-            model.add(makespan >= selected_ends[operation.id])
-
-        (
-            total_setup,
-            total_material_scaled,
-            total_tardiness,
-            total_energy_scaled,
-            secondary_bound,
-            weights,
-            scale,
-            energy_scale,
-            bigm_degraded,
-        ) = self._build_weighted_objective(
-            model,
-            solve_problem,
-            horizon,
-            makespan,
-            setup_terms,
-            material_terms,
-            energy_terms,
-            selected_ends,
-            objective_weights,
-            material_loss_scale,
-            energy_kwh_scale,
-            epsilon_constraints=epsilon_constraints,
-            objective_mode=objective_mode,
-            primary_objective=primary_objective,
-        )
-
-        if enable_symmetry_breaking:
-            # A capacity-ordering symmetry cut is sound only between genuinely
-            # interchangeable machines: any schedule of A must be transferable
-            # wholesale onto B. That requires identical capability_group,
-            # speed_factor, max_parallel, setup matrix, AND identical eligible-
-            # operation sets. The old form grouped only by (capability_group,
-            # speed_factor) and summed over "shared" ops, cutting the optimum
-            # whenever an op was eligible on A but not B (P0-2).
-            setup_rows_by_wc: dict[Any, list[tuple[Any, Any, int, float, float]]] = {}
-            for entry in solve_problem.setup_matrix:
-                setup_rows_by_wc.setdefault(entry.work_center_id, []).append(
-                    (
-                        entry.from_state_id,
-                        entry.to_state_id,
-                        entry.setup_minutes,
-                        entry.material_loss,
-                        entry.energy_kwh,
-                    )
-                )
-            eligible_ops_by_wc: dict[Any, frozenset[Any]] = {
-                work_center.id: frozenset(
-                    operation.id
-                    for operation in solve_problem.operations
-                    if work_center.id in eligible_by_op[operation.id]
-                )
-                for work_center in solve_problem.work_centers
-            }
-            # T-30: per-(op, machine) overrides break interchangeability even when
-            # speed/eligibility match — include the override fingerprint in the
-            # symmetry class key (Wave 5 Red Team H4).
-            override_sig_by_wc: dict[Any, tuple[tuple[str, int], ...]] = {
-                work_center.id: tuple(
-                    sorted(
-                        (str(operation.id), int(minutes))
-                        for operation in solve_problem.operations
-                        for minutes in (operation.machine_duration_overrides.get(work_center.id),)
-                        if minutes is not None
-                    )
-                )
-                for work_center in solve_problem.work_centers
-            }
-            # Machines carrying frozen (fixed) intervals are not interchangeable
-            # with unfrozen peers even when all other attributes match: the
-            # frozen blocks differ per machine, so a wholesale A<->B swap need
-            # not preserve feasibility. Exclude them from symmetry classes.
-            frozen_wc_ids = {assignment.work_center_id for assignment in frozen_assignments}
-            symmetry_classes: dict[tuple[Any, ...], list[Any]] = {}
-            for work_center in solve_problem.work_centers:
-                if work_center.id in frozen_wc_ids:
-                    continue
-                setup_signature = tuple(
-                    sorted(
-                        setup_rows_by_wc.get(work_center.id, []),
-                        key=lambda row: (str(row[0]), str(row[1])),
-                    )
-                )
-                class_key = (
-                    work_center.capability_group,
-                    work_center.speed_factor,
-                    work_center.max_parallel,
-                    setup_signature,
-                    eligible_ops_by_wc[work_center.id],
-                    override_sig_by_wc[work_center.id],
-                )
-                symmetry_classes.setdefault(class_key, []).append(work_center)
-            for class_work_centers in symmetry_classes.values():
-                if len(class_work_centers) < 2:
-                    continue
-                for work_center_a, work_center_b in itertools.pairwise(class_work_centers):
-                    # Eligible sets are identical within a class, so summing over
-                    # A's ops covers exactly the same operations as B's.
-                    presences_a = [
-                        presences[(op_id, work_center_a.id)]
-                        for op_id in eligible_ops_by_wc[work_center_a.id]
-                        if (op_id, work_center_a.id) in presences
-                    ]
-                    presences_b = [
-                        presences[(op_id, work_center_b.id)]
-                        for op_id in eligible_ops_by_wc[work_center_b.id]
-                        if (op_id, work_center_b.id) in presences
-                    ]
-                    if presences_a and presences_b:
-                        model.add(sum(presences_a) >= sum(presences_b))
-
-        if (
-            auto_greedy_warm_start
-            and warm_start_assignments is None
-            and time_limit_s >= 5
-            and not virtual_to_original
-            and not any(operation.modes for operation in solve_problem.operations)
-        ):
-            from synaps.solvers.greedy_dispatch import GreedyDispatch
-
-            greedy_result = GreedyDispatch().solve(problem)
-            if greedy_result.assignments:
-                warm_start_assignments = greedy_result.assignments
-
-        hint_count = 0
-        if warm_start_assignments and not virtual_to_original:
-            hint_by_operation = {
-                assignment.operation_id: assignment for assignment in warm_start_assignments
-            }
-            for operation in solve_problem.operations:
-                hint = hint_by_operation.get(operation.id)
-                if hint is None:
-                    continue
-                start_offset = int(
-                    (hint.start_time - problem.planning_horizon_start).total_seconds() / 60.0
-                )
-                start_offset = max(0, min(start_offset, horizon))
-                for work_center_id in eligible_by_op[operation.id]:
-                    is_assigned = work_center_id == hint.work_center_id
-                    model.add_hint(presences[(operation.id, work_center_id)], int(is_assigned))
-                    hint_count += 1
-                    if is_assigned:
-                        model.add_hint(starts[(operation.id, work_center_id)], start_offset)
-                        hint_count += 1
-
+        build = self._build_model(problem, cfg)
+        if cfg.enable_symmetry_breaking:
+            _add_machine_symmetry_breaking(build, cfg.frozen_assignments)
+        warm_start = self._warm_start_assignments(problem, build, cfg)
+        hint_count = _add_warm_start_hints(problem, build, warm_start)
         solver = cp_model.CpSolver()
         effective_sat_parameters = _apply_sat_parameter_overrides(
             solver,
-            time_limit_s=time_limit_s,
-            random_seed=random_seed,
-            num_workers=num_workers,
-            determinism=determinism,
-            overrides=sat_parameter_overrides,
+            time_limit_s=cfg.time_limit_s,
+            random_seed=cfg.random_seed,
+            num_workers=cfg.num_workers,
+            determinism=cfg.determinism,
+            overrides=cfg.sat_parameter_overrides,
         )
-        random_seed = int(effective_sat_parameters["random_seed"])
-        num_workers = int(effective_sat_parameters["num_workers"])
-
-        status_code = solver.solve(model)
-        status_map = {
-            cp_model.OPTIMAL: SolverStatus.OPTIMAL,
-            cp_model.FEASIBLE: SolverStatus.FEASIBLE,
-            cp_model.INFEASIBLE: SolverStatus.INFEASIBLE,
-            cp_model.MODEL_INVALID: SolverStatus.ERROR,
-        }
-        result_status = status_map.get(status_code, SolverStatus.TIMEOUT)
-
-        # N1 (audit v3): under strict determinism the search must stop on the
-        # machine-independent deterministic-time budget, not on the wall cap.
-        # If the result was not proven (OPTIMAL/INFEASIBLE) yet the solver
-        # consumed less than its deterministic budget, the wall cap ended the
-        # search first, so the schedule is NOT guaranteed reproducible on this
-        # host. Surface that rather than implying determinism silently.
+        status_code = solver.solve(build.model)
+        result_status = _STATUS_MAP.get(status_code, SolverStatus.TIMEOUT)
+        # N1 (audit v3): under a deterministic mode the search must stop on the
+        # machine-independent deterministic budget, not on the wall cap. If the
+        # result was not proven (OPTIMAL/INFEASIBLE) and the wall safety ended
+        # the search, the schedule is NOT reproducible on this host: surface it.
         determinism_violated = False
-        if determinism == "strict" and result_status not in (
+        if cfg.determinism in _DETERMINISTIC_MODES and result_status not in (
             SolverStatus.OPTIMAL,
             SolverStatus.INFEASIBLE,
         ):
-            deterministic_stop = float(effective_sat_parameters["max_deterministic_time"])
-            deterministic_time_used = float(solver.deterministic_time)
-            determinism_violated = deterministic_time_used < deterministic_stop * 0.99
-
-        assignments, objective, metadata = self._extract_solution_and_objective(
-            solve_problem,
-            solver,
-            result_status,
-            eligible_by_op,
-            starts,
-            ends,
-            presences,
-            makespan,
-            total_setup,
-            total_material_scaled,
-            total_tardiness,
-            total_energy_scaled,
-            weights,
-            scale,
-            energy_scale,
-            secondary_bound,
-            makespan_bound_divisor=(
-                # Q3: the default weighted-sum objective scales makespan by
-                # secondary_bound; the epsilon modes minimize makespan (or the
-                # primary) directly, so the bound is already in its own units.
-                float(secondary_bound)
-                if objective_mode == "weighted_sum" and not epsilon_constraints
-                else 1.0
-            ),
-            bound_is_makespan=(
-                # The dual bound is a makespan bound only when the minimized
-                # objective is makespan (weighted-sum, epsilon-constraint, or
-                # epsilon_primary with primary==makespan). With a non-makespan
-                # primary the objective is scalarized, so the bound is not.
-                objective_mode != "epsilon_primary" or primary_objective == "makespan"
-            ),
-            mode_vars=mode_vars,
+            determinism_violated = _wall_cap_ended_search(solver, effective_sat_parameters)
+        assignments, objective, metadata = self._extract_build_solution(
+            build, solver, result_status, cfg
         )
-        if virtual_to_original:
-            for assignment in assignments:
-                assignment.lane_id = assignment.work_center_id
-                assignment.work_center_id = virtual_to_original.get(
-                    assignment.work_center_id,
-                    assignment.work_center_id,
-                )
         metadata.update(
-            {
-                "objective_mode": objective_mode,
-                "primary_objective": primary_objective,
-                "epsilon_constraints": dict(epsilon_constraints or {}),
-                "auto_greedy_warm_start": auto_greedy_warm_start,
-                "warm_started": warm_start_assignments is not None and not virtual_to_original,
-                "hint_count": hint_count,
-                "symmetry_breaking": enable_symmetry_breaking,
-                "determinism": determinism,
-                "determinism_violated": determinism_violated,
-                "objective_bigm_overflow_degraded": bigm_degraded,
-                "calendar_encoded": bool(calendar_shifts),
-                "sat_parameters": effective_sat_parameters,
-                "parallel_virtualization": {
-                    "enabled": bool(virtual_to_original),
-                    "virtual_lane_count": len(virtual_to_original),
-                    "original_parallel_work_centers": len(set(virtual_to_original.values())),
-                },
-            }
+            _run_metadata(
+                build,
+                cfg,
+                solver,
+                warm_started=warm_start is not None and not build.virtual_to_original,
+                hint_count=hint_count,
+                determinism_violated=determinism_violated,
+                effective_sat_parameters=effective_sat_parameters,
+            )
         )
-
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         return stamp_honest_coverage(
             problem,
@@ -1567,7 +1264,488 @@ class CpSatSolver(BaseSolver):
                 assignments=assignments,
                 objective=objective,
                 duration_ms=elapsed_ms,
-                random_seed=random_seed,
+                random_seed=int(effective_sat_parameters["random_seed"]),
                 metadata=metadata,
             ),
         )
+
+    def _build_model(self, problem: ScheduleProblem, cfg: _CpSatSolveConfig) -> _CpSatBuild:
+        """Variables, temporal bounds, machine/aux resources and the objective."""
+        model = cp_model.CpModel()
+        solve_problem, virtual_to_original = self._virtualize_parallel_work_centers(problem)
+        # P1-4: frozen assignments reference ORIGINAL work centers, not the
+        # virtual lanes created for max_parallel > 1 — refuse instead of
+        # silently dropping them (a lane mapping is a future enhancement).
+        if cfg.frozen_assignments and virtual_to_original:
+            raise ValueError(
+                "frozen_assignments are not supported together with max_parallel>1 "
+                "work-center lane virtualization: the frozen intervals reference the "
+                "original work centers, not the virtual lanes. Provide a single-lane "
+                "instance or omit frozen_assignments (P1-4)."
+            )
+        context_ops_by_id = _frozen_context_ops(solve_problem, cfg)
+        # F8 (audit v4): floor is the CONSERVATIVE direction — every start/end
+        # var is bounded by `horizon`, so extracted datetimes never exceed
+        # planning_horizon_end (the checker's HORIZON_BOUND stays safe).
+        horizon = int(
+            (
+                solve_problem.planning_horizon_end - solve_problem.planning_horizon_start
+            ).total_seconds()
+            / 60
+        )
+        build = _CpSatBuild(
+            model=model,
+            solve_problem=solve_problem,
+            virtual_to_original=virtual_to_original,
+            horizon=horizon,
+            eligible_by_op={
+                operation.id: (
+                    operation.eligible_wc_ids
+                    if operation.eligible_wc_ids
+                    else [work_center.id for work_center in solve_problem.work_centers]
+                )
+                for operation in solve_problem.operations
+            },
+        )
+        build.mode_vars, build.mode_load = build_presence_intervals(
+            model,
+            solve_problem,
+            build.eligible_by_op,
+            {work_center.id: work_center for work_center in solve_problem.work_centers},
+            horizon,
+            build.starts,
+            build.ends,
+            build.intervals,
+            build.presences,
+            build.selected_starts,
+            build.selected_ends,
+        )
+        _add_operation_time_bounds(
+            model,
+            solve_problem,
+            build.selected_starts,
+            build.selected_ends,
+            frozen_predecessor_end_offsets=cfg.frozen_predecessor_end_offsets,
+            release_offset_by_op=_release_offsets(solve_problem),
+        )
+        self._add_resources(build, cfg, context_ops_by_id)
+        return build
+
+    def _add_resources(
+        self, build: _CpSatBuild, cfg: _CpSatSolveConfig, context_ops_by_id: dict[Any, Any]
+    ) -> None:
+        """Calendars, machine sequencing (SDST circuit), aux cumulatives, objective."""
+        model, solve_problem = build.model, build.solve_problem
+        lookups = _scaled_transition_lookups(
+            solve_problem,
+            material_loss_scale=cfg.material_loss_scale,
+            energy_kwh_scale=cfg.energy_kwh_scale,
+        )
+        build.calendar_shifts = _add_calendar_shift_literals(
+            model, solve_problem, build.starts, build.ends, build.presences
+        )
+        setup_terms, material_terms, energy_terms, setup_intervals_by_op = (
+            self._add_machine_order_and_adjacency(
+                model,
+                solve_problem,
+                build.starts,
+                build.ends,
+                build.intervals,
+                build.presences,
+                *lookups,
+                planning_horizon_start=solve_problem.planning_horizon_start,
+                horizon=build.horizon,
+                frozen_assignments=cfg.frozen_assignments,
+                context_ops_by_id=context_ops_by_id,
+                calendar_shifts=build.calendar_shifts,
+            )
+        )
+        self._add_aux_resource_cumulative_constraints(
+            model,
+            solve_problem,
+            build.eligible_by_op,
+            build.intervals,
+            setup_intervals_by_op,
+            planning_horizon_start=solve_problem.planning_horizon_start,
+            horizon=build.horizon,
+            frozen_assignments=cfg.frozen_assignments,
+            frozen_aux_requirements=cfg.frozen_aux_requirements
+            or list(solve_problem.aux_requirements),
+            mode_load=build.mode_load,
+        )
+        build.makespan = model.new_int_var(0, build.horizon, "makespan")
+        for operation in solve_problem.operations:
+            model.add(build.makespan >= build.selected_ends[operation.id])
+        build.objective = self._build_weighted_objective(
+            model,
+            solve_problem,
+            build.horizon,
+            build.makespan,
+            setup_terms,
+            material_terms,
+            energy_terms,
+            build.selected_ends,
+            cfg.objective_weights,
+            cfg.material_loss_scale,
+            cfg.energy_kwh_scale,
+            epsilon_constraints=cfg.epsilon_constraints,
+            objective_mode=cfg.objective_mode,
+            primary_objective=cfg.primary_objective,
+        )
+
+    @staticmethod
+    def _warm_start_assignments(
+        problem: ScheduleProblem, build: _CpSatBuild, cfg: _CpSatSolveConfig
+    ) -> list[Assignment] | None:
+        """Caller warm start, else an automatic greedy seed when it is sound."""
+        if (
+            cfg.auto_greedy_warm_start
+            and cfg.warm_start_assignments is None
+            and cfg.time_limit_s >= 5
+            and not build.virtual_to_original
+            and not any(operation.modes for operation in build.solve_problem.operations)
+        ):
+            from synaps.solvers.greedy_dispatch import GreedyDispatch
+
+            greedy_result = GreedyDispatch().solve(problem)
+            if greedy_result.assignments:
+                return list(greedy_result.assignments)
+        return cfg.warm_start_assignments
+
+    def _extract_build_solution(
+        self,
+        build: _CpSatBuild,
+        solver: cp_model.CpSolver,
+        result_status: SolverStatus,
+        cfg: _CpSatSolveConfig,
+    ) -> tuple[list[Assignment], ObjectiveValues, dict[str, Any]]:
+        objective_terms = build.objective
+        assert objective_terms is not None
+        (
+            total_setup,
+            total_material,
+            total_tardiness,
+            total_energy,
+            secondary_bound,
+            weights,
+            scale,
+            energy_scale,
+        ) = objective_terms[:8]
+        assignments, objective, metadata = self._extract_solution_and_objective(
+            build.solve_problem,
+            solver,
+            result_status,
+            build.eligible_by_op,
+            build.starts,
+            build.ends,
+            build.presences,
+            build.makespan,
+            total_setup,
+            total_material,
+            total_tardiness,
+            total_energy,
+            weights,
+            scale,
+            energy_scale,
+            secondary_bound,
+            # Q3: the default weighted-sum objective scales makespan by
+            # secondary_bound; epsilon modes minimize makespan (or the primary)
+            # directly, so the bound is already in its own units.
+            makespan_bound_divisor=(
+                float(secondary_bound)
+                if cfg.objective_mode == "weighted_sum" and not cfg.epsilon_constraints
+                else 1.0
+            ),
+            # The dual bound is a makespan bound only when the minimized
+            # objective is makespan (weighted-sum, epsilon-constraint, or
+            # epsilon_primary with primary == makespan).
+            bound_is_makespan=(
+                cfg.objective_mode != "epsilon_primary" or cfg.primary_objective == "makespan"
+            ),
+            mode_vars=build.mode_vars,
+        )
+        for assignment in assignments if build.virtual_to_original else ():
+            assignment.lane_id = assignment.work_center_id
+            assignment.work_center_id = build.virtual_to_original.get(
+                assignment.work_center_id, assignment.work_center_id
+            )
+        return assignments, objective, metadata
+
+
+_STATUS_MAP = {
+    cp_model.OPTIMAL: SolverStatus.OPTIMAL,
+    cp_model.FEASIBLE: SolverStatus.FEASIBLE,
+    cp_model.INFEASIBLE: SolverStatus.INFEASIBLE,
+    cp_model.MODEL_INVALID: SolverStatus.ERROR,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class _CpSatSolveConfig:
+    """Typed view of the ``CpSatSolver.solve`` keyword surface (historical defaults)."""
+
+    time_limit_s: float
+    random_seed: int
+    num_workers: int
+    determinism: str
+    sat_parameter_overrides: Any
+    auto_greedy_warm_start: bool
+    objective_weights: dict[str, Any]
+    material_loss_scale: int
+    energy_kwh_scale: int
+    epsilon_constraints: dict[str, int] | None
+    objective_mode: str
+    primary_objective: str
+    warm_start_assignments: list[Assignment] | None
+    frozen_assignments: list[Assignment]
+    frozen_predecessor_end_offsets: dict[Any, int]
+    frozen_context_operations: list[Any]
+    frozen_aux_requirements: list[Any]
+    enable_symmetry_breaking: bool
+
+    @classmethod
+    def from_kwargs(cls, kwargs: dict[str, Any]) -> _CpSatSolveConfig:
+        determinism = str(kwargs.get("determinism", "strict"))
+        if determinism not in (*_DETERMINISTIC_MODES, "fast"):
+            raise ValueError(
+                f"determinism must be 'strict', 'strict-parallel' or 'fast', got {determinism!r}"
+            )
+        return cls(
+            # Audit 2026-10 (A-10): float, not int — int(0.5) == 0 stopped the
+            # search before it started (and a 2.7 s budget became 2 s).
+            time_limit_s=float(kwargs.get("time_limit_s", 30)),
+            random_seed=int(kwargs.get("random_seed", 42)),
+            num_workers=int(kwargs.get("num_workers", 8)),
+            determinism=determinism,
+            sat_parameter_overrides=kwargs.get("sat_parameters"),
+            auto_greedy_warm_start=bool(kwargs.get("auto_greedy_warm_start", True)),
+            objective_weights=dict(kwargs.get("objective_weights", {})),
+            material_loss_scale=int(kwargs.get("material_loss_scale", 1000)),
+            energy_kwh_scale=int(kwargs.get("energy_kwh_scale", 1000)),
+            epsilon_constraints=kwargs.get("epsilon_constraints"),
+            objective_mode=str(kwargs.get("objective_mode", "weighted_sum")),
+            primary_objective=str(kwargs.get("primary_objective", "makespan")),
+            warm_start_assignments=kwargs.get("warm_start_assignments"),
+            frozen_assignments=list(kwargs.get("frozen_assignments") or []),
+            frozen_predecessor_end_offsets={
+                op_id: int(offset)
+                for op_id, offset in dict(kwargs.get("frozen_predecessor_end_offsets", {})).items()
+            },
+            frozen_context_operations=list(kwargs.get("frozen_context_operations") or []),
+            frozen_aux_requirements=list(kwargs.get("frozen_aux_requirements") or []),
+            enable_symmetry_breaking=bool(kwargs.get("enable_symmetry_breaking", False)),
+        )
+
+
+@dataclass
+class _CpSatBuild:
+    """Model handles shared by the build, hint, solve and extraction steps."""
+
+    model: cp_model.CpModel
+    solve_problem: ScheduleProblem
+    virtual_to_original: dict[UUID, UUID]
+    horizon: int
+    eligible_by_op: dict[Any, list[Any]]
+    starts: dict[tuple[Any, Any], Any] = field(default_factory=dict)
+    ends: dict[tuple[Any, Any], Any] = field(default_factory=dict)
+    intervals: dict[tuple[Any, Any], Any] = field(default_factory=dict)
+    presences: dict[tuple[Any, Any], Any] = field(default_factory=dict)
+    selected_starts: dict[Any, Any] = field(default_factory=dict)
+    selected_ends: dict[Any, Any] = field(default_factory=dict)
+    mode_vars: dict[Any, list[tuple[str, Any]]] = field(default_factory=dict)
+    mode_load: dict[Any, list[tuple[Any, list[tuple[Any, int]]]]] = field(default_factory=dict)
+    calendar_shifts: dict[tuple[Any, Any], list[tuple[int, int, Any]]] = field(default_factory=dict)
+    makespan: Any = None
+    objective: tuple[Any, ...] | None = None
+
+
+def _frozen_context_ops(solve_problem: ScheduleProblem, cfg: _CpSatSolveConfig) -> dict[Any, Any]:
+    """Operations visible to frozen SDST arcs; refuse frozen work without context."""
+    context_ops_by_id: dict[Any, Any] = {op.id: op for op in solve_problem.operations}
+    for operation in cfg.frozen_context_operations:
+        context_ops_by_id.setdefault(operation.id, operation)
+    missing = [
+        assignment.operation_id
+        for assignment in cfg.frozen_assignments
+        if assignment.operation_id not in context_ops_by_id
+    ]
+    if missing:
+        raise ValueError(
+            "frozen_assignments require frozen_context_operations covering "
+            f"missing ops {missing[:5]}"
+            f"{'...' if len(missing) > 5 else ''} "
+            "(Wave 12 / C12-1)."
+        )
+    return context_ops_by_id
+
+
+def _release_offsets(solve_problem: ScheduleProblem) -> dict[Any, int]:
+    """M1 / F8: CEIL release + earliest-start offsets on the integer-minute grid.
+
+    ``int()`` admitted starts up to 59.999 s before the release (release at
+    H0+1.5 min -> offset 1 -> RELEASE_DATE_VIOLATION); ceil lands on the first
+    grid point that is not before the release.
+    """
+    orders_by_id = {order.id: order for order in solve_problem.orders}
+    release_offset_by_op: dict[Any, int] = {}
+    for operation in solve_problem.operations:
+        order = orders_by_id.get(operation.order_id)
+        offset = math.ceil(
+            operation_earliest_offset_minutes(
+                operation, order, solve_problem.planning_horizon_start
+            )
+        )
+        if offset > 0:
+            release_offset_by_op[operation.id] = offset
+    return release_offset_by_op
+
+
+def _machine_symmetry_classes(
+    solve_problem: ScheduleProblem,
+    eligible_ops_by_wc: dict[Any, frozenset[Any]],
+    frozen_assignments: list[Assignment],
+) -> list[list[Any]]:
+    """Groups of genuinely interchangeable machines (P0-2 / H4).
+
+    Identical capability group, speed, lanes, setup rows, eligible-operation
+    sets and per-machine duration overrides; machines carrying frozen work are
+    never interchangeable.
+    """
+    setup_rows_by_wc: dict[Any, list[tuple[Any, Any, int, float, float]]] = {}
+    for entry in solve_problem.setup_matrix:
+        setup_rows_by_wc.setdefault(entry.work_center_id, []).append(
+            (
+                entry.from_state_id,
+                entry.to_state_id,
+                entry.setup_minutes,
+                entry.material_loss,
+                entry.energy_kwh,
+            )
+        )
+    frozen_wc_ids = {assignment.work_center_id for assignment in frozen_assignments}
+    classes: dict[tuple[Any, ...], list[Any]] = {}
+    for work_center in solve_problem.work_centers:
+        if work_center.id in frozen_wc_ids:
+            continue
+        override_signature = tuple(
+            sorted(
+                (str(operation.id), int(minutes))
+                for operation in solve_problem.operations
+                for minutes in (operation.machine_duration_overrides.get(work_center.id),)
+                if minutes is not None
+            )
+        )
+        setup_signature = tuple(
+            sorted(setup_rows_by_wc.get(work_center.id, []), key=lambda r: (str(r[0]), str(r[1])))
+        )
+        class_key = (
+            work_center.capability_group,
+            work_center.speed_factor,
+            work_center.max_parallel,
+            setup_signature,
+            eligible_ops_by_wc[work_center.id],
+            override_signature,
+        )
+        classes.setdefault(class_key, []).append(work_center)
+    return [members for members in classes.values() if len(members) >= 2]
+
+
+def _add_machine_symmetry_breaking(
+    build: _CpSatBuild, frozen_assignments: list[Assignment]
+) -> None:
+    """Load-ordering cut ``sum(presence_A) >= sum(presence_B)`` within each class.
+
+    Sound only between genuinely interchangeable machines: any schedule of A
+    must be transferable wholesale onto B (the old (group, speed) grouping cut
+    the optimum whenever an op was eligible on A but not B — P0-2).
+    """
+    solve_problem, presences = build.solve_problem, build.presences
+    eligible_ops_by_wc: dict[Any, frozenset[Any]] = {
+        work_center.id: frozenset(
+            operation.id
+            for operation in solve_problem.operations
+            if work_center.id in build.eligible_by_op[operation.id]
+        )
+        for work_center in solve_problem.work_centers
+    }
+    for members in _machine_symmetry_classes(solve_problem, eligible_ops_by_wc, frozen_assignments):
+        for work_center_a, work_center_b in itertools.pairwise(members):
+            # Eligible sets are identical within a class.
+            presences_a = [
+                presences[(op_id, work_center_a.id)]
+                for op_id in eligible_ops_by_wc[work_center_a.id]
+                if (op_id, work_center_a.id) in presences
+            ]
+            presences_b = [
+                presences[(op_id, work_center_b.id)]
+                for op_id in eligible_ops_by_wc[work_center_b.id]
+                if (op_id, work_center_b.id) in presences
+            ]
+            if presences_a and presences_b:
+                build.model.add(sum(presences_a) >= sum(presences_b))
+
+
+def _add_warm_start_hints(
+    problem: ScheduleProblem, build: _CpSatBuild, warm_start: list[Assignment] | None
+) -> int:
+    """Presence + start hints from a warm start (skipped on virtual lanes)."""
+    if not warm_start or build.virtual_to_original:
+        return 0
+    hint_count = 0
+    hint_by_operation = {assignment.operation_id: assignment for assignment in warm_start}
+    for operation in build.solve_problem.operations:
+        hint = hint_by_operation.get(operation.id)
+        if hint is None:
+            continue
+        start_offset = int(
+            (hint.start_time - problem.planning_horizon_start).total_seconds() / 60.0
+        )
+        start_offset = max(0, min(start_offset, build.horizon))
+        for work_center_id in build.eligible_by_op[operation.id]:
+            is_assigned = work_center_id == hint.work_center_id
+            build.model.add_hint(build.presences[(operation.id, work_center_id)], int(is_assigned))
+            hint_count += 1
+            if is_assigned:
+                build.model.add_hint(build.starts[(operation.id, work_center_id)], start_offset)
+                hint_count += 1
+    return hint_count
+
+
+def _run_metadata(
+    build: _CpSatBuild,
+    cfg: _CpSatSolveConfig,
+    solver: cp_model.CpSolver,
+    *,
+    warm_started: bool,
+    hint_count: int,
+    determinism_violated: bool,
+    effective_sat_parameters: dict[str, Any],
+) -> dict[str, Any]:
+    objective_terms = build.objective
+    assert objective_terms is not None
+    bigm_degraded, weight_scale = objective_terms[8], objective_terms[9]
+    virtual = build.virtual_to_original
+    return {
+        "objective_mode": cfg.objective_mode,
+        "primary_objective": cfg.primary_objective,
+        "epsilon_constraints": dict(cfg.epsilon_constraints or {}),
+        "auto_greedy_warm_start": cfg.auto_greedy_warm_start,
+        "warm_started": warm_started,
+        "hint_count": hint_count,
+        "symmetry_breaking": cfg.enable_symmetry_breaking,
+        "determinism": cfg.determinism,
+        "determinism_violated": determinism_violated,
+        # Audit 2026-10: raw stop telemetry so a reader can see WHICH limit
+        # ended the search (deterministic vs wall) without re-running.
+        "cpsat_deterministic_time": round(float(solver.deterministic_time), 6),
+        "cpsat_wall_time_s": round(float(solver.wall_time), 6),
+        "objective_bigm_overflow_degraded": bigm_degraded,
+        **({"objective_weight_scale": weight_scale} if weight_scale != 1 else {}),
+        "calendar_encoded": bool(build.calendar_shifts),
+        "sat_parameters": effective_sat_parameters,
+        "parallel_virtualization": {
+            "enabled": bool(virtual),
+            "virtual_lane_count": len(virtual),
+            "original_parallel_work_centers": len(set(virtual.values())),
+        },
+    }

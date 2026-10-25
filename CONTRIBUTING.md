@@ -75,6 +75,23 @@ twine check dist/*
 
 If you change solver behavior, also include benchmark evidence or a clear explanation of why no benchmark delta is expected.
 
+### Behavior-preserving refactors (golden snapshots)
+
+A refactor that claims "no behavior change" (for example, extracting a long
+function from the Rule 4 ratchet) must show identical golden snapshots on an
+idle machine:
+
+```bash
+python scripts/golden_snapshot.py capture before.json --suite fast   # on the base commit
+python scripts/golden_snapshot.py capture after.json --suite fast    # on your branch
+python scripts/golden_snapshot.py compare before.json after.json     # exit 0 = identical
+```
+
+Use `--suite full` when the change touches RHC, ALNS, LBBD-HD or the native
+path. A difference is either a behavior change (explain it, or revert the
+fix being bundled and compare again) or a case that is wall-clock bound on
+your host.
+
 ### Lower-bound helpers (Rule 6)
 
 Any **public** function in `synaps/solvers/` whose name matches `*lower_bound*`, `*_lb`, or `*bound` MUST ship with a property or validity test under `tests/` that references it by name. Precedent: S3/F6 — BHK cuts over-claimed because the bound had no subset-monotonicity test until GUARD-S3. Prefer Hypothesis against a brute-force oracle on small instances. Private (`_…`) helpers are exempt.

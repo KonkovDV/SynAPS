@@ -133,13 +133,7 @@ def test_no_dead_public_functions() -> None:
 # This list may only SHRINK except when a verified Red Team fail-open fix
 # necessarily grows a hot path (Wave 12/13 frozen algebra). Prefer extract next.
 _LONG_FUNCTION_RATCHET: dict[str, int] = {
-    "solvers/rhc/_solver.py::solve": 2652,
-    "solvers/alns_solver.py::_solve_core": 1578,
-    "solvers/feasibility_checker.py::check": 217,
-    "solvers/lbbd_hd_solver.py::solve": 433,
-    "solvers/lbbd_solver.py::solve": 397,
-    "solvers/cpsat_solver.py::solve": 453,
-    "solvers/greedy_dispatch.py::_solve_core": 362,
+    "solvers/feasibility_checker.py::check": 185,
     "solvers/router.py::route_solver_config": 211,
     "solvers/lbbd_hd_solver.py::_solve_precedence_aware_master": 297,
     "solvers/alns_solver.py::_try_native_greedy_repair": 260,
@@ -177,7 +171,7 @@ _LONG_FUNCTION_RATCHET: dict[str, int] = {
     "solvers/lbbd_hd_solver.py::_topological_post_assembly": 95,
     "problem_profile.py::build_problem_profile": 91,
     "solvers/cpsat_solver.py::_virtualize_parallel_work_centers": 91,
-    "solvers/cpsat_solver.py::_apply_sat_parameter_overrides": 91,
+    "solvers/cpsat_solver.py::_apply_sat_parameter_overrides": 88,
     "solvers/lbbd_hd_solver.py::_build_subproblem": 86,
     "accelerators.py::evaluate_objective_batch": 87,
     "solvers/lbbd_solver.py::_solve_subproblems_parallel": 85,
@@ -231,7 +225,7 @@ def test_function_length_ratchet() -> None:
 _OBJECTIVE_VALUES_CTOR_RATCHET: dict[str, int] = {
     "solvers/alns_solver.py": 3,
     "solvers/cpsat_solver.py": 2,
-    "solvers/greedy_dispatch.py": 5,
+    "solvers/greedy_dispatch.py": 3,
     "solvers/incremental_repair.py": 1,
     "solvers/lbbd_hd_solver.py": 2,
     "solvers/lbbd_solver.py": 1,

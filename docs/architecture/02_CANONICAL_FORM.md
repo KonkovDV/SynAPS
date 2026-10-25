@@ -34,44 +34,79 @@ This is a generalization that subsumes classical FJSP, JSSP, flow-shop, and para
 | $s_o$ | $\mathbb{R}_{\geq 0}$ | Start time of operation $o$ |
 | $\pi_m$ | permutation | Sequence of operations on work center $m$ |
 
+## Processing Time (integer reservation grain)
+
+$$p_{om} = \begin{cases} \text{override}_{om} & \text{if } m \in \text{machine\_duration\_overrides}(o) \\ \max\!\left(1,\ \left\lceil b_o / v_m - \epsilon \right\rceil\right) & \text{otherwise} \end{cases}$$
+
+with base duration $b_o$, machine speed $v_m > 0$ and $\epsilon = 10^{-9}$ min (`synaps.timegrain.GRAIN_EPSILON_MIN`). The tolerance absorbs IEEE-754 division noise ($21/0.7 = 30.000000000000004$ must reserve 30, not 31 minutes) and equals the checker's physical-floor tolerance, so grain and certification agree by construction. With execution modes, the selected mode's `duration_min` is used as an absolute machine override (it is **not** divided by $v_m$).
+
 ## Hard Constraints
 
-**Supply ≤ Demand (auxiliary resources, setup + processing):**
+**Assignment:** $\sum_{m \in \mathcal{E}_o} x_{om} = 1$ for every operation (with modes: exactly one (machine, mode) pair).
 
-$$\forall r \in \mathcal{R},\; \forall t \in \mathcal{T}: \quad \sum_{o \,:\, r \in \text{req}(o),\; s_o - \hat{\sigma}_o \leq t < s_o + p_{o}} 1 \;\leq\; \text{cap}(r, t)$$
+**Precedence (in-order chain, finish-to-start):**
 
-where $\hat{\sigma}_o$ is the setup duration reserved immediately before operation $o$ on its assigned work center (and $\hat{\sigma}_o = 0$ when no setup is required).
+$$\forall (o_i, o_{i+1}) \in \mathcal{O}_j: \quad s_{o_{i+1}} \;\geq\; s_{o_i} + \sum_{m} x_{o_i m}\, p_{o_i m}$$
 
-**Precedence:**
+Generalized edges add $\text{anchor}(o') - \text{anchor}(o) \in [\ell^{\min}, \ell^{\max}]$ for FS/SS/FF/SF anchors.
 
-$$\forall j \in \mathcal{J},\; \forall (o_i, o_{i+1}) \in \mathcal{O}_j: \quad s_{o_{i+1}} \;\geq\; s_{o_i} + p_{o_i}$$
+**Time windows:** $s_o \geq \lceil \max(r_j, \text{est}_o) \rceil$ (release, earliest start) and $e_o \leq \lfloor \text{lft}_o \rfloor$; $s_o \geq H_0$, $e_o \leq H_1$.
 
-**No-overlap (with setup):**
+**Machine disjunction with SDST (single lane):** for operations $a \to b$ consecutive on $m$,
 
-$$\forall m,\; \forall (o_a, o_b) \text{ consecutive on } m: \quad s_{o_b} \;\geq\; s_{o_a} + p_{o_a} + \sigma(o_a, o_b, m)$$
+$$s_b \;\geq\; e_a + \sigma_m(\text{state}(a), \text{state}(b)),$$
 
-where $\sigma(o_a, o_b, m)$ is the sequence-dependent setup time.
+and the setup occupies the right-justified window $[s_b - \sigma, s_b)$. A missing cross-state cell means $\sigma = 0$ (sparse SDST); `strict_setup_matrix` turns it into a violation. Machines with `max_parallel` $=L > 1$ are $L$ identical lanes when setups exist, otherwise a cumulative of capacity $L$.
 
-**Capacity:**
+**Auxiliary resources (demand $\leq$ supply, setup + processing):**
 
-$$\forall m \in \mathcal{M},\; \forall t: \quad \sum_{o: x_{om}=1,\; s_o \leq t < s_o + p_o} 1 \;\leq\; \text{cap}(m)$$
+$$\forall r \in \mathcal{R},\; \forall t: \quad \sum_{o \,:\, r \in \text{req}(o),\; s_o - \hat{\sigma}_o \leq t < e_o} q_{o,r} \;\leq\; \text{pool}(r)$$
 
-## Objective Function
+where $q_{o,r}$ is the requested quantity (of the selected mode, when modes are used) and $\hat{\sigma}_o$ the setup reserved immediately before $o$ on its machine.
 
-$$J = w_1 T + w_2 S + w_3 M + w_4 B + w_5 R + w_6 E$$
+**Calendars:** the occupancy $[s_o - \hat{\sigma}_o,\ e_o]$ lies inside one published shift of the machine and of every held auxiliary resource with a non-empty calendar (empty = 24/7). Adjacent shifts are *not* merged: an operation cannot straddle a shift boundary.
 
-| Term | Formula | Description | Status |
-|------|---------|-------------|--------|
-| $T$ | $\sum_{j} \alpha_j \max(0,\, C_j - d_j)$ | Weighted tardiness | **Implemented** (CP-SAT) |
-| $S$ | $\sum_{m} \sum_{\text{consecutive } (a,b)} \sigma(a, b, m)$ | Total setup time | **Implemented** (CP-SAT, Greedy) |
-| $M$ | $\sum_{o} \text{material\_cost}(o)$ | Material waste / auxiliary resource cost | **Implemented** (CP-SAT) |
-| $B$ | $\text{Var}(\text{load}_m)$ or $\max(\text{load}_m) - \min(\text{load}_m)$ | Load imbalance | Roadmap |
-| $R$ | $\|A_{\text{new}} \triangle A_{\text{old}}\| / \|A_{\text{old}}\|$ | Schedule stability | Roadmap |
-| $E$ | $\sum_{m,t} \text{tariff}(t) \cdot \text{power}(m, t)$ | Energy cost | Roadmap |
+## Objective Vector
 
-**Weights** $w_1, \ldots, w_6$ are configurable per policy profile. Future advisory or operator surfaces may retune them, but no live ML tuner is shipped in the current repository.
+| Term | Formula | Status |
+|------|---------|--------|
+| Coverage | $\lvert\{o \text{ scheduled}\}\rvert / \lvert\mathcal{O}\rvert$ | Level-0 rank key (`objective_sort_key`) |
+| $C_{\max}$ | $\max_o e_o - H_0$ | Implemented (all solvers, canonical `evaluate`) |
+| $S$ | $\sum_{\text{lanes}} \sum_{\text{consecutive } (a,b)} \sigma(a, b, m)$ | Implemented |
+| $M$ | material loss summed along the same transitions | Implemented |
+| $T$ | $\sum_{j} \max(0,\, C_j - d_j)$, an unscheduled order completes at $H_1$ | Implemented (**unweighted**: `Order.priority` is a dispatching weight, not a tardiness weight) |
+| $E$ | energy summed along the same transitions | Implemented (transition energy only) |
+| $B$, $R$ | load imbalance, schedule stability | Roadmap |
 
-## Robust Extension
+The published objective is always recomputed by the single canonical evaluator (`synaps.objective.evaluate`) at the `BaseSolver` boundary; solver-internal values are telemetry.
+
+## Scalarization Strategies
+
+Portfolio ranking is lexicographic: $(-\text{coverage},\ C_{\max},\ \sum_k w_k F_k)$ with `DEFAULT_WEIGHTS` = makespan only.
+
+### Hierarchical big-M objective (CP-SAT default)
+
+With non-negative integer coefficients $c_k$ (weights multiplied by the smallest decimal scale $K \in \{1, 10, \dots, 10^6\}$ that makes them integral) and per-term upper bounds $U_k$,
+
+$$f = C_{\max} \cdot S_B + \sum_k c_k F_k, \qquad S_B = 1 + \sum_k c_k U_k .$$
+
+Because $0 \le \sum_k c_k F_k < S_B$, minimizing $f$ is exactly lexicographic $(C_{\max}, \sum_k c_k F_k)$, and $\lfloor B / S_B \rfloor$ is a valid makespan dual bound for any objective bound $B$. Negative weights are rejected (they break both statements). If $(H+1) S_B > 2^{62}$ the model degrades to minimizing $C_{\max}$ alone and records it.
+
+Known divergences from `scalarize()` (audit 2026-10, A-11/A-12): the `makespan` weight is ignored by this hierarchical mode (makespan always dominates), and the material / energy coefficients act on milli-units (`material_loss_scale = energy_kwh_scale = 1000`), i.e. a weight of 1 on material weighs 1000× more than in `scalarize()`.
+
+### $\varepsilon$-Constraint (Pareto Slice)
+
+$$\min f_{\text{primary}} \quad \text{s.t.} \quad f_i \leq (1 + \varepsilon_i) \cdot f_i^* \quad \forall i \neq \text{primary}$$
+
+Current shipped Pareto profiles use $\varepsilon = 0.10$ (10% relaxation).
+
+## Makespan Lower Bound (`compute_relaxed_makespan_lower_bound`)
+
+$\text{LB} = \max(\text{critical path},\ \text{head-tail},\ \sum_o \min_m p_{om} / \sum_m L_m,\ \text{pinned-machine load}/L_m,\ \max_o \min_m p_{om},\ \max_r \sum_o q_{o,r} \min_m p_{om} / \text{pool}(r))$.
+
+Each component is a relaxation (setups, calendars and generalized edges are dropped), hence valid. Caveat: it uses the base / override durations and ignores execution modes; it is currently consumed only by ALNS and RHC, which refuse mode instances.
+
+## Robust Extension (roadmap, not implemented)
 
 For stochastic parameters $\xi$ (processing time variance, machine failures, demand uncertainty):
 
@@ -96,24 +131,8 @@ For a fixed input snapshot, policy profile, and random seed:
 
 $$R_{\text{det}} = \frac{N_{\text{identical outputs}}}{N_{\text{replays}}}$$
 
-Target for deterministic lane: $R_{\text{det}} \geq 0.999$.
+Target for deterministic lane: $R_{\text{det}} \geq 0.999$. CP-SAT `determinism="strict"` (single thread) and `"strict-parallel"` (interleaved subsolvers) both stop on machine-independent deterministic time; see ADR-0001.
 
-
-## Scalarization Strategies (Multi-Objective to Single-Objective Reduction)
-
-The canonical 6-objective formulation $J = w_1 T + w_2 S + w_3 M + w_4 B + w_5 R + w_6 E$ must be reduced to a scalar for CP-SAT / HiGHS. SynAPS supports two strategies:
-
-### Hierarchical Weighted Sum (Default)
-
-$$f = C_{\max} \cdot (1 + |S_{\text{ub}}| + |\ell_{\text{ub}}| + |T_{\text{ub}}|) + w_s \cdot \text{total\_setup} + w_\ell \cdot \text{total\_material} + w_T \cdot \text{total\_tardiness}$$
-
-The multiplier $(1 + |S_{\text{ub}}| + \ldots)$ ensures **lexicographic dominance** of Makespan.
-
-### $\varepsilon$-Constraint (Pareto Slice)
-
-$$\min f_{\text{primary}} \quad \text{s.t.} \quad f_i \leq (1 + \varepsilon_i) \cdot f_i^* \quad \forall i \neq \text{primary}$$
-
-Current shipped Pareto profiles use $\varepsilon = 0.10$ (10% relaxation).
 
 ## Repair-Radius Formalization
 
@@ -131,9 +150,10 @@ Current shipped Pareto profiles use $\varepsilon = 0.10$ (10% relaxation).
 
 | If you restrict... | You get... |
 |--------------------|-----------|
-| $|\mathcal{E}_o| = 1$ for all $o$ | Classical JSSP |
-| Single machine per stage | Flow-shop |
-| No precedence constraints | Parallel machine scheduling |
-| $w_2 = \ldots = w_6 = 0$ | Single-objective tardiness minimization |
+| $\lvert\mathcal{E}_o\rvert = 1$, $\sigma = 0$, $\mathcal{R} = \emptyset$ | Classical job shop $J \Vert C_{\max}$ |
+| ... and every job visits the machines in the same order | (non-permutation) flow shop $F \Vert C_{\max}$ |
+| One operation per job, identical machines | Identical parallel machines $P \Vert C_{\max}$ |
+| One operation per job, machine-dependent $p_{om}$ | Unrelated parallel machines $R \Vert C_{\max}$ |
+| $w_{\text{tardiness}}$ only, coverage full | Total tardiness minimization (makespan still dominates in the CP-SAT hierarchical mode) |
 | $\sigma = 0$ | Setup-free FJSP |
 | $\mathcal{R} = \emptyset$ | No auxiliary resource constraints |

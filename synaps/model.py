@@ -90,9 +90,12 @@ class ModeRequirement(BaseModel):
 class OperationMode(BaseModel):
     """One alternative way to perform an operation.
 
-    ``duration_min`` is the reserved processing time before machine speed, the
-    same grain as ``base_duration_min``. An empty ``modes`` list keeps the
-    historical single-mode model.
+    ``duration_min`` is the reserved processing time in integer minutes and is
+    used AS IS on every eligible machine: CP-SAT and the FeasibilityChecker
+    treat it as a machine override, it is NOT divided by
+    ``WorkCenter.speed_factor`` (audit 2026-10 corrected the previous docstring,
+    which claimed the opposite). An empty ``modes`` list keeps the historical
+    single-mode model.
     """
 
     code: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_.:-]+$")
@@ -224,8 +227,12 @@ def _mode_issues(problem: ScheduleProblem, aux_ids: set[UUID]) -> list[str]:
 
     issues: list[str] = []
     mode_ops = [operation for operation in problem.operations if operation.modes]
-    if mode_ops and problem.setup_matrix:
-        issues.append("execution modes cannot be combined with setup_matrix yet")
+    setup_centers = {entry.work_center_id for entry in problem.setup_matrix}
+    for operation in mode_ops:
+        if setup_centers.intersection(operation.eligible_wc_ids):
+            issues.append(
+                "execution modes cannot be combined with setup_matrix on the same work center yet"
+            )
     claimed = {requirement.operation_id for requirement in problem.aux_requirements}
     for operation in mode_ops:
         if operation.id in claimed:

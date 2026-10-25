@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import random
 from datetime import datetime, timedelta
-from uuid import UUID, uuid4
+from typing import TYPE_CHECKING
 
+from synaps._ids import seeded_uuid_factory
 from synaps.model import (
     Operation,
     Order,
@@ -28,6 +29,9 @@ from synaps.model import (
     State,
     WorkCenter,
 )
+
+if TYPE_CHECKING:
+    from uuid import UUID
 
 
 def generate_large_instance(
@@ -68,16 +72,17 @@ def generate_large_instance(
         Random seed for reproducibility.
     """
     rng = random.Random(seed)
+    new_id = seeded_uuid_factory(seed)
 
     # -- Work centers --
     work_centers = [
-        WorkCenter(id=uuid4(), code=f"WC-{i:04d}", capability_group=f"G{i % 10}")
+        WorkCenter(id=new_id(), code=f"WC-{i:04d}", capability_group=f"G{i % 10}")
         for i in range(num_work_centers)
     ]
     wc_ids = [wc.id for wc in work_centers]
 
     # -- States --
-    states = [State(id=uuid4(), code=f"S-{i:03d}", label=f"State {i}") for i in range(num_states)]
+    states = [State(id=new_id(), code=f"S-{i:03d}", label=f"State {i}") for i in range(num_states)]
     state_ids = [s.id for s in states]
 
     # -- Setup matrix (SDST entries) --
@@ -115,7 +120,7 @@ def generate_large_instance(
     operations: list[Operation] = []
 
     for oi in range(num_orders):
-        order_id = uuid4()
+        order_id = new_id()
         order_due = horizon_start + timedelta(
             minutes=rng.randint(480, 43200)  # 8h to 30d
         )
@@ -131,7 +136,7 @@ def generate_large_instance(
 
         prev_op_id = None
         for step in range(ops_per_order):
-            op_id = uuid4()
+            op_id = new_id()
             n_eligible = rng.randint(min_eligible, max_eligible)
             eligible = rng.sample(wc_ids, n_eligible)
             state_id = rng.choice(state_ids)

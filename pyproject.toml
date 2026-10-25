@@ -43,7 +43,7 @@ dependencies = [
     # (undefined symbol Highs::releaseMemory) that break import on CI.
     "highspy>=1.11,<1.15",
     "pydantic>=2.9",
-    "numpy>=2.1",
+    "numpy>=2.5.3",
 ]
 
 [project.optional-dependencies]
@@ -60,23 +60,23 @@ rl = [
 dev = [
     "build>=1.2",
     "hypothesis>=6.100",
-    "pytest>=8.3",
-    "pytest-benchmark>=5.0",
+    "pytest>=9.1.1",
+    "pytest-benchmark>=5.3.0",
     "pytest-cov>=6.0",
-    "ruff>=0.8",
-    "mypy>=1.13",
-    "twine>=6.1",
-    "pre-commit>=4.0",
+    "ruff>=0.16.10",
+    "mypy>=2.4.0",
+    "twine>=7.0.0",
+    "pre-commit>=4.6.2",
 ]
 all = ["synaps[ml,llm,rl,dev]"]
 
 [project.urls]
 Homepage = "https://github.com/KonkovDV/SynAPS"
 Repository = "https://github.com/KonkovDV/SynAPS"
-Documentation = "https://github.com/KonkovDV/SynAPS/tree/master/docs"
+Documentation = "https://github.com/KonkovDV/SynAPS/tree/main/docs"
 Issues = "https://github.com/KonkovDV/SynAPS/issues"
-Changelog = "https://github.com/KonkovDV/SynAPS/releases"
-Support = "https://github.com/KonkovDV/SynAPS/blob/master/SUPPORT.md"
+Changelog = "https://github.com/KonkovDV/SynAPS/blob/main/CHANGELOG.md"
+Support = "https://github.com/KonkovDV/SynAPS/blob/main/SUPPORT.md"
 Security = "https://github.com/KonkovDV/SynAPS/security/policy"
 
 [tool.ruff]
