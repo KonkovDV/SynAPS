@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **T-06: sound LBBD master relaxation (`sound_cuts=True`, opt-in).**
+  `synaps/solvers/_lbbd_sound.py` adds valid inequalities of the scheduling
+  problem to the LBBD master instead of discounted optimality cuts (KI-S3):
+  chain rows with assigned durations, head/tail energy rows (lazily
+  separated, only for ANCHORED thresholds — an unanchored pair gave 31 > BKS
+  26 on `mk02` in the prototype), state entry / exit setup rows and
+  state-path rows on the metric closure of all routable states. Every row
+  holds for every feasible schedule, so a master without no-goods stays a
+  relaxation: the reported `lower_bound` is the max of the first master and
+  a final no-good-free master over the whole row pool. Public
+  `compute_sound_master_lower_bound` (Rule 6). Default off; golden
+  unchanged. Proofs: `docs/rfc/T06_SOUND_LBBD_RELAXATION.md`. A/B
+  (`benchmark/study_lbbd_sound_cuts.py`, `LBBD-5`, 16 instances, 3 repeats,
+  per-instance medians): mean gap 0.344 → 0.328, the lower bound raised on 8
+  instances and lowered on none; incumbent differences stay within the
+  wall-clock noise of LBBD's subproblems
+  (`benchmark/evidence/lbbd-sound-cuts-2026-10-25/`).
+- **Exhaustive FJSP-SDST oracle** `tests/_fjsp_oracle.py` (every assignment,
+  every lane sequence; cross-checked against CP-SAT's optimum). Every
+  candidate sound row is checked at every assignment
+  (`tests/test_lbbd_sound_cuts.py`, Hypothesis; `slow`: 6 operations).
+- **T-03a release gate** `scripts/check_wheel_isa.py`, run by `release.yml`
+  on the Linux wheels before upload: zero VEX/EVEX instructions in the `.so`
+  (VEX-128 included) and an import plus scalar / batch kernels under
+  `qemu-x86_64 -cpu Nehalem`. The `target-cpu=native` wheel fails both.
+
 - **CP-SAT `determinism="strict-parallel"` (audit 2026-10, opt-in):** the
   strict contract (deterministic-time stop, loose wall safety,
   `determinism_violated` when the wall safety ends the search) with
@@ -45,6 +71,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **T-05 decomposition (behaviour-preserving).** The eight functions of the
+  plan are split: `_solve_precedence_aware_master` 269 → 39 lines (shared
+  `_lbbd_master.py` with LBBD: assignment, capacity, no-good rows and the
+  solution read-back), CP-SAT `_add_machine_order_and_adjacency` 240 → 68,
+  ALNS `_try_native_greedy_repair` 258 → 65 and `_try_native_initial_seed`
+  221 → 34 (one `_native_greedy_dispatch` core instead of two copies),
+  `_destroy_critical_path` 203 → 61, `route_solver_config` 221 → 27,
+  `IncrementalRepair._solve_core` 239 → 75, `validate_cross_references`
+  202 → 19; LBBD `_solve_master` 176 → 57. Functions over 80 lines: 44 → 35
+  (total 6132 → 4094 lines). Router: identical decisions on a 3024-context
+  grid; model: identical error texts; golden full: see
+  `docs/rfc/AUDIT_2026_10.md` §16.
 - **God-function decomposition (audit 2026-10, behavior-preserving):**
   `RhcSolver.solve` → `_RhcRun` engine + `RhcRunConfig` (`rhc/_config.py`);
   `AlnsSolver._solve_core` → `_AlnsRun` + `_alns_config.py`;
@@ -341,6 +379,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`CONTRIBUTING.md`). Direct push `7a4083e` is the counter-example.
 
 ### Fixed
+
+- **LBBD returned `FEASIBLE` with a calendar violation (KI-L1).**
+  Post-assembly right-shifted an operation for cross-cluster precedence into
+  a closed period and nothing re-checked the merge. It now moves the
+  occupancy into the next shift that holds it, and LBBD / LBBD-HD adopt an
+  incumbent (merge or greedy warm start) only when the notary reports
+  `proven_hard_violations = ∅` (`metadata["incumbent_rejections"]`).
+  `tests/test_lbbd_incumbent_notary.py`.
+- **Virtual lanes dropped `machine_duration_overrides` (KI-V1).** Greedy and
+  CP-SAT lane expansion kept overrides keyed by the original work center, so
+  every solve of an override instance with a parallel machine raised
+  `ValidationError`. `tests/test_virtual_lane_overrides.py`.
+- **Public lower bounds ignored execution modes (KI-B1).** A mode shorter
+  than the base duration made `compute_relaxed_makespan_lower_bound`
+  over-claim (bound 200, CP-SAT optimum 20 on the repro);
+  `timegrain.min_duration_minutes_for` takes the shortest mode.
+  `tests/test_mode_lower_bounds.py`.
 
 Review of the `audit-2026-10` branch update (2026-10-25,
 `docs/rfc/AUDIT_2026_10.md` §12):
