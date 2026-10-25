@@ -845,6 +845,11 @@ export function buildControlPlaneApp(
     const isOpenApi = pathOnly === "/openapi.json";
 
     if (requireAuth && !authConfigured && !isHealthz) {
+      // This return is before the shared limiter. Without an IP bucket a
+      // misconfigured bind could be hammered for free (audit 2026-10, U-09).
+      if (rateLimitExceeded(`ip:${request.ip}`)) {
+        return sendRateLimited(reply);
+      }
       reply.code(503).send({
         statusCode: 503,
         error: "Service Unavailable",
@@ -873,6 +878,9 @@ export function buildControlPlaneApp(
 
     // Discovery endpoints are private by default (even on anonymous loopback).
     if (isMetrics && !authConfigured && !publicMetrics) {
+      if (rateLimitExceeded(`ip:${request.ip}`)) {
+        return sendRateLimited(reply);
+      }
       reply.code(404).send({
         statusCode: 404,
         error: "Not Found",
@@ -881,6 +889,9 @@ export function buildControlPlaneApp(
       return;
     }
     if (isOpenApi && !authConfigured && !publicOpenApi) {
+      if (rateLimitExceeded(`ip:${request.ip}`)) {
+        return sendRateLimited(reply);
+      }
       reply.code(404).send({
         statusCode: 404,
         error: "Not Found",

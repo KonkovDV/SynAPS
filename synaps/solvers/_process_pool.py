@@ -86,9 +86,14 @@ def solve_clusters(
     """
     if pool.broken:
         return _solve_in_process(fn, jobs)
-    futures = {pool.submit(fn, *job): index for index, job in enumerate(jobs)}
+    # Submit inside the try. A BrokenProcessPool raised on a later submit used
+    # to escape before any future was settled and skipped the in-process
+    # fallback (the dict comprehension never finished).
+    futures: dict[Future[Any], int] = {}
     results: dict[int, dict[str, Any]] = {}
     try:
+        for index, job in enumerate(jobs):
+            futures[pool.submit(fn, *job)] = index
         for future in as_completed(futures):
             result = future.result()
             if result is None or result.get("failed"):

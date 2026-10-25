@@ -999,8 +999,10 @@ def _solve_single_cluster_worker(
     """Solve one cluster's CP-SAT subproblem in a worker process.
 
     Accepts JSON-serializable arguments to work with ProcessPoolExecutor.
-    Returns a dict with 'assignments' (list of dicts) and 'makespan' (float),
-    or None if the subproblem is infeasible.
+    Returns a dict. A proven INFEASIBLE subproblem is
+    ``{"failed": True, "infeasible_proven": True}``; TIMEOUT/ERROR without
+    assignments is ``{"failed": True, "infeasible_proven": False}``. ``None``
+    is not a proven cut: ``solve_clusters`` treats it as an unproven failure.
     """
     from uuid import UUID
 

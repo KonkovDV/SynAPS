@@ -198,5 +198,7 @@ test("bridge error classification only reports oom for memory failures", () => {
   assert.equal(_testInternals.detectBridgeErrorCode("MemoryError: cannot allocate"), "oom");
   assert.equal(_testInternals.detectBridgeErrorCode("Killed: out of memory"), "oom");
   assert.equal(_testInternals.detectBridgeErrorCode("OOM killer terminated the solver"), "oom");
+  assert.equal(_testInternals.detectBridgeErrorCode("OOMKilled"), "oom");
   assert.equal(_testInternals.detectBridgeErrorCode("no room left in the zoom bloom"), "bridge");
+  assert.equal(_testInternals.detectBridgeErrorCode("boom"), "bridge");
 });

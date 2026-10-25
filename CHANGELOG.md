@@ -375,6 +375,18 @@ Review of the `audit-2026-10` branch update (2026-10-25,
   rotating forged keys bypassed the limit in anonymous mode, and failed
   authentication was never throttled. Buckets use a SHA-256 of a verified key
   (or the client IP); failed attempts count per IP.
+- **U-09 follow-up:** `/metrics` and `/openapi.json` (and the misconfigured-auth
+  503) returned before that limiter, so those routes were unlimited. They now
+  share the client IP bucket.
+- **U-05 follow-up:** the whole-word `oom` test missed the glued spelling
+  `OOMKilled`. `room` / `zoom` / `bloom` / `boom` stay ordinary bridge errors.
+- **U-03 follow-up:** `package.json` still allowed `fastify` 5.8.2–5.12.4
+  (the vulnerable range). The direct dependency floor is now `^5.12.7`,
+  matching the lock.
+- **T-04 follow-up:** `BrokenProcessPool` raised while submitting a later
+  cluster escaped the fallback and left the earlier futures unsettled. Submit
+  is inside the same handler. A worker `None` is an unproven failure, not a
+  proven cut (docstring of the LBBD worker matched the old contract).
 
 Audit 2026-10 (`docs/rfc/AUDIT_2026_10.md`); each item has a regression
 test in `tests/test_audit_2026_10.py`.

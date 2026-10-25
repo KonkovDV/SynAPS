@@ -168,9 +168,10 @@ function detectBridgeErrorCode(stderr: string): SynapsPythonBridgeErrorCode {
   if (
     normalized.includes("memoryerror") ||
     normalized.includes("out of memory") ||
-    // Whole word only: "room" / "zoom" in a traceback must not read as OOM
-    // (an OOM code triggers a solver-chain retry and a 503).
-    /\boom\b/.test(normalized)
+    // Token "oom", including the glued runtime spelling "oomkilled".
+    // A bare substring matched "room" / "zoom" / "bloom" and forced a 503
+    // retry (audit 2026-10). A whole-word match missed the glued spelling OOMKilled.
+    /\boom(?:killed)?\b/.test(normalized)
   ) {
     return "oom";
   }

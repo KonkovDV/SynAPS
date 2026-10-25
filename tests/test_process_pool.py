@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import sys
+from concurrent.futures import Future
+from concurrent.futures.process import BrokenProcessPool
 
 import pytest
 
@@ -66,6 +68,32 @@ def test_the_fork_server_itself_stays_single_threaded() -> None:
         threads = len(os.listdir(f"/proc/{server_pid}/task"))
     assert results == {0: {"x": 1}, 1: {"x": 2}}
     assert threads == 1
+
+
+def test_broken_pool_during_submit_falls_back_and_settles() -> None:
+    """A later submit raising BrokenProcessPool must not leak the earlier futures."""
+
+    class _DiesOnSecondSubmit:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def submit(self, fn: object, /, *args: object) -> Future[object]:
+            self.calls += 1
+            if self.calls > 1:
+                raise BrokenProcessPool("submit failed")
+            future: Future[object] = Future()
+            assert callable(fn)
+            future.set_result(fn(*args))
+            return future
+
+    pool = SubproblemPool(2)
+    pool._executor = _DiesOnSecondSubmit()  # type: ignore[assignment]
+    jobs = [({"makespan": 1.0},), ({"makespan": 2.0},)]
+    with pytest.warns(RuntimeWarning, match="solving clusters in-process"):
+        results, infeasible = solve_clusters(pool, dict, jobs)
+    assert pool.broken is True
+    assert infeasible is False
+    assert results == {0: {"makespan": 1.0}, 1: {"makespan": 2.0}}
 
 
 def test_a_broken_pool_degrades_to_in_process_solving_with_one_warning() -> None:
