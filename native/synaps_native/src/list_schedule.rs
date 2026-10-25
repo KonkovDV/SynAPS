@@ -34,11 +34,16 @@ fn floor_key(minutes: f64) -> i64 {
     (minutes * 1_000_000.0).round() as i64
 }
 
-/// Canonical reservation grain: max(1, ceil(base / speed)). Matches Python timegrain.
+/// Absolute grain tolerance in minutes. Must equal Python
+/// `synaps.timegrain.GRAIN_EPSILON_MIN` (float division noise: 21 / 0.7 is
+/// 30.000000000000004 and a bare ceil reserved 31 minutes; audit 2026-10 A-01).
+const GRAIN_EPSILON_MIN: f64 = 1e-9;
+
+/// Canonical reservation grain: max(1, ceil(base / speed - eps)). Matches Python timegrain.
 #[inline(always)]
 fn grain_duration(base: f64, speed: f64) -> f64 {
     let speed = if speed > 0.0 { speed } else { 1.0 };
-    (base / speed).ceil().max(1.0)
+    (base / speed - GRAIN_EPSILON_MIN).ceil().max(1.0)
 }
 
 /// Occupancy [start-setup, end] must sit in one published shift (ADR-0005).
@@ -368,8 +373,8 @@ fn run_list_schedule(a: CoverArrays<'_>) -> (Vec<f64>, Vec<f64>, Vec<i64>, Vec<i
             }
             let s0 = succ_off[i] as usize;
             let s1 = succ_off[i + 1] as usize;
-            for slot in s0..s1 {
-                let succ = succ_idx[slot] as usize;
+            for &succ_raw in &succ_idx[s0..s1] {
+                let succ = succ_raw as usize;
                 let succ_floor = end.max(a.earliest[succ]);
                 heap.push(Reverse(ReadyKey {
                     floor_us: floor_key(succ_floor),
@@ -851,9 +856,7 @@ fn run_atcs_cover(
         );
         let s0 = succ_off[i] as usize;
         let s1 = succ_off[i + 1] as usize;
-        for pos in s0..s1 {
-            ready.push(succ_idx[pos]);
-        }
+        ready.extend_from_slice(&succ_idx[s0..s1]);
     }
 }
 
@@ -1110,6 +1113,9 @@ mod tests {
         assert_eq!(grain_duration(10.0, 3.0), 4.0);
         assert_eq!(grain_duration(0.0, 1.0), 1.0);
         assert_eq!(grain_duration(10.0, 0.0), 10.0);
+        // Float division noise must not inflate an exact quotient (A-01).
+        assert_eq!(grain_duration(21.0, 0.7), 30.0);
+        assert_eq!(grain_duration(42.0, 1.4), 30.0);
     }
 
     #[test]

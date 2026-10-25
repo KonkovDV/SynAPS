@@ -1,0 +1,402 @@
+{
+ "study": "CP-SAT determinism modes (audit 2026-10, ADR-0001 addendum)",
+ "host": {
+  "cpu_count": 4,
+  "python": "3.13.17",
+  "ortools": "9.15.6755"
+ },
+ "load_model": "N busy-loop processes (cpu_count) started for 3x the budget",
+ "experiment_1_mode_comparison_budget_6s": [
+  {
+   "mode": "strict",
+   "workers": 1,
+   "load": false,
+   "distinct_schedules": 1,
+   "makespans": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "wall_s": [
+    9.84,
+    10.44,
+    10.55
+   ],
+   "det_violated": false,
+   "status": "timeout",
+   "instance": "gen_120"
+  },
+  {
+   "mode": "strict",
+   "workers": 1,
+   "load": true,
+   "distinct_schedules": 1,
+   "makespans": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "wall_s": [
+    11.35,
+    12.16,
+    11.53
+   ],
+   "det_violated": false,
+   "status": "timeout",
+   "instance": "gen_120"
+  },
+  {
+   "mode": "strict-parallel",
+   "workers": 8,
+   "load": false,
+   "distinct_schedules": 1,
+   "makespans": [
+    4467.0,
+    4467.0,
+    4467.0
+   ],
+   "wall_s": [
+    11.31,
+    11.78,
+    11.85
+   ],
+   "det_violated": false,
+   "status": "feasible",
+   "instance": "gen_120"
+  },
+  {
+   "mode": "strict-parallel",
+   "workers": 8,
+   "load": true,
+   "distinct_schedules": 1,
+   "makespans": [
+    4467.0,
+    4467.0,
+    4467.0
+   ],
+   "wall_s": [
+    12.28,
+    12.28,
+    12.33
+   ],
+   "det_violated": false,
+   "status": "feasible",
+   "instance": "gen_120"
+  },
+  {
+   "mode": "strict",
+   "workers": 1,
+   "load": false,
+   "distinct_schedules": 1,
+   "makespans": [
+    184.0,
+    184.0,
+    184.0
+   ],
+   "wall_s": [
+    7.19,
+    6.93,
+    6.71
+   ],
+   "det_violated": false,
+   "status": "feasible",
+   "instance": "medium_stress_20x4"
+  },
+  {
+   "mode": "strict",
+   "workers": 1,
+   "load": true,
+   "distinct_schedules": 1,
+   "makespans": [
+    184.0,
+    184.0,
+    184.0
+   ],
+   "wall_s": [
+    9.03,
+    9.46,
+    10.53
+   ],
+   "det_violated": false,
+   "status": "feasible",
+   "instance": "medium_stress_20x4"
+  },
+  {
+   "mode": "strict-parallel",
+   "workers": 8,
+   "load": false,
+   "distinct_schedules": 1,
+   "makespans": [
+    165.0,
+    165.0,
+    165.0
+   ],
+   "wall_s": [
+    8.02,
+    7.2,
+    6.98
+   ],
+   "det_violated": false,
+   "status": "feasible",
+   "instance": "medium_stress_20x4"
+  },
+  {
+   "mode": "strict-parallel",
+   "workers": 8,
+   "load": true,
+   "distinct_schedules": 2,
+   "makespans": [
+    165.0,
+    165.0,
+    165.0
+   ],
+   "wall_s": [
+    11.68,
+    12.17,
+    12.2
+   ],
+   "det_violated": false,
+   "status": "feasible",
+   "instance": "medium_stress_20x4"
+  }
+ ],
+ "experiment_2_medium_stress_budget_6s_fields": [
+  "schedule_sha256_10",
+  "makespan",
+  "cpsat_deterministic_time",
+  "cpsat_wall_time_s",
+  "determinism_violated_OLD_DETECTOR"
+ ],
+ "experiment_2_medium_stress_budget_6s": [
+  {
+   "workers": 4,
+   "load": false,
+   "distinct": 1,
+   "runs": [
+    [
+     "3154c89924",
+     165.0,
+     9.471768,
+     7.621548,
+     false
+    ],
+    [
+     "3154c89924",
+     165.0,
+     9.471768,
+     7.248437,
+     false
+    ],
+    [
+     "3154c89924",
+     165.0,
+     9.471768,
+     7.43247,
+     false
+    ],
+    [
+     "3154c89924",
+     165.0,
+     9.471768,
+     7.288139,
+     false
+    ]
+   ]
+  },
+  {
+   "workers": 4,
+   "load": true,
+   "distinct": 1,
+   "runs": [
+    [
+     "3154c89924",
+     165.0,
+     8.382273,
+     12.027422,
+     false
+    ],
+    [
+     "3154c89924",
+     165.0,
+     8.563997,
+     12.026378,
+     false
+    ],
+    [
+     "3154c89924",
+     165.0,
+     8.494713,
+     12.025809,
+     false
+    ],
+    [
+     "3154c89924",
+     165.0,
+     7.995726,
+     12.035966,
+     false
+    ]
+   ]
+  },
+  {
+   "workers": 8,
+   "load": false,
+   "distinct": 1,
+   "runs": [
+    [
+     "3154c89924",
+     165.0,
+     9.471768,
+     7.477208,
+     false
+    ],
+    [
+     "3154c89924",
+     165.0,
+     9.471768,
+     6.953401,
+     false
+    ],
+    [
+     "3154c89924",
+     165.0,
+     9.471768,
+     7.331639,
+     false
+    ],
+    [
+     "3154c89924",
+     165.0,
+     9.471768,
+     7.162795,
+     false
+    ]
+   ]
+  },
+  {
+   "workers": 8,
+   "load": true,
+   "distinct": 1,
+   "runs": [
+    [
+     "3154c89924",
+     165.0,
+     9.471768,
+     11.526998,
+     false
+    ],
+    [
+     "3154c89924",
+     165.0,
+     9.471768,
+     11.64122,
+     false
+    ],
+    [
+     "3154c89924",
+     165.0,
+     9.471768,
+     11.858114,
+     false
+    ],
+    [
+     "3154c89924",
+     165.0,
+     9.471768,
+     11.27797,
+     false
+    ]
+   ]
+  }
+ ],
+ "experiment_3_budget_sweep_fields": [
+  "time_limit_s",
+  "mode",
+  "makespan",
+  "deterministic_time",
+  "wall_time_s",
+  "wall_cap_s",
+  "determinism_violated_NEW_DETECTOR"
+ ],
+ "experiment_3_budget_sweep_medium_stress": [
+  [
+   2,
+   "strict",
+   189.0,
+   1.001392,
+   2.668811,
+   4.0,
+   false
+  ],
+  [
+   2,
+   "strict-parallel",
+   165.0,
+   5.274351,
+   4.0277,
+   4.0,
+   true
+  ],
+  [
+   3,
+   "strict",
+   186.0,
+   1.500146,
+   4.002682,
+   6.0,
+   false
+  ],
+  [
+   3,
+   "strict-parallel",
+   165.0,
+   8.193941,
+   6.018014,
+   6.0,
+   true
+  ],
+  [
+   4,
+   "strict",
+   184.0,
+   2.000085,
+   5.097825,
+   8.0,
+   false
+  ],
+  [
+   4,
+   "strict-parallel",
+   165.0,
+   9.471768,
+   7.476838,
+   8.0,
+   false
+  ],
+  [
+   6,
+   "strict",
+   184.0,
+   3.000383,
+   6.428267,
+   12.0,
+   false
+  ],
+  [
+   6,
+   "strict-parallel",
+   165.0,
+   9.471768,
+   7.65667,
+   12.0,
+   false
+  ]
+ ],
+ "notes": [
+  "experiment_2 ran BEFORE the detector fix: workers=4 under load hit the 12 s wall cap (12.03 s) yet determinism_violated was False because interleaved deterministic time (~8-9.5) exceeds the 3.0 stop; fixed by _wall_cap_ended_search.",
+  "experiment_1 also ran BEFORE the detector fix: the loaded strict-parallel medium_stress_20x4 row (2 distinct schedules, equal makespan 165) has walls 12.17 / 12.2 s at the 12 s wall cap (2 x 6 s), i.e. the wall safety, not the deterministic stop, ended those runs; under _wall_cap_ended_search they report determinism_violated=True. No run that ended on the deterministic stop produced a second schedule.",
+  "Under interleave_search the deterministic limit is checked between batches: used deterministic time overshoots the configured stop by ~4-6 units on this instance.",
+  "gen_120 (experiment_1): strict found no solution within its budget; strict-parallel found 4467 in every run, idle and loaded.",
+  "Wall-time cost of the strict contract: with the wall safety at 2x the budget, strict runs took 6.7-12.2 s for a 6 s budget here (experiment_1); strict-parallel overshoots its deterministic stop, so its wall time is typically closer to the 2x cap. Callers who need a hard wall bound should use determinism='fast'."
+ ]
+}

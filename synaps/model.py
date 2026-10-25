@@ -90,9 +90,12 @@ class ModeRequirement(BaseModel):
 class OperationMode(BaseModel):
     """One alternative way to perform an operation.
 
-    ``duration_min`` is the reserved processing time before machine speed, the
-    same grain as ``base_duration_min``. An empty ``modes`` list keeps the
-    historical single-mode model.
+    ``duration_min`` is the reserved processing time in integer minutes and is
+    used AS IS on every eligible machine: CP-SAT and the FeasibilityChecker
+    treat it as a machine override, it is NOT divided by
+    ``WorkCenter.speed_factor`` (audit 2026-10 corrected the previous docstring,
+    which claimed the opposite). An empty ``modes`` list keeps the historical
+    single-mode model.
     """
 
     code: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_.:-]+$")

@@ -1,11 +1,11 @@
 # SynAPS Developer Makefile
 # Requires: Python 3.12+, pre-commit, ruff, mypy, pytest, maturin (for native builds)
-# On Windows use with `nmake` or run commands directly via PowerShell.
+# Windows: run via Git Bash / WSL make, or invoke the commands directly in PowerShell.
 
-PYTHON := py -3.13
-PYTHONPATH := C:/plans/SynAPS
+# Portable default; override per host, e.g. `make test PYTHON="py -3.13"` on Windows.
+PYTHON ?= python3
 
-.PHONY: lint format format-fix typecheck test test-fast test-slow clean native-build native-test benchmark-fast precommit help
+.PHONY: lint format format-fix typecheck test test-fast test-slow clean native-build native-test native-check benchmark-fast precommit help
 
 help: ## Show this help message
 	@echo "SynAPS developer targets:"
@@ -19,6 +19,7 @@ help: ## Show this help message
 	@echo "  benchmark-fast- Run quick benchmark subset"
 	@echo "  native-build  - Build synaps_native wheel via maturin"
 	@echo "  native-test   - Run native accelerator tests"
+	@echo "  native-check  - cargo test + clippy on the native crate"
 	@echo "  precommit     - Run pre-commit on all files"
 	@echo "  clean         - Remove cache/build artifacts"
 
@@ -53,7 +54,11 @@ native-build: ## Build native PyO3 accelerator wheel
 		--release --out native-dist
 native-test: ## Install built wheel and run native tests
 	$(PYTHON) -m pip install --force-reinstall native-dist/*.whl
-	$(PYTHON) -m pytest tests/test_native_*.py tests/test_accelerators.py -q
+	$(PYTHON) -m pytest tests/test_native_*.py tests/test_accelerators.py tests/test_alns_native_grain.py -q
+
+native-check: ## Rust unit tests + clippy on the native crate
+	cargo test --manifest-path native/synaps_native/Cargo.toml
+	cargo clippy --manifest-path native/synaps_native/Cargo.toml --all-targets
 
 precommit: ## Run all pre-commit hooks
 	pre-commit run --all-files

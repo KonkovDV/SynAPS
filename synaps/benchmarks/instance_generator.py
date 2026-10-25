@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import random
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
 
+from synaps._ids import seeded_uuid_factory
 from synaps.model import (
     AuxiliaryResource,
     Operation,
@@ -67,16 +67,17 @@ def generate_large_instance(
         A ScheduleProblem with the specified characteristics.
     """
     rng = random.Random(seed)
+    new_id = seeded_uuid_factory(seed)
     horizon_start = datetime(2026, 4, 1, 0, 0, tzinfo=UTC)
     horizon_end = horizon_start + timedelta(hours=horizon_hours)
 
     # States
-    states = [State(id=uuid4(), code=f"S-{i:03d}", label=f"State {i}") for i in range(n_states)]
+    states = [State(id=new_id(), code=f"S-{i:03d}", label=f"State {i}") for i in range(n_states)]
 
     # Work centers
     work_centers = [
         WorkCenter(
-            id=uuid4(),
+            id=new_id(),
             code=f"WC-{i:04d}",
             capability_group=f"group-{i % 5}",
             speed_factor=round(rng.uniform(0.8, 1.3), 2),
@@ -95,7 +96,7 @@ def generate_large_instance(
                     continue
                 setup_matrix.append(
                     SetupEntry(
-                        id=uuid4(),
+                        id=new_id(),
                         work_center_id=wc.id,
                         from_state_id=from_state.id,
                         to_state_id=to_state.id,
@@ -107,7 +108,7 @@ def generate_large_instance(
     # Auxiliary resources
     auxiliary_resources = [
         AuxiliaryResource(
-            id=uuid4(),
+            id=new_id(),
             code=f"AUX-{i:03d}",
             resource_type="tool",
             pool_size=aux_pool_size,
@@ -132,7 +133,7 @@ def generate_large_instance(
         if ops_created >= n_operations:
             break
 
-        order_id = uuid4()
+        order_id = new_id()
         # Sample releases with an early-skewed long tail.
         # Pure uniform sampling over a wide span starves short first-window
         # smoke studies and hides admission-pressure behavior.
@@ -149,7 +150,7 @@ def generate_large_instance(
         prev_op_id = None
         order_min_duration_minutes = 0.0
         for seq in range(this_order_ops):
-            op_id = uuid4()
+            op_id = new_id()
             state = rng.choice(states)
             eligible = rng.sample(
                 work_center_ids,

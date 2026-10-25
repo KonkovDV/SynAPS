@@ -11,10 +11,11 @@ Features:
       GreedyDispatch (toggle via use_greedy_warm_start).
     - Parallel subproblem execution via ProcessPoolExecutor for
       O(K) speedup (toggle via parallel_subproblems).
-        - Families of Benders cuts: nogood, capacity, setup_cost,
-            machine_tsp, critical_path. (The `load_balance` cut was removed
-            in the 2026-07 S1 fix: it added an unconditional
-            `C_max >= makespan(incumbent)` row and produced a fake gap.)
+        - Benders cuts: full-assignment no-goods only (emitted for proven
+            infeasible or optimality-status clusters). The capacity,
+            setup_cost, machine_tsp, critical_path and load_balance cuts were
+            removed in the 2026-07 S1/S2/S3 validity fixes (each could raise
+            the master bound above the optimum).
 """
 
 from __future__ import annotations
@@ -48,6 +49,7 @@ from synaps.solvers._lbbd_cuts import (
     compute_machine_transition_floor,
     compute_machine_tsp_lower_bound,
     compute_sequence_independent_setup_lower_bound,
+    cut_kind_lb_contribution,
     cut_pool_fingerprint,
     reported_lower_bound,
 )
@@ -77,399 +79,327 @@ class LbbdSolver(BaseSolver):
         return "lbbd"
 
     def solve(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
-        t0 = time.monotonic()
-        max_iterations: int = int(kwargs.get("max_iterations", 10))
-        time_limit_s: int = int(kwargs.get("time_limit_s", 60))
-        random_seed: int = int(kwargs.get("random_seed", 42))
-        sub_time_limit_s: int = max(1, time_limit_s // max(max_iterations, 1))
-        # D3: hard wall-clock deadline shared by all cluster solves.
-        deadline = t0 + float(time_limit_s)
-        gap_threshold: float = float(kwargs.get("gap_threshold", 0.01))
-        setup_relaxation: bool = bool(kwargs.get("setup_relaxation", True))
-        use_greedy_warm_start: bool = bool(kwargs.get("use_greedy_warm_start", True))
-        parallel_subproblems: bool = bool(kwargs.get("parallel_subproblems", True))
-        num_workers: int = int(kwargs.get("num_workers", min(4, os.cpu_count() or 2)))
-        # NOTE: `enable_machine_tsp_cuts` is accepted for backward compatibility
-        # but is now a no-op: the machine_tsp/setup_cost optimality cuts were
-        # removed in the 2026-07 S3 validity fix (their L(S) right side
-        # over-claims the true setup path). Reading it keeps old benchmark
-        # call sites from erroring.
-        _ = kwargs.get("enable_machine_tsp_cuts", True)
+        """Master/subproblem iterations under a hard wall-clock deadline (D3)."""
+        return stamp_honest_coverage(problem, _LbbdRun(self.name, problem, kwargs).execute())
 
-        # Precompute lookups
-        wc_by_id = {wc.id: wc for wc in problem.work_centers}
-        ops_by_id = {op.id: op for op in problem.operations}
-        orders_by_id = {o.id: o for o in problem.orders}
-        setup_lookup = {
+
+class _LbbdRun:
+    """One LBBD solve: HiGHS master -> CP-SAT cluster subproblems -> no-goods."""
+
+    def __init__(self, solver_name: str, problem: ScheduleProblem, kwargs: dict[str, Any]):
+        self.solver_name = solver_name
+        self.problem = problem
+        self.t0 = time.monotonic()
+        self.max_iterations = int(kwargs.get("max_iterations", 10))
+        self.time_limit_s = int(kwargs.get("time_limit_s", 60))
+        self.random_seed = int(kwargs.get("random_seed", 42))
+        self.sub_time_limit_s = max(1, self.time_limit_s // max(self.max_iterations, 1))
+        # D3: hard wall-clock deadline shared by all cluster solves.
+        self.deadline = self.t0 + float(self.time_limit_s)
+        self.gap_threshold = float(kwargs.get("gap_threshold", 0.01))
+        self.setup_relaxation = bool(kwargs.get("setup_relaxation", True))
+        self.use_greedy_warm_start = bool(kwargs.get("use_greedy_warm_start", True))
+        self.parallel_subproblems = bool(kwargs.get("parallel_subproblems", True))
+        self.num_workers = int(kwargs.get("num_workers", min(4, os.cpu_count() or 2)))
+        # `enable_machine_tsp_cuts` is accepted for backward compatibility but
+        # is a no-op since the 2026-07 S3 validity fix removed those cuts.
+        _ = kwargs.get("enable_machine_tsp_cuts", True)
+        self.wc_by_id = {wc.id: wc for wc in problem.work_centers}
+        self.ops_by_id = {op.id: op for op in problem.operations}
+        self.orders_by_id = {o.id: o for o in problem.orders}
+        self.setup_lookup = {
             (entry.work_center_id, entry.from_state_id, entry.to_state_id): entry.setup_minutes
             for entry in problem.setup_matrix
         }
-        eligible_by_op: dict[UUID, list[UUID]] = {
+        self.eligible_by_op: dict[UUID, list[UUID]] = {
             op.id: (
                 op.eligible_wc_ids if op.eligible_wc_ids else [wc.id for wc in problem.work_centers]
             )
             for op in problem.operations
         }
-
-        # Build aux resource clustering: ops sharing aux resources should
-        # be solved together when on the same machine cluster.
-        aux_links = _build_aux_resource_links(problem)
-
-        best_assignments: list[Assignment] = []
-        best_objective = ObjectiveValues()
-        best_ub = float("inf")
-        lb = 0.0
-        benders_cuts: list[_BendersCut] = []
-        iteration_log: list[dict[str, Any]] = []
-        prev_assignment_map: dict[UUID, UUID] | None = None
-        master_warm_start_iterations = 0
-        # R3 (2026-05-03): cut-pool deduplication. Two cuts with the same
-        # (kind, bottleneck_ops, rhs-rounded) fingerprint produce identical
-        # HiGHS rows, so the second one only inflates the master without
-        # tightening anything. The closure below registers a cut iff its
-        # fingerprint has not been seen.
-        seen_cut_fingerprints: set[
+        # Ops sharing aux resources are solved together on a machine cluster.
+        self.aux_links = _build_aux_resource_links(problem)
+        self.best_assignments: list[Assignment] = []
+        self.best_objective = ObjectiveValues()
+        self.best_ub = float("inf")
+        self.lb = 0.0
+        self.benders_cuts: list[_BendersCut] = []
+        self.iteration_log: list[dict[str, Any]] = []
+        self.prev_assignment_map: dict[UUID, UUID] | None = None
+        self.master_warm_start_iterations = 0
+        # R3: cut-pool dedup by (kind, payload, rhs-rounded) fingerprint.
+        self.seen_cut_fingerprints: set[
             tuple[str, frozenset[UUID], frozenset[tuple[UUID, UUID]], float]
         ] = set()
-        cuts_skipped_duplicate = 0
-        # S2 telemetry: how many times an optimality/feasibility cut was NOT
-        # emitted because the subproblem result was not proven (TIMEOUT/ERROR).
-        # A large value signals the per-iteration sub budget is too small to
-        # make sound progress, not a reason to emit unsound cuts.
-        cuts_skipped_unproven_subproblem = 0
+        self.cuts_skipped_duplicate = 0
+        # S2: cuts NOT emitted because the subproblem result was unproven.
+        self.cuts_skipped_unproven_subproblem = 0
+        # lb_evolution[N] is the master bound of iteration N; the delta seen in
+        # iteration N is attributed to the cuts generated in iteration N-1.
+        self.lb_evolution: list[float] = []
+        self.ub_evolution: list[float] = []
+        self.prev_master_bound = 0.0
+        self.prev_iteration_cut_kinds: list[str] = []
+        self.greedy_warm_start_used = False
+        self.min_setup_by_wc: dict[UUID, float] = {}
 
-        def _register_cut(cut: _BendersCut) -> bool:
-            nonlocal cuts_skipped_duplicate
-            fp = cut_pool_fingerprint(cut)
-            if fp in seen_cut_fingerprints:
-                cuts_skipped_duplicate += 1
-                return False
-            seen_cut_fingerprints.add(fp)
-            benders_cuts.append(cut)
-            return True
+    def _register_cut(self, cut: _BendersCut) -> bool:
+        fp = cut_pool_fingerprint(cut)
+        if fp in self.seen_cut_fingerprints:
+            self.cuts_skipped_duplicate += 1
+            return False
+        self.seen_cut_fingerprints.add(fp)
+        self.benders_cuts.append(cut)
+        return True
 
-        # Master-LB telemetry: each entry of `lb_evolution` is the master
-        # lower bound observed in that iteration. `prev_iteration_cut_kinds`
-        # carries the kinds of cuts added in iteration N-1, which are the
-        # ones whose effect is realised by the master solve in iteration N
-        # (and therefore the ones to attribute the LB delta to).
-        lb_evolution: list[float] = []
-        ub_evolution: list[float] = []
-        prev_master_bound: float = 0.0
-        prev_iteration_cut_kinds: list[str] = []
-
-        min_setup_by_wc: dict[UUID, float] = {}
-        if setup_relaxation:
-            for work_center in problem.work_centers:
-                transition_floor = compute_machine_transition_floor(
-                    problem,
-                    eligible_by_op,
-                    work_center.id,
-                    setup_lookup,
-                )
-                if transition_floor > 0:
-                    min_setup_by_wc[work_center.id] = transition_floor
-
-        # --- Greedy warm start: use GreedyDispatch to seed initial UB ---
-        greedy_warm_start_used = False
-        if use_greedy_warm_start:
-            warm_ub, warm_assignments, warm_objective, warm_map = _greedy_warm_start(
-                problem, best_ub
-            )
-            if warm_map is not None:
-                prev_assignment_map = warm_map
-            if warm_assignments is not None and warm_ub is not None:
-                best_ub = warm_ub
-                ub_evolution.append(best_ub)
-                best_assignments = warm_assignments
-                best_objective = warm_objective  # type: ignore[assignment]
-                greedy_warm_start_used = True
-
-        for iteration in range(1, max_iterations + 1):
-            elapsed = time.monotonic() - t0
-            if elapsed >= time_limit_s:
-                break
-
-            cuts_before_iteration = len(benders_cuts)
-            cut_kinds_attributed_now = list(prev_iteration_cut_kinds)
-
-            # --- Master Problem ---
-            if prev_assignment_map is not None:
-                master_warm_start_iterations += 1
-            master_result, master_proven_infeasible = _solve_master(
-                problem,
-                eligible_by_op,
-                wc_by_id,
-                benders_cuts,
-                min_setup_by_wc=min_setup_by_wc,
-                prev_solution=prev_assignment_map,
-                master_time_limit_s=max(
-                    1.0, min(deadline - time.monotonic(), float(sub_time_limit_s) + 2.0)
-                ),
-            )
-            if master_result is None:
-                failed = _master_failed_result(
-                    self.name, t0, iteration, master_proven_infeasible, bool(best_assignments)
-                )
-                if failed is not None:
-                    return stamp_honest_coverage(problem, failed)
-                break
-
-            assignment_map, master_bound = master_result
-            lb_delta = master_bound - prev_master_bound
-            lb_evolution.append(master_bound)
-            lb = max(lb, master_bound)
-            prev_assignment_map = assignment_map
-            prev_master_bound = master_bound
-
-            # --- Subproblems (one CP-SAT per machine cluster) ---
-            sub_result = _dispatch_subproblems(
-                problem,
-                assignment_map,
-                aux_links,
-                wc_by_id,
-                ops_by_id,
-                orders_by_id,
-                sub_time_limit_s,
-                random_seed,
-                parallel_subproblems=parallel_subproblems,
-                num_workers=num_workers,
-                deadline=deadline,
-            )
-            sub_assignments, sub_makespan, sub_proven_optimal, sub_infeasible_proven = sub_result
-
-            if sub_assignments is None:
-                if sub_infeasible_proven:
-                    # Proven INFEASIBLE for this assignment → excluding it from
-                    # the master is sound.
-                    _register_cut(
-                        _BendersCut(
-                            assignment_map=dict(assignment_map),
-                            kind="nogood",
-                            rhs=0.0,
-                            bottleneck_ops=set(),
-                        )
-                    )
-                else:
-                    # S2 gate: TIMEOUT/ERROR without a schedule proves nothing.
-                    # Emitting a no-good here would exclude a possibly-optimal
-                    # assignment and invalidate the master bound.
-                    cuts_skipped_unproven_subproblem += 1
-                iteration_log.append(
-                    {
-                        "iteration": iteration,
-                        "master_bound": master_bound,
-                        "sub_makespan": None,
-                        "lb_delta": lb_delta,
-                        "cut_kinds_attributed": cut_kinds_attributed_now,
-                        "sub_proven_optimal": False,
-                        "status": (
-                            "sub_infeasible" if sub_infeasible_proven else "sub_unproven_failure"
-                        ),
-                    }
-                )
-                prev_iteration_cut_kinds = [
-                    cut.kind for cut in benders_cuts[cuts_before_iteration:]
-                ]
-                continue
-
-            ub = sub_makespan
-
-            # Track best feasible solution
-            if ub < best_ub:
-                best_ub = ub
-                ub_evolution.append(best_ub)
-                best_assignments = sub_assignments
-                best_objective = _compute_objective(
-                    problem,
-                    sub_assignments,
-                    sub_makespan,
-                    wc_by_id,
-                    ops_by_id,
-                    orders_by_id,
-                )
-
-            iteration_log.append(
-                {
-                    "iteration": iteration,
-                    "master_bound": master_bound,
-                    "sub_makespan": sub_makespan,
-                    "gap": (ub - lb) / max(ub, 1e-9),
-                    "lb_delta": lb_delta,
-                    "cut_kinds_attributed": cut_kinds_attributed_now,
-                    "sub_proven_optimal": sub_proven_optimal,
-                    "status": "feasible",
-                }
-            )
-
-            # --- Convergence check ---
-            gap = (best_ub - lb) / max(best_ub, 1e-9)
-            if gap < gap_threshold:
-                prev_iteration_cut_kinds = []
-                break
-
-            # --- Generate Benders cuts ---
-            # S2 fix (2026-07): the former `capacity` optimality cut asserted
-            # `C_max >= sub_makespan - Sum p_i(1-y_i)` over the bottleneck
-            # machine's ops. That right side is the POST-ASSEMBLY global
-            # makespan — clusters are sequenced independently and re-anchored,
-            # so it is an achieved upper bound for this assignment, not a
-            # proven minimum, and the processing-only discount does not cover
-            # setup/contention (audit S2+S3). Both made the master bound
-            # invalid. The sound replacement is a full-assignment no-good,
-            # emitted ONLY when every cluster was proven OPTIMAL: excluding a
-            # proven assignment keeps `min(master_bound, best_ub)` a valid
-            # global lower bound (excluded assignments have known cost
-            # >= best_ub; unexcluded ones are bounded by the master
-            # relaxation).
-            if sub_proven_optimal:
-                _register_cut(
-                    _BendersCut(
-                        assignment_map=dict(assignment_map),
-                        kind="nogood",
-                        rhs=0.0,
-                        bottleneck_ops=set(),
-                    )
-                )
-            else:
-                cuts_skipped_unproven_subproblem += 1
-
-            # --- setup_cost / machine_tsp cuts: REMOVED (S3 validity, 2026-07) ---
-            # These asserted `C_max >= Sum p_i + L(S)` when the whole set S runs
-            # on a machine. Even in a conditional no-good form the right side is
-            # only valid if L(S) is a true lower bound on the machine's setup
-            # path — but both `compute_machine_tsp_lower_bound` (BHK) and
-            # `compute_sequence_independent_setup_lower_bound` OVER-claim it
-            # (audit S3: missing state-repeat terms, sparse-cell zeros, a false
-            # dominance docstring). Empirically the no-good right side reached
-            # 95 on a proven-optimum-90 instance. Re-enabling them requires a
-            # validated setup lower bound; until then the bound comes from the
-            # master capacity relaxation (Constraint 2) plus proven-optimal
-            # full-assignment no-goods, both of which are sound.
-
-            # --- Load-balance / critical_path cuts: REMOVED (S1/S3, 2026-07) ---
-            # load_balance added an unconditional `C_max >= makespan(incumbent)`
-            # (a fake optimality certificate); critical_path used the incumbent's
-            # realized, contention-inflated longest path. Neither is a valid
-            # master lower bound. The valid y-independent floor is
-            # `average_capacity_lb` in lower_bounds.py; the valid y-dependent
-            # load bound is already Constraint 2.
-
-            prev_iteration_cut_kinds = [cut.kind for cut in benders_cuts[cuts_before_iteration:]]
-
-        status = SolverStatus.FEASIBLE if best_assignments else SolverStatus.TIMEOUT
-        # D2: emit assignments in a fully deterministic order. Combined with the
-        # deterministic cluster collection below and the D1 strict CP-SAT
-        # default, two runs at the same seed produce byte-identical schedules.
-        best_assignments = sorted(
-            best_assignments,
-            key=lambda a: (str(a.work_center_id), a.start_time, str(a.operation_id)),
+    def _nogood(self, assignment_map: dict[UUID, UUID]) -> _BendersCut:
+        return _BendersCut(
+            assignment_map=dict(assignment_map), kind="nogood", rhs=0.0, bottleneck_ops=set()
         )
-        elapsed_ms = int((time.monotonic() - t0) * 1000)
-        cut_kinds: dict[str, int] = {}
-        for cut in benders_cuts:
-            cut_kinds[cut.kind] = cut_kinds.get(cut.kind, 0) + 1
 
-        # Reported lower bound (2026-07 validity fix, audit S1/S2/S3).
-        # In this cluster-decomposed LBBD the subproblem solves machine
-        # clusters independently and re-assembles them, so `sub_makespan` is an
-        # UPPER bound on the fixed assignment's true makespan, not a proven
-        # minimum (a globally-90 assignment can assemble to 92). Nogood cuts
-        # therefore drive the SEARCH (finding incumbents) but must NOT tighten
-        # the reported LOWER bound: excluding an assignment whose true cost the
-        # decomposition could not prove would raise the master bound above the
-        # optimum (observed: reported 92 vs proven optimum 90). The only
-        # provably-valid bound is the cut-free master relaxation (unique +
-        # capacity, Constraint 1+2), which is exactly the first iteration's
-        # master bound before any cut.
-        #
-        # N5 (audit v3): report the RAW relaxation, not min(relaxation, best_ub).
-        # Clamping to the incumbent makes lb <= ub true by construction and
-        # would silence an invalid relaxation; instead flag it explicitly.
-        raw_relaxation = lb_evolution[0] if lb_evolution else 0.0
-        reported_lb, lb_invariant_violated = reported_lower_bound(raw_relaxation, best_ub)
-        if lb_invariant_violated:
-            warnings.warn(
-                f"LBBD lower-bound invariant violated: raw master relaxation "
-                f"{raw_relaxation} exceeds incumbent {best_ub}; the relaxation "
-                f"is not a valid lower bound.",
-                stacklevel=2,
-            )
-
-        # Aggregate per-iteration LB deltas back to the cut kinds that drove
-        # them. The delta seen in iteration N is attributable to the cuts
-        # generated in iteration N-1 (which are the ones first acting on the
-        # master in iteration N). Mixed-kind iterations split the share
-        # equally; iterations with no attributed cuts (typically the very
-        # first one) accrue to the unprimed master relaxation.
-        cut_kind_lb_contribution: dict[str, float] = {}
-        for entry in iteration_log:
-            delta = float(entry.get("lb_delta", 0.0) or 0.0)
-            if delta <= 0.0:
-                continue
-            kinds = entry.get("cut_kinds_attributed") or []
-            if not kinds:
-                cut_kind_lb_contribution["master_relaxation"] = (
-                    cut_kind_lb_contribution.get("master_relaxation", 0.0) + delta
+    def execute(self) -> ScheduleResult:
+        if self.setup_relaxation:
+            for work_center in self.problem.work_centers:
+                floor = compute_machine_transition_floor(
+                    self.problem, self.eligible_by_op, work_center.id, self.setup_lookup
                 )
-                continue
-            share = delta / float(len(kinds))
-            for kind in kinds:
-                cut_kind_lb_contribution[kind] = cut_kind_lb_contribution.get(kind, 0.0) + share
+                if floor > 0:
+                    self.min_setup_by_wc[work_center.id] = floor
+        if self.use_greedy_warm_start:
+            self._greedy_warm_start()
+        for iteration in range(1, self.max_iterations + 1):
+            if time.monotonic() - self.t0 >= self.time_limit_s:
+                break
+            outcome = self._iteration(iteration)
+            if isinstance(outcome, ScheduleResult):
+                return outcome
+            if outcome == "stop":
+                break
+        return self._final_result()
 
-        # N2 (audit v3): when no Benders cut was ever generated (every
-        # subproblem hit the S2 unproven gate), the master never learned and
-        # LBBD degenerated into "solve the relaxation, solve the clusters,
-        # report" — not a converging decomposition. Expose that honestly
-        # instead of implying convergence via a gap number.
-        benders_active = len(benders_cuts) > 0
-        quality_warning = None if benders_active else "lbbd_no_cuts_degenerate"
-        return stamp_honest_coverage(
-            problem,
-            ScheduleResult(
-                solver_name=self.name,
-                status=status,
-                assignments=best_assignments,
-                objective=best_objective,
-                duration_ms=elapsed_ms,
-                random_seed=random_seed,
-                metadata={
-                    "iterations": len(iteration_log),
-                    "lower_bound": reported_lb,
-                    "upper_bound": best_ub,
-                    "gap": (
-                        (best_ub - reported_lb) / max(best_ub, 1e-9)
-                        if best_ub < float("inf")
-                        else None
-                    ),
-                    "benders_active": benders_active,
-                    "quality_warning": quality_warning,
-                    "lower_bound_invariant_violated": lb_invariant_violated,
-                    "lower_bound_method": "master_relaxation_benders",
-                    "lower_bound_components": {
-                        "master_relaxation_lb": reported_lb,
-                        "assignment_setup_lb": compute_assignment_setup_lb_total(
-                            problem, best_assignments
-                        ),
-                    },
-                    "iteration_log": iteration_log,
-                    "lb_evolution": lb_evolution,
-                    "ub_evolution": ub_evolution,
-                    "cut_kind_lb_contribution": cut_kind_lb_contribution,
-                    "gap_threshold": gap_threshold,
-                    "setup_relaxation": setup_relaxation,
-                    "master_warm_start_iterations": master_warm_start_iterations,
-                    "greedy_warm_start_used": greedy_warm_start_used,
-                    "parallel_subproblems": parallel_subproblems,
-                    "cut_pool": {
-                        "size": len(benders_cuts),
-                        "kinds": cut_kinds,
-                        "skipped_duplicate": cuts_skipped_duplicate,
-                        "skipped_unproven_subproblem": cuts_skipped_unproven_subproblem,
-                    },
-                },
+    def _greedy_warm_start(self) -> None:
+        warm_ub, warm_assignments, warm_objective, warm_map = _greedy_warm_start(
+            self.problem, self.best_ub
+        )
+        if warm_map is not None:
+            self.prev_assignment_map = warm_map
+        if warm_assignments is not None and warm_ub is not None:
+            self.best_ub = warm_ub
+            self.ub_evolution.append(self.best_ub)
+            self.best_assignments = warm_assignments
+            self.best_objective = warm_objective  # type: ignore[assignment]
+            self.greedy_warm_start_used = True
+
+    def _iteration(self, iteration: int) -> ScheduleResult | str:
+        """One master + subproblem round; returns a result, "stop" or "next"."""
+        cuts_before = len(self.benders_cuts)
+        attributed = list(self.prev_iteration_cut_kinds)
+        if self.prev_assignment_map is not None:
+            self.master_warm_start_iterations += 1
+        master_result, master_proven_infeasible = _solve_master(
+            self.problem,
+            self.eligible_by_op,
+            self.wc_by_id,
+            self.benders_cuts,
+            min_setup_by_wc=self.min_setup_by_wc,
+            prev_solution=self.prev_assignment_map,
+            master_time_limit_s=max(
+                1.0, min(self.deadline - time.monotonic(), float(self.sub_time_limit_s) + 2.0)
             ),
         )
+        if master_result is None:
+            failed = _master_failed_result(
+                self.solver_name,
+                self.t0,
+                iteration,
+                master_proven_infeasible,
+                bool(self.best_assignments),
+            )
+            return failed if failed is not None else "stop"
+        assignment_map, master_bound = master_result
+        lb_delta = master_bound - self.prev_master_bound
+        self.lb_evolution.append(master_bound)
+        self.lb = max(self.lb, master_bound)
+        self.prev_assignment_map = assignment_map
+        self.prev_master_bound = master_bound
+        sub_assignments, sub_makespan, sub_optimal, sub_infeasible = _dispatch_subproblems(
+            self.problem,
+            assignment_map,
+            self.aux_links,
+            self.wc_by_id,
+            self.ops_by_id,
+            self.orders_by_id,
+            self.sub_time_limit_s,
+            self.random_seed,
+            parallel_subproblems=self.parallel_subproblems,
+            num_workers=self.num_workers,
+            deadline=self.deadline,
+        )
+        entry: dict[str, Any] = {
+            "iteration": iteration,
+            "master_bound": master_bound,
+            "sub_makespan": sub_makespan if sub_assignments is not None else None,
+        }
+        if sub_assignments is None:
+            self._record_failed_subproblem(
+                entry, assignment_map, lb_delta, attributed, sub_infeasible
+            )
+            self.prev_iteration_cut_kinds = [c.kind for c in self.benders_cuts[cuts_before:]]
+            return "next"
+        if self._record_feasible_subproblem(
+            entry, sub_assignments, sub_makespan, lb_delta, attributed, sub_optimal
+        ):
+            self.prev_iteration_cut_kinds = []
+            return "stop"
+        # S2 (2026-07): the sound cut is a full-assignment no-good, emitted ONLY
+        # when every cluster was proven OPTIMAL; excluded assignments have known
+        # cost >= best_ub, unexcluded ones stay bounded by the relaxation. The
+        # capacity / setup_cost / machine_tsp / load_balance / critical_path
+        # cuts were removed as invalid master bounds (S1/S2/S3).
+        if sub_optimal:
+            self._register_cut(self._nogood(assignment_map))
+        else:
+            self.cuts_skipped_unproven_subproblem += 1
+        self.prev_iteration_cut_kinds = [c.kind for c in self.benders_cuts[cuts_before:]]
+        return "next"
+
+    def _record_failed_subproblem(
+        self,
+        entry: dict[str, Any],
+        assignment_map: dict[UUID, UUID],
+        lb_delta: float,
+        attributed: list[str],
+        sub_infeasible: bool,
+    ) -> None:
+        if sub_infeasible:
+            # Proven INFEASIBLE for this assignment: excluding it is sound.
+            self._register_cut(self._nogood(assignment_map))
+        else:
+            # S2 gate: TIMEOUT/ERROR without a schedule proves nothing; a no-good
+            # would exclude a possibly-optimal assignment.
+            self.cuts_skipped_unproven_subproblem += 1
+        entry.update(
+            {
+                "lb_delta": lb_delta,
+                "cut_kinds_attributed": attributed,
+                "sub_proven_optimal": False,
+                "status": "sub_infeasible" if sub_infeasible else "sub_unproven_failure",
+            }
+        )
+        self.iteration_log.append(entry)
+
+    def _record_feasible_subproblem(
+        self,
+        entry: dict[str, Any],
+        sub_assignments: list[Assignment],
+        sub_makespan: float,
+        lb_delta: float,
+        attributed: list[str],
+        sub_optimal: bool,
+    ) -> bool:
+        """Update the incumbent and the log; True when the gap has closed."""
+        ub = sub_makespan
+        if ub < self.best_ub:
+            self.best_ub = ub
+            self.ub_evolution.append(self.best_ub)
+            self.best_assignments = sub_assignments
+            self.best_objective = _compute_objective(
+                self.problem,
+                sub_assignments,
+                sub_makespan,
+                self.wc_by_id,
+                self.ops_by_id,
+                self.orders_by_id,
+            )
+        entry.update(
+            {
+                "gap": (ub - self.lb) / max(ub, 1e-9),
+                "lb_delta": lb_delta,
+                "cut_kinds_attributed": attributed,
+                "sub_proven_optimal": sub_optimal,
+                "status": "feasible",
+            }
+        )
+        self.iteration_log.append(entry)
+        return (self.best_ub - self.lb) / max(self.best_ub, 1e-9) < self.gap_threshold
+
+    def _final_result(self) -> ScheduleResult:
+        status = SolverStatus.FEASIBLE if self.best_assignments else SolverStatus.TIMEOUT
+        # D2: fully deterministic assignment order (with the deterministic
+        # cluster collection and strict CP-SAT, byte-identical across runs).
+        best_assignments = sorted(
+            self.best_assignments,
+            key=lambda a: (str(a.work_center_id), a.start_time, str(a.operation_id)),
+        )
+        elapsed_ms = int((time.monotonic() - self.t0) * 1000)
+        return ScheduleResult(
+            solver_name=self.solver_name,
+            status=status,
+            assignments=best_assignments,
+            objective=self.best_objective,
+            duration_ms=elapsed_ms,
+            random_seed=self.random_seed,
+            metadata=self._final_metadata(best_assignments),
+        )
+
+    def _reported_lower_bound(self) -> tuple[float, bool]:
+        """Cut-free master relaxation (N5: raw, never clamped to the incumbent).
+
+        Cluster subproblems are re-assembled, so ``sub_makespan`` is an UPPER
+        bound for its assignment: no-goods drive the search but must not
+        tighten the reported bound (observed 92 vs optimum 90). The only valid
+        bound is the first, cut-free master relaxation.
+        """
+        raw_relaxation = self.lb_evolution[0] if self.lb_evolution else 0.0
+        reported_lb, violated = reported_lower_bound(raw_relaxation, self.best_ub)
+        if violated:
+            warnings.warn(
+                f"LBBD lower-bound invariant violated: raw master relaxation "
+                f"{raw_relaxation} exceeds incumbent {self.best_ub}; the relaxation "
+                f"is not a valid lower bound.",
+                stacklevel=6,  # the caller of LbbdSolver.solve
+            )
+        return reported_lb, violated
+
+    def _final_metadata(self, best_assignments: list[Assignment]) -> dict[str, Any]:
+        reported_lb, lb_invariant_violated = self._reported_lower_bound()
+        cut_kinds: dict[str, int] = {}
+        for cut in self.benders_cuts:
+            cut_kinds[cut.kind] = cut_kinds.get(cut.kind, 0) + 1
+        # N2: no cut ever generated -> the master never learned (degenerate run).
+        benders_active = len(self.benders_cuts) > 0
+        best_ub = self.best_ub
+        return {
+            "iterations": len(self.iteration_log),
+            "lower_bound": reported_lb,
+            "upper_bound": best_ub,
+            "gap": (best_ub - reported_lb) / max(best_ub, 1e-9) if best_ub < float("inf") else None,
+            "benders_active": benders_active,
+            "quality_warning": None if benders_active else "lbbd_no_cuts_degenerate",
+            "lower_bound_invariant_violated": lb_invariant_violated,
+            "lower_bound_method": "master_relaxation_benders",
+            "lower_bound_components": {
+                "master_relaxation_lb": reported_lb,
+                "assignment_setup_lb": compute_assignment_setup_lb_total(
+                    self.problem, best_assignments
+                ),
+            },
+            "iteration_log": self.iteration_log,
+            "lb_evolution": self.lb_evolution,
+            "ub_evolution": self.ub_evolution,
+            "cut_kind_lb_contribution": cut_kind_lb_contribution(self.iteration_log),
+            "gap_threshold": self.gap_threshold,
+            "setup_relaxation": self.setup_relaxation,
+            "master_warm_start_iterations": self.master_warm_start_iterations,
+            "greedy_warm_start_used": self.greedy_warm_start_used,
+            "parallel_subproblems": self.parallel_subproblems,
+            "cut_pool": {
+                "size": len(self.benders_cuts),
+                "kinds": cut_kinds,
+                "skipped_duplicate": self.cuts_skipped_duplicate,
+                "skipped_unproven_subproblem": self.cuts_skipped_unproven_subproblem,
+            },
+        }
 
 
 class _BendersCut:

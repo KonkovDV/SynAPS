@@ -12,6 +12,14 @@ pyo3 = { version = "0.24", features = ["extension-module"] }
 numpy = "0.24"
 rayon = "1.10"
 
+[lints.clippy]
+# PyO3 entry points mirror the Python call signature (structure-of-arrays
+# buffers): the argument count and the tuple return types are the FFI contract,
+# not a design smell. Everything else stays at clippy's default level and CI
+# runs `cargo clippy --all-targets -- -D warnings`.
+too_many_arguments = "allow"
+type_complexity = "allow"
+
 [profile.release]
 lto = "fat"
 codegen-units = 1

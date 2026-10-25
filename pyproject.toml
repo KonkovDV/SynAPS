@@ -73,10 +73,10 @@ all = ["synaps[ml,llm,rl,dev]"]
 [project.urls]
 Homepage = "https://github.com/KonkovDV/SynAPS"
 Repository = "https://github.com/KonkovDV/SynAPS"
-Documentation = "https://github.com/KonkovDV/SynAPS/tree/master/docs"
+Documentation = "https://github.com/KonkovDV/SynAPS/tree/main/docs"
 Issues = "https://github.com/KonkovDV/SynAPS/issues"
-Changelog = "https://github.com/KonkovDV/SynAPS/releases"
-Support = "https://github.com/KonkovDV/SynAPS/blob/master/SUPPORT.md"
+Changelog = "https://github.com/KonkovDV/SynAPS/blob/main/CHANGELOG.md"
+Support = "https://github.com/KonkovDV/SynAPS/blob/main/SUPPORT.md"
 Security = "https://github.com/KonkovDV/SynAPS/security/policy"
 
 [tool.ruff]

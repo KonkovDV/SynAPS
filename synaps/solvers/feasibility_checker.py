@@ -9,7 +9,11 @@ from typing import TYPE_CHECKING, Any
 
 from synaps.calendar import processing_fits_calendar
 from synaps.precedence import edge_violation
-from synaps.timegrain import duration_minutes_for, physical_processing_minutes_for
+from synaps.timegrain import (
+    GRAIN_EPSILON_MIN,
+    duration_minutes_for,
+    physical_processing_minutes_for,
+)
 
 
 class _LaneSearchBudgetExceeded(Exception):  # noqa: N818
@@ -228,6 +232,83 @@ def _check_precedence_edges(
 
 def _minutes_from(origin: Any, moment: Any) -> float:
     return float((moment - origin).total_seconds()) / 60.0
+
+
+def _check_cardinality(
+    problem: ScheduleProblem,
+    assignments: list[Assignment],
+    violations: list[FeasibilityViolation],
+) -> dict[Any, Assignment]:
+    """1. Every operation assigned exactly once; returns the last row per op."""
+    assigned: dict[Any, Assignment] = {}
+    for a in assignments:
+        if a.operation_id in assigned:
+            violations.append(
+                FeasibilityViolation(
+                    "DUPLICATE_ASSIGNMENT",
+                    f"Operation {a.operation_id} assigned more than once.",
+                    operation_id=a.operation_id,
+                )
+            )
+        assigned[a.operation_id] = a
+    for op in problem.operations:
+        if op.id not in assigned:
+            violations.append(
+                FeasibilityViolation(
+                    "MISSING_ASSIGNMENT",
+                    f"Operation {op.id} not assigned.",
+                    operation_id=op.id,
+                )
+            )
+    return assigned
+
+
+def _check_horizon_bounds(
+    problem: ScheduleProblem,
+    assignments: list[Assignment],
+    violations: list[FeasibilityViolation],
+    scope: NotaryScope | None,
+) -> None:
+    """6. ``H0 <= start`` and ``end <= H1`` for every in-scope assignment."""
+    for a in assignments:
+        if not _op_in_scope(scope, a.operation_id):
+            continue
+        if a.start_time < problem.planning_horizon_start:
+            violations.append(
+                FeasibilityViolation(
+                    "HORIZON_BOUND_VIOLATION",
+                    (
+                        f"Operation {a.operation_id} starts at {a.start_time}, "
+                        f"before planning horizon start {problem.planning_horizon_start}."
+                    ),
+                    operation_id=a.operation_id,
+                )
+            )
+        if a.end_time > problem.planning_horizon_end:
+            violations.append(
+                FeasibilityViolation(
+                    "HORIZON_BOUND_VIOLATION",
+                    (
+                        f"Operation {a.operation_id} ends at {a.end_time}, "
+                        f"after planning horizon end {problem.planning_horizon_end}."
+                    ),
+                    operation_id=a.operation_id,
+                )
+            )
+
+
+def _occupancy_start(assignment: Any, setup_window_start_by_op: dict[Any, Any] | None) -> Any:
+    """Earlier of the stamped and the derived setup-window start (A-02)."""
+    stamped_setup = int(getattr(assignment, "setup_minutes", 0) or 0)
+    stamped_start = assignment.start_time - timedelta(minutes=stamped_setup)
+    derived_start = (setup_window_start_by_op or {}).get(assignment.operation_id)
+    if derived_start is None:
+        return stamped_start
+    return min(stamped_start, derived_start)
+
+
+def _minutes_between(earlier: Any, later: Any) -> float:
+    return float((later - earlier).total_seconds()) / 60.0
 
 
 def hard_violations(
@@ -882,26 +963,7 @@ class FeasibilityChecker:
         assigned: dict[Any, Assignment] = {}
 
         # 1. All operations assigned exactly once
-        for a in assignments:
-            if a.operation_id in assigned:
-                violations.append(
-                    FeasibilityViolation(
-                        "DUPLICATE_ASSIGNMENT",
-                        f"Operation {a.operation_id} assigned more than once.",
-                        operation_id=a.operation_id,
-                    )
-                )
-            assigned[a.operation_id] = a
-
-        for op in problem.operations:
-            if op.id not in assigned:
-                violations.append(
-                    FeasibilityViolation(
-                        "MISSING_ASSIGNMENT",
-                        f"Operation {op.id} not assigned.",
-                        operation_id=op.id,
-                    )
-                )
+        assigned.update(_check_cardinality(problem, assignments, violations))
 
         # 1b. Referential integrity of the RESULT itself (RT-20): phantom
         # operation / work-center references must not be certified.
@@ -1025,31 +1087,7 @@ class FeasibilityChecker:
         )
 
         # 6. Horizon bounds
-        for a in assignments:
-            if not _op_in_scope(scope, a.operation_id):
-                continue
-            if a.start_time < problem.planning_horizon_start:
-                violations.append(
-                    FeasibilityViolation(
-                        "HORIZON_BOUND_VIOLATION",
-                        (
-                            f"Operation {a.operation_id} starts at {a.start_time}, "
-                            f"before planning horizon start {problem.planning_horizon_start}."
-                        ),
-                        operation_id=a.operation_id,
-                    )
-                )
-            if a.end_time > problem.planning_horizon_end:
-                violations.append(
-                    FeasibilityViolation(
-                        "HORIZON_BOUND_VIOLATION",
-                        (
-                            f"Operation {a.operation_id} ends at {a.end_time}, "
-                            f"after planning horizon end {problem.planning_horizon_end}."
-                        ),
-                        operation_id=a.operation_id,
-                    )
-                )
+        _check_horizon_bounds(problem, assignments, violations, scope)
 
         scoped_ops = None if scope is None else scope.operation_ids
         self._check_release_and_op_windows(
@@ -1060,14 +1098,16 @@ class FeasibilityChecker:
             exhaustive=exhaustive,
             operation_ids=scoped_ops,
         )
-        self._check_work_center_calendar(
-            assignments=assignments,
+        self._check_calendars(
+            assignments,
             work_centers_by_id=work_centers_by_id,
+            resources_by_id=resources_by_id,
+            requirements_by_op=requirements_by_op,
+            setup_window_start_by_op=setup_window_start_by_op,
             violations=violations,
             exhaustive=exhaustive,
             operation_ids=scoped_ops,
         )
-        self._check_aux_calendar(assignments, resources_by_id, violations, exhaustive, scoped_ops)
 
         # 8. Operation durations (P0-3; hardened by F2, audit v4 — see the
         # helper's docstring for the physical-floor contract).
@@ -1082,6 +1122,37 @@ class FeasibilityChecker:
         )
 
         return violations
+
+    def _check_calendars(
+        self,
+        assignments: list[Assignment],
+        *,
+        work_centers_by_id: dict[Any, Any],
+        resources_by_id: dict[Any, Any],
+        requirements_by_op: dict[Any, list[Any]],
+        setup_window_start_by_op: dict[Any, Any],
+        violations: list[FeasibilityViolation],
+        exhaustive: bool,
+        operation_ids: frozenset[Any] | None,
+    ) -> None:
+        """9 + 10: machine and aux calendars over the DERIVED occupancy (A-02/A-03)."""
+        self._check_work_center_calendar(
+            assignments=assignments,
+            work_centers_by_id=work_centers_by_id,
+            violations=violations,
+            exhaustive=exhaustive,
+            operation_ids=operation_ids,
+            setup_window_start_by_op=setup_window_start_by_op,
+        )
+        self._check_aux_calendar(
+            assignments,
+            resources_by_id,
+            violations,
+            exhaustive,
+            operation_ids,
+            setup_window_start_by_op=setup_window_start_by_op,
+            requirements_by_op=requirements_by_op,
+        )
 
     @staticmethod
     def _check_release_and_op_windows(
@@ -1153,16 +1224,25 @@ class FeasibilityChecker:
         violations: list[FeasibilityViolation],
         exhaustive: bool,
         operation_ids: frozenset[Any] | None = None,
+        setup_window_start_by_op: dict[Any, Any] | None = None,
     ) -> None:
-        """Occupancy [start - setup, end] must sit in one published shift."""
+        """Occupancy [start - setup, end] must sit in one published shift.
+
+        Audit 2026-10 (A-02): the setup window is the LONGER of the solver's
+        ``setup_minutes`` stamp and the setup this checker derives from the
+        machine / lane sequence. Trusting the stamp alone let a schedule that
+        under-reports a changeover push it into a closed period and still be
+        certified (the overlap walk only checks the gap length, not where the
+        gap sits).
+        """
 
         for assignment in assignments:
             if operation_ids is not None and assignment.operation_id not in operation_ids:
                 continue
             work_center = work_centers_by_id.get(assignment.work_center_id)
             calendar = getattr(work_center, "calendar", None) if work_center is not None else None
-            setup_minutes = int(getattr(assignment, "setup_minutes", 0) or 0)
-            occupancy_start = assignment.start_time - timedelta(minutes=setup_minutes)
+            occupancy_start = _occupancy_start(assignment, setup_window_start_by_op)
+            setup_minutes = _minutes_between(occupancy_start, assignment.start_time)
             if calendar and not processing_fits_calendar(
                 occupancy_start, assignment.end_time, calendar
             ):
@@ -1172,7 +1252,7 @@ class FeasibilityChecker:
                         (
                             f"Operation {assignment.operation_id} occupancy "
                             f"[{occupancy_start}, {assignment.end_time}] "
-                            f"(setup {setup_minutes} min) is not inside a shift on "
+                            f"(setup {setup_minutes:g} min) is not inside a shift on "
                             f"{assignment.work_center_id}."
                         ),
                         operation_id=assignment.operation_id,
@@ -1189,15 +1269,29 @@ class FeasibilityChecker:
         violations: list[FeasibilityViolation],
         exhaustive: bool,
         operation_ids: frozenset[Any] | None = None,
+        *,
+        setup_window_start_by_op: dict[Any, Any] | None = None,
+        requirements_by_op: dict[Any, list[Any]] | None = None,
     ) -> None:
-        """Assigned aux occupancy must sit in one of that resource's shifts."""
+        """Aux occupancy must sit in one of each held resource's shifts.
+
+        Audit 2026-10 (A-03): the held resources are the problem's requirements
+        (mode-bound when modes are used) UNION the solver's ``aux_resource_ids``
+        stamp, and the occupancy window uses the derived setup (A-02). The
+        TimeTable pool sweep already used the requirements; the calendar check
+        trusted the stamp, so an omitted stamp skipped the check entirely.
+        """
 
         for assignment in assignments:
             if operation_ids is not None and assignment.operation_id not in operation_ids:
                 continue
-            setup_minutes = int(getattr(assignment, "setup_minutes", 0) or 0)
-            occupancy_start = assignment.start_time - timedelta(minutes=setup_minutes)
-            for aux_id in getattr(assignment, "aux_resource_ids", []) or []:
+            occupancy_start = _occupancy_start(assignment, setup_window_start_by_op)
+            setup_minutes = _minutes_between(occupancy_start, assignment.start_time)
+            held = list(getattr(assignment, "aux_resource_ids", []) or [])
+            for requirement in (requirements_by_op or {}).get(assignment.operation_id, []):
+                if requirement.aux_resource_id not in held:
+                    held.append(requirement.aux_resource_id)
+            for aux_id in held:
                 resource = resources_by_id.get(aux_id)
                 calendar = getattr(resource, "calendar", None) if resource is not None else None
                 if calendar and not processing_fits_calendar(
@@ -1209,7 +1303,7 @@ class FeasibilityChecker:
                             (
                                 f"Operation {assignment.operation_id} occupancy "
                                 f"[{occupancy_start}, {assignment.end_time}] "
-                                f"(setup {setup_minutes} min) is not inside a shift on "
+                                f"(setup {setup_minutes:g} min) is not inside a shift on "
                                 f"auxiliary resource {aux_id}."
                             ),
                             operation_id=assignment.operation_id,
@@ -1295,7 +1389,7 @@ class FeasibilityChecker:
                 continue
             span = (a.end_time - a.start_time).total_seconds() / 60.0
             physical = physical_processing_minutes_for(checked_op, work_center)
-            if span + 1e-9 < physical:
+            if span + GRAIN_EPSILON_MIN < physical:
                 violations.append(
                     FeasibilityViolation(
                         "DURATION_MISMATCH",
@@ -1312,7 +1406,7 @@ class FeasibilityChecker:
                     return
             if strict_grain:
                 expected = duration_minutes_for(checked_op, work_center)
-                if span + 1e-9 < float(expected):
+                if span + GRAIN_EPSILON_MIN < float(expected):
                     violations.append(
                         FeasibilityViolation(
                             "DURATION_BELOW_GRAIN",

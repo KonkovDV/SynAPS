@@ -31,6 +31,7 @@ from synaps.model import (
     SolverStatus,
 )
 from synaps.solvers import BaseSolver
+from synaps.solvers._alns_config import AlnsRunConfig
 from synaps.solvers._dispatch_support import (
     APPEND_GAP_SCAN_MIN_OPS,
     MachineIndex,
@@ -3192,1331 +3193,1254 @@ class AlnsSolver(BaseSolver):
         )
 
     def _solve_core(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
-        t0 = time.monotonic()
+        """Run one ALNS search on *problem* (pipeline: see :class:`_AlnsRun`)."""
+        return _AlnsRun(self, problem, kwargs).execute()
 
-        # Parameters
-        max_iterations: int = int(kwargs.get("max_iterations", 500))
-        # D3: min_iterations is accepted but no longer overrides the hard
-        # wall-clock deadline; time_limit_s always wins.
-        _ = kwargs.get("min_iterations")
-        time_limit_s: float = float(kwargs.get("time_limit_s", 300))
-        determinism = str(kwargs.get("determinism", "strict"))
-        destroy_fraction: float = float(kwargs.get("destroy_fraction", 0.05))
-        min_destroy: int = int(kwargs.get("min_destroy", 20))
-        max_destroy: int = int(kwargs.get("max_destroy", 300))
-        repair_time_limit_s: int = int(kwargs.get("repair_time_limit_s", 10))
-        repair_num_workers: int = max(
-            1,
-            int(kwargs.get("repair_num_workers", kwargs.get("num_workers", 1))),
-        )
-        sa_auto_calibration_enabled: bool = bool(kwargs.get("sa_auto_calibration_enabled", False))
-        # R6: default raised from 5 to 15 — Pepels (2014, C&OR) recommends ≥10-50
-        # worsening samples for reliable SA temperature estimation. 5 gave ≥40%
-        # variance at 50K scale, reducing strict-lane reproducibility.
-        sa_calibration_trials: int = max(0, int(kwargs.get("sa_calibration_trials", 15)))
-        sa_initial_acceptance_probability: float = float(
-            kwargs.get("sa_initial_acceptance_probability", 0.8)
-        )
-        sa_initial_temp: float = float(kwargs.get("sa_initial_temp", 100.0))
-        sa_cooling_rate: float = float(kwargs.get("sa_cooling_rate", 0.995))
-        operator_weight_segment_length: int = max(
-            1,
-            int(kwargs.get("operator_weight_segment_length", 50)),
-        )
-        operator_weight_reset_mix: float = min(
-            0.95,
-            max(0.0, float(kwargs.get("operator_weight_reset_mix", 0.2))),
-        )
-        max_no_improve_base_iters: int = int(kwargs.get("max_no_improve_iters", 0))
-        dynamic_no_improve_enabled: bool = bool(kwargs.get("dynamic_no_improve_enabled", False))
-        due_pressure: float = max(0.0, float(kwargs.get("due_pressure", 0.0)))
-        candidate_pressure: float = max(
-            0.0,
-            float(kwargs.get("candidate_pressure", 0.0)),
-        )
-        no_improve_due_alpha: float = float(kwargs.get("no_improve_due_alpha", 0.6))
-        no_improve_candidate_beta: float = float(kwargs.get("no_improve_candidate_beta", 0.4))
-        dynamic_sa_enabled: bool = bool(kwargs.get("dynamic_sa_enabled", True))
-        sa_due_alpha: float = float(kwargs.get("sa_due_alpha", 0.35))
-        sa_candidate_beta: float = float(kwargs.get("sa_candidate_beta", 0.15))
-        sa_pressure_cooling_gamma: float = float(kwargs.get("sa_pressure_cooling_gamma", 0.0015))
-        sa_temp_min: float = float(kwargs.get("sa_temp_min", 50.0))
-        sa_temp_max: float = float(kwargs.get("sa_temp_max", 500.0))
-        no_improve_min_iters: int = int(
-            kwargs.get(
-                "no_improve_min_iters",
-                max(1, max_no_improve_base_iters // 2) if max_no_improve_base_iters > 0 else 0,
+
+# ---------------------------------------------------------------------------
+# ALNS run engine (2026-10 god-function decomposition)
+# ---------------------------------------------------------------------------
+#
+# ``_AlnsRun`` is one search, executed as an explicit pipeline:
+#
+#     phase 1  initial solution  (warm start -> frozen seed -> native seed ->
+#                                 list-schedule cover -> beam/greedy tournament)
+#     phase 2  calibration       (warm-start skip, iteration budget, SA T0)
+#     phase 3  operators         (roulette weights or UCB1 pairs, window bias)
+#     phase 4  search loop       (destroy -> repair -> sanity -> accept -> adapt)
+#     phase 5  final validation  (notary + recovery) and metadata
+#
+# The engine lives in this module on purpose: tests patch module globals
+# (``DESTROY_OPERATORS``, ``_objective_cost``, ``_repair_greedy_outcome``,
+# ``SdstMatrix``, ``FeasibilityChecker``, ``APPEND_GAP_SCAN_MIN_OPS``,
+# ``time.monotonic`` ...) and the order of wall-clock and RNG draws is part of
+# the reproducibility contract, so the decomposition preserves both exactly.
+
+
+class _EarlyResult(Exception):  # noqa: N818 - control flow, never escapes _AlnsRun
+    """Phase-1 abort carrying the ERROR result to return from ``execute``."""
+
+    def __init__(self, result: ScheduleResult) -> None:
+        super().__init__("alns phase-1 abort")
+        self.result = result
+
+
+@dataclass
+class _AlnsRepairStats:
+    """Repair-lane counters accumulated over the search loop."""
+
+    cpsat_repair_attempts: int = 0
+    cpsat_repairs: int = 0
+    cpsat_repair_skips_large_destroy: int = 0
+    cpsat_repair_timeouts: int = 0
+    greedy_repair_attempts: int = 0
+    greedy_repairs: int = 0
+    greedy_repair_timeouts: int = 0
+    cpsat_repair_ms_total: int = 0
+    greedy_repair_ms_total: int = 0
+    # R2 (EMA calibration): destroyed-op totals per lane so RHC can compute an
+    # empirical mean repair time per destroyed op.
+    cpsat_repair_total_destroy_size: int = 0
+    greedy_repair_total_destroy_size: int = 0
+    repair_rejection_reasons: dict[str, int] = field(default_factory=dict)
+
+    def absorb(self, attempt: Any) -> None:
+        self.cpsat_repair_attempts += attempt.cpsat_repair_attempts
+        self.cpsat_repair_ms_total += attempt.cpsat_repair_ms_total
+        self.cpsat_repair_total_destroy_size += attempt.cpsat_repair_total_destroy_size
+        self.cpsat_repair_timeouts += attempt.cpsat_repair_timeouts
+        self.cpsat_repairs += attempt.cpsat_repairs
+        self.cpsat_repair_skips_large_destroy += attempt.cpsat_repair_skips_large_destroy
+        self.greedy_repair_attempts += attempt.greedy_repair_attempts
+        self.greedy_repair_ms_total += attempt.greedy_repair_ms_total
+        self.greedy_repair_total_destroy_size += attempt.greedy_repair_total_destroy_size
+        self.greedy_repair_timeouts += attempt.greedy_repair_timeouts
+        self.greedy_repairs += attempt.greedy_repairs
+        for reason, count in attempt.rejection_reasons.items():
+            self.repair_rejection_reasons[reason] = (
+                self.repair_rejection_reasons.get(reason, 0) + count
             )
+
+
+@dataclass
+class _AlnsSearchState:
+    """Incumbent / current solution and loop counters."""
+
+    current_assignments: list[Assignment]
+    current_obj: ObjectiveValues
+    current_cost: float
+    current_cache: Any
+    best_assignments: list[Assignment]
+    best_obj: ObjectiveValues
+    best_cost: float
+    initial_cost: float
+    temperature: float = 0.0
+    improvements: int = 0
+    feasibility_failures: int = 0
+    sa_worsening_accepted: int = 0
+    sa_worsening_rejected: int = 0
+    iterations_completed: int = 0
+    accepted_iterations: int = 0
+    no_improve_streak: int = 0
+    no_improve_early_stop: bool = False
+    stagnation_iteration: int | None = None
+    # P3.3: EMA repair-time tracker.
+    ema_repair_ms: float = 0.0
+    ema_repair_samples: int = 0
+
+
+@dataclass
+class _AlnsOperators:
+    """Destroy-operator adaptation state (roulette wheel or UCB1 pairs)."""
+
+    names: list[str]
+    weights: list[float]
+    scores: list[float]
+    attempts: list[int]
+    cumulative_attempts: list[int]
+    cumulative_improvements: list[int]
+    initial_weights_dict: dict[str, float]
+    pair_bandit: Any = None
+    mab_repair_modes: list[str] = field(default_factory=list)
+    mab_pair_labels: list[str] = field(default_factory=list)
+    cross_window_bias_applied: bool = False
+    cross_window_bias_operator_deltas: dict[str, float] = field(default_factory=dict)
+
+
+# Score rewards (Ropke & Pisinger 2006 §4.2).
+_SIGMA_NEW_BEST = 33.0
+_SIGMA_BETTER = 9.0
+_SIGMA_ACCEPTED = 3.0
+
+
+class _AlnsRun:
+    """One ALNS search on one (sub-)problem."""
+
+    initial_result: ScheduleResult
+    initial_solution_t0: float
+    phase1_deadline: float
+    initial_solution_ms: int
+    time_limit_exhausted_before_search: bool
+    search: _AlnsSearchState
+    ops: _AlnsOperators
+
+    def __init__(self, solver: AlnsSolver, problem: ScheduleProblem, kwargs: dict[str, Any]):
+        self.solver = solver
+        self.problem = problem
+        self.t0 = time.monotonic()
+        self.cfg = cfg = AlnsRunConfig.from_kwargs(kwargs)
+        self.objective_weights = _normalize_objective_weights(cfg.seeding.objective_weights_raw)
+        self.frozen_assignments: list[Assignment] = list(cfg.seeding.frozen_assignments)
+        self.frozen_assignments_by_op = {a.operation_id: a for a in self.frozen_assignments}
+        self.frozen_predecessor_end_offsets = dict(cfg.seeding.frozen_predecessor_end_offsets)
+        self.frozen_context_operations = list(
+            cfg.seeding.frozen_context_operations_raw or problem.operations
         )
-        no_improve_max_iters: int = int(
-            kwargs.get(
-                "no_improve_max_iters",
-                max_no_improve_base_iters * 4 if max_no_improve_base_iters > 0 else 0,
-            )
-        )
-        seed: int = int(kwargs.get("random_seed", 42))
-        initial_beam_op_limit: int = int(kwargs.get("initial_beam_op_limit", 60))
-        frozen_initial_repair_max_ops: int = int(kwargs.get("frozen_initial_repair_max_ops", 2000))
-        frozen_initial_repair_min_remaining_time_s: float = float(
-            kwargs.get("frozen_initial_repair_min_remaining_time_s", 30.0)
-        )
-        use_cpsat_repair: bool = bool(kwargs.get("use_cpsat_repair", True))
-        mab_pair_selection: bool = bool(kwargs.get("mab_pair_selection", False))
-        cpsat_max_destroy_ops: int = int(kwargs.get("cpsat_max_destroy_ops", min(20, max_destroy)))
-        objective_weights = _normalize_objective_weights(
-            dict(kwargs["objective_weights"]) if kwargs.get("objective_weights") else None
-        )
-        warm_start_assignments_raw = kwargs.get("warm_start_assignments")
-        frozen_assignments_raw = kwargs.get("frozen_assignments")
-        frozen_assignments: list[Assignment] = list(frozen_assignments_raw or [])
-        frozen_assignments_by_op = {
-            assignment.operation_id: assignment for assignment in frozen_assignments
-        }
-        frozen_predecessor_end_offsets = {
-            op_id: float(offset)
-            for op_id, offset in dict(kwargs.get("frozen_predecessor_end_offsets", {})).items()
-        }
-        frozen_context_operations = list(
-            kwargs.get("frozen_context_operations") or problem.operations
-        )
+        # P3.1: variable fixing — exclude stable ops from destroy.
+        self.fixed_op_ids: set[UUID] = set(cfg.seeding.fixed_op_ids)
+        self._derive_search_parameters()
+        self._init_context()
+        # Native telemetry: initialized before any early ERROR can publish it.
+        self.native_initial_seed_attempted = False
+        self.native_initial_seed_used = False
+        self.native_initial_seed_ms = 0
+        self.native_initial_seed_fallback_reason: str | None = None
+        self.native_greedy_repair_skip_reasons: list[str] = []
+        self.warm_start_assignments: list[Assignment] = []
+        self.warm_start_supplied_assignments = 0
+        self.warm_start_completed_assignments = 0
+        self.warm_start_used = False
+        self.warm_start_rejected_reason: str | None = None
+        self.initial_solver_name = "greedy"
+        self.repair = _AlnsRepairStats()
 
-        # P3.1: Variable fixing — exclude stable ops from destroy
-        fixed_op_ids_raw = kwargs.get("fixed_op_ids")
-        fixed_op_ids: set[UUID] = set(fixed_op_ids_raw) if fixed_op_ids_raw else set()
-
-        # P3.2: Adaptive destroy sizing (Deng et al. 2026)
-        adaptive_destroy_enabled: bool = bool(kwargs.get("adaptive_destroy_enabled", False))
-        adaptive_destroy_grow_rate: float = float(kwargs.get("adaptive_destroy_grow_rate", 1.15))
-        adaptive_destroy_shrink_rate: float = float(
-            kwargs.get("adaptive_destroy_shrink_rate", 0.85)
-        )
-
-        # P3.3: EMA repair-time tracking
-        ema_repair_alpha: float = float(kwargs.get("ema_repair_alpha", 0.3))
-
-        # B3 (Task 7): Convergence diagnostics — per-iteration trace control
-        record_iteration_metrics: bool = bool(kwargs.get("record_iteration_metrics", False))
-        max_iteration_records: int = max(1, int(kwargs.get("max_iteration_records", 500)))
-
-        # C2 (Task 12.1): Initial operator weights — dict[str, float] | list[float] | None
-        initial_operator_weights_raw = kwargs.get("initial_operator_weights")
-
-        # C4 (Task 3b.1): Cross-window operator bias — independent from telemetry flag.
-        # When enabled AND cross_window_hints indicate high setup cost concentration,
-        # applies a bounded boost (max 15%) to setup-disrupting operators.
-        cross_window_operator_bias_enabled: bool = bool(
-            kwargs.get("cross_window_operator_bias_enabled", False)
-        )
-        cross_window_hints = kwargs.get("cross_window_hints")
-
-        # Task 24.1: Native initial seed — use Rust greedy_repair_batch for Phase 1.
-        native_initial_seed_enabled: bool = bool(kwargs.get("native_initial_seed_enabled", True))
-
-        max_no_improve_iters = max_no_improve_base_iters
-        if dynamic_no_improve_enabled and max_no_improve_base_iters > 0:
-            scaled_no_improve = round(
-                max_no_improve_base_iters
+    def _derive_search_parameters(self) -> None:
+        """Stagnation patience, destroy size and the pressure-coupled SA schedule."""
+        cfg, ad, an = self.cfg, self.cfg.adaptation, self.cfg.annealing
+        base = ad.max_no_improve_base_iters
+        self.max_no_improve_iters = base
+        if ad.dynamic_no_improve_enabled and base > 0:
+            scaled = round(
+                base
                 * (
                     1.0
-                    + no_improve_due_alpha * due_pressure
-                    + no_improve_candidate_beta * candidate_pressure
+                    + ad.no_improve_due_alpha * an.due_pressure
+                    + ad.no_improve_candidate_beta * an.candidate_pressure
                 )
             )
-            max_no_improve_iters = min(
-                no_improve_max_iters,
-                max(no_improve_min_iters, scaled_no_improve),
+            self.max_no_improve_iters = min(
+                ad.no_improve_max_iters, max(ad.no_improve_min_iters, scaled)
             )
-
-        destroy_size = max(min_destroy, int(len(problem.operations) * destroy_fraction))
-        destroy_size = min(destroy_size, max_destroy)
-        adaptive_destroy_current = destroy_size
-
-        sa_calibrated_base_temp = sa_initial_temp
-        sa_calibration_samples = 0
-
-        sa_pressure_factor = 1.0
-        if dynamic_sa_enabled:
-            sa_pressure_factor += (
-                sa_due_alpha * due_pressure + sa_candidate_beta * candidate_pressure
-            )
-        # Initial effective SA temperature via _compute_effective_temperature.
-        # sa_pressure_factor is retained for the cooling-rate adjustment below
-        # and for metadata/logging; the temperature clamp itself delegates to
-        # the pure helper.
-        effective_sa_initial_temp = _compute_effective_temperature(
-            base_temp=sa_calibrated_base_temp,
-            due_pressure=due_pressure,
-            candidate_pressure=candidate_pressure,
-            due_alpha=sa_due_alpha if dynamic_sa_enabled else 0.0,
-            candidate_beta=sa_candidate_beta if dynamic_sa_enabled else 0.0,
-            min_temp=sa_temp_min,
-            max_temp=sa_temp_max,
+        destroy_size = max(
+            cfg.budget.min_destroy, int(len(self.problem.operations) * cfg.budget.destroy_fraction)
         )
-        effective_sa_cooling_rate = min(
+        self.destroy_size = min(destroy_size, cfg.budget.max_destroy)
+        self.adaptive_destroy_current = self.destroy_size
+        self.max_iterations = cfg.budget.max_iterations
+        self.original_max_iterations = cfg.budget.max_iterations
+        self.sa_calibrated_base_temp = an.sa_initial_temp
+        self.sa_calibration_samples = 0
+        self.sa_temp_min = an.sa_temp_min
+        self.sa_pressure_factor = 1.0
+        if an.dynamic_sa_enabled:
+            self.sa_pressure_factor += (
+                an.sa_due_alpha * an.due_pressure + an.sa_candidate_beta * an.candidate_pressure
+            )
+        self.effective_sa_initial_temp = self._effective_temperature()
+        self.effective_sa_cooling_rate = min(
             0.9999,
             max(
                 0.90,
-                sa_cooling_rate + (sa_pressure_cooling_gamma * max(0.0, sa_pressure_factor - 1.0)),
+                an.sa_cooling_rate
+                + (an.sa_pressure_cooling_gamma * max(0.0, self.sa_pressure_factor - 1.0)),
             ),
         )
 
-        rng = random.Random(seed)
-        n_ops = len(problem.operations)
-        ops_by_id = {op.id: op for op in (*frozen_context_operations, *problem.operations)}
-        problem_op_ids = {op.id for op in problem.operations}
-        op_positions = {op.id: index for index, op in enumerate(problem.operations)}
-        successors_by_op: dict[UUID, list[UUID]] = {}
+    def _effective_temperature(self) -> float:
+        an = self.cfg.annealing
+        return _compute_effective_temperature(
+            base_temp=self.sa_calibrated_base_temp,
+            due_pressure=an.due_pressure,
+            candidate_pressure=an.candidate_pressure,
+            due_alpha=an.sa_due_alpha if an.dynamic_sa_enabled else 0.0,
+            candidate_beta=an.sa_candidate_beta if an.dynamic_sa_enabled else 0.0,
+            min_temp=self.sa_temp_min,
+            max_temp=an.sa_temp_max,
+        )
+
+    def _init_context(self) -> None:
+        problem = self.problem
+        self.rng = random.Random(self.cfg.seeding.seed)
+        self.n_ops = len(problem.operations)
+        self.ops_by_id = {
+            op.id: op for op in (*self.frozen_context_operations, *problem.operations)
+        }
+        self.problem_op_ids = {op.id for op in problem.operations}
+        self.op_positions = {op.id: index for index, op in enumerate(problem.operations)}
+        self.successors_by_op: dict[UUID, list[UUID]] = {}
         for op in problem.operations:
             if op.predecessor_op_id is not None:
-                successors_by_op.setdefault(op.predecessor_op_id, []).append(op.id)
-        sdst = SdstMatrix.from_problem(problem)
-        checker = FeasibilityChecker()
-        dispatch_context = build_dispatch_context(problem)
-        lower_bound = compute_relaxed_makespan_lower_bound(problem)
-        # Native telemetry: init before any early ERROR return can publish metadata.
-        native_initial_seed_attempted = False
-        native_initial_seed_used = False
-        native_initial_seed_ms = 0
-        native_initial_seed_fallback_reason: str | None = None
-        native_greedy_repair_skip_reasons: list[str] = []
+                self.successors_by_op.setdefault(op.predecessor_op_id, []).append(op.id)
+        self.sdst = SdstMatrix.from_problem(problem)
+        self.checker = FeasibilityChecker()
+        self.dispatch_context = build_dispatch_context(problem)
+        self.lower_bound = compute_relaxed_makespan_lower_bound(problem)
 
-        def _initial_generation_error_result(
-            error_message: str,
-            *,
-            reason_key: str | None = None,
-            time_limit_exhausted_before_search: bool | None = None,
-        ) -> ScheduleResult:
-            elapsed_s = time.monotonic() - t0
-            exhausted = (
-                bool(time_limit_exhausted_before_search)
-                if time_limit_exhausted_before_search is not None
-                else elapsed_s > time_limit_s
+    # ---------------------------------------------------------- orchestration
+
+    def execute(self) -> ScheduleResult:
+        try:
+            self._phase1_initial_solution()
+        except _EarlyResult as early:
+            return early.result
+        self.initial_solution_ms = int((time.monotonic() - self.initial_solution_t0) * 1000)
+        self.time_limit_exhausted_before_search = (
+            time.monotonic() - self.t0
+        ) >= self.cfg.budget.time_limit_s
+        self._init_search_state()
+        skip_result = self._warm_start_skip_result()
+        if skip_result is not None:
+            return skip_result
+        self._adjust_iteration_budget()
+        self._calibrate_temperature()
+        self._init_operators()
+        self.search.temperature = self.effective_sa_initial_temp
+        logger.info(
+            "ALNS starting: %d ops, %d machines, destroy_size=%d, max_iter=%d, fixed_ops=%d",
+            self.n_ops,
+            len(self.problem.work_centers),
+            self.destroy_size,
+            self.max_iterations,
+            len(self.fixed_op_ids),
+        )
+        # B3 (Task 7.3): bounded per-iteration trace (oldest records dropped).
+        record = self.cfg.adaptation.record_iteration_metrics
+        self.iteration_trace: deque[AlnsIterationRecord] = (
+            deque(maxlen=self.cfg.adaptation.max_iteration_records) if record else deque(maxlen=0)
+        )
+        if self.time_limit_exhausted_before_search:
+            logger.info(
+                "ALNS time limit exhausted during initial solution generation (%d ms)",
+                self.initial_solution_ms,
             )
-            return ScheduleResult(
-                solver_name=self.name,
+        else:
+            self._run_search_loop()
+        return self._finalize()
+
+    # ----------------------------------------------------- phase-1 helpers
+
+    def _phase1_budget_exhausted(self) -> bool:
+        return time.monotonic() >= self.phase1_deadline
+
+    def _remaining_initial_seed_budget_s(self) -> float:
+        return max(1.0, self.cfg.budget.time_limit_s - (time.monotonic() - self.t0))
+
+    def _initial_seed_budget_s(self) -> float:
+        """Seed budget that always leaves ``search_budget_reservation_s`` for search.
+
+        ~0.5 ms/op (Python GreedyDispatch, capped at 30 s) vs 15 % of the
+        remaining budget, floored at 3 s, never eating the search reservation.
+        """
+        time_limit_s = self.cfg.budget.time_limit_s
+        remaining_budget_s = self._remaining_initial_seed_budget_s()
+        repair_budget_s = max(1.0, float(self.cfg.budget.repair_time_limit_s))
+        reserved = remaining_budget_s - self.cfg.seeding.search_budget_reservation_s
+        if reserved < 1.0:
+            return max(1.0, remaining_budget_s * 0.1)
+        n_ops_budget = min(self.n_ops * 0.0005, 30.0)
+        proportional = max(3.0, remaining_budget_s * 0.15)
+        if time_limit_s <= 90.0:
+            cap = max(1.0, min(3.0, repair_budget_s * 2.0))
+        else:
+            cap = max(5.0, min(max(n_ops_budget, proportional), reserved))
+        return max(1.0, min(cap, reserved))
+
+    @staticmethod
+    def _initial_seed_timed_out(result: ScheduleResult) -> bool:
+        metadata = result.metadata or {}
+        return result.status == SolverStatus.TIMEOUT or bool(metadata.get("partial_schedule"))
+
+    def _overlap(self, assignments: list[Assignment]) -> bool:
+        return _has_machine_overlap(
+            assignments,
+            ops_by_id=self.ops_by_id,
+            setup_minutes=self.dispatch_context.setup_minutes,
+        ) or has_aux_capacity_violation(self.dispatch_context, assignments)
+
+    def _frozen_prec_bad(self, assignments: list[Assignment]) -> bool:
+        return _violates_frozen_precedence(
+            assignments,
+            self.frozen_assignments_by_op,
+            self.ops_by_id,
+            frozen_predecessor_end_offsets=self.frozen_predecessor_end_offsets,
+            horizon_start=self.problem.planning_horizon_start,
+        )
+
+    def _is_valid_complete_schedule(self, assignments: list[Assignment]) -> bool:
+        frozen = self.frozen_assignments
+        combined = frozen + assignments if frozen else assignments
+        return (
+            len(assignments) == self.n_ops
+            and len({assignment.operation_id for assignment in assignments}) == self.n_ops
+            and not self._overlap(combined)
+            and not _has_precedence_violation(assignments, self.ops_by_id)
+            and not self._frozen_prec_bad(assignments)
+            and not self.checker.check(self.problem, assignments)
+        )
+
+    def _seed_result(self, assignments: list[Assignment], solver_name: str) -> ScheduleResult:
+        recompute_assignment_setups(assignments, self.dispatch_context)
+        self.initial_solver_name = solver_name
+        return ScheduleResult(
+            solver_name=self.solver.name, status=SolverStatus.FEASIBLE, assignments=assignments
+        )
+
+    def _reanchor(self, assignments: list[Assignment]) -> list[Assignment]:
+        reanchored, _ = _reanchor_against_frozen(
+            assignments,
+            problem=self.problem,
+            frozen_assignments=self.frozen_assignments,
+            ops_by_id=self.ops_by_id,
+            op_positions=self.op_positions,
+            frozen_assignments_by_op=self.frozen_assignments_by_op,
+            frozen_predecessor_end_offsets=self.frozen_predecessor_end_offsets,
+            dispatch_context=self.dispatch_context,
+        )
+        return reanchored
+
+    def _error_result(
+        self,
+        error_message: str,
+        *,
+        reason_key: str | None = None,
+        time_limit_exhausted_before_search: bool | None = None,
+    ) -> _EarlyResult:
+        """Build the phase-1 ERROR result (raise the returned exception)."""
+        budget = self.cfg.budget
+        elapsed_s = time.monotonic() - self.t0
+        exhausted = (
+            bool(time_limit_exhausted_before_search)
+            if time_limit_exhausted_before_search is not None
+            else elapsed_s > budget.time_limit_s
+        )
+        return _EarlyResult(
+            ScheduleResult(
+                solver_name=self.solver.name,
                 status=SolverStatus.ERROR,
                 duration_ms=int(elapsed_s * 1000),
                 metadata={
                     "error": error_message,
                     "initial_seed_fallback_reason": reason_key or error_message,
-                    "initial_solver": initial_solver_name,
-                    "warm_start_used": warm_start_used,
-                    "warm_start_supplied_assignments": warm_start_supplied_assignments,
-                    "warm_start_completed_assignments": warm_start_completed_assignments,
-                    "warm_start_rejected_reason": warm_start_rejected_reason,
-                    # C1 (Task 9.4): explicit ALNS-scoped warm-start signals for RHC
-                    # telemetry. `alns_warm_start_used` mirrors `warm_start_used`
-                    # but is prefixed to avoid ambiguity with RHC-owned keys.
-                    # `alns_warm_start_coverage` is the fraction of operations in
-                    # the current (sub-)problem that the caller-supplied warm
-                    # start covered before any greedy fill or rejection.
-                    "alns_warm_start_used": warm_start_used,
-                    "alns_warm_start_coverage": round(
-                        warm_start_supplied_assignments / max(n_ops, 1), 6
-                    ),
+                    "initial_solver": self.initial_solver_name,
+                    **self._warm_start_meta(),
                     "initial_solution_ms": int(elapsed_s * 1000),
-                    "native_initial_seed_attempted": native_initial_seed_attempted,
-                    "native_initial_seed_used": native_initial_seed_used,
-                    "native_initial_seed_ms": native_initial_seed_ms,
-                    "native_initial_seed_fallback_reason": native_initial_seed_fallback_reason,
-                    **_native_repair_meta_from_skips(native_greedy_repair_skip_reasons),
+                    **self._native_seed_meta(),
                     "time_limit_exhausted_before_search": exhausted,
                     "iterations_completed": 0,
                     **_alns_wall_clock_honesty_meta(
-                        determinism,
+                        budget.determinism,
                         exhausted,
                         0,
-                        max_iterations,
+                        budget.max_iterations,
                         elapsed_s,
-                        time_limit_s,
+                        budget.time_limit_s,
                     ),
                 },
             )
-
-        def _remaining_initial_seed_budget_s() -> float:
-            return max(1.0, time_limit_s - (time.monotonic() - t0))
-
-        def _initial_seed_budget_s() -> float:
-            remaining_budget_s = _remaining_initial_seed_budget_s()
-            repair_budget_s = max(1.0, float(repair_time_limit_s))
-            # Guarantee a minimum search budget so that ALNS always gets
-            # at least search_budget_reservation_s seconds after the seed.
-            search_budget_reservation_s: float = float(
-                kwargs.get("search_budget_reservation_s", 10.0)
-            )
-            reserved = remaining_budget_s - search_budget_reservation_s
-            if reserved < 1.0:
-                return max(1.0, remaining_budget_s * 0.1)
-            # Scale seed budget proportionally to problem size and remaining
-            # budget so larger windows don't exhaust their budget on seed
-            # construction alone.
-            #   - n_ops factor: ~0.5 ms per op (empirically observed for
-            #     Python GreedyDispatch), capped at 30 s.
-            #   - proportional factor: 15 % of remaining budget.
-            #   - Floor at 3 s; cap to leave the search reservation intact.
-            n_ops_budget = min(n_ops * 0.0005, 30.0)
-            proportional = max(3.0, remaining_budget_s * 0.15)
-            if time_limit_s <= 90.0:
-                cap = max(1.0, min(3.0, repair_budget_s * 2.0))
-            else:
-                cap = max(5.0, min(max(n_ops_budget, proportional), reserved))
-            return max(1.0, min(cap, reserved))
-
-        def _initial_seed_timed_out(result: ScheduleResult) -> bool:
-            metadata = result.metadata or {}
-            return result.status == SolverStatus.TIMEOUT or bool(metadata.get("partial_schedule"))
-
-        # ------- Phase 1: Initial solution -------
-        from synaps.solvers.greedy_dispatch import BeamSearchDispatch, GreedyDispatch
-
-        initial_solution_t0 = time.monotonic()
-        # Hard ceiling for Phase-1 seed+completion so RHC windows retain search
-        # (or fall back to inline greedy) instead of burning 180-320s on seed alone.
-        phase1_wall_fraction: float = max(
-            0.1, min(0.9, float(kwargs.get("phase1_wall_fraction", 0.5)))
         )
-        phase1_deadline = t0 + (time_limit_s * phase1_wall_fraction)
 
-        def _phase1_budget_exhausted() -> bool:
-            return time.monotonic() >= phase1_deadline
+    def _warm_start_meta(self) -> dict[str, Any]:
+        # C1 (Task 9.4): `alns_warm_start_*` are ALNS-scoped mirrors for RHC
+        # telemetry; coverage is the caller-supplied fraction before any fill.
+        return {
+            "warm_start_used": self.warm_start_used,
+            "warm_start_supplied_assignments": self.warm_start_supplied_assignments,
+            "warm_start_completed_assignments": self.warm_start_completed_assignments,
+            "warm_start_rejected_reason": self.warm_start_rejected_reason,
+            "alns_warm_start_used": self.warm_start_used,
+            "alns_warm_start_coverage": round(
+                self.warm_start_supplied_assignments / max(self.n_ops, 1), 6
+            ),
+        }
 
-        warm_start_assignments: list[Assignment] = []
-        warm_start_supplied_assignments = 0
-        warm_start_completed_assignments = 0
-        warm_start_used = False
-        warm_start_rejected_reason: str | None = None
+    def _native_seed_meta(self) -> dict[str, Any]:
+        return {
+            "native_initial_seed_attempted": self.native_initial_seed_attempted,
+            "native_initial_seed_used": self.native_initial_seed_used,
+            "native_initial_seed_ms": self.native_initial_seed_ms,
+            "native_initial_seed_fallback_reason": self.native_initial_seed_fallback_reason,
+            **_native_repair_meta_from_skips(self.native_greedy_repair_skip_reasons),
+        }
 
-        if isinstance(warm_start_assignments_raw, list):
-            seen_warm_start_ids: set[UUID] = set()
-            for assignment in warm_start_assignments_raw:
-                op_id = getattr(assignment, "operation_id", None)
-                if op_id not in problem_op_ids or op_id in seen_warm_start_ids:
-                    continue
-                warm_start_assignments.append(assignment)
-                seen_warm_start_ids.add(op_id)
-            warm_start_supplied_assignments = len(warm_start_assignments)
+    # ---------------------------------------------------- phase 1: seeding
 
-        def _overlap(asns: list[Assignment]) -> bool:
-            return _has_machine_overlap(
-                asns, ops_by_id=ops_by_id, setup_minutes=dispatch_context.setup_minutes
-            ) or has_aux_capacity_violation(dispatch_context, asns)
-
-        def _frozen_prec_bad(asns: list[Assignment]) -> bool:
-            return _violates_frozen_precedence(
-                asns,
-                frozen_assignments_by_op,
-                ops_by_id,
-                frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
-                horizon_start=problem.planning_horizon_start,
-            )
-
-        def _is_valid_complete_schedule(assignments: list[Assignment]) -> bool:
-            combined_assignments = (
-                frozen_assignments + assignments if frozen_assignments else assignments
-            )
-            return (
-                len(assignments) == n_ops
-                and len({assignment.operation_id for assignment in assignments}) == n_ops
-                and not _overlap(combined_assignments)
-                and not _has_precedence_violation(assignments, ops_by_id)
-                and not _frozen_prec_bad(assignments)
-                and not checker.check(problem, assignments)
-            )
-
-        initial_solver_name = "greedy"
-        initial_result: ScheduleResult | None = None
-
-        if warm_start_assignments:
-            warm_candidate = sorted(
-                warm_start_assignments,
-                key=lambda assignment: assignment.start_time,
-            )
-            warm_missing_ids = problem_op_ids.difference(
-                assignment.operation_id for assignment in warm_candidate
-            )
-            if warm_missing_ids:
-                if _phase1_budget_exhausted():
-                    warm_start_rejected_reason = "phase1_wall_budget_exhausted"
-                else:
-                    warm_outcome = _repair_greedy_outcome(
-                        problem,
-                        warm_candidate,
-                        warm_missing_ids,
-                        native_skip_reasons=native_greedy_repair_skip_reasons,
-                    )
-                    if warm_outcome.status == RepairStatus.FEASIBLE:
-                        warm_candidate = sorted(
-                            warm_candidate + list(warm_outcome.assignments),
-                            key=lambda assignment: assignment.start_time,
-                        )
-                        warm_start_completed_assignments = len(warm_outcome.assignments)
-                    else:
-                        warm_start_rejected_reason = warm_outcome.reason
-
-            if _is_valid_complete_schedule(warm_candidate):
-                recompute_assignment_setups(warm_candidate, dispatch_context)
-                initial_solver_name = "warm_start"
-                warm_start_used = True
-                initial_result = ScheduleResult(
-                    solver_name=self.name,
-                    status=SolverStatus.FEASIBLE,
-                    assignments=warm_candidate,
-                )
-            elif frozen_assignments:
-                reanchored_warm_candidate, _ = _reanchor_against_frozen(
-                    warm_candidate,
-                    problem=problem,
-                    frozen_assignments=frozen_assignments,
-                    ops_by_id=ops_by_id,
-                    op_positions=op_positions,
-                    frozen_assignments_by_op=frozen_assignments_by_op,
-                    frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
-                    dispatch_context=dispatch_context,
-                )
-                if _is_valid_complete_schedule(reanchored_warm_candidate):
-                    recompute_assignment_setups(
-                        reanchored_warm_candidate,
-                        dispatch_context,
-                    )
-                    initial_solver_name = "warm_start"
-                    warm_start_used = True
-                    initial_result = ScheduleResult(
-                        solver_name=self.name,
-                        status=SolverStatus.FEASIBLE,
-                        assignments=reanchored_warm_candidate,
-                    )
-                elif warm_start_rejected_reason is None:
-                    warm_start_rejected_reason = "warm_start_reanchored_infeasible"
-            elif warm_start_rejected_reason is None:
-                warm_start_rejected_reason = "warm_start_infeasible"
-        if initial_result is None and frozen_assignments:
-            # For RHC inner windows, prefer a frozen-compatible constructive seed
-            # instead of a standalone greedy seed that may become infeasible after
-            # re-anchoring against committed assignments.
-            remaining_budget_s = max(0.0, time_limit_s - (time.monotonic() - t0))
-            if _phase1_budget_exhausted():
-                if warm_start_rejected_reason is None:
-                    warm_start_rejected_reason = "phase1_wall_budget_exhausted"
-            elif (
-                n_ops <= frozen_initial_repair_max_ops
-                and remaining_budget_s >= frozen_initial_repair_min_remaining_time_s
-            ):
-                frozen_seed_outcome = _repair_greedy_outcome(
-                    problem,
-                    frozen_assignments,
-                    set(problem_op_ids),
-                    native_skip_reasons=native_greedy_repair_skip_reasons,
-                )
-                if frozen_seed_outcome.status == RepairStatus.FEASIBLE:
-                    frozen_seed_candidate = list(frozen_seed_outcome.assignments)
-                    if _is_valid_complete_schedule(frozen_seed_candidate):
-                        recompute_assignment_setups(frozen_seed_candidate, dispatch_context)
-                        initial_solver_name = "frozen_greedy_repair"
-                        initial_result = ScheduleResult(
-                            solver_name=self.name,
-                            status=SolverStatus.FEASIBLE,
-                            assignments=frozen_seed_candidate,
-                        )
-                    elif warm_start_rejected_reason is None:
-                        warm_start_rejected_reason = "frozen_greedy_seed_infeasible"
-                elif warm_start_rejected_reason is None:
-                    warm_start_rejected_reason = f"frozen_greedy_seed_{frozen_seed_outcome.reason}"
-            elif warm_start_rejected_reason is None:
-                warm_start_rejected_reason = "frozen_greedy_seed_skipped_budget_or_size"
-
-        # Task 24: Native initial seed — fast complete packing via Rust
-        # greedy_repair_batch. Small-n still tournaments against Python greedy
-        # so ALNS does not start from a worse-than-greedy incumbent.
-        if native_initial_seed_enabled and initial_result is None:
-            native_initial_seed_attempted = True
-            t_native = time.monotonic()
-
-            if _ops_have_machine_duration_overrides(list(ops_by_id.values())):
-                native_initial_seed_ms = 0
-                native_initial_seed_fallback_reason = "machine_duration_overrides"
-            else:
-                native_seed_result = _try_native_initial_seed(
-                    problem,
-                    frozen_assignments=frozen_assignments,
-                    ops_by_id=ops_by_id,
-                    frozen_assignments_by_op=frozen_assignments_by_op,
-                )
-                native_initial_seed_ms = int((time.monotonic() - t_native) * 1000)
-
-                if native_seed_result is not None:
-                    # Validate the native seed with a RELAXED check:
-                    # Only require completeness (all ops assigned) and no internal
-                    # machine overlap. Skip frozen-precedence and full feasibility
-                    # checks — the native seed is a heuristic initial solution that
-                    # ALNS will improve through destroy/repair iterations.
-                    # This is the standard approach in ALNS literature (Ropke &
-                    # Pisinger 2006): the initial solution need not be feasible,
-                    # only complete.
-                    native_seed_valid = (
-                        len(native_seed_result) == n_ops
-                        and len({a.operation_id for a in native_seed_result}) == n_ops
-                        and not _has_machine_overlap(native_seed_result)
-                    )
-                    if native_seed_valid:
-                        recompute_assignment_setups(native_seed_result, dispatch_context)
-                        initial_solver_name, seed_assignments = _maybe_prefer_python_seed(
-                            problem,
-                            native_seed_result,
-                            n_ops=n_ops,
-                            initial_beam_op_limit=initial_beam_op_limit,
-                            seed_budget_s=_initial_seed_budget_s(),
-                            sdst=sdst,
-                            ops_by_id=ops_by_id,
-                            objective_weights=objective_weights,
-                            is_valid=_is_valid_complete_schedule,
-                        )
-                        native_initial_seed_used = initial_solver_name == "native_greedy"
-                        initial_result = ScheduleResult(
-                            solver_name=self.name,
-                            status=SolverStatus.FEASIBLE,
-                            assignments=seed_assignments,
-                        )
-                    else:
-                        native_initial_seed_fallback_reason = "native_seed_infeasible"
-                else:
-                    native_initial_seed_fallback_reason = "native_unavailable_or_failed"
-
-        if initial_result is None:
-            cover_seed = _try_unconstrained_list_schedule_seed(
-                problem,
-                dispatch_context=dispatch_context,
-                n_ops=n_ops,
-                frozen_assignments=frozen_assignments,
-                deadline_exceeded=_phase1_budget_exhausted,
-            )
-            if cover_seed is not None:
-                initial_solver_name = "list_schedule_cover"
-                initial_result = cover_seed
-        if initial_result is None:
-            if n_ops <= initial_beam_op_limit:
-                seed_kw = {"time_limit_s": _initial_seed_budget_s()}
-                beam_result = BeamSearchDispatch(beam_width=3).solve(problem, **seed_kw)
-                greedy_result = GreedyDispatch().solve(problem, **seed_kw)
-
-                beam_valid = _is_valid_complete_schedule(list(beam_result.assignments))
-                greedy_valid = _is_valid_complete_schedule(list(greedy_result.assignments))
-
-                if beam_valid and greedy_valid:
-                    beam_cost = _objective_cost(
-                        _evaluate_objective(
-                            problem,
-                            list(beam_result.assignments),
-                            sdst,
-                            ops_by_id=ops_by_id,
-                        ),
-                        objective_weights,
-                    )
-                    greedy_cost = _objective_cost(
-                        _evaluate_objective(
-                            problem,
-                            list(greedy_result.assignments),
-                            sdst,
-                            ops_by_id=ops_by_id,
-                        ),
-                        objective_weights,
-                    )
-                    if greedy_cost < beam_cost:
-                        initial_solver_name = "greedy"
-                        initial_result = greedy_result
-                    else:
-                        initial_solver_name = "beam"
-                        initial_result = beam_result
-                elif beam_valid:
-                    initial_solver_name = "beam"
-                    initial_result = beam_result
-                else:
-                    initial_solver_name = "greedy"
-                    initial_result = greedy_result
-            else:
-                initial_solver_name = "greedy"
-                initial_result = GreedyDispatch().solve(
-                    problem,
-                    time_limit_s=_initial_seed_budget_s(),
-                )
-
-            if _initial_seed_timed_out(initial_result):
-                # Seed timed out but may still have produced enough assignments
-                # to serve as a starting point. Proceed to ALNS search rather than
-                # bailing out — the completion phase below will repair any gaps,
-                # and the ALNS loop will then improve the resulting schedule.
-                seed_coverage = len(initial_result.assignments) / max(n_ops, 1)
-                if seed_coverage > 0:
-                    logger.info(
-                        "ALNS seed timed out at %.1f%% coverage (%d/%d), "
-                        "proceeding to completion + search",
-                        seed_coverage * 100,
-                        len(initial_result.assignments),
-                        n_ops,
-                    )
-                else:
-                    return _initial_generation_error_result(
-                        "initial_seed_greedy_timed_out",
-                        reason_key="initial_seed_greedy_timed_out",
-                        time_limit_exhausted_before_search=True,
-                    )
-
-            if not _is_valid_complete_schedule(list(initial_result.assignments)):
-                # Fall back to greedy if beam failed to cover the full instance.
-                initial_solver_name = "greedy"
-                initial_result = GreedyDispatch().solve(
-                    problem,
-                    time_limit_s=_initial_seed_budget_s(),
-                )
-                if _initial_seed_timed_out(initial_result):
-                    seed_coverage = len(initial_result.assignments) / max(n_ops, 1)
-                    if seed_coverage > 0:
-                        logger.info(
-                            "ALNS fallback seed timed out at %.1f%% coverage (%d/%d), "
-                            "proceeding to completion + search",
-                            seed_coverage * 100,
-                            len(initial_result.assignments),
-                            n_ops,
-                        )
-                    else:
-                        return _initial_generation_error_result(
-                            "initial_seed_greedy_timed_out",
-                            reason_key="initial_seed_greedy_timed_out",
-                            time_limit_exhausted_before_search=True,
-                        )
-                if not _is_valid_complete_schedule(list(initial_result.assignments)):
-                    # Proceed with whatever coverage we have — completion phase
-                    # and ALNS will repair missing ops. Only bail if zero coverage.
-                    if len(initial_result.assignments) > 0:
-                        logger.info(
-                            "ALNS seed incomplete (%d/%d ops), proceeding to "
-                            "completion + search for repair",
-                            len(initial_result.assignments),
-                            n_ops,
-                        )
-                    else:
-                        return _initial_generation_error_result(
-                            "initial solution generation failed"
-                        )
-
-        if initial_result is not None and frozen_assignments:
-            reanchored_initial_assignments, _ = _reanchor_against_frozen(
-                list(initial_result.assignments),
-                problem=problem,
-                frozen_assignments=frozen_assignments,
-                ops_by_id=ops_by_id,
-                op_positions=op_positions,
-                frozen_assignments_by_op=frozen_assignments_by_op,
-                frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
-                dispatch_context=dispatch_context,
-            )
-            if _is_valid_complete_schedule(reanchored_initial_assignments):
-                recompute_assignment_setups(
-                    reanchored_initial_assignments,
-                    dispatch_context,
-                )
-                initial_result = initial_result.model_copy(
-                    update={"assignments": reanchored_initial_assignments}
-                )
-            else:
-                return _initial_generation_error_result("initial solution generation failed")
-
-        # Completion phase: if seed did not cover all operations, repair the
-        # missing ones via greedy dispatch so ALNS starts from a full schedule.
-        # Hard-stop when Phase-1 wall fraction is exhausted so RHC can fall back
-        # instead of burning the full window on uncapped completion.
+    def _phase1_initial_solution(self) -> None:
+        """Build a complete initial schedule or raise :class:`_EarlyResult`."""
+        seeding = self.cfg.seeding
+        self.initial_solution_t0 = time.monotonic()
+        # Hard ceiling for seed+completion so RHC windows retain search (or
+        # fall back to inline greedy) instead of burning the window on seeding.
+        self.phase1_deadline = self.t0 + (
+            self.cfg.budget.time_limit_s * seeding.phase1_wall_fraction
+        )
+        self._collect_warm_start()
+        initial: ScheduleResult | None = None
+        if self.warm_start_assignments:
+            initial = self._try_warm_start_seed()
+        if initial is None and self.frozen_assignments:
+            # RHC inner windows: prefer a frozen-compatible constructive seed.
+            initial = self._try_frozen_seed()
+        if seeding.native_initial_seed_enabled and initial is None:
+            initial = self._try_native_seed()
+        if initial is None:
+            initial = self._try_cover_seed()
+        if initial is None:
+            initial = self._constructive_seed()
+        if self.frozen_assignments:
+            initial = self._reanchor_initial(initial)
+        initial = self._complete_initial(initial)
         if (
-            initial_result is not None
-            and len(initial_result.assignments) < n_ops
-            and n_ops < APPEND_GAP_SCAN_MIN_OPS
+            self._phase1_budget_exhausted()
+            and (time.monotonic() - self.t0) > self.cfg.budget.time_limit_s * 0.85
         ):
-            if _phase1_budget_exhausted():
-                return _initial_generation_error_result(
-                    "phase1_wall_budget_exhausted_before_completion",
-                    time_limit_exhausted_before_search=True,
-                )
-            covered_ids = {a.operation_id for a in initial_result.assignments}
-            missing_ids = problem_op_ids - covered_ids
-            if missing_ids:
-                repair_outcome = _repair_greedy_outcome(
-                    problem,
-                    list(initial_result.assignments),
+            # Seed consumed the Phase-1 ceiling: surface as pre-search timeout
+            # so RHC prefers the inline greedy coverage path.
+            raise self._error_result(
+                "phase1_wall_budget_exhausted_after_seed", time_limit_exhausted_before_search=True
+            )
+        self.initial_result = initial
+
+    def _collect_warm_start(self) -> None:
+        raw = self.cfg.seeding.warm_start_assignments_raw
+        if not isinstance(raw, list):
+            return
+        seen: set[UUID] = set()
+        for assignment in raw:
+            op_id = getattr(assignment, "operation_id", None)
+            if op_id not in self.problem_op_ids or op_id in seen:
+                continue
+            self.warm_start_assignments.append(assignment)
+            seen.add(op_id)
+        self.warm_start_supplied_assignments = len(self.warm_start_assignments)
+
+    def _try_warm_start_seed(self) -> ScheduleResult | None:
+        candidate = sorted(self.warm_start_assignments, key=lambda a: a.start_time)
+        missing_ids = self.problem_op_ids.difference(a.operation_id for a in candidate)
+        if missing_ids:
+            if self._phase1_budget_exhausted():
+                self.warm_start_rejected_reason = "phase1_wall_budget_exhausted"
+            else:
+                outcome = _repair_greedy_outcome(
+                    self.problem,
+                    candidate,
                     missing_ids,
-                    native_skip_reasons=native_greedy_repair_skip_reasons,
+                    native_skip_reasons=self.native_greedy_repair_skip_reasons,
                 )
-                if repair_outcome.status == RepairStatus.FEASIBLE:
-                    completed = list(initial_result.assignments) + list(repair_outcome.assignments)
-                    completed.sort(
-                        key=lambda a: (
-                            a.start_time,
-                            op_positions.get(a.operation_id, 0),
-                        )
+                if outcome.status == RepairStatus.FEASIBLE:
+                    candidate = sorted(
+                        candidate + list(outcome.assignments), key=lambda a: a.start_time
                     )
-                    initial_result = initial_result.model_copy(update={"assignments": completed})
-                    logger.info(
-                        "ALNS completion phase repaired %d missing ops (now %d/%d)",
-                        len(missing_ids),
-                        len(completed),
-                        n_ops,
-                    )
-                elif _phase1_budget_exhausted() or (time.monotonic() - t0) > time_limit_s:
-                    return _initial_generation_error_result(
-                        "phase1_wall_budget_exhausted_during_completion",
-                        time_limit_exhausted_before_search=True,
-                    )
+                    self.warm_start_completed_assignments = len(outcome.assignments)
+                else:
+                    self.warm_start_rejected_reason = outcome.reason
+        if self._is_valid_complete_schedule(candidate):
+            self.warm_start_used = True
+            return self._seed_result(candidate, "warm_start")
+        if self.frozen_assignments:
+            reanchored = self._reanchor(candidate)
+            if self._is_valid_complete_schedule(reanchored):
+                self.warm_start_used = True
+                return self._seed_result(reanchored, "warm_start")
+            if self.warm_start_rejected_reason is None:
+                self.warm_start_rejected_reason = "warm_start_reanchored_infeasible"
+        elif self.warm_start_rejected_reason is None:
+            self.warm_start_rejected_reason = "warm_start_infeasible"
+        return None
 
-        if (
-            initial_result is not None
-            and _phase1_budget_exhausted()
-            and (time.monotonic() - t0) > time_limit_s * 0.85
+    def _set_rejected_reason_once(self, reason: str) -> None:
+        if self.warm_start_rejected_reason is None:
+            self.warm_start_rejected_reason = reason
+
+    def _try_frozen_seed(self) -> ScheduleResult | None:
+        seeding = self.cfg.seeding
+        remaining_budget_s = max(0.0, self.cfg.budget.time_limit_s - (time.monotonic() - self.t0))
+        if self._phase1_budget_exhausted():
+            self._set_rejected_reason_once("phase1_wall_budget_exhausted")
+            return None
+        if not (
+            self.n_ops <= seeding.frozen_initial_repair_max_ops
+            and remaining_budget_s >= seeding.frozen_initial_repair_min_remaining_time_s
         ):
-            # Seed finished but consumed the Phase-1 ceiling - surface as
-            # pre-search timeout so RHC prefers inline greedy coverage path.
-            return _initial_generation_error_result(
-                "phase1_wall_budget_exhausted_after_seed",
+            self._set_rejected_reason_once("frozen_greedy_seed_skipped_budget_or_size")
+            return None
+        outcome = _repair_greedy_outcome(
+            self.problem,
+            self.frozen_assignments,
+            set(self.problem_op_ids),
+            native_skip_reasons=self.native_greedy_repair_skip_reasons,
+        )
+        if outcome.status != RepairStatus.FEASIBLE:
+            self._set_rejected_reason_once(f"frozen_greedy_seed_{outcome.reason}")
+            return None
+        candidate = list(outcome.assignments)
+        if self._is_valid_complete_schedule(candidate):
+            return self._seed_result(candidate, "frozen_greedy_repair")
+        self._set_rejected_reason_once("frozen_greedy_seed_infeasible")
+        return None
+
+    def _try_native_seed(self) -> ScheduleResult | None:
+        """Task 24: fast complete packing via Rust ``greedy_repair_batch``.
+
+        Validated with a RELAXED check (complete + no internal machine overlap):
+        an ALNS initial solution need only be complete (Ropke & Pisinger 2006).
+        Small instances still tournament against the Python greedy seed.
+        """
+        self.native_initial_seed_attempted = True
+        t_native = time.monotonic()
+        if _ops_have_machine_duration_overrides(list(self.ops_by_id.values())):
+            self.native_initial_seed_ms = 0
+            self.native_initial_seed_fallback_reason = "machine_duration_overrides"
+            return None
+        native = _try_native_initial_seed(
+            self.problem,
+            frozen_assignments=self.frozen_assignments,
+            ops_by_id=self.ops_by_id,
+            frozen_assignments_by_op=self.frozen_assignments_by_op,
+        )
+        self.native_initial_seed_ms = int((time.monotonic() - t_native) * 1000)
+        if native is None:
+            self.native_initial_seed_fallback_reason = "native_unavailable_or_failed"
+            return None
+        if not (
+            len(native) == self.n_ops
+            and len({a.operation_id for a in native}) == self.n_ops
+            and not _has_machine_overlap(native)
+        ):
+            self.native_initial_seed_fallback_reason = "native_seed_infeasible"
+            return None
+        recompute_assignment_setups(native, self.dispatch_context)
+        self.initial_solver_name, seed_assignments = _maybe_prefer_python_seed(
+            self.problem,
+            native,
+            n_ops=self.n_ops,
+            initial_beam_op_limit=self.cfg.seeding.initial_beam_op_limit,
+            seed_budget_s=self._initial_seed_budget_s(),
+            sdst=self.sdst,
+            ops_by_id=self.ops_by_id,
+            objective_weights=self.objective_weights,
+            is_valid=self._is_valid_complete_schedule,
+        )
+        self.native_initial_seed_used = self.initial_solver_name == "native_greedy"
+        return ScheduleResult(
+            solver_name=self.solver.name, status=SolverStatus.FEASIBLE, assignments=seed_assignments
+        )
+
+    def _try_cover_seed(self) -> ScheduleResult | None:
+        cover_seed = _try_unconstrained_list_schedule_seed(
+            self.problem,
+            dispatch_context=self.dispatch_context,
+            n_ops=self.n_ops,
+            frozen_assignments=self.frozen_assignments,
+            deadline_exceeded=self._phase1_budget_exhausted,
+        )
+        if cover_seed is not None:
+            self.initial_solver_name = "list_schedule_cover"
+        return cover_seed
+
+    def _constructive_seed(self) -> ScheduleResult:
+        """Beam/greedy tournament (small n) or greedy; greedy retry on failure."""
+        from synaps.solvers.greedy_dispatch import GreedyDispatch
+
+        if self.n_ops <= self.cfg.seeding.initial_beam_op_limit:
+            result = self._beam_greedy_tournament()
+        else:
+            self.initial_solver_name = "greedy"
+            result = GreedyDispatch().solve(
+                self.problem, time_limit_s=self._initial_seed_budget_s()
+            )
+        self._accept_partial_seed_or_abort(result, "ALNS seed timed out")
+        if self._is_valid_complete_schedule(list(result.assignments)):
+            return result
+        # Fall back to greedy if beam failed to cover the full instance.
+        self.initial_solver_name = "greedy"
+        result = GreedyDispatch().solve(self.problem, time_limit_s=self._initial_seed_budget_s())
+        self._accept_partial_seed_or_abort(result, "ALNS fallback seed timed out")
+        if not self._is_valid_complete_schedule(list(result.assignments)):
+            # Proceed with partial coverage — completion + ALNS repair the
+            # missing ops. Only bail out on zero coverage.
+            if len(result.assignments) > 0:
+                logger.info(
+                    "ALNS seed incomplete (%d/%d ops), proceeding to "
+                    "completion + search for repair",
+                    len(result.assignments),
+                    self.n_ops,
+                )
+            else:
+                raise self._error_result("initial solution generation failed")
+        return result
+
+    def _accept_partial_seed_or_abort(self, result: ScheduleResult, label: str) -> None:
+        """A timed-out seed with >0 coverage proceeds to completion + search."""
+        if not self._initial_seed_timed_out(result):
+            return
+        seed_coverage = len(result.assignments) / max(self.n_ops, 1)
+        if seed_coverage <= 0:
+            raise self._error_result(
+                "initial_seed_greedy_timed_out",
+                reason_key="initial_seed_greedy_timed_out",
                 time_limit_exhausted_before_search=True,
             )
+        logger.info(
+            "%s at %.1f%% coverage (%d/%d), proceeding to completion + search",
+            label,
+            seed_coverage * 100,
+            len(result.assignments),
+            self.n_ops,
+        )
 
-        initial_solution_ms = int((time.monotonic() - initial_solution_t0) * 1000)
-        time_limit_exhausted_before_search = (time.monotonic() - t0) >= time_limit_s
+    def _beam_greedy_tournament(self) -> ScheduleResult:
+        from synaps.solvers.greedy_dispatch import BeamSearchDispatch, GreedyDispatch
 
-        # Current best
-        current_assignments = list(initial_result.assignments)
-        current_obj = _evaluate_objective(problem, current_assignments, sdst, ops_by_id=ops_by_id)
-        current_cost = _objective_cost(current_obj, objective_weights)
-        initial_cost = current_cost
+        seed_kw = {"time_limit_s": self._initial_seed_budget_s()}
+        beam_result = BeamSearchDispatch(beam_width=3).solve(self.problem, **seed_kw)
+        greedy_result = GreedyDispatch().solve(self.problem, **seed_kw)
+        beam_valid = self._is_valid_complete_schedule(list(beam_result.assignments))
+        greedy_valid = self._is_valid_complete_schedule(list(greedy_result.assignments))
+        if beam_valid and greedy_valid:
+            beam_cost = self._cost_of(list(beam_result.assignments))
+            greedy_cost = self._cost_of(list(greedy_result.assignments))
+            if greedy_cost < beam_cost:
+                self.initial_solver_name = "greedy"
+                return greedy_result
+            self.initial_solver_name = "beam"
+            return beam_result
+        if beam_valid:
+            self.initial_solver_name = "beam"
+            return beam_result
+        self.initial_solver_name = "greedy"
+        return greedy_result
 
-        # P2.1: Pre-compute order due offsets once (avoids datetime math per iteration)
-        horizon_start = problem.planning_horizon_start
-        order_due_offsets = {
-            order.id: (order.due_date - horizon_start).total_seconds() / 60.0
+    def _cost_of(self, assignments: list[Assignment]) -> float:
+        objective = _evaluate_objective(
+            self.problem, assignments, self.sdst, ops_by_id=self.ops_by_id
+        )
+        return _objective_cost(objective, self.objective_weights)
+
+    def _reanchor_initial(self, initial: ScheduleResult) -> ScheduleResult:
+        reanchored = self._reanchor(list(initial.assignments))
+        if not self._is_valid_complete_schedule(reanchored):
+            raise self._error_result("initial solution generation failed")
+        recompute_assignment_setups(reanchored, self.dispatch_context)
+        return initial.model_copy(update={"assignments": reanchored})
+
+    def _complete_initial(self, initial: ScheduleResult) -> ScheduleResult:
+        """Greedy-complete a partial seed (hard stop at the Phase-1 ceiling)."""
+        if not (len(initial.assignments) < self.n_ops and self.n_ops < APPEND_GAP_SCAN_MIN_OPS):
+            return initial
+        if self._phase1_budget_exhausted():
+            raise self._error_result(
+                "phase1_wall_budget_exhausted_before_completion",
+                time_limit_exhausted_before_search=True,
+            )
+        covered_ids = {a.operation_id for a in initial.assignments}
+        missing_ids = self.problem_op_ids - covered_ids
+        if not missing_ids:
+            return initial
+        outcome = _repair_greedy_outcome(
+            self.problem,
+            list(initial.assignments),
+            missing_ids,
+            native_skip_reasons=self.native_greedy_repair_skip_reasons,
+        )
+        if outcome.status == RepairStatus.FEASIBLE:
+            completed = list(initial.assignments) + list(outcome.assignments)
+            completed.sort(key=lambda a: (a.start_time, self.op_positions.get(a.operation_id, 0)))
+            logger.info(
+                "ALNS completion phase repaired %d missing ops (now %d/%d)",
+                len(missing_ids),
+                len(completed),
+                self.n_ops,
+            )
+            return initial.model_copy(update={"assignments": completed})
+        if (
+            self._phase1_budget_exhausted()
+            or (time.monotonic() - self.t0) > self.cfg.budget.time_limit_s
+        ):
+            raise self._error_result(
+                "phase1_wall_budget_exhausted_during_completion",
+                time_limit_exhausted_before_search=True,
+            )
+        return initial
+
+    # ------------------------------------------------ phase 2: calibration
+
+    def _init_search_state(self) -> None:
+        problem = self.problem
+        current = list(self.initial_result.assignments)
+        current_obj = _evaluate_objective(problem, current, self.sdst, ops_by_id=self.ops_by_id)
+        current_cost = _objective_cost(current_obj, self.objective_weights)
+        # P2.1: pre-compute order due offsets once (no datetime math per iteration).
+        self.horizon_start = problem.planning_horizon_start
+        self.order_due_offsets = {
+            order.id: (order.due_date - self.horizon_start).total_seconds() / 60.0
             for order in problem.orders
         }
-        # Build per-machine cache for incremental evaluation
         current_cache = _build_machine_objective_cache(
             problem,
-            current_assignments,
-            sdst,
-            ops_by_id=ops_by_id,
-            horizon_start=horizon_start,
-            order_due_offsets=order_due_offsets,
+            current,
+            self.sdst,
+            ops_by_id=self.ops_by_id,
+            horizon_start=self.horizon_start,
+            order_due_offsets=self.order_due_offsets,
+        )
+        self.search = _AlnsSearchState(
+            current_assignments=current,
+            current_obj=current_obj,
+            current_cost=current_cost,
+            current_cache=current_cache,
+            best_assignments=list(current),
+            best_obj=current_obj,
+            best_cost=current_cost,
+            initial_cost=current_cost,
         )
 
-        best_assignments = list(current_assignments)
-        best_obj = current_obj
-        best_cost = current_cost
-
-        # ─── Task 18: Adaptive Iteration Budget + Warm-Start Skip ───────────
-        # Task 18.2: Warm-start skip when gap < threshold.
-        # If the warm-start solution is already within `warm_start_skip_threshold_gap`
-        # of the lower bound, skip ALNS entirely and commit the warm-start directly.
-        # Default 0.0 = disabled (conservative); set to 0.03 for aggressive skip.
-        warm_start_skip_threshold_gap: float = float(
-            kwargs.get("warm_start_skip_threshold_gap", 0.0)
+    def _warm_start_skip_result(self) -> ScheduleResult | None:
+        """Task 18.2: commit a warm start already within the gap threshold of the LB."""
+        threshold = self.cfg.budget.warm_start_skip_threshold_gap
+        if not (threshold > 0 and self.warm_start_used):
+            return None
+        lower = self.lower_bound.value
+        ws_gap = (self.search.current_obj.makespan_minutes - lower) / max(lower, 1e-6)
+        if ws_gap > threshold:
+            return None
+        elapsed_ms = int((time.monotonic() - self.t0) * 1000)
+        best = self.search.best_assignments
+        recompute_assignment_setups(best, self.dispatch_context)
+        final_obj = _evaluate_objective(self.problem, best, self.sdst, ops_by_id=self.ops_by_id)
+        return ScheduleResult(
+            solver_name=self.solver.name,
+            status=SolverStatus.FEASIBLE,
+            assignments=best,
+            objective=final_obj,
+            duration_ms=elapsed_ms,
+            random_seed=self.cfg.seeding.seed,
+            metadata={
+                "alns_skipped_warm_start_sufficient": True,
+                "alns_skip_gap": round(ws_gap, 6),
+                "iterations_completed": 0,
+                "improvements": 0,
+                "accepted_iterations": 0,
+                "improved_iterations": 0,
+                "stagnation_detected": False,
+                "stagnation_iteration": None,
+                **self._warm_start_meta(),
+                "initial_solver": self.initial_solver_name,
+                "initial_solution_ms": self.initial_solution_ms,
+                **self._native_seed_meta(),
+                "time_limit_exhausted_before_search": False,
+                "max_iterations": self.max_iterations,
+                "max_no_improve_iters": self.max_no_improve_iters,
+                **self._lower_bound_meta(final_obj, include_upper=False),
+            },
         )
-        alns_skipped_warm_start_sufficient = False
-        alns_skip_gap: float | None = None
 
-        if warm_start_skip_threshold_gap > 0 and warm_start_used:
-            ws_makespan = current_obj.makespan_minutes
-            ws_gap = (ws_makespan - lower_bound.value) / max(lower_bound.value, 1e-6)
-            if ws_gap <= warm_start_skip_threshold_gap:
-                # Warm-start is already near-optimal — skip ALNS entirely.
-                alns_skipped_warm_start_sufficient = True
-                alns_skip_gap = round(ws_gap, 6)
-                elapsed_ms = int((time.monotonic() - t0) * 1000)
-                recompute_assignment_setups(best_assignments, dispatch_context)
-                final_obj = _evaluate_objective(
-                    problem, best_assignments, sdst, ops_by_id=ops_by_id
-                )
-                return ScheduleResult(
-                    solver_name=self.name,
-                    status=SolverStatus.FEASIBLE,
-                    assignments=best_assignments,
-                    objective=final_obj,
-                    duration_ms=elapsed_ms,
-                    random_seed=seed,
-                    metadata={
-                        "alns_skipped_warm_start_sufficient": True,
-                        "alns_skip_gap": alns_skip_gap,
-                        "iterations_completed": 0,
-                        "improvements": 0,
-                        "accepted_iterations": 0,
-                        "improved_iterations": 0,
-                        "stagnation_detected": False,
-                        "stagnation_iteration": None,
-                        "warm_start_used": warm_start_used,
-                        "warm_start_supplied_assignments": warm_start_supplied_assignments,
-                        "warm_start_completed_assignments": warm_start_completed_assignments,
-                        "warm_start_rejected_reason": warm_start_rejected_reason,
-                        "alns_warm_start_used": warm_start_used,
-                        "alns_warm_start_coverage": round(
-                            warm_start_supplied_assignments / max(n_ops, 1), 6
-                        ),
-                        "initial_solver": initial_solver_name,
-                        "initial_solution_ms": initial_solution_ms,
-                        "native_initial_seed_attempted": native_initial_seed_attempted,
-                        "native_initial_seed_used": native_initial_seed_used,
-                        "native_initial_seed_ms": native_initial_seed_ms,
-                        "native_initial_seed_fallback_reason": native_initial_seed_fallback_reason,
-                        **_native_repair_meta_from_skips(native_greedy_repair_skip_reasons),
-                        "time_limit_exhausted_before_search": False,
-                        "max_iterations": max_iterations,
-                        "max_no_improve_iters": max_no_improve_iters,
-                        "lower_bound": round(lower_bound.value, 4),
-                        "alns_lower_bound": round(lower_bound.value, 4),
-                        "alns_gap_ratio": round(
-                            max(final_obj.makespan_minutes - lower_bound.value, 0.0)
-                            / max(lower_bound.value, 1e-6),
-                            6,
-                        ),
-                        "lower_bound_components": lower_bound.as_metadata(),
-                    },
-                )
+    def _lower_bound_meta(
+        self, final_obj: ObjectiveValues, *, include_upper: bool
+    ) -> dict[str, Any]:
+        lower = self.lower_bound.value
+        makespan = final_obj.makespan_minutes
+        meta: dict[str, Any] = {"lower_bound": round(lower, 4)}
+        if include_upper:
+            meta["upper_bound"] = round(makespan, 4)
+            meta["gap"] = round(max(makespan - lower, 0.0) / max(makespan, 1e-9), 6)
+            meta["lower_bound_method"] = "relaxed_precedence_capacity"
+            meta["lower_bound_components"] = self.lower_bound.as_metadata()
+        # Audit 6.2 / 6.3: ALNS-scoped LB + conventional relative gap vs the
+        # makespan (never the weighted ALNS cost).
+        meta["alns_lower_bound"] = round(lower, 4)
+        meta["alns_gap_ratio"] = round(max(makespan - lower, 0.0) / max(lower, 1e-6), 6)
+        if not include_upper:
+            meta["lower_bound_components"] = self.lower_bound.as_metadata()
+        return meta
 
-        # Task 18.1: Reduce max_no_improve_iters for high-coverage warm-starts.
-        # When warm-start coverage > 80%, the initial solution is already good;
-        # fewer stagnation-patience iterations are needed.
-        warm_start_coverage = warm_start_supplied_assignments / max(n_ops, 1)
-        if warm_start_used and warm_start_coverage > 0.8 and max_no_improve_iters > 15:
-            max_no_improve_iters = 15
+    def _adjust_iteration_budget(self) -> None:
+        """Task 18.1 / 18.3: shrink patience and iterations for good warm starts."""
+        coverage = self.warm_start_supplied_assignments / max(self.n_ops, 1)
+        if self.warm_start_used and coverage > 0.8 and self.max_no_improve_iters > 15:
+            self.max_no_improve_iters = 15
+        self.adaptive_iteration_scaling_applied = False
+        if self.cfg.budget.adaptive_iteration_scaling and self.warm_start_used:
+            scale_factor = max(0.1, 1.0 - coverage)
+            self.max_iterations = max(5, int(self.max_iterations * scale_factor))
+            self.adaptive_iteration_scaling_applied = True
 
-        # Task 18.3: Adaptive iteration scaling.
-        # Scale max_iterations proportionally to (1 - warm_start_coverage):
-        # full coverage → 10% of budget (floor), no coverage → full budget.
-        # Default False (conservative); RHC can enable via inner_kwargs.
-        adaptive_iteration_scaling: bool = bool(kwargs.get("adaptive_iteration_scaling", False))
-        adaptive_iteration_scaling_applied = False
-        original_max_iterations = max_iterations
+    def _calibrate_temperature(self) -> None:
+        an = self.cfg.annealing
+        if not (an.sa_auto_calibration_enabled and self.n_ops < APPEND_GAP_SCAN_MIN_OPS):
+            return
+        self.sa_calibrated_base_temp, self.sa_calibration_samples = _calibrate_sa_temperature(
+            self.problem,
+            self.search.current_assignments,
+            current_cost=self.search.current_cost,
+            objective_weights=self.objective_weights,
+            sdst=self.sdst,
+            destroy_size=self.destroy_size,
+            max_destroy=self.cfg.budget.max_destroy,
+            ops_by_id=self.ops_by_id,
+            successors_by_op=self.successors_by_op,
+            trials=an.sa_calibration_trials,
+            acceptance_probability=an.sa_initial_acceptance_probability,
+            seed=self.cfg.seeding.seed,
+            fallback_temperature=an.sa_initial_temp,
+        )
+        if self.sa_calibration_samples > 0:
+            # R5: T_min as a fraction of the calibrated T_0 (Pepels 2014:
+            # T_min = 0.01 T_0); an absolute floor degenerates SA into
+            # hill-climbing on large-delta objectives.
+            self.sa_temp_min = max(self.sa_temp_min, 0.01 * self.sa_calibrated_base_temp)
+            self.effective_sa_initial_temp = self._effective_temperature()
 
-        if adaptive_iteration_scaling and warm_start_used:
-            scale_factor = max(0.1, 1.0 - warm_start_coverage)
-            max_iterations = max(5, int(max_iterations * scale_factor))
-            adaptive_iteration_scaling_applied = True
+    # -------------------------------------------------- phase 3: operators
 
-        if sa_auto_calibration_enabled and n_ops < APPEND_GAP_SCAN_MIN_OPS:
-            sa_calibrated_base_temp, sa_calibration_samples = _calibrate_sa_temperature(
-                problem,
-                current_assignments,
-                current_cost=current_cost,
-                objective_weights=objective_weights,
-                sdst=sdst,
-                destroy_size=destroy_size,
-                max_destroy=max_destroy,
-                ops_by_id=ops_by_id,
-                successors_by_op=successors_by_op,
-                trials=sa_calibration_trials,
-                acceptance_probability=sa_initial_acceptance_probability,
-                seed=seed,
-                fallback_temperature=sa_initial_temp,
-            )
-            if sa_calibration_samples > 0:
-                # R5: express sa_temp_min as a fraction of calibrated T_0.
-                # An absolute floor of 50.0 causes acceptance probability
-                # e^(-delta/50) ≈ 0 for large-scale objectives (delta ~ 1000s),
-                # effectively reducing SA to a hill-climber after very few iters.
-                # Pepels (2014): T_min = 0.01 * T_0 is the recommended lower end.
-                sa_temp_min = max(sa_temp_min, 0.01 * sa_calibrated_base_temp)
-                # Recompute effective initial temperature with calibrated base
-                # via _compute_effective_temperature.
-                effective_sa_initial_temp = _compute_effective_temperature(
-                    base_temp=sa_calibrated_base_temp,
-                    due_pressure=due_pressure,
-                    candidate_pressure=candidate_pressure,
-                    due_alpha=sa_due_alpha if dynamic_sa_enabled else 0.0,
-                    candidate_beta=sa_candidate_beta if dynamic_sa_enabled else 0.0,
-                    min_temp=sa_temp_min,
-                    max_temp=sa_temp_max,
-                )
-
-        # ------- Phase 2: ALNS operator selection (Roulette Wheel / optional MAB) -------
+    def _init_operators(self) -> None:
+        ad = self.cfg.adaptation
         n_operators = len(DESTROY_OPERATORS)
-        operator_names = [name for name, _ in DESTROY_OPERATORS]
-        operator_scores = [0.0] * n_operators
-        operator_attempts = [0] * n_operators
-        pair_bandit = None
-        mab_repair_modes: list[str] = []
-        mab_pair_labels: list[str] = []
-        if mab_pair_selection:
+        names = [name for name, _ in DESTROY_OPERATORS]
+        # C2 (Task 12.1): dict keyed by operator name (robust to reordering).
+        weights = list(_normalize_initial_operator_weights(ad.initial_operator_weights_raw, names))
+        self.ops = _AlnsOperators(
+            names=names,
+            weights=weights,
+            scores=[0.0] * n_operators,
+            attempts=[0] * n_operators,
+            cumulative_attempts=[0] * n_operators,
+            cumulative_improvements=[0] * n_operators,
+            initial_weights_dict={
+                name: round(w, 6) for name, w in zip(names, weights, strict=True)
+            },
+            cross_window_bias_operator_deltas=dict.fromkeys(names, 0.0),
+        )
+        if ad.mab_pair_selection:
             from synaps.solvers._alns_mab import PairBandit
 
-            # T-34 / Wave 6.3: UCB1 over (destroy, repair) cartesian product.
-            mab_repair_modes = ["cpsat", "greedy"] if use_cpsat_repair else ["greedy"]
-            mab_pair_labels = [
-                f"{d_name}|{r_mode}"
-                for d_name, _ in DESTROY_OPERATORS
-                for r_mode in mab_repair_modes
-            ]
-            pair_bandit = PairBandit(n_pairs=len(mab_pair_labels))
+            # T-34 / Wave 6.3: UCB1 over the (destroy, repair) cartesian product.
+            modes = ["cpsat", "greedy"] if self.cfg.budget.use_cpsat_repair else ["greedy"]
+            self.ops.mab_repair_modes = modes
+            self.ops.mab_pair_labels = [f"{d}|{r}" for d, _ in DESTROY_OPERATORS for r in modes]
+            self.ops.pair_bandit = PairBandit(n_pairs=len(self.ops.mab_pair_labels))
+        self._apply_cross_window_bias()
 
-        # C2 (Task 12.1): Process initial_operator_weights kwarg via helper.
-        # Prefer dict keyed by operator name (robust to DESTROY_OPERATORS reordering).
-        initial_normalized_weights = _normalize_initial_operator_weights(
-            initial_operator_weights_raw, operator_names
-        )
-        operator_weights = list(initial_normalized_weights)
-
-        # Snapshot initial weights for metadata (after normalization)
-        initial_operator_weights_dict = {
-            name: round(w, 6) for name, w in zip(operator_names, operator_weights, strict=True)
+    def _apply_cross_window_bias(self) -> None:
+        """C4 (Task 3b): bounded (<= 15 %) one-shot boost of setup-disrupting operators."""
+        ad, ops = self.cfg.adaptation, self.ops
+        hints = ad.cross_window_hints
+        if not (ad.cross_window_operator_bias_enabled and hints and isinstance(hints, list)):
+            return
+        total_max_setup = 0.0
+        valid_hint_count = 0
+        for hint in hints:
+            setup_by_machine = getattr(hint, "setup_cost_by_machine", None)
+            if setup_by_machine and isinstance(setup_by_machine, dict):
+                costs = [
+                    v for v in setup_by_machine.values() if isinstance(v, int | float) and v > 0
+                ]
+                if costs:
+                    total_max_setup += max(costs)
+                    valid_hint_count += 1
+        if valid_hint_count == 0:
+            return
+        # 100 minutes of setup concentration saturates the signal.
+        signal = min(1.0, (total_max_setup / valid_hint_count) / 100.0)
+        boost_factor = min(0.15, signal * 0.15)
+        if boost_factor <= 0.0:
+            return
+        weights, n_operators = ops.weights, len(ops.names)
+        pre_bias = list(weights)
+        for idx, name in enumerate(ops.names):
+            if name == "machine_segment":
+                weights[idx] += boost_factor * weights[idx]
+            elif name == "worst":
+                weights[idx] += (boost_factor * 0.5) * weights[idx]
+        # Floor: no operator below 10 % of the uniform weight.
+        weight_floor = 1.0 / (n_operators * 10)
+        for idx in range(n_operators):
+            if weights[idx] < weight_floor:
+                weights[idx] = weight_floor
+        weight_sum = sum(weights)
+        if weight_sum > 0.0:
+            ops.weights = [w / weight_sum for w in weights]
+        ops.cross_window_bias_applied = True
+        ops.cross_window_bias_operator_deltas = {
+            name: round(ops.weights[idx] - pre_bias[idx], 6) for idx, name in enumerate(ops.names)
         }
 
-        # C4 (Task 3b.2-3b.4): Bounded cross-window operator bias.
-        # Applied once at initialization (before the main loop). Does NOT modify
-        # weights during the loop. When the flag is off or hints are absent,
-        # behavior is identical to baseline.
-        cross_window_bias_applied = False
-        cross_window_bias_operator_deltas: dict[str, float] = dict.fromkeys(operator_names, 0.0)
+    # ------------------------------------------------ phase 4: search loop
 
-        if (
-            cross_window_operator_bias_enabled
-            and cross_window_hints
-            and isinstance(cross_window_hints, list)
-            and len(cross_window_hints) > 0
-        ):
-            # Compute setup concentration signal: average max machine setup cost
-            # across all hint windows, normalized to [0, 1].
-            total_max_setup = 0.0
-            valid_hint_count = 0
-            for hint in cross_window_hints:
-                setup_by_machine = getattr(hint, "setup_cost_by_machine", None)
-                if setup_by_machine and isinstance(setup_by_machine, dict):
-                    machine_costs = [
-                        v for v in setup_by_machine.values() if isinstance(v, int | float) and v > 0
-                    ]
-                    if machine_costs:
-                        total_max_setup += max(machine_costs)
-                        valid_hint_count += 1
+    def _run_search_loop(self) -> None:
+        for iteration in range(1, self.max_iterations + 1):
+            # D3: time_limit_s is a HARD deadline (min_iterations never overrides it).
+            if time.monotonic() - self.t0 >= self.cfg.budget.time_limit_s:
+                logger.info("ALNS time limit reached at iteration %d", iteration)
+                break
+            self.search.iterations_completed = iteration
+            if not self._search_iteration(iteration):
+                break
 
-            if valid_hint_count > 0:
-                avg_max_setup = total_max_setup / valid_hint_count
-                # Normalize signal to [0, 1] — 100 minutes of setup cost is
-                # considered full saturation.
-                signal = min(1.0, avg_max_setup / 100.0)
-                # Bounded boost: max 15% of the operator's own weight.
-                boost_factor = min(0.15, signal * 0.15)
+    def _select_operator(self) -> tuple[int, int, str | None]:
+        """Return ``(operator_idx, pair_idx, forced_repair_mode)``."""
+        ops = self.ops
+        if ops.pair_bandit is not None:
+            pair_idx = int(ops.pair_bandit.select())
+            n_modes = max(1, len(ops.mab_repair_modes))
+            return pair_idx // n_modes, pair_idx, ops.mab_repair_modes[pair_idx % n_modes]
+        r = self.rng.random() * sum(ops.weights)
+        cumulative = 0.0
+        selected = 0
+        for idx, w in enumerate(ops.weights):
+            cumulative += w
+            if cumulative >= r:
+                selected = idx
+                break
+        return selected, -1, None
 
-                if boost_factor > 0.0:
-                    pre_bias_weights = list(operator_weights)
-
-                    # Primary boost: machine_segment
-                    for idx, name in enumerate(operator_names):
-                        if name == "machine_segment":
-                            operator_weights[idx] += boost_factor * operator_weights[idx]
-                        elif name == "worst":
-                            # Secondary boost: worst gets half the boost
-                            operator_weights[idx] += (boost_factor * 0.5) * operator_weights[idx]
-
-                    # 3b.3: Floor — no operator weight below 1/(n_operators * 10)
-                    # i.e., 10% of uniform weight. This prevents any operator from
-                    # being zeroed out.
-                    weight_floor = 1.0 / (n_operators * 10)
-                    for idx in range(n_operators):
-                        if operator_weights[idx] < weight_floor:
-                            operator_weights[idx] = weight_floor
-
-                    # Re-normalize to sum 1.0
-                    weight_sum = sum(operator_weights)
-                    if weight_sum > 0.0:
-                        operator_weights = [w / weight_sum for w in operator_weights]
-
-                    cross_window_bias_applied = True
-                    cross_window_bias_operator_deltas = {
-                        name: round(operator_weights[idx] - pre_bias_weights[idx], 6)
-                        for idx, name in enumerate(operator_names)
-                    }
-
-        # Score rewards (Ropke & Pisinger 2006 §4.2)
-        sigma_1 = 33.0  # new global best
-        sigma_2 = 9.0  # better than current
-        sigma_3 = 3.0  # accepted (SA)
-
-        temperature = effective_sa_initial_temp
-
-        # Tracking
-        improvements = 0
-        cpsat_repair_attempts = 0
-        cpsat_repairs = 0
-        cpsat_repair_skips_large_destroy = 0
-        cpsat_repair_timeouts = 0
-        greedy_repair_attempts = 0
-        greedy_repairs = 0
-        greedy_repair_timeouts = 0
-        cpsat_repair_ms_total = 0
-        greedy_repair_ms_total = 0
-        # R2 (EMA calibration): track total destroyed-op count per repair lane
-        # so RHC can compute an empirical mean repair time per destroyed op.
-        cpsat_repair_total_destroy_size = 0
-        greedy_repair_total_destroy_size = 0
-        feasibility_failures = 0
-        sa_worsening_accepted = 0
-        sa_worsening_rejected = 0
-        repair_rejection_reasons: dict[str, int] = {}
-        iterations_completed = 0
-        accepted_iterations = 0
-        no_improve_streak = 0
-        no_improve_early_stop = False
-        stagnation_iteration: int | None = None
-        # B3 (Task 7.4): Cumulative per-operator tracking (never reset)
-        cumulative_operator_attempts = [0] * n_operators
-        cumulative_operator_improvements = [0] * n_operators
-        # P3.3: EMA repair-time tracker
-        ema_repair_ms: float = 0.0
-        ema_repair_samples: int = 0
-        # P3.1: fixed ops tracking
-        fixed_ops_applied = len(fixed_op_ids)
-
-        logger.info(
-            "ALNS starting: %d ops, %d machines, destroy_size=%d, max_iter=%d, fixed_ops=%d",
-            n_ops,
-            len(problem.work_centers),
-            destroy_size,
-            max_iterations,
-            fixed_ops_applied,
+    def _destroy(self, destroy_fn: Any) -> set[UUID]:
+        budget = self.cfg.budget
+        size = (
+            self.adaptive_destroy_current if budget.adaptive_destroy_enabled else self.destroy_size
+        )
+        destroyed_ids: set[UUID] = destroy_fn(
+            self.search.current_assignments,
+            self.problem,
+            self.sdst,
+            size,
+            self.rng,
+            ops_by_id=self.ops_by_id,
+            energy_weight=float(
+                self.objective_weights.get("energy", self.objective_weights.get("energy_kwh", 0.0))
+            ),
+        )
+        if self.fixed_op_ids:
+            destroyed_ids -= self.fixed_op_ids
+        if not destroyed_ids:
+            return destroyed_ids
+        destroyed_ids = _expand_successor_closure(destroyed_ids, self.successors_by_op)
+        return _cap_destroy_set_preserving_successor_closure(
+            destroyed_ids, self.ops_by_id, self.successors_by_op, budget.max_destroy, self.rng
         )
 
-        # B3 (Task 7.3): Per-iteration trace — bounded via deque(maxlen=N).
-        # Oldest-dropped via deque(maxlen=N). When the trace exceeds
-        # max_iteration_records, the oldest records are silently discarded.
-        # This keeps memory bounded while preserving the most recent
-        # convergence behavior.
-        iteration_trace: deque[AlnsIterationRecord] = (
-            deque(maxlen=max_iteration_records) if record_iteration_metrics else deque(maxlen=0)
-        )
+    def _search_iteration(self, iteration: int) -> bool:
+        """One destroy/repair/accept step; False ends the loop."""
+        from synaps.solvers._alns_mab import charge_pair_reject
 
-        # ------- Phase 3: Main ALNS loop -------
-        if time_limit_exhausted_before_search:
-            logger.info(
-                "ALNS time limit exhausted during initial solution generation (%d ms)",
-                initial_solution_ms,
+        ops, search = self.ops, self.search
+        op_idx, pair_idx, forced_repair_mode = self._select_operator()
+        op_name, destroy_fn = DESTROY_OPERATORS[op_idx]
+        destroyed_ids = self._destroy(destroy_fn)
+        if not destroyed_ids:
+            charge_pair_reject(ops.pair_bandit, pair_idx)
+            return True
+        internal_frozen = [
+            a for a in search.current_assignments if a.operation_id not in destroyed_ids
+        ]
+        remaining_s = self.cfg.budget.time_limit_s - (time.monotonic() - self.t0)
+        # Wave 9 / D3: never start a repair with essentially no wall budget left.
+        if remaining_s < _ALNS_MIN_REPAIR_REMAINING_S:
+            return False
+        attempt = self._repair(
+            destroyed_ids, internal_frozen, forced_repair_mode, pair_idx, remaining_s
+        )
+        self.repair.absorb(attempt)
+        new_assignments = None if attempt.abort_iteration else attempt.assignments
+        if new_assignments is None:
+            charge_pair_reject(ops.pair_bandit, pair_idx)
+            return True
+        candidate = internal_frozen + new_assignments
+        if not self._candidate_is_sane(candidate):
+            charge_pair_reject(ops.pair_bandit, pair_idx)
+            search.feasibility_failures += 1
+            return True
+        candidate_obj, candidate_cache = self._evaluate_candidate(
+            candidate, destroyed_ids, new_assignments
+        )
+        candidate_cost = _objective_cost(candidate_obj, self.objective_weights)
+        cost_before = search.current_cost
+        reward = self._accept(candidate, candidate_obj, candidate_cache, candidate_cost)
+        if reward >= _SIGMA_NEW_BEST:
+            logger.debug(
+                "ALNS iter %d: new best (cost=%.1f, makespan=%.1f, %s destroy, %s repair)",
+                iteration,
+                search.best_cost,
+                search.best_obj.makespan_minutes,
+                op_name,
+                attempt.repair_used,
             )
+        self._update_adaptation(iteration, op_idx, pair_idx, reward, cost_before, candidate_cost)
+        self._record_iteration(iteration, op_name, destroyed_ids, candidate_cost, reward)
+        self._update_ema_repair(attempt)
+        self._update_adaptive_destroy(reward)
+        search.temperature *= self.effective_sa_cooling_rate
+        if self.max_no_improve_iters > 0 and search.no_improve_streak >= self.max_no_improve_iters:
+            search.no_improve_early_stop = True
+            search.stagnation_iteration = iteration
+            logger.info(
+                "ALNS early stop: no improvements for %d consecutive iterations",
+                search.no_improve_streak,
+            )
+            return False
+        return True
+
+    def _repair(
+        self,
+        destroyed_ids: set[UUID],
+        internal_frozen: list[Assignment],
+        forced_repair_mode: str | None,
+        pair_idx: int,
+        remaining_s: float,
+    ) -> Any:
+        frozen = self.frozen_assignments + internal_frozen
+        frozen_by_op = dict(self.frozen_assignments_by_op)
+        frozen_by_op.update({a.operation_id: a for a in internal_frozen})
+        budget = self.cfg.budget
+        return _attempt_alns_pair_repair(
+            problem=self.problem,
+            frozen=frozen,
+            frozen_by_op=frozen_by_op,
+            destroyed_ids=destroyed_ids,
+            ops_by_id=self.ops_by_id,
+            op_positions=self.op_positions,
+            use_cpsat_repair=budget.use_cpsat_repair,
+            forced_repair_mode=forced_repair_mode,
+            cpsat_max_destroy_ops=budget.cpsat_max_destroy_ops,
+            repair_time_limit_s=budget.repair_time_limit_s,
+            repair_num_workers=budget.repair_num_workers,
+            remaining_s=remaining_s,
+            pair_bandit_active=self.ops.pair_bandit is not None and pair_idx >= 0,
+            native_skip_reasons=self.native_greedy_repair_skip_reasons,
+            frozen_predecessor_end_offsets=self.frozen_predecessor_end_offsets,
+            frozen_context_operations=self.frozen_context_operations,
+            setup_minutes=self.dispatch_context.setup_minutes,
+        )
+
+    def _candidate_is_sane(self, candidate: list[Assignment]) -> bool:
+        """Completeness, precedence, frozen precedence and occupancy sanity."""
+        if len({a.operation_id for a in candidate}) != self.n_ops:
+            return False
+        if _has_precedence_violation(candidate, self.ops_by_id):
+            return False
+        if self._frozen_prec_bad(candidate):
+            return False
+        return not self._overlap(self.frozen_assignments + candidate)
+
+    def _evaluate_candidate(
+        self,
+        candidate: list[Assignment],
+        destroyed_ids: set[UUID],
+        new_assignments: list[Assignment],
+    ) -> tuple[ObjectiveValues, Any]:
+        """Incremental evaluation: recompute only machines touched by the move."""
+        affected_machine_ids: set[Any] = {
+            a.work_center_id
+            for a in self.search.current_assignments
+            if a.operation_id in destroyed_ids
+        }
+        affected_machine_ids.update(a.work_center_id for a in new_assignments)
+        candidate_obj, candidate_cache = _evaluate_objective_incremental(
+            self.problem,
+            candidate,
+            self.sdst,
+            ops_by_id=self.ops_by_id,
+            horizon_start=self.horizon_start,
+            affected_machine_ids=affected_machine_ids,
+            base_cache=self.search.current_cache,
+        )
+        return candidate_obj, candidate_cache
+
+    def _accept(
+        self,
+        candidate: list[Assignment],
+        candidate_obj: ObjectiveValues,
+        candidate_cache: Any,
+        candidate_cost: float,
+    ) -> float:
+        """Global-best / SA acceptance; returns the Ropke-Pisinger score."""
+        search = self.search
+        delta = candidate_cost - search.current_cost
+        if candidate_cost < search.best_cost:
+            search.best_assignments = list(candidate)
+            search.best_obj = candidate_obj
+            search.best_cost = candidate_cost
+            self._move_current(candidate, candidate_obj, candidate_cache, candidate_cost)
+            search.improvements += 1
+            search.no_improve_streak = 0
+            return _SIGMA_NEW_BEST
+        if _sa_accept(delta, search.temperature, self.rng):
+            self._move_current(candidate, candidate_obj, candidate_cache, candidate_cost)
+            if delta < 0:
+                search.no_improve_streak = 0
+                return _SIGMA_BETTER
+            search.sa_worsening_accepted += 1
+            search.no_improve_streak += 1
+            return _SIGMA_ACCEPTED
+        if delta > 0:
+            search.sa_worsening_rejected += 1
+        search.no_improve_streak += 1
+        return 0.0
+
+    def _move_current(
+        self,
+        candidate: list[Assignment],
+        candidate_obj: ObjectiveValues,
+        candidate_cache: Any,
+        candidate_cost: float,
+    ) -> None:
+        search = self.search
+        search.current_assignments = candidate
+        search.current_obj = candidate_obj
+        search.current_cost = candidate_cost
+        search.current_cache = candidate_cache
+
+    def _update_adaptation(
+        self,
+        iteration: int,
+        op_idx: int,
+        pair_idx: int,
+        reward: float,
+        cost_before: float,
+        candidate_cost: float,
+    ) -> None:
+        ops = self.ops
+        ops.scores[op_idx] += reward
+        ops.attempts[op_idx] += 1
+        if ops.pair_bandit is not None:
+            from synaps.solvers._alns_mab import pair_reward
+
+            ops.pair_bandit.update(
+                pair_idx if pair_idx >= 0 else op_idx,
+                pair_reward(
+                    cost_before=cost_before, cost_after=candidate_cost, accepted=reward > 0.0
+                ),
+            )
+        # B3 (Task 7.4): cumulative per-operator tracking (never reset).
+        ops.cumulative_attempts[op_idx] += 1
+        if reward >= _SIGMA_NEW_BEST:
+            ops.cumulative_improvements[op_idx] += 1
+        if reward > 0.0:
+            self.search.accepted_iterations += 1
+        # Segment boundary: refresh weights and reset the segment.
+        if iteration % self.cfg.adaptation.operator_weight_segment_length == 0:
+            ops.weights = _update_operator_weights_for_segment(
+                ops.scores, ops.attempts, reset_mix=self.cfg.adaptation.operator_weight_reset_mix
+            )
+            ops.scores = [0.0] * len(ops.names)
+            ops.attempts = [0] * len(ops.names)
+
+    def _record_iteration(
+        self,
+        iteration: int,
+        op_name: str,
+        destroyed_ids: set[UUID],
+        candidate_cost: float,
+        reward: float,
+    ) -> None:
+        if not self.cfg.adaptation.record_iteration_metrics:
+            return
+        self.iteration_trace.append(
+            AlnsIterationRecord(
+                iteration=iteration,
+                operator_name=op_name,
+                destroy_size=len(destroyed_ids),
+                repair_status="feasible",  # only reached when repair succeeded
+                candidate_cost=candidate_cost,
+                best_cost=self.search.best_cost,
+                temperature=self.search.temperature,
+                accepted=reward > 0.0,
+                improved=reward >= _SIGMA_NEW_BEST,
+            )
+        )
+
+    def _update_ema_repair(self, attempt: Any) -> None:
+        """P3.3: EMA of the per-iteration repair time of the lane that succeeded.
+
+        Audit 2026-10 (A-09): the EMA used to average the lane's CUMULATIVE
+        total (``cpsat_repair_ms_total`` summed over all iterations), so it grew
+        monotonically instead of estimating one repair. ``attempt`` carries the
+        per-iteration lane timings.
+        """
+        search = self.search
+        iter_repair_ms = 0
+        if attempt.repair_used == "cpsat":
+            iter_repair_ms = attempt.cpsat_repair_ms_total
+        elif attempt.repair_used == "greedy":
+            iter_repair_ms = attempt.greedy_repair_ms_total
+        if iter_repair_ms <= 0:
+            return
+        alpha = self.cfg.budget.ema_repair_alpha
+        if search.ema_repair_samples == 0:
+            search.ema_repair_ms = float(iter_repair_ms)
         else:
-            for iteration in range(1, max_iterations + 1):
-                elapsed = time.monotonic() - t0
-                # D3: time_limit_s is a HARD deadline. It must win over
-                # min_iterations — the old `iteration > min_iterations` gate
-                # let 5 unbounded repair iterations overshoot an 8s budget 5x.
-                if elapsed >= time_limit_s:
-                    logger.info("ALNS time limit reached at iteration %d", iteration)
-                    break
+            search.ema_repair_ms = alpha * iter_repair_ms + (1.0 - alpha) * search.ema_repair_ms
+        search.ema_repair_samples += 1
 
-                iterations_completed = iteration
+    def _update_adaptive_destroy(self, reward: float) -> None:
+        """P3.2: shrink on improvement (exploit), grow every 5-iteration plateau."""
+        budget = self.cfg.budget
+        if not budget.adaptive_destroy_enabled:
+            return
+        if reward >= _SIGMA_NEW_BEST:
+            self.adaptive_destroy_current = max(
+                budget.min_destroy,
+                int(self.adaptive_destroy_current * budget.adaptive_destroy_shrink_rate),
+            )
+        elif self.search.no_improve_streak > 0 and self.search.no_improve_streak % 5 == 0:
+            self.adaptive_destroy_current = min(
+                budget.max_destroy,
+                int(self.adaptive_destroy_current * budget.adaptive_destroy_grow_rate),
+            )
 
-                # Select destroy operator (roulette wheel, or UCB1 pair when MAB on)
-                selected_pair_idx = -1
-                forced_repair_mode: str | None = None
-                if pair_bandit is not None:
-                    selected_pair_idx = pair_bandit.select()
-                    n_modes = max(1, len(mab_repair_modes))
-                    selected_op_idx = selected_pair_idx // n_modes
-                    forced_repair_mode = mab_repair_modes[selected_pair_idx % n_modes]
-                else:
-                    total_weight = sum(operator_weights)
-                    r = rng.random() * total_weight
-                    cumulative = 0.0
-                    selected_op_idx = 0
-                    for idx, w in enumerate(operator_weights):
-                        cumulative += w
-                        if cumulative >= r:
-                            selected_op_idx = idx
-                            break
+    # ------------------------------------------- phase 5: final validation
 
-                op_name, destroy_fn = DESTROY_OPERATORS[selected_op_idx]
-
-                # P3.2: use adaptive destroy size
-                effective_destroy_size = (
-                    adaptive_destroy_current if adaptive_destroy_enabled else destroy_size
-                )
-
-                destroyed_ids = destroy_fn(
-                    current_assignments,
-                    problem,
-                    sdst,
-                    effective_destroy_size,
-                    rng,
-                    ops_by_id=ops_by_id,
-                    energy_weight=float(
-                        objective_weights.get("energy", objective_weights.get("energy_kwh", 0.0))
-                    ),
-                )
-
-                # P3.1: exclude fixed ops from destroy set
-                if fixed_op_ids:
-                    destroyed_ids -= fixed_op_ids
-
-                if not destroyed_ids:
-                    from synaps.solvers._alns_mab import charge_pair_reject
-
-                    charge_pair_reject(pair_bandit, selected_pair_idx)
-                    continue
-
-                destroyed_ids = _expand_successor_closure(
-                    destroyed_ids,
-                    successors_by_op,
-                )
-                destroyed_ids = _cap_destroy_set_preserving_successor_closure(
-                    destroyed_ids,
-                    ops_by_id,
-                    successors_by_op,
-                    max_destroy,
-                    rng,
-                )
-
-                # Frozen assignments (everything not destroyed)
-                internal_frozen = [
-                    assignment
-                    for assignment in current_assignments
-                    if assignment.operation_id not in destroyed_ids
-                ]
-                frozen = frozen_assignments + internal_frozen
-                frozen_by_op = dict(frozen_assignments_by_op)
-                frozen_by_op.update(
-                    {assignment.operation_id: assignment for assignment in internal_frozen}
-                )
-
-                # Repair — primary depends on use_cpsat_repair flag (or MAB pair)
-                remaining_s = time_limit_s - (time.monotonic() - t0)
-                # Wave 9 / D3: stop the search loop before starting a repair with
-                # essentially no remaining wall budget (in-flight overrun guard).
-                if remaining_s < _ALNS_MIN_REPAIR_REMAINING_S:
-                    break
-                repair_attempt = _attempt_alns_pair_repair(
-                    problem=problem,
-                    frozen=frozen,
-                    frozen_by_op=frozen_by_op,
-                    destroyed_ids=destroyed_ids,
-                    ops_by_id=ops_by_id,
-                    op_positions=op_positions,
-                    use_cpsat_repair=use_cpsat_repair,
-                    forced_repair_mode=forced_repair_mode,
-                    cpsat_max_destroy_ops=cpsat_max_destroy_ops,
-                    repair_time_limit_s=repair_time_limit_s,
-                    repair_num_workers=repair_num_workers,
-                    remaining_s=remaining_s,
-                    pair_bandit_active=pair_bandit is not None and selected_pair_idx >= 0,
-                    native_skip_reasons=native_greedy_repair_skip_reasons,
-                    frozen_predecessor_end_offsets=frozen_predecessor_end_offsets,
-                    frozen_context_operations=frozen_context_operations,
-                    setup_minutes=dispatch_context.setup_minutes,
-                )
-                cpsat_repair_attempts += repair_attempt.cpsat_repair_attempts
-                cpsat_repair_ms_total += repair_attempt.cpsat_repair_ms_total
-                cpsat_repair_total_destroy_size += repair_attempt.cpsat_repair_total_destroy_size
-                cpsat_repair_timeouts += repair_attempt.cpsat_repair_timeouts
-                cpsat_repairs += repair_attempt.cpsat_repairs
-                cpsat_repair_skips_large_destroy += repair_attempt.cpsat_repair_skips_large_destroy
-                greedy_repair_attempts += repair_attempt.greedy_repair_attempts
-                greedy_repair_ms_total += repair_attempt.greedy_repair_ms_total
-                greedy_repair_total_destroy_size += repair_attempt.greedy_repair_total_destroy_size
-                greedy_repair_timeouts += repair_attempt.greedy_repair_timeouts
-                greedy_repairs += repair_attempt.greedy_repairs
-                for reason, count in repair_attempt.rejection_reasons.items():
-                    repair_rejection_reasons[reason] = (
-                        repair_rejection_reasons.get(reason, 0) + count
-                    )
-                if repair_attempt.abort_iteration:
-                    from synaps.solvers._alns_mab import charge_pair_reject
-
-                    charge_pair_reject(pair_bandit, selected_pair_idx)
-                    continue
-                new_assignments = repair_attempt.assignments
-                repair_used = repair_attempt.repair_used
-
-                if new_assignments is None:
-                    from synaps.solvers._alns_mab import charge_pair_reject
-
-                    charge_pair_reject(pair_bandit, selected_pair_idx)
-                    continue  # repair failed, discard this iteration
-
-                # Assemble candidate solution
-                candidate = internal_frozen + new_assignments
-
-                # Quick feasibility sanity check (only check completeness)
-                candidate_op_ids = {a.operation_id for a in candidate}
-                if len(candidate_op_ids) != n_ops:
-                    from synaps.solvers._alns_mab import charge_pair_reject
-
-                    charge_pair_reject(pair_bandit, selected_pair_idx)
-                    feasibility_failures += 1
-                    continue
-                if _has_precedence_violation(candidate, ops_by_id):
-                    from synaps.solvers._alns_mab import charge_pair_reject
-
-                    charge_pair_reject(pair_bandit, selected_pair_idx)
-                    feasibility_failures += 1
-                    continue
-                if _frozen_prec_bad(candidate):
-                    from synaps.solvers._alns_mab import charge_pair_reject
-
-                    charge_pair_reject(pair_bandit, selected_pair_idx)
-                    feasibility_failures += 1
-                    continue
-                if _overlap(frozen_assignments + candidate):
-                    from synaps.solvers._alns_mab import charge_pair_reject
-
-                    charge_pair_reject(pair_bandit, selected_pair_idx)
-                    feasibility_failures += 1
-                    continue
-
-                # Evaluate incrementally — only recompute affected machines
-                # Affected = machines that had destroyed ops + machines that got repaired ops
-                affected_machine_ids: set[Any] = set()
-                destroyed_assignment_map = {
-                    a.operation_id: a
-                    for a in current_assignments
-                    if a.operation_id in destroyed_ids
-                }
-                for a in destroyed_assignment_map.values():
-                    affected_machine_ids.add(a.work_center_id)
-                for a in new_assignments:
-                    affected_machine_ids.add(a.work_center_id)
-
-                candidate_obj, candidate_cache = _evaluate_objective_incremental(
-                    problem,
-                    candidate,
-                    sdst,
-                    ops_by_id=ops_by_id,
-                    horizon_start=horizon_start,
-                    affected_machine_ids=affected_machine_ids,
-                    base_cache=current_cache,
-                )
-                candidate_cost = _objective_cost(candidate_obj, objective_weights)
-                cost_before_move = current_cost
-                delta = candidate_cost - current_cost
-
-                # SA acceptance
-                score_reward = 0.0
-                if candidate_cost < best_cost:
-                    # New global best
-                    best_assignments = list(candidate)
-                    best_obj = candidate_obj
-                    best_cost = candidate_cost
-                    current_assignments = candidate
-                    current_obj = candidate_obj
-                    current_cost = candidate_cost
-                    current_cache = candidate_cache
-                    score_reward = sigma_1
-                    improvements += 1
-                    no_improve_streak = 0
-                    logger.debug(
-                        "ALNS iter %d: new best (cost=%.1f, makespan=%.1f, %s destroy, %s repair)",
-                        iteration,
-                        best_cost,
-                        best_obj.makespan_minutes,
-                        op_name,
-                        repair_used,
-                    )
-                elif _sa_accept(delta, temperature, rng):
-                    current_assignments = candidate
-                    current_obj = candidate_obj
-                    current_cost = candidate_cost
-                    current_cache = candidate_cache
-                    score_reward = sigma_2 if delta < 0 else sigma_3
-                    if delta < 0:
-                        no_improve_streak = 0
-                    else:
-                        sa_worsening_accepted += 1
-                        no_improve_streak += 1
-                # else: reject
-                else:
-                    if delta > 0:
-                        sa_worsening_rejected += 1
-                    no_improve_streak += 1
-
-                # Update operator scores
-                operator_scores[selected_op_idx] += score_reward
-                operator_attempts[selected_op_idx] += 1
-                if pair_bandit is not None:
-                    from synaps.solvers._alns_mab import pair_reward
-
-                    accepted_move = score_reward > 0.0
-                    pair_bandit.update(
-                        selected_pair_idx if selected_pair_idx >= 0 else selected_op_idx,
-                        pair_reward(
-                            cost_before=cost_before_move,
-                            cost_after=candidate_cost,
-                            accepted=accepted_move,
-                        ),
-                    )
-
-                # B3 (Task 7.4): Cumulative per-operator tracking (never reset)
-                cumulative_operator_attempts[selected_op_idx] += 1
-                if score_reward >= sigma_1:
-                    cumulative_operator_improvements[selected_op_idx] += 1
-                # Track accepted iterations (improved OR SA-accepted)
-                if score_reward > 0.0:
-                    accepted_iterations += 1
-
-                # Update operator weights on segment boundaries and reset the segment.
-                if iteration % operator_weight_segment_length == 0:
-                    operator_weights = _update_operator_weights_for_segment(
-                        operator_scores,
-                        operator_attempts,
-                        reset_mix=operator_weight_reset_mix,
-                    )
-                    operator_scores = [0.0] * n_operators
-                    operator_attempts = [0] * n_operators
-
-                # B3 (Task 7.3): Record per-iteration metrics when enabled.
-                # The boolean check is near-zero overhead when disabled.
-                if record_iteration_metrics:
-                    iteration_trace.append(
-                        AlnsIterationRecord(
-                            iteration=iteration,
-                            operator_name=op_name,
-                            destroy_size=len(destroyed_ids),
-                            repair_status="feasible",  # only reached when repair succeeded
-                            candidate_cost=candidate_cost,
-                            best_cost=best_cost,
-                            temperature=temperature,
-                            accepted=score_reward > 0.0,
-                            improved=score_reward >= sigma_1,
-                        )
-                    )
-
-                # P3.3: Update EMA repair time
-                iter_repair_ms = 0
-                if repair_used == "cpsat":
-                    iter_repair_ms = cpsat_repair_ms_total  # cumulative, approximate
-                elif repair_used == "greedy":
-                    iter_repair_ms = greedy_repair_ms_total
-                if iter_repair_ms > 0:
-                    if ema_repair_samples == 0:
-                        ema_repair_ms = float(iter_repair_ms)
-                    else:
-                        ema_repair_ms = (
-                            ema_repair_alpha * iter_repair_ms
-                            + (1.0 - ema_repair_alpha) * ema_repair_ms
-                        )
-                    ema_repair_samples += 1
-
-                # P3.2: Adaptive destroy sizing
-                if adaptive_destroy_enabled:
-                    if score_reward >= sigma_1:
-                        # Improvement found — shrink destroy to exploit
-                        adaptive_destroy_current = max(
-                            min_destroy,
-                            int(adaptive_destroy_current * adaptive_destroy_shrink_rate),
-                        )
-                    elif no_improve_streak > 0 and no_improve_streak % 5 == 0:
-                        # No improvement plateau — grow destroy to explore
-                        adaptive_destroy_current = min(
-                            max_destroy,
-                            int(adaptive_destroy_current * adaptive_destroy_grow_rate),
-                        )
-
-                # Cool down
-                temperature *= effective_sa_cooling_rate
-
-                if max_no_improve_iters > 0 and no_improve_streak >= max_no_improve_iters:
-                    no_improve_early_stop = True
-                    stagnation_iteration = iteration
-                    logger.info(
-                        "ALNS early stop: no improvements for %d consecutive iterations",
-                        no_improve_streak,
-                    )
-                    break
-
-        # ------- Phase 4: Final validation -------
+    def _finalize(self) -> ScheduleResult:
+        search, stats = self.search, self.repair
         (
             best_assignments,
             final_obj,
@@ -4524,247 +4448,238 @@ class AlnsSolver(BaseSolver):
             violations,
             violations_before_recovery,
             frozen_precedence_bad,
-            final_violation_recovered,
-            final_violation_recovery_source,
-        ) = self._final_validate(
-            problem,
-            best_assignments,
-            list(initial_result.assignments),
-            frozen_assignments,
-            _frozen_prec_bad,
-            dispatch_context,
-            checker,
-            sdst,
-            ops_by_id,
-            objective_weights,
+            recovered,
+            recovery_source,
+        ) = self.solver._final_validate(
+            self.problem,
+            search.best_assignments,
+            list(self.initial_result.assignments),
+            self.frozen_assignments,
+            self._frozen_prec_bad,
+            self.dispatch_context,
+            self.checker,
+            self.sdst,
+            self.ops_by_id,
+            self.objective_weights,
         )
-        final_violations_before_recovery = len(violations_before_recovery)
-        final_violation_recovery_attempted = final_violations_before_recovery > 0
-
         status = (
             SolverStatus.FEASIBLE
             if not violations and not frozen_precedence_bad
             else SolverStatus.ERROR
         )
-
-        elapsed_ms = int((time.monotonic() - t0) * 1000)
-
-        from synaps.solvers._alns_mab import pair_pulls
-
+        elapsed_ms = int((time.monotonic() - self.t0) * 1000)
         logger.info(
             "ALNS finished: %d iterations, %d improvements, cost=%.1f, "
             "makespan=%.1f min, %d cpsat repairs, %d greedy repairs, "
             "%d feasibility failures, %d violations, %d ms",
-            iterations_completed,
-            improvements,
+            search.iterations_completed,
+            search.improvements,
             final_cost,
             final_obj.makespan_minutes,
-            cpsat_repairs,
-            greedy_repairs,
-            feasibility_failures,
+            stats.cpsat_repairs,
+            stats.greedy_repairs,
+            search.feasibility_failures,
             len(violations),
             elapsed_ms,
         )
-
+        recovery = {
+            "final_violation_recovery_attempted": len(violations_before_recovery) > 0,
+            "final_violation_recovered": recovered,
+            "final_violation_recovery_source": recovery_source,
+            "final_violations_before_recovery": len(violations_before_recovery),
+            # Q4: the search incumbent was discarded and the seed returned.
+            "quality_warning": "search_discarded_returned_seed" if recovered else None,
+            "final_violations": len(violations),
+        }
+        metadata = {
+            **self._meta_search_stats(),
+            **self._meta_seed_and_budget(),
+            **self._meta_annealing(),
+            **self._meta_repair(recovery),
+            **self._meta_quality(final_obj, final_cost),
+        }
         return ScheduleResult(
-            solver_name=self.name,
+            solver_name=self.solver.name,
             status=status,
             assignments=best_assignments,
             objective=final_obj,
             duration_ms=elapsed_ms,
-            random_seed=seed,
-            metadata={
-                "iterations_completed": iterations_completed,
-                "improvements": improvements,
-                # B3 (Task 7.4): Aggregate convergence metadata — always present
-                "accepted_iterations": accepted_iterations,
-                "improved_iterations": improvements,
-                "operator_attempt_counts": {
-                    name: cumulative_operator_attempts[i]
-                    for i, (name, _) in enumerate(DESTROY_OPERATORS)
-                },
-                "operator_improvement_counts": {
-                    name: cumulative_operator_improvements[i]
-                    for i, (name, _) in enumerate(DESTROY_OPERATORS)
-                },
-                "alns_final_operator_weights": {
-                    name: round(operator_weights[i], 6)
-                    for i, (name, _) in enumerate(DESTROY_OPERATORS)
-                },
-                # C2 (Task 12.1): Operator name list and initial weights for
-                # weight-persistence diagnostics across RHC windows.
-                "alns_operator_names": operator_names,
-                "alns_initial_operator_weights": initial_operator_weights_dict,
-                # C4 (Task 3b.4): Cross-window operator bias metadata — always
-                # present regardless of whether bias was applied.
-                "cross_window_bias_applied": cross_window_bias_applied,
-                "cross_window_bias_operator_deltas": cross_window_bias_operator_deltas,
-                "stagnation_detected": no_improve_early_stop,
-                "stagnation_iteration": stagnation_iteration,
-                "cpsat_repair_attempts": cpsat_repair_attempts,
-                "cpsat_repairs": cpsat_repairs,
-                "cpsat_repair_skips_large_destroy": cpsat_repair_skips_large_destroy,
-                "cpsat_repair_timeouts": cpsat_repair_timeouts,
-                "cpsat_repair_total_destroy_size": cpsat_repair_total_destroy_size,
-                "greedy_repair_attempts": greedy_repair_attempts,
-                "greedy_repairs": greedy_repairs,
-                "greedy_repair_timeouts": greedy_repair_timeouts,
-                "greedy_repair_total_destroy_size": greedy_repair_total_destroy_size,
-                # R2 (EMA calibration): empirical mean repair time per destroyed
-                # op, weighted across both repair lanes. None when no repair
-                # attempt produced a non-zero destroy size (cold start).
-                "observed_repair_s_per_destroyed_op": (
-                    (cpsat_repair_ms_total + greedy_repair_ms_total)
-                    / 1000.0
-                    / (cpsat_repair_total_destroy_size + greedy_repair_total_destroy_size)
-                    if (cpsat_repair_total_destroy_size + greedy_repair_total_destroy_size) > 0
-                    else None
-                ),
-                "repair_rejection_reasons": repair_rejection_reasons,
-                "initial_solver": initial_solver_name,
-                "warm_start_used": warm_start_used,
-                "warm_start_supplied_assignments": warm_start_supplied_assignments,
-                "warm_start_completed_assignments": warm_start_completed_assignments,
-                "warm_start_rejected_reason": warm_start_rejected_reason,
-                # C1 (Task 9.4): explicit ALNS-scoped warm-start signals for RHC
-                # telemetry. `alns_warm_start_used` mirrors `warm_start_used`
-                # but is prefixed to avoid ambiguity with RHC-owned keys.
-                # `alns_warm_start_coverage` is the fraction of operations in
-                # the current (sub-)problem that the caller-supplied warm
-                # start covered before any greedy fill or rejection.
-                "alns_warm_start_used": warm_start_used,
-                "alns_warm_start_coverage": round(
-                    warm_start_supplied_assignments / max(n_ops, 1), 6
-                ),
-                "initial_beam_op_limit": initial_beam_op_limit,
-                "frozen_initial_repair_max_ops": frozen_initial_repair_max_ops,
-                "phase1_wall_fraction": phase1_wall_fraction,
-                "frozen_initial_repair_min_remaining_time_s": (
-                    frozen_initial_repair_min_remaining_time_s
-                ),
-                "cpsat_max_destroy_ops": cpsat_max_destroy_ops,
-                "mab_pair_selection": mab_pair_selection,
-                "mab_pair_count": len(mab_pair_labels),
-                "mab_repair_modes": list(mab_repair_modes),
-                "mab_pair_pulls": pair_pulls(pair_bandit, mab_pair_labels),
-                "repair_num_workers": repair_num_workers,
-                "initial_solution_ms": initial_solution_ms,
-                "native_initial_seed_attempted": native_initial_seed_attempted,
-                "native_initial_seed_used": native_initial_seed_used,
-                "native_initial_seed_ms": native_initial_seed_ms,
-                "native_initial_seed_fallback_reason": native_initial_seed_fallback_reason,
-                **_native_repair_meta_from_skips(native_greedy_repair_skip_reasons),
-                **_alns_wall_clock_honesty_meta(
-                    determinism,
-                    bool(time_limit_exhausted_before_search),
-                    iterations_completed,
-                    max_iterations,
-                    time.monotonic() - t0,
-                    time_limit_s,
-                    no_improve=no_improve_early_stop,
-                ),
-                "time_limit_exhausted_before_search": time_limit_exhausted_before_search,
-                "max_no_improve_iters": max_no_improve_iters,
-                "max_no_improve_base_iters": max_no_improve_base_iters,
-                "dynamic_no_improve_enabled": dynamic_no_improve_enabled,
-                "dynamic_sa_enabled": dynamic_sa_enabled,
-                "sa_auto_calibration_enabled": sa_auto_calibration_enabled,
-                "sa_calibration_trials": sa_calibration_trials,
-                "sa_calibration_samples": sa_calibration_samples,
-                "sa_initial_acceptance_probability": sa_initial_acceptance_probability,
-                "due_pressure": round(due_pressure, 4),
-                "candidate_pressure": round(candidate_pressure, 4),
-                "sa_pressure_factor": round(sa_pressure_factor, 4),
-                "sa_calibrated_base_temp": round(sa_calibrated_base_temp, 4),
-                "effective_sa_initial_temp": round(effective_sa_initial_temp, 4),
-                "effective_sa_cooling_rate": round(effective_sa_cooling_rate, 6),
-                "operator_weight_segment_length": operator_weight_segment_length,
-                "operator_weight_reset_mix": operator_weight_reset_mix,
-                "sa_due_alpha": sa_due_alpha,
-                "sa_candidate_beta": sa_candidate_beta,
-                "sa_pressure_cooling_gamma": sa_pressure_cooling_gamma,
-                "sa_temp_min": sa_temp_min,
-                "sa_temp_max": sa_temp_max,
-                "no_improve_due_alpha": no_improve_due_alpha,
-                "no_improve_candidate_beta": no_improve_candidate_beta,
-                "no_improve_min_iters": no_improve_min_iters,
-                "no_improve_max_iters": no_improve_max_iters,
-                "no_improve_early_stop": no_improve_early_stop,
-                "no_improve_streak_final": no_improve_streak,
-                "sa_worsening_accepted": sa_worsening_accepted,
-                "sa_worsening_rejected": sa_worsening_rejected,
-                "effective_sa_acceptance_rate": round(
-                    sa_worsening_accepted / max(1, sa_worsening_accepted + sa_worsening_rejected),
-                    4,
-                ),
-                "cpsat_repair_ms_total": cpsat_repair_ms_total,
-                "greedy_repair_ms_total": greedy_repair_ms_total,
-                "cpsat_repair_ms_mean": round(cpsat_repair_ms_total / cpsat_repair_attempts, 2)
-                if cpsat_repair_attempts > 0
-                else 0.0,
-                "greedy_repair_ms_mean": round(greedy_repair_ms_total / greedy_repair_attempts, 2)
-                if greedy_repair_attempts > 0
-                else 0.0,
-                "feasibility_failures": feasibility_failures,
-                "final_violation_recovery_attempted": final_violation_recovery_attempted,
-                "final_violation_recovered": final_violation_recovered,
-                "final_violation_recovery_source": final_violation_recovery_source,
-                "final_violations_before_recovery": final_violations_before_recovery,
-                # Q4: when the search incumbent was discarded and the initial
-                # seed returned, the whole search budget produced nothing usable
-                # — surface it so the portfolio can prefer a genuine improvement.
-                "quality_warning": (
-                    "search_discarded_returned_seed" if final_violation_recovered else None
-                ),
-                "final_violations": len(violations),
-                "destroy_operators": {
-                    name: {
-                        "final_weight": round(operator_weights[i], 4),
-                    }
-                    for i, (name, _) in enumerate(DESTROY_OPERATORS)
-                },
-                "sdst_matrix_bytes": sdst.memory_bytes(),
-                "initial_cost": round(initial_cost, 2),
-                "final_cost": round(final_cost, 2),
-                "lower_bound": round(lower_bound.value, 4),
-                "upper_bound": round(final_obj.makespan_minutes, 4),
-                "gap": round(
-                    max(final_obj.makespan_minutes - lower_bound.value, 0.0)
-                    / max(final_obj.makespan_minutes, 1e-9),
-                    6,
-                ),
-                "lower_bound_method": "relaxed_precedence_capacity",
-                "lower_bound_components": lower_bound.as_metadata(),
-                # Audit task 6.2 / 6.3: ALNS-scoped lower bound + gap ratio
-                # using the conventional relative-gap formula (denominator is
-                # max(LB, 1e-6)), compared against the makespan (never the
-                # weighted ALNS cost) per audit correction.
-                "alns_lower_bound": round(lower_bound.value, 4),
-                "alns_gap_ratio": round(
-                    max(final_obj.makespan_minutes - lower_bound.value, 0.0)
-                    / max(lower_bound.value, 1e-6),
-                    6,
-                ),
-                "improvement_pct": round((1 - final_cost / max(initial_cost, 1e-9)) * 100, 2),
-                # P3.1: Variable fixing metadata
-                "fixed_ops_applied": fixed_ops_applied,
-                # P3.2: Adaptive destroy metadata
-                "adaptive_destroy_enabled": adaptive_destroy_enabled,
-                "adaptive_destroy_final_size": adaptive_destroy_current,
-                # P3.3: EMA repair-time metadata
-                "ema_repair_ms": round(ema_repair_ms, 2),
-                "ema_repair_samples": ema_repair_samples,
-                # Task 18: Adaptive iteration budget metadata
-                "alns_skipped_warm_start_sufficient": alns_skipped_warm_start_sufficient,
-                "adaptive_iteration_scaling": adaptive_iteration_scaling,
-                "adaptive_iteration_scaling_applied": adaptive_iteration_scaling_applied,
-                "max_iterations": max_iterations,
-                "original_max_iterations": original_max_iterations,
-                # B3 (Task 7.3): Per-iteration convergence trace (only when enabled)
-                **(
-                    {"alns_iteration_trace": [record.to_dict() for record in iteration_trace]}
-                    if record_iteration_metrics
-                    else {}
-                ),
-            },
+            random_seed=self.cfg.seeding.seed,
+            metadata=metadata,
         )
+
+    def _meta_search_stats(self) -> dict[str, Any]:
+        search, stats, ops = self.search, self.repair, self.ops
+        destroy_names = [name for name, _ in DESTROY_OPERATORS]
+        total_destroy = (
+            stats.cpsat_repair_total_destroy_size + stats.greedy_repair_total_destroy_size
+        )
+        return {
+            "iterations_completed": search.iterations_completed,
+            "improvements": search.improvements,
+            # B3 (Task 7.4): aggregate convergence metadata — always present.
+            "accepted_iterations": search.accepted_iterations,
+            "improved_iterations": search.improvements,
+            "operator_attempt_counts": {
+                name: ops.cumulative_attempts[i] for i, name in enumerate(destroy_names)
+            },
+            "operator_improvement_counts": {
+                name: ops.cumulative_improvements[i] for i, name in enumerate(destroy_names)
+            },
+            "alns_final_operator_weights": {
+                name: round(ops.weights[i], 6) for i, name in enumerate(destroy_names)
+            },
+            # C2 (Task 12.1): names + initial weights for cross-window persistence.
+            "alns_operator_names": ops.names,
+            "alns_initial_operator_weights": ops.initial_weights_dict,
+            # C4 (Task 3b.4): always present, applied or not.
+            "cross_window_bias_applied": ops.cross_window_bias_applied,
+            "cross_window_bias_operator_deltas": ops.cross_window_bias_operator_deltas,
+            "stagnation_detected": search.no_improve_early_stop,
+            "stagnation_iteration": search.stagnation_iteration,
+            "cpsat_repair_attempts": stats.cpsat_repair_attempts,
+            "cpsat_repairs": stats.cpsat_repairs,
+            "cpsat_repair_skips_large_destroy": stats.cpsat_repair_skips_large_destroy,
+            "cpsat_repair_timeouts": stats.cpsat_repair_timeouts,
+            "cpsat_repair_total_destroy_size": stats.cpsat_repair_total_destroy_size,
+            "greedy_repair_attempts": stats.greedy_repair_attempts,
+            "greedy_repairs": stats.greedy_repairs,
+            "greedy_repair_timeouts": stats.greedy_repair_timeouts,
+            "greedy_repair_total_destroy_size": stats.greedy_repair_total_destroy_size,
+            # R2: empirical mean repair seconds per destroyed op (None on cold start).
+            "observed_repair_s_per_destroyed_op": (
+                (stats.cpsat_repair_ms_total + stats.greedy_repair_ms_total)
+                / 1000.0
+                / total_destroy
+                if total_destroy > 0
+                else None
+            ),
+            "repair_rejection_reasons": stats.repair_rejection_reasons,
+        }
+
+    def _meta_seed_and_budget(self) -> dict[str, Any]:
+        cfg, seeding, budget = self.cfg, self.cfg.seeding, self.cfg.budget
+        ops = self.ops
+        return {
+            "initial_solver": self.initial_solver_name,
+            **self._warm_start_meta(),
+            "initial_beam_op_limit": seeding.initial_beam_op_limit,
+            "frozen_initial_repair_max_ops": seeding.frozen_initial_repair_max_ops,
+            "phase1_wall_fraction": seeding.phase1_wall_fraction,
+            "frozen_initial_repair_min_remaining_time_s": (
+                seeding.frozen_initial_repair_min_remaining_time_s
+            ),
+            "cpsat_max_destroy_ops": budget.cpsat_max_destroy_ops,
+            "mab_pair_selection": cfg.adaptation.mab_pair_selection,
+            "mab_pair_count": len(ops.mab_pair_labels),
+            "mab_repair_modes": list(ops.mab_repair_modes),
+            "mab_pair_pulls": _pair_pulls(ops.pair_bandit, ops.mab_pair_labels),
+            "repair_num_workers": budget.repair_num_workers,
+            "initial_solution_ms": self.initial_solution_ms,
+            **self._native_seed_meta(),
+            **_alns_wall_clock_honesty_meta(
+                budget.determinism,
+                bool(self.time_limit_exhausted_before_search),
+                self.search.iterations_completed,
+                self.max_iterations,
+                time.monotonic() - self.t0,
+                budget.time_limit_s,
+                no_improve=self.search.no_improve_early_stop,
+            ),
+            "time_limit_exhausted_before_search": self.time_limit_exhausted_before_search,
+        }
+
+    def _meta_annealing(self) -> dict[str, Any]:
+        an, ad, search = self.cfg.annealing, self.cfg.adaptation, self.search
+        worsening = search.sa_worsening_accepted + search.sa_worsening_rejected
+        return {
+            "max_no_improve_iters": self.max_no_improve_iters,
+            "max_no_improve_base_iters": ad.max_no_improve_base_iters,
+            "dynamic_no_improve_enabled": ad.dynamic_no_improve_enabled,
+            "dynamic_sa_enabled": an.dynamic_sa_enabled,
+            "sa_auto_calibration_enabled": an.sa_auto_calibration_enabled,
+            "sa_calibration_trials": an.sa_calibration_trials,
+            "sa_calibration_samples": self.sa_calibration_samples,
+            "sa_initial_acceptance_probability": an.sa_initial_acceptance_probability,
+            "due_pressure": round(an.due_pressure, 4),
+            "candidate_pressure": round(an.candidate_pressure, 4),
+            "sa_pressure_factor": round(self.sa_pressure_factor, 4),
+            "sa_calibrated_base_temp": round(self.sa_calibrated_base_temp, 4),
+            "effective_sa_initial_temp": round(self.effective_sa_initial_temp, 4),
+            "effective_sa_cooling_rate": round(self.effective_sa_cooling_rate, 6),
+            "operator_weight_segment_length": ad.operator_weight_segment_length,
+            "operator_weight_reset_mix": ad.operator_weight_reset_mix,
+            "sa_due_alpha": an.sa_due_alpha,
+            "sa_candidate_beta": an.sa_candidate_beta,
+            "sa_pressure_cooling_gamma": an.sa_pressure_cooling_gamma,
+            "sa_temp_min": self.sa_temp_min,
+            "sa_temp_max": an.sa_temp_max,
+            "no_improve_due_alpha": ad.no_improve_due_alpha,
+            "no_improve_candidate_beta": ad.no_improve_candidate_beta,
+            "no_improve_min_iters": ad.no_improve_min_iters,
+            "no_improve_max_iters": ad.no_improve_max_iters,
+            "no_improve_early_stop": search.no_improve_early_stop,
+            "no_improve_streak_final": search.no_improve_streak,
+            "sa_worsening_accepted": search.sa_worsening_accepted,
+            "sa_worsening_rejected": search.sa_worsening_rejected,
+            "effective_sa_acceptance_rate": round(
+                search.sa_worsening_accepted / max(1, worsening), 4
+            ),
+        }
+
+    def _meta_repair(self, recovery: dict[str, Any]) -> dict[str, Any]:
+        stats, search = self.repair, self.search
+        return {
+            "cpsat_repair_ms_total": stats.cpsat_repair_ms_total,
+            "greedy_repair_ms_total": stats.greedy_repair_ms_total,
+            "cpsat_repair_ms_mean": round(
+                stats.cpsat_repair_ms_total / stats.cpsat_repair_attempts, 2
+            )
+            if stats.cpsat_repair_attempts > 0
+            else 0.0,
+            "greedy_repair_ms_mean": round(
+                stats.greedy_repair_ms_total / stats.greedy_repair_attempts, 2
+            )
+            if stats.greedy_repair_attempts > 0
+            else 0.0,
+            "feasibility_failures": search.feasibility_failures,
+            **recovery,
+            "destroy_operators": {
+                name: {"final_weight": round(self.ops.weights[i], 4)}
+                for i, (name, _) in enumerate(DESTROY_OPERATORS)
+            },
+            "sdst_matrix_bytes": self.sdst.memory_bytes(),
+        }
+
+    def _meta_quality(self, final_obj: ObjectiveValues, final_cost: float) -> dict[str, Any]:
+        search, budget = self.search, self.cfg.budget
+        record = self.cfg.adaptation.record_iteration_metrics
+        return {
+            "initial_cost": round(search.initial_cost, 2),
+            "final_cost": round(final_cost, 2),
+            **self._lower_bound_meta(final_obj, include_upper=True),
+            "improvement_pct": round((1 - final_cost / max(search.initial_cost, 1e-9)) * 100, 2),
+            "fixed_ops_applied": len(self.fixed_op_ids),
+            "adaptive_destroy_enabled": budget.adaptive_destroy_enabled,
+            "adaptive_destroy_final_size": self.adaptive_destroy_current,
+            "ema_repair_ms": round(search.ema_repair_ms, 2),
+            "ema_repair_samples": search.ema_repair_samples,
+            # Task 18: adaptive iteration budget.
+            "alns_skipped_warm_start_sufficient": False,
+            "adaptive_iteration_scaling": budget.adaptive_iteration_scaling,
+            "adaptive_iteration_scaling_applied": self.adaptive_iteration_scaling_applied,
+            "max_iterations": self.max_iterations,
+            "original_max_iterations": self.original_max_iterations,
+            # B3 (Task 7.3): per-iteration convergence trace (only when enabled).
+            **(
+                {"alns_iteration_trace": [r.to_dict() for r in self.iteration_trace]}
+                if record
+                else {}
+            ),
+        }
+
+
+def _pair_pulls(bandit: Any, labels: list[str]) -> dict[str, int]:
+    from synaps.solvers._alns_mab import pair_pulls
+
+    return pair_pulls(bandit, labels)

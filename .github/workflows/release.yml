@@ -111,6 +111,17 @@ jobs:
           python -m pip install maturin
 
       - name: Build native wheel
+        env:
+          # Audit 2026-10 (R-10): the repo's .cargo/config.toml sets
+          # target-cpu=native for local builds. A published wheel built with it
+          # carries the runner's ISA extensions (e.g. AVX-512) and dies with
+          # SIGILL on older CPUs before the Python fallback can engage.
+          # RUSTFLAGS takes precedence over config rustflags: pin a portable
+          # baseline (x86-64-v2 = SSE4.2/POPCNT; Apple M1 for arm64 runners).
+          RUSTFLAGS: ${{ runner.arch == 'ARM64' && '-C target-cpu=apple-m1' || '-C target-cpu=x86-64-v2' }}
+        # R-11: backslash continuations are bash syntax; windows-latest
+        # defaults to PowerShell.
+        shell: bash
         run: |
           python -m maturin build \
             --manifest-path native/synaps_native/Cargo.toml \

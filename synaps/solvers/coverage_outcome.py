@@ -67,9 +67,12 @@ def process_exit_code(status: SolverStatus, coverage: CoverageClass) -> int:
 def stamp_honest_coverage(problem: ScheduleProblem, result: ScheduleResult) -> ScheduleResult:
     """Apply empty-success demotion and record ``coverage_class`` on *result*."""
 
+    # Audit 2026-10 (A-07): count DISTINCT operations. A duplicated assignment
+    # is not coverage; counting rows let [op1, op1] read as FULL on a 2-op
+    # problem (same definition as ``objective.coverage_fraction``).
     coverage = classify_coverage(
         n_operations=len(problem.operations),
-        n_assigned=len(result.assignments),
+        n_assigned=len({assignment.operation_id for assignment in result.assignments}),
     )
     result.metadata["coverage_class"] = coverage.value
     result.status = honest_status(result.status, coverage)

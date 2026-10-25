@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 from datetime import timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from synaps.accelerators import compute_atcs_log_scores_batch, get_acceleration_status
 from synaps.model import (
@@ -32,6 +32,9 @@ from synaps.solvers._dispatch_support import (
 from synaps.solvers._time_windows import operation_earliest_offset_minutes
 from synaps.solvers.coverage_outcome import stamp_honest_coverage
 from synaps.timegrain import duration_minutes_for, physical_processing_minutes_for
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def _edge_bound(
@@ -86,18 +89,23 @@ def _dispatch_timeout_result(
     )
 
 
-def _beam_feasible_result(
+def _dispatch_feasible_result(
     *,
     solver_name: str,
-    beam_width: int,
     assignments: list[Assignment],
-    makespan: float,
+    makespan: float | None,
     dispatch_context: Any,
     problem: ScheduleProblem,
     horizon_start: Any,
     t0: float,
-    acceleration_status: object,
+    metadata: dict[str, Any],
 ) -> ScheduleResult:
+    """FEASIBLE result with setups recomputed from the final machine sequences.
+
+    Recomputing per-assignment setup from the final sequence corrects ghost
+    setups after gap insertions. The objective here is solver telemetry; the
+    BaseSolver boundary replaces it with the canonical ``evaluate``.
+    """
     total_setup = recompute_assignment_setups(assignments, dispatch_context)
     total_material_loss = 0.0
     assignments_by_machine: dict[Any, list[Assignment]] = {}
@@ -125,6 +133,8 @@ def _beam_feasible_result(
         completion = order_completion.get(order.id, 0.0)
         due_offset = (order.due_date - horizon_start).total_seconds() / 60.0
         total_tardiness += max(completion - due_offset, 0.0)
+    if makespan is None:
+        makespan = _makespan_of(assignments, horizon_start)
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     return ScheduleResult(
         solver_name=solver_name,
@@ -137,10 +147,7 @@ def _beam_feasible_result(
             total_tardiness_minutes=total_tardiness,
         ),
         duration_ms=elapsed_ms,
-        metadata={
-            "acceleration": acceleration_status,
-            "beam_width": beam_width,
-        },
+        metadata=metadata,
     )
 
 
@@ -321,6 +328,162 @@ def _unroll_lane_assignments(result: ScheduleResult, virtual_to_original: dict[A
             assignment.work_center_id = original
 
 
+def _dispatch_time_limit(kwargs: dict[str, Any]) -> float | None:
+    raw = kwargs.get("time_limit_s")
+    return max(0.1, float(raw)) if raw is not None else None
+
+
+def _ready_p_bar(ready: list[Any]) -> float:
+    """Mean BASE duration of the ready set (ATCS look-ahead scale, >= 1)."""
+    total = float(sum(op.base_duration_min for op in ready))
+    return max(total / max(len(ready), 1), 1.0)
+
+
+def _collect_atcs_records(
+    *,
+    problem: ScheduleProblem,
+    dispatch_context: Any,
+    orders_by_id: dict[Any, Any],
+    wc_by_id: dict[Any, Any],
+    ready: list[Any],
+    assignments: list[Assignment],
+    op_end_offsets: dict[Any, float],
+    machine_idx: MachineIndex,
+    n_total_ops: int,
+    edges: DispatchPrecedence | None = None,
+    check_timeout: Callable[[], ScheduleResult | None] | None = None,
+) -> tuple[list[dict[str, Any]], ScheduleResult | None]:
+    """Feasible (operation, machine) slots of the ready set with ATCS inputs.
+
+    Returns ``(records, timeout_result)``; ``check_timeout`` (beam search) is
+    polled before every slot search and aborts with its result.
+    """
+    horizon_start = problem.planning_horizon_start
+    records: list[dict[str, Any]] = []
+    for op in ready:
+        order = orders_by_id[op.order_id]
+        due_offset = (order.due_date - horizon_start).total_seconds() / 60.0
+        w_j = order.priority / 500.0  # normalise around default priority
+        pred_end = op_end_offsets.get(op.predecessor_op_id, 0.0)
+        pred_end = max(pred_end, operation_earliest_offset_minutes(op, order, horizon_start))
+        eligible = (
+            op.eligible_wc_ids
+            if op.eligible_wc_ids
+            else [work_center.id for work_center in problem.work_centers]
+        )
+        if edges is not None:
+            pred_end = max(pred_end, _edge_bound(edges, op, eligible, wc_by_id))
+        for wc_id in eligible:
+            if check_timeout is not None and (timed_out := check_timeout()) is not None:
+                return records, timed_out
+            slot = find_earliest_feasible_slot(
+                dispatch_context,
+                assignments,
+                op,
+                wc_id,
+                pred_end,
+                machine_index=machine_idx,
+                gap_scan=_gap_scan_for(n_total_ops, op),
+            )
+            if slot is None:
+                continue
+            work_center: Any = wc_by_id.get(wc_id)
+            if work_center is None:
+                from types import SimpleNamespace
+
+                work_center = SimpleNamespace(id=wc_id, speed_factor=1.0)
+            records.append(
+                {
+                    "operation": op,
+                    "work_center_id": wc_id,
+                    "slot": slot,
+                    "due_offset": due_offset,
+                    "weight": w_j,
+                    # F11: ATCS uses the physical (fractional) processing time.
+                    "processing_minutes": physical_processing_minutes_for(op, work_center),
+                }
+            )
+    return records, None
+
+
+def _atcs_log_scores(
+    records: list[dict[str, Any]], *, ready_p_bar: float, k1: float, k2: float, k3: float
+) -> list[float]:
+    """Batch log-ATCS scores with per-machine setup and global material scales."""
+    local_setup_scale_by_wc: dict[Any, float] = {}
+    for wc_id in {record["work_center_id"] for record in records}:
+        nonzero = [
+            record["slot"].setup_minutes
+            for record in records
+            if record["work_center_id"] == wc_id and record["slot"].setup_minutes > 0
+        ]
+        local_setup_scale_by_wc[wc_id] = max(sum(nonzero) / max(len(nonzero), 1), 1.0)
+    nonzero_material = [
+        record["slot"].material_loss for record in records if record["slot"].material_loss > 0
+    ]
+    material_scale = max(sum(nonzero_material) / max(len(nonzero_material), 1), 1.0)
+    # One SoA batch call: deterministic in Python, PyO3/Rust when available.
+    return compute_atcs_log_scores_batch(
+        weights=[record["weight"] for record in records],
+        processing_minutes=[record["processing_minutes"] for record in records],
+        slack=[
+            max(
+                record["due_offset"] - record["processing_minutes"] - record["slot"].start_offset,
+                0.0,
+            )
+            for record in records
+        ],
+        ready_p_bar=ready_p_bar,
+        setup_minutes=[record["slot"].setup_minutes for record in records],
+        setup_scale=[local_setup_scale_by_wc[record["work_center_id"]] for record in records],
+        k1=k1,
+        k2=k2,
+        material_loss=[record["slot"].material_loss for record in records],
+        material_scale=material_scale,
+        k3=k3,
+    )
+
+
+def _slot_preference_key(record: dict[str, Any]) -> tuple[float, float, float, str]:
+    """Deterministic machine preference: (end, setup, material, wc id)."""
+    slot = record["slot"]
+    return (slot.end_offset, slot.setup_minutes, slot.material_loss, str(record["work_center_id"]))
+
+
+def _assignment_from_record(record: dict[str, Any], horizon_start: Any) -> Assignment:
+    slot = record["slot"]
+    return Assignment(
+        operation_id=record["operation"].id,
+        work_center_id=record["work_center_id"],
+        start_time=horizon_start + timedelta(minutes=slot.start_offset),
+        end_time=horizon_start + timedelta(minutes=slot.end_offset),
+        setup_minutes=slot.setup_minutes,
+        aux_resource_ids=slot.aux_resource_ids,
+    )
+
+
+def _makespan_of(assignments: list[Assignment], horizon_start: Any) -> float:
+    return max(
+        ((a.end_time - horizon_start).total_seconds() / 60.0 for a in assignments), default=0.0
+    )
+
+
+def _partial_fingerprint(
+    assignments: list[Assignment], horizon_start: Any
+) -> tuple[tuple[str, float, str], ...]:
+    """Width-independent identity of a partial schedule (beam nesting key)."""
+    return tuple(
+        sorted(
+            (
+                str(a.work_center_id),
+                (a.start_time - horizon_start).total_seconds(),
+                str(a.operation_id),
+            )
+            for a in assignments
+        )
+    )
+
+
 class GreedyDispatch(BaseSolver):
     """Single-pass priority dispatch using the ATCS composite index.
 
@@ -430,320 +593,148 @@ class GreedyDispatch(BaseSolver):
         return best_result
 
     def _solve_core(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
+        """Serial schedule generation: ATCS picks the op, earliest completion the machine."""
         t0 = time.monotonic()
         acceleration_status = get_acceleration_status()
-        time_limit_s_raw = kwargs.get("time_limit_s")
-        time_limit_s: float | None = None
-        if time_limit_s_raw is not None:
-            time_limit_s = max(0.1, float(time_limit_s_raw))
-
-        # Precompute lookup tables
+        time_limit_s = _dispatch_time_limit(kwargs)
         orders_by_id = {o.id: o for o in problem.orders}
         wc_by_id = {wc.id: wc for wc in problem.work_centers}
         dispatch_context = build_dispatch_context(problem)
-
         horizon_start = problem.planning_horizon_start
-
-        # Build operation queue (respecting precedence)
-        all_ops = problem.operations
-        n_total_ops = len(all_ops)
+        n_total_ops = len(problem.operations)
         scheduled_ops: set[Any] = set()
         op_end_offsets: dict[Any, float] = {}
         assignments: list[Assignment] = []
         machine_idx = MachineIndex(dispatch_context)
         edges = DispatchPrecedence.build(problem.precedence_edges)
-
         while len(scheduled_ops) < n_total_ops:
             if time_limit_s is not None and (time.monotonic() - t0) > time_limit_s:
-                elapsed_ms = int((time.monotonic() - t0) * 1000)
-                partial_makespan = (
-                    max(
-                        (assignment.end_time - horizon_start).total_seconds() / 60.0
-                        for assignment in assignments
-                    )
-                    if assignments
-                    else 0.0
+                return self._timeout_result(
+                    assignments,
+                    horizon_start,
+                    t0,
+                    acceleration_status,
+                    time_limit_s,
+                    n_total_ops,
+                    len(scheduled_ops),
                 )
-                return ScheduleResult(
-                    solver_name=self.name,
-                    status=SolverStatus.TIMEOUT,
-                    assignments=assignments,
-                    objective=ObjectiveValues(makespan_minutes=partial_makespan),
-                    duration_ms=elapsed_ms,
-                    metadata={
-                        "acceleration": acceleration_status,
-                        "partial_schedule": True,
-                        "scheduled_ops": len(assignments),
-                        "remaining_ops": n_total_ops - len(scheduled_ops),
-                        "time_limit_s": time_limit_s,
-                    },
-                )
-
-            # Filter to ready operations (predecessor scheduled or none)
             ready = [
                 op
-                for op in all_ops
+                for op in problem.operations
                 if op.id not in scheduled_ops
                 and (op.predecessor_op_id is None or op.predecessor_op_id in scheduled_ops)
                 and edges.ready(op.id, scheduled_ops)
             ]
             if not ready:
-                elapsed_ms = int((time.monotonic() - t0) * 1000)
-                return ScheduleResult(
-                    solver_name=self.name,
-                    status=SolverStatus.ERROR,
-                    assignments=assignments,
-                    objective=ObjectiveValues(
-                        makespan_minutes=max(
-                            (
-                                (assignment.end_time - horizon_start).total_seconds() / 60.0
-                                for assignment in assignments
-                            ),
-                            default=0.0,
-                        ),
-                    ),
-                    duration_ms=elapsed_ms,
-                    metadata={
-                        "acceleration": acceleration_status,
-                        "error": (
-                            "no ready operations available; precedence graph may contain a cycle"
-                        ),
-                    },
+                return self._error_result(
+                    assignments,
+                    horizon_start,
+                    t0,
+                    acceleration_status,
+                    "no ready operations available; precedence graph may contain a cycle",
                 )
-
-            ready_p_bar = max(
-                sum(op.base_duration_min for op in ready) / max(len(ready), 1),
-                1.0,
+            records, _ = _collect_atcs_records(
+                problem=problem,
+                dispatch_context=dispatch_context,
+                orders_by_id=orders_by_id,
+                wc_by_id=wc_by_id,
+                ready=ready,
+                assignments=assignments,
+                op_end_offsets=op_end_offsets,
+                machine_idx=machine_idx,
+                n_total_ops=n_total_ops,
+                edges=edges,
             )
-            candidate_records: list[dict[str, Any]] = []
-
-            for op in ready:
-                order = orders_by_id[op.order_id]
-                due_offset = (order.due_date - horizon_start).total_seconds() / 60.0
-                w_j = order.priority / 500.0  # normalise around default priority
-                pred_end = op_end_offsets.get(op.predecessor_op_id, 0.0)
-                pred_end = max(
-                    pred_end,
-                    operation_earliest_offset_minutes(op, order, horizon_start),
+            if not records:
+                return self._error_result(
+                    assignments,
+                    horizon_start,
+                    t0,
+                    acceleration_status,
+                    "no feasible constructive slot found",
                 )
-
-                eligible = (
-                    op.eligible_wc_ids
-                    if op.eligible_wc_ids
-                    else [work_center.id for work_center in problem.work_centers]
-                )
-                pred_end = max(pred_end, _edge_bound(edges, op, eligible, wc_by_id))
-                for wc_id in eligible:
-                    slot = find_earliest_feasible_slot(
-                        dispatch_context,
-                        assignments,
-                        op,
-                        wc_id,
-                        pred_end,
-                        machine_index=machine_idx,
-                        gap_scan=_gap_scan_for(n_total_ops, op),
-                    )
-                    if slot is None:
-                        continue
-
-                    work_center: Any = wc_by_id.get(wc_id)
-                    if work_center is None:
-                        from types import SimpleNamespace
-
-                        work_center = SimpleNamespace(id=wc_id, speed_factor=1.0)
-                    # F11: ATCS priority uses the physical (fractional) processing
-                    # time via timegrain — not the integer reservation grain.
-                    p_j = physical_processing_minutes_for(op, work_center)
-
-                    candidate_records.append(
-                        {
-                            "operation": op,
-                            "work_center_id": wc_id,
-                            "slot": slot,
-                            "due_offset": due_offset,
-                            "weight": w_j,
-                            "processing_minutes": p_j,
-                        }
-                    )
-
-            if not candidate_records:
-                elapsed_ms = int((time.monotonic() - t0) * 1000)
-                return ScheduleResult(
-                    solver_name=self.name,
-                    status=SolverStatus.ERROR,
-                    assignments=assignments,
-                    objective=ObjectiveValues(
-                        makespan_minutes=max(
-                            (
-                                (assignment.end_time - horizon_start).total_seconds() / 60.0
-                                for assignment in assignments
-                            ),
-                            default=0.0,
-                        ),
-                    ),
-                    duration_ms=elapsed_ms,
-                    metadata={
-                        "acceleration": acceleration_status,
-                        "error": "no feasible constructive slot found",
-                    },
-                )
-
-            local_setup_scale_by_wc: dict[Any, float] = {}
-            for wc_id in {record["work_center_id"] for record in candidate_records}:
-                nonzero_machine_setups = [
-                    record["slot"].setup_minutes
-                    for record in candidate_records
-                    if record["work_center_id"] == wc_id and record["slot"].setup_minutes > 0
-                ]
-                local_setup_scale_by_wc[wc_id] = max(
-                    sum(nonzero_machine_setups) / max(len(nonzero_machine_setups), 1),
-                    1.0,
-                )
-            global_nonzero_material_losses = [
-                record["slot"].material_loss
-                for record in candidate_records
-                if record["slot"].material_loss > 0
-            ]
-            material_scale = max(
-                sum(global_nonzero_material_losses) / max(len(global_nonzero_material_losses), 1),
-                1.0,
-            )
-
-            best_log_score = float("-inf")
-            best_record = candidate_records[0]
-            # Score all candidates in one SoA-style batch call.
-            # This keeps Python deterministic and lets optional PyO3/Rust
-            # backends process the hot path with lower overhead.
-            log_scores = compute_atcs_log_scores_batch(
-                weights=[record["weight"] for record in candidate_records],
-                processing_minutes=[record["processing_minutes"] for record in candidate_records],
-                slack=[
-                    max(
-                        record["due_offset"]
-                        - record["processing_minutes"]
-                        - record["slot"].start_offset,
-                        0.0,
-                    )
-                    for record in candidate_records
-                ],
-                ready_p_bar=ready_p_bar,
-                setup_minutes=[record["slot"].setup_minutes for record in candidate_records],
-                setup_scale=[
-                    local_setup_scale_by_wc[record["work_center_id"]]
-                    for record in candidate_records
-                ],
-                k1=self._k1,
-                k2=self._k2,
-                material_loss=[record["slot"].material_loss for record in candidate_records],
-                material_scale=material_scale,
-                k3=self._k3,
-            )
-            for record, log_score in zip(candidate_records, log_scores, strict=True):
-                if log_score > best_log_score:
-                    best_log_score = log_score
-                    best_record = record
-
-            best_op = best_record["operation"]
-            # M2: ATCS decides WHICH operation to dispatch next; the work-center
-            # choice for that op is then the earliest-completion feasible slot
-            # among its candidates. This lets a max_parallel machine use an idle
-            # lane instead of queuing behind a busy one (the ATCS composite,
-            # dominated by the slack term at large due offsets, otherwise
-            # preferred a much later start on the same lane, charging a phantom
-            # setup). Deterministic tie-break: (end, setup, material, wc id) —
-            # material_loss before wc id preserves the secondary preference for
-            # a lower-material lane when completion and setup tie.
-            best_op_candidates = [
-                record for record in candidate_records if record["operation"].id == best_op.id
-            ]
-            best_record = min(
-                best_op_candidates,
-                key=lambda record: (
-                    record["slot"].end_offset,
-                    record["slot"].setup_minutes,
-                    record["slot"].material_loss,
-                    str(record["work_center_id"]),
-                ),
-            )
-            best_wc_id = best_record["work_center_id"]
-            best_slot = best_record["slot"]
-
-            # Assign best
-            work_center = wc_by_id.get(best_wc_id)
-            end_offset = best_slot.end_offset
-
-            new_assignment = Assignment(
-                operation_id=best_op.id,
-                work_center_id=best_wc_id,
-                start_time=horizon_start + timedelta(minutes=best_slot.start_offset),
-                end_time=horizon_start + timedelta(minutes=end_offset),
-                setup_minutes=best_slot.setup_minutes,
-                aux_resource_ids=best_slot.aux_resource_ids,
-            )
+            best_record = self._select_record(records, _ready_p_bar(ready))
+            new_assignment = _assignment_from_record(best_record, horizon_start)
             assignments.append(new_assignment)
             machine_idx.add(new_assignment)
-
-            op_end_offsets[best_op.id] = end_offset
-            edges.record(best_op.id, best_slot.start_offset, end_offset)
-            scheduled_ops.add(best_op.id)
-
-        # Recompute per-assignment setup_minutes and aggregate total from the
-        # final machine sequence — corrects ghost setups after gap insertions.
-        total_setup = recompute_assignment_setups(assignments, dispatch_context)
-
-        total_material_loss = 0.0
-        assignments_by_machine: dict[Any, list[Assignment]] = {}
-        for assignment in assignments:
-            assignments_by_machine.setdefault(assignment.work_center_id, []).append(assignment)
-        for work_center_id, machine_assignments in assignments_by_machine.items():
-            machine_assignments.sort(key=lambda assignment: assignment.start_time)
-            for index in range(1, len(machine_assignments)):
-                previous_assignment = machine_assignments[index - 1]
-                current_assignment = machine_assignments[index]
-                previous_state = dispatch_context.ops_by_id[
-                    previous_assignment.operation_id
-                ].state_id
-                current_state = dispatch_context.ops_by_id[current_assignment.operation_id].state_id
-                total_material_loss += dispatch_context.material_loss.get(
-                    (work_center_id, previous_state, current_state),
-                    0.0,
-                )
-
-        # Compute per-order tardiness (last operation per order determines tardiness)
-        order_completion: dict[Any, float] = {}
-        for assignment in assignments:
-            op = dispatch_context.ops_by_id[assignment.operation_id]
-            end = (assignment.end_time - horizon_start).total_seconds() / 60.0
-            if op.order_id not in order_completion or end > order_completion[op.order_id]:
-                order_completion[op.order_id] = end
-
-        total_tardiness = 0.0
-        for order in problem.orders:
-            completion = order_completion.get(order.id, 0.0)
-            due_offset = (order.due_date - horizon_start).total_seconds() / 60.0
-            total_tardiness += max(completion - due_offset, 0.0)
-
-        # Compute objective
-        makespan = (
-            max((a.end_time - horizon_start).total_seconds() / 60.0 for a in assignments)
-            if assignments
-            else 0.0
+            end_offset = best_record["slot"].end_offset
+            op_end_offsets[new_assignment.operation_id] = end_offset
+            edges.record(new_assignment.operation_id, best_record["slot"].start_offset, end_offset)
+            scheduled_ops.add(new_assignment.operation_id)
+        return _dispatch_feasible_result(
+            solver_name=self.name,
+            assignments=assignments,
+            makespan=None,
+            dispatch_context=dispatch_context,
+            problem=problem,
+            horizon_start=horizon_start,
+            t0=t0,
+            metadata={"acceleration": acceleration_status},
         )
 
-        elapsed_ms = int((time.monotonic() - t0) * 1000)
+    def _select_record(self, records: list[dict[str, Any]], ready_p_bar: float) -> dict[str, Any]:
+        """ATCS chooses WHICH operation; earliest completion chooses its machine.
 
+        M2: picking the machine by earliest completion lets a max_parallel
+        machine use an idle lane instead of queuing behind a busy one (the ATCS
+        slack term otherwise preferred a much later start on the same lane,
+        charging a phantom setup). Tie-break (end, setup, material, wc id).
+        """
+        log_scores = _atcs_log_scores(
+            records, ready_p_bar=ready_p_bar, k1=self._k1, k2=self._k2, k3=self._k3
+        )
+        best_log_score = float("-inf")
+        best_record = records[0]
+        for record, log_score in zip(records, log_scores, strict=True):
+            if log_score > best_log_score:
+                best_log_score = log_score
+                best_record = record
+        best_op_id = best_record["operation"].id
+        return min(
+            (record for record in records if record["operation"].id == best_op_id),
+            key=_slot_preference_key,
+        )
+
+    def _timeout_result(
+        self,
+        assignments: list[Assignment],
+        horizon_start: Any,
+        t0: float,
+        acceleration_status: object,
+        time_limit_s: float,
+        n_total_ops: int,
+        n_scheduled: int,
+    ) -> ScheduleResult:
         return ScheduleResult(
             solver_name=self.name,
-            status=SolverStatus.FEASIBLE,
+            status=SolverStatus.TIMEOUT,
             assignments=assignments,
-            objective=ObjectiveValues(
-                makespan_minutes=makespan,
-                total_setup_minutes=total_setup,
-                total_material_loss=total_material_loss,
-                total_tardiness_minutes=total_tardiness,
-            ),
-            duration_ms=elapsed_ms,
-            metadata={"acceleration": acceleration_status},
+            objective=ObjectiveValues(makespan_minutes=_makespan_of(assignments, horizon_start)),
+            duration_ms=int((time.monotonic() - t0) * 1000),
+            metadata={
+                "acceleration": acceleration_status,
+                "partial_schedule": True,
+                "scheduled_ops": len(assignments),
+                "remaining_ops": n_total_ops - n_scheduled,
+                "time_limit_s": time_limit_s,
+            },
+        )
+
+    def _error_result(
+        self,
+        assignments: list[Assignment],
+        horizon_start: Any,
+        t0: float,
+        acceleration_status: object,
+        error: str,
+    ) -> ScheduleResult:
+        return ScheduleResult(
+            solver_name=self.name,
+            status=SolverStatus.ERROR,
+            assignments=assignments,
+            objective=ObjectiveValues(makespan_minutes=_makespan_of(assignments, horizon_start)),
+            duration_ms=int((time.monotonic() - t0) * 1000),
+            metadata={"acceleration": acceleration_status, "error": error},
         )
 
 
@@ -888,356 +879,212 @@ class BeamSearchDispatch(BaseSolver):
     def _solve_core(
         self, problem: ScheduleProblem, beam_width: int, **kwargs: Any
     ) -> ScheduleResult:
-        t0 = time.monotonic()
-        acceleration_status = get_acceleration_status()
-        time_limit_s_raw = kwargs.get("time_limit_s")
-        time_limit_s: float | None = None
-        if time_limit_s_raw is not None:
-            time_limit_s = max(0.1, float(time_limit_s_raw))
+        """One filtered beam search of width ``beam_width`` (see :class:`_BeamRun`)."""
+        return _BeamRun(self, problem, beam_width, kwargs).execute()
 
-        orders_by_id = {o.id: o for o in problem.orders}
-        wc_by_id = {wc.id: wc for wc in problem.work_centers}
-        dispatch_context = build_dispatch_context(problem)
-        horizon_start = problem.planning_horizon_start
 
-        # Each beam is a tuple: (assignments, scheduled_ops, op_end_offsets, remaining)
-        initial_remaining = list(problem.operations)
-        beams: list[tuple[list[Assignment], set[Any], dict[Any, float], list[Any]]] = [
-            ([], set(), {}, initial_remaining),
-        ]
+_BeamState = tuple[list[Assignment], set[Any], dict[Any, float], list[Any]]
+_BeamCandidate = tuple[
+    float,
+    tuple[tuple[str, float, str], ...],
+    list[Assignment],
+    set[Any],
+    dict[Any, float],
+    list[Any],
+]
 
-        total_ops = len(problem.operations)
 
-        # Q1: global incumbent over EVERY completed rollout, not just the beams
-        # that survive the last step. A wider beam rolls out a superset of
-        # partial states, so this is non-increasing in the beam width.
-        incumbent: list[Assignment] | None = None
-        incumbent_makespan = float("inf")
+class _BeamRun:
+    """One filtered beam search (Ow & Morton 1989) with a global incumbent.
 
-        def _timeout() -> ScheduleResult | None:
-            return _beam_deadline_result(
-                time_limit_s=time_limit_s,
-                t0=t0,
-                incumbent=incumbent,
-                beams=beams,
-                solver_name=self.name,
-                problem=problem,
-                acceleration_status=acceleration_status,
-                beam_width=self._beam_width,
-            )
+    Each step expands every live beam: the cheap ATCS index selects up to
+    ``beam_width`` children (first stage), a completion-to-go greedy rollout
+    ranks them by the ACTUAL makespan (second stage), and the ``beam_width``
+    best survive. The incumbent is the best of EVERY completed rollout, so
+    makespan is non-increasing in the beam width (Q1).
+    """
 
-        for _step in range(total_ops):
-            timed_out = _timeout()
+    def __init__(
+        self,
+        solver: BeamSearchDispatch,
+        problem: ScheduleProblem,
+        beam_width: int,
+        kwargs: dict[str, Any],
+    ) -> None:
+        self.solver = solver
+        self.problem = problem
+        self.beam_width = beam_width
+        self.kwargs = kwargs
+        self.t0 = time.monotonic()
+        self.acceleration_status = get_acceleration_status()
+        self.time_limit_s = _dispatch_time_limit(kwargs)
+        self.orders_by_id = {o.id: o for o in problem.orders}
+        self.wc_by_id = {wc.id: wc for wc in problem.work_centers}
+        self.dispatch_context = build_dispatch_context(problem)
+        self.horizon_start = problem.planning_horizon_start
+        self.total_ops = len(problem.operations)
+        self.beams: list[_BeamState] = [([], set(), {}, list(problem.operations))]
+        self.incumbent: list[Assignment] | None = None
+        self.incumbent_makespan = float("inf")
+
+    def _timeout(self) -> ScheduleResult | None:
+        return _beam_deadline_result(
+            time_limit_s=self.time_limit_s,
+            t0=self.t0,
+            incumbent=self.incumbent,
+            beams=self.beams,
+            solver_name=self.solver.name,
+            problem=self.problem,
+            acceleration_status=self.acceleration_status,
+            beam_width=self.solver._beam_width,
+        )
+
+    def execute(self) -> ScheduleResult:
+        for _step in range(self.total_ops):
+            timed_out = self._timeout()
             if timed_out is not None:
                 return timed_out
-            candidates: list[
-                tuple[
-                    float,
-                    tuple[tuple[str, float, str], ...],
-                    list[Assignment],
-                    set[Any],
-                    dict[Any, float],
-                    list[Any],
-                ]
-            ] = []
-
-            for assignments, scheduled_ops, op_end_offsets, remaining in beams:
-                machine_idx = MachineIndex(dispatch_context)
-                for assignment in assignments:
-                    machine_idx.add(assignment)
-
-                if not remaining:
-                    # Beam already complete — rank by its own makespan and let
-                    # it update the incumbent.
-                    completed_mk = (
-                        max(
-                            (a.end_time - horizon_start).total_seconds() / 60.0 for a in assignments
-                        )
-                        if assignments
-                        else 0.0
-                    )
-                    if completed_mk < incumbent_makespan:
-                        # Snapshot: assignment objects are shared across beams and
-                        # mutated in place by later steps, so copy to freeze it.
-                        incumbent = [a.model_copy() for a in assignments]
-                        incumbent_makespan = completed_mk
-                    completed_fp = tuple(
-                        sorted(
-                            (
-                                str(a.work_center_id),
-                                (a.start_time - horizon_start).total_seconds(),
-                                str(a.operation_id),
-                            )
-                            for a in assignments
-                        )
-                    )
-                    candidates.append(
-                        (
-                            completed_mk,
-                            completed_fp,
-                            assignments,
-                            scheduled_ops,
-                            op_end_offsets,
-                            remaining,
-                        )
-                    )
-                    continue
-
-                ready = [
-                    op
-                    for op in remaining
-                    if op.predecessor_op_id is None or op.predecessor_op_id in scheduled_ops
-                ]
-                if not ready:
-                    continue  # Dead beam — precedence cycle
-
-                ready_p_bar = max(
-                    sum(op.base_duration_min for op in ready) / max(len(ready), 1),
-                    1.0,
-                )
-
-                candidate_records: list[dict[str, Any]] = []
-                for op in ready:
-                    order = orders_by_id[op.order_id]
-                    due_offset = (order.due_date - horizon_start).total_seconds() / 60.0
-                    w_j = order.priority / 500.0
-                    pred_end = op_end_offsets.get(op.predecessor_op_id, 0.0)
-                    pred_end = max(
-                        pred_end,
-                        operation_earliest_offset_minutes(op, order, horizon_start),
-                    )
-
-                    eligible = (
-                        op.eligible_wc_ids
-                        if op.eligible_wc_ids
-                        else [wc.id for wc in problem.work_centers]
-                    )
-                    for wc_id in eligible:
-                        timed_out = _timeout()
-                        if timed_out is not None:
-                            return timed_out
-                        slot = find_earliest_feasible_slot(
-                            dispatch_context,
-                            assignments,
-                            op,
-                            wc_id,
-                            pred_end,
-                            machine_index=machine_idx,
-                            gap_scan=_gap_scan_for(total_ops, op),
-                        )
-                        if slot is None:
-                            continue
-
-                        work_center: Any = wc_by_id.get(wc_id)
-                        if work_center is None:
-                            from types import SimpleNamespace
-
-                            work_center = SimpleNamespace(id=wc_id, speed_factor=1.0)
-                        # F11: ATCS priority uses physical processing via timegrain.
-                        p_j = physical_processing_minutes_for(op, work_center)
-
-                        candidate_records.append(
-                            {
-                                "operation": op,
-                                "work_center_id": wc_id,
-                                "slot": slot,
-                                "due_offset": due_offset,
-                                "weight": w_j,
-                                "processing_minutes": p_j,
-                            }
-                        )
-
-                if not candidate_records:
-                    continue  # Dead beam
-
-                # M2: collapse each operation's candidates to its earliest-
-                # completion feasible slot before scoring, so a max_parallel
-                # machine's idle lane is used instead of queuing behind a busy
-                # lane (mirrors GreedyDispatch). Deterministic key (end, setup,
-                # wc id). Beam then explores which OPERATION to place next.
-                _best_by_op: dict[Any, dict[str, Any]] = {}
-                for record in candidate_records:
-                    op_id = record["operation"].id
-                    existing_best = _best_by_op.get(op_id)
-                    key = (
-                        record["slot"].end_offset,
-                        record["slot"].setup_minutes,
-                        record["slot"].material_loss,
-                        str(record["work_center_id"]),
-                    )
-                    if existing_best is None or key < (
-                        existing_best["slot"].end_offset,
-                        existing_best["slot"].setup_minutes,
-                        existing_best["slot"].material_loss,
-                        str(existing_best["work_center_id"]),
-                    ):
-                        _best_by_op[op_id] = record
-                candidate_records = list(_best_by_op.values())
-
-                # Compute setup and material scales
-                local_setup_scale_by_wc: dict[Any, float] = {}
-                for wc_id in {r["work_center_id"] for r in candidate_records}:
-                    nonzero = [
-                        r["slot"].setup_minutes
-                        for r in candidate_records
-                        if r["work_center_id"] == wc_id and r["slot"].setup_minutes > 0
-                    ]
-                    local_setup_scale_by_wc[wc_id] = max(
-                        sum(nonzero) / max(len(nonzero), 1),
-                        1.0,
-                    )
-                global_mat = [
-                    r["slot"].material_loss
-                    for r in candidate_records
-                    if r["slot"].material_loss > 0
-                ]
-                material_scale = max(sum(global_mat) / max(len(global_mat), 1), 1.0)
-
-                # Score all candidates and keep top-B
-                scored: list[tuple[float, dict[str, Any]]] = []
-                log_scores = compute_atcs_log_scores_batch(
-                    weights=[record["weight"] for record in candidate_records],
-                    processing_minutes=[
-                        record["processing_minutes"] for record in candidate_records
-                    ],
-                    slack=[
-                        max(
-                            record["due_offset"]
-                            - record["processing_minutes"]
-                            - record["slot"].start_offset,
-                            0.0,
-                        )
-                        for record in candidate_records
-                    ],
-                    ready_p_bar=ready_p_bar,
-                    setup_minutes=[record["slot"].setup_minutes for record in candidate_records],
-                    setup_scale=[
-                        local_setup_scale_by_wc[record["work_center_id"]]
-                        for record in candidate_records
-                    ],
-                    k1=self._k1,
-                    k2=self._k2,
-                    material_loss=[record["slot"].material_loss for record in candidate_records],
-                    material_scale=material_scale,
-                    k3=self._k3,
-                )
-
-                for record, log_score in zip(candidate_records, log_scores, strict=True):
-                    scored.append((log_score, record))
-
-                # Deterministic tie-break (op id, wc id) so the top-beam_width
-                # child set is a prefix independent of the beam width — the key
-                # to width-monotonicity: beams(B) then contains beams(B-1).
-                scored.sort(
-                    key=lambda x: (
-                        -x[0],
-                        str(x[1]["operation"].id),
-                        str(x[1]["work_center_id"]),
-                    )
-                )
-                # First stage (Ow & Morton): cheap ATCS priority filter selects
-                # up to beam_width child expansions of this beam.
-                top_candidates = scored[:beam_width]
-
-                for _score, record in top_candidates:
-                    new_assignments = list(assignments)
-                    new_scheduled = set(scheduled_ops)
-                    new_offsets = dict(op_end_offsets)
-
-                    best_op = record["operation"]
-                    best_slot = record["slot"]
-                    end_offset = best_slot.end_offset
-
-                    new_assignments.append(
-                        Assignment(
-                            operation_id=best_op.id,
-                            work_center_id=record["work_center_id"],
-                            start_time=horizon_start + timedelta(minutes=best_slot.start_offset),
-                            end_time=horizon_start + timedelta(minutes=end_offset),
-                            setup_minutes=best_slot.setup_minutes,
-                            aux_resource_ids=best_slot.aux_resource_ids,
-                        )
-                    )
-                    new_offsets[best_op.id] = end_offset
-                    new_scheduled.add(best_op.id)
-                    new_remaining = [op for op in remaining if op.id != best_op.id]
-
-                    # Second stage: completion-to-go rollout ranks this beam by
-                    # the ACTUAL objective and updates the global incumbent.
-                    timed_out = _timeout()
-                    if timed_out is not None:
-                        return timed_out
-                    rollout = _greedy_complete(
-                        dispatch_context,
-                        orders_by_id,
-                        horizon_start,
-                        new_assignments,
-                        new_scheduled,
-                        new_offsets,
-                        new_remaining,
-                        time_limit_s=time_limit_s,
-                        t0=t0,
-                    )
-                    if rollout is None:
-                        timed_out = _timeout()
-                        if timed_out is not None:
-                            return timed_out
-                        continue
-                    full_assignments, projected_mk = rollout
-                    if projected_mk < incumbent_makespan:
-                        # Snapshot: the rollout reuses assignment objects that
-                        # later steps mutate in place, so copy to freeze it.
-                        incumbent = [a.model_copy() for a in full_assignments]
-                        incumbent_makespan = projected_mk
-                    # Fingerprint is a deterministic function of the partial
-                    # schedule (independent of the beam width), so the top-B
-                    # beam set is a prefix and nests across widths.
-                    fingerprint = tuple(
-                        sorted(
-                            (
-                                str(a.work_center_id),
-                                (a.start_time - horizon_start).total_seconds(),
-                                str(a.operation_id),
-                            )
-                            for a in new_assignments
-                        )
-                    )
-                    candidates.append(
-                        (
-                            projected_mk,
-                            fingerprint,
-                            new_assignments,
-                            new_scheduled,
-                            new_offsets,
-                            new_remaining,
-                        ),
-                    )
-
+            candidates: list[_BeamCandidate] = []
+            for beam in self.beams:
+                timed_out = self._expand(beam, candidates)
+                if timed_out is not None:
+                    return timed_out
             if not candidates:
                 break
-
-            # Second-stage ranking: keep the B beams with the best completion-
-            # to-go projection (lower makespan is better), tie-broken by the
-            # deterministic fingerprint so top-B nests across beam widths.
-            candidates.sort(key=lambda x: (x[0], x[1]))
-            beams = [(c[2], c[3], c[4], c[5]) for c in candidates[:beam_width]]
-
-        # The incumbent is the best of every completed rollout. It is the
-        # returned schedule; a wider beam can only lower it (Q1 monotonicity).
-        if incumbent is None:
-            # Fall back to standard greedy
-            greedy = GreedyDispatch(k1=self._k1, k2=self._k2, k3=self._k3)
-            return greedy.solve(problem, **kwargs)
-
-        assignments, makespan = incumbent, incumbent_makespan
-        return _beam_feasible_result(
-            solver_name=self.name,
-            beam_width=self._beam_width,
-            assignments=assignments,
-            makespan=makespan,
-            dispatch_context=dispatch_context,
-            problem=problem,
-            horizon_start=horizon_start,
-            t0=t0,
-            acceleration_status=acceleration_status,
+            # Keep the B best completion-to-go projections; the deterministic
+            # fingerprint tie-break makes top-B nest across beam widths.
+            candidates.sort(key=lambda c: (c[0], c[1]))
+            self.beams = [(c[2], c[3], c[4], c[5]) for c in candidates[: self.beam_width]]
+        if self.incumbent is None:
+            # Fall back to standard greedy.
+            solver = self.solver
+            greedy = GreedyDispatch(k1=solver._k1, k2=solver._k2, k3=solver._k3)
+            return greedy.solve(self.problem, **self.kwargs)
+        return _dispatch_feasible_result(
+            solver_name=self.solver.name,
+            assignments=self.incumbent,
+            makespan=self.incumbent_makespan,
+            dispatch_context=self.dispatch_context,
+            problem=self.problem,
+            horizon_start=self.horizon_start,
+            t0=self.t0,
+            metadata={
+                "acceleration": self.acceleration_status,
+                "beam_width": self.solver._beam_width,
+            },
         )
+
+    def _offer_incumbent(self, assignments: list[Assignment], makespan: float) -> None:
+        if makespan < self.incumbent_makespan:
+            # Snapshot: assignment objects are shared across beams and mutated
+            # in place by later steps, so copy to freeze the incumbent.
+            self.incumbent = [a.model_copy() for a in assignments]
+            self.incumbent_makespan = makespan
+
+    def _expand(self, beam: _BeamState, candidates: list[_BeamCandidate]) -> ScheduleResult | None:
+        """Expand one beam into ranked children (or re-rank a completed beam)."""
+        assignments, scheduled_ops, op_end_offsets, remaining = beam
+        machine_idx = MachineIndex(self.dispatch_context)
+        for assignment in assignments:
+            machine_idx.add(assignment)
+        if not remaining:
+            completed = _makespan_of(assignments, self.horizon_start)
+            self._offer_incumbent(assignments, completed)
+            fingerprint = _partial_fingerprint(assignments, self.horizon_start)
+            candidates.append((completed, fingerprint, *beam))
+            return None
+        ready = [
+            op
+            for op in remaining
+            if op.predecessor_op_id is None or op.predecessor_op_id in scheduled_ops
+        ]
+        if not ready:
+            return None  # Dead beam — precedence cycle
+        records, timed_out = _collect_atcs_records(
+            problem=self.problem,
+            dispatch_context=self.dispatch_context,
+            orders_by_id=self.orders_by_id,
+            wc_by_id=self.wc_by_id,
+            ready=ready,
+            assignments=assignments,
+            op_end_offsets=op_end_offsets,
+            machine_idx=machine_idx,
+            n_total_ops=self.total_ops,
+            check_timeout=self._timeout,
+        )
+        if timed_out is not None:
+            return timed_out
+        if not records:
+            return None  # Dead beam
+        for record in self._top_children(records, _ready_p_bar(ready)):
+            timed_out = self._rollout_child(record, beam, candidates)
+            if timed_out is not None:
+                return timed_out
+        return None
+
+    def _top_children(
+        self, records: list[dict[str, Any]], ready_p_bar: float
+    ) -> list[dict[str, Any]]:
+        """First stage: per-op earliest-completion slot, then the top-B by ATCS.
+
+        M2: collapsing each operation to its earliest-completion slot lets a
+        max_parallel machine use an idle lane (mirrors GreedyDispatch). The
+        (op id, wc id) tie-break makes the top-B a width-independent prefix,
+        so beams(B) contains beams(B-1).
+        """
+        best_by_op: dict[Any, dict[str, Any]] = {}
+        for record in records:
+            op_id = record["operation"].id
+            existing = best_by_op.get(op_id)
+            if existing is None or _slot_preference_key(record) < _slot_preference_key(existing):
+                best_by_op[op_id] = record
+        collapsed = list(best_by_op.values())
+        solver = self.solver
+        log_scores = _atcs_log_scores(
+            collapsed, ready_p_bar=ready_p_bar, k1=solver._k1, k2=solver._k2, k3=solver._k3
+        )
+        scored = list(zip(log_scores, collapsed, strict=True))
+        scored.sort(key=lambda x: (-x[0], str(x[1]["operation"].id), str(x[1]["work_center_id"])))
+        return [record for _score, record in scored[: self.beam_width]]
+
+    def _rollout_child(
+        self, record: dict[str, Any], beam: _BeamState, candidates: list[_BeamCandidate]
+    ) -> ScheduleResult | None:
+        """Second stage: completion-to-go rollout ranks the child by makespan."""
+        assignments, scheduled_ops, op_end_offsets, remaining = beam
+        best_op = record["operation"]
+        new_assignments = [*assignments, _assignment_from_record(record, self.horizon_start)]
+        new_offsets = dict(op_end_offsets)
+        new_offsets[best_op.id] = record["slot"].end_offset
+        new_scheduled = set(scheduled_ops)
+        new_scheduled.add(best_op.id)
+        new_remaining = [op for op in remaining if op.id != best_op.id]
+        timed_out = self._timeout()
+        if timed_out is not None:
+            return timed_out
+        rollout = _greedy_complete(
+            self.dispatch_context,
+            self.orders_by_id,
+            self.horizon_start,
+            new_assignments,
+            new_scheduled,
+            new_offsets,
+            new_remaining,
+            time_limit_s=self.time_limit_s,
+            t0=self.t0,
+        )
+        if rollout is None:
+            return self._timeout()
+        full_assignments, projected_mk = rollout
+        self._offer_incumbent(full_assignments, projected_mk)
+        candidates.append(
+            (
+                projected_mk,
+                _partial_fingerprint(new_assignments, self.horizon_start),
+                new_assignments,
+                new_scheduled,
+                new_offsets,
+                new_remaining,
+            )
+        )
+        return None

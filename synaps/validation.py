@@ -14,6 +14,7 @@ from synaps.solvers.feasibility_checker import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from uuid import UUID
 
 
@@ -35,8 +36,67 @@ class SetupTriangleViolation:
     via_minutes: float
 
 
+def _triangle_violations_by_source(
+    problem: ScheduleProblem,
+) -> Iterator[list[SetupTriangleViolation]]:
+    """Yield, per (work center, source state), its triangle violations.
+
+    Vectorised (NumPy) form of the triple loop ``for a, c, b``: for a fixed
+    source ``a`` the matrix ``via[c, b] = D[a, b] + D[b, c]`` is one broadcast,
+    and missing cells are NaN (every comparison with NaN is False, which is the
+    historical "missing cell = no assertion" rule). Only states that occur in
+    the work center's own entries can take part, so each work center costs
+    ``O(k^3)`` flops on its ``k`` participating states instead of ``O(|S|^3)``
+    interpreted Python iterations (audit 2026-10: this ran on every
+    ``solve()``). Output order is identical to the historical loop
+    (work centers in set order, then ``a``, ``c``, ``b`` in ``problem.states``
+    order).
+    """
+    import numpy as np
+
+    entries_by_wc: dict[UUID, list[tuple[UUID, UUID, float]]] = {}
+    for e in problem.setup_matrix:
+        entries_by_wc.setdefault(e.work_center_id, []).append(
+            (e.from_state_id, e.to_state_id, float(e.setup_minutes))
+        )
+    wc_ids = {e.work_center_id for e in problem.setup_matrix}
+    state_ids = [s.id for s in problem.states]
+    for wc_id in wc_ids:
+        rows = entries_by_wc[wc_id]
+        present = {state for row in rows for state in row[:2]}
+        local = [state for state in state_ids if state in present]
+        position = {state: i for i, state in enumerate(local)}
+        k = len(local)
+        matrix = np.full((k, k), np.nan)
+        for from_state, to_state, minutes in rows:
+            if from_state in position and to_state in position:
+                matrix[position[from_state], position[to_state]] = minutes
+        off_diagonal = ~np.eye(k, dtype=bool)
+        transposed = matrix.T
+        for a in range(k):
+            via = matrix[a][None, :] + transposed  # via[c, b] = D[a, b] + D[b, c]
+            hits = (matrix[a][:, None] > via + 1e-9) & off_diagonal
+            hits[a, :] = False  # c == a
+            hits[:, a] = False  # b == a
+            found = [
+                SetupTriangleViolation(
+                    work_center_id=wc_id,
+                    from_state_id=local[a],
+                    via_state_id=local[b],
+                    to_state_id=local[c],
+                    direct_minutes=float(matrix[a, c]),
+                    via_minutes=float(via[c, b]),
+                )
+                for c, b in np.argwhere(hits)
+            ]
+            if found:
+                yield found
+
+
 def validate_setup_matrix_metricity(
     problem: ScheduleProblem,
+    *,
+    limit: int | None = None,
 ) -> list[SetupTriangleViolation]:
     """Return every triangle-inequality violation in the SDST matrix (M3).
 
@@ -45,46 +105,30 @@ def validate_setup_matrix_metricity(
     heuristics can warn instead of silently under/over-claiming. A missing
     (from, to) cell is treated as +inf (no assertion possible), so it never
     fabricates a violation.
+
+    Semantics note (audit 2026-10): solvers and the checker read a missing
+    cross-state cell as a ZERO setup (sparse SDST). "Metric" here therefore
+    means metric over the EXPLICIT cells; the effective matrix used by the
+    solvers can be non-metric through implicit zeros even when this returns
+    no violation.
+
+    ``limit`` stops the enumeration once at least that many violations were
+    found (whole source-state blocks are kept, so the list may be longer).
     """
-    setup: dict[tuple[UUID, UUID, UUID], float] = {
-        (e.work_center_id, e.from_state_id, e.to_state_id): float(e.setup_minutes)
-        for e in problem.setup_matrix
-    }
-    wc_ids = {e.work_center_id for e in problem.setup_matrix}
-    state_ids = [s.id for s in problem.states]
     violations: list[SetupTriangleViolation] = []
-    for wc_id in wc_ids:
-        for a in state_ids:
-            for c in state_ids:
-                if a == c:
-                    continue
-                direct = setup.get((wc_id, a, c))
-                if direct is None:
-                    continue
-                for b in state_ids:
-                    if b in (a, c):
-                        continue
-                    ab = setup.get((wc_id, a, b))
-                    bc = setup.get((wc_id, b, c))
-                    if ab is None or bc is None:
-                        continue
-                    if direct > ab + bc + 1e-9:
-                        violations.append(
-                            SetupTriangleViolation(
-                                work_center_id=wc_id,
-                                from_state_id=a,
-                                via_state_id=b,
-                                to_state_id=c,
-                                direct_minutes=direct,
-                                via_minutes=ab + bc,
-                            )
-                        )
+    for found in _triangle_violations_by_source(problem):
+        violations.extend(found)
+        if limit is not None and len(violations) >= limit:
+            break
     return violations
 
 
 def is_setup_matrix_metric(problem: ScheduleProblem) -> bool:
-    """True iff the SDST matrix satisfies the triangle inequality everywhere (M3)."""
-    return not validate_setup_matrix_metricity(problem)
+    """True iff the SDST matrix satisfies the triangle inequality everywhere (M3).
+
+    Short-circuits on the first violation.
+    """
+    return not validate_setup_matrix_metricity(problem, limit=1)
 
 
 @dataclass(frozen=True)

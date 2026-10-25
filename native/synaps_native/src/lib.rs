@@ -85,9 +85,7 @@ fn build_successor_index(predecessor_ids: &[i64]) -> PyResult<(Vec<usize>, Vec<u
 
         let predecessor_idx = predecessor_idx as usize;
         if predecessor_idx >= op_count {
-            return Err(PyValueError::new_err(
-                "predecessor index is out of range",
-            ));
+            return Err(PyValueError::new_err("predecessor index is out of range"));
         }
 
         successor_offsets[predecessor_idx + 1] += 1;
@@ -245,7 +243,9 @@ fn compute_atcs_log_score(
         0.0
     };
 
-    safe_weight.ln() - safe_processing.ln() - (slack / (k1 * safe_ready_p_bar))
+    safe_weight.ln()
+        - safe_processing.ln()
+        - (slack / (k1 * safe_ready_p_bar))
         - setup_penalty
         - material_penalty
 }
@@ -776,8 +776,8 @@ fn machine_objective_kernel(
     end_offsets: &[f64],
     wc_idx: usize,
     state_ids: &[i64],
-    sdst_setup: &[f64],      // flattened [n_wc, n_states, n_states]
-    sdst_loss: &[f64],       // flattened [n_wc, n_states, n_states]
+    sdst_setup: &[f64], // flattened [n_wc, n_states, n_states]
+    sdst_loss: &[f64],  // flattened [n_wc, n_states, n_states]
     n_states: usize,
 ) -> (f64, f64, f64) {
     // (makespan, setup, material_loss)
@@ -856,8 +856,8 @@ fn evaluate_objective_batch<'py>(
 
     // Group assignment indices by machine
     let mut by_machine: Vec<Vec<usize>> = vec![Vec::new(); n_wc];
-    for i in 0..n {
-        let machine = wc[i] as usize;
+    for (i, &machine_raw) in wc.iter().enumerate().take(n) {
+        let machine = machine_raw as usize;
         if machine < n_wc {
             by_machine[machine].push(i);
         }
@@ -908,7 +908,13 @@ fn evaluate_objective_batch<'py>(
         + w_loss * total_loss
         + w_tardiness * total_tardiness;
 
-    Ok((cost, total_makespan, total_setup, total_loss, total_tardiness))
+    Ok((
+        cost,
+        total_makespan,
+        total_setup,
+        total_loss,
+        total_tardiness,
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -961,8 +967,8 @@ fn stabilize_temporal_batch<'py>(
 
     let mut topo_order: Vec<usize> = Vec::with_capacity(n);
     let mut queue: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
-    for i in 0..n {
-        if indegree[i] == 0 {
+    for (i, &degree) in indegree.iter().enumerate().take(n) {
+        if degree == 0 {
             queue.push_back(i);
         }
     }
@@ -980,8 +986,8 @@ fn stabilize_temporal_batch<'py>(
     for &node in &topo_order {
         visited[node] = true;
     }
-    for i in 0..n {
-        if !visited[i] {
+    for (i, &seen) in visited.iter().enumerate() {
+        if !seen {
             topo_order.push(i);
         }
     }
@@ -1015,8 +1021,8 @@ fn stabilize_temporal_batch<'py>(
 
             // Machine overlap repair (sort by start_offset per machine)
             let mut by_machine: Vec<Vec<usize>> = vec![Vec::new(); n_wc];
-            for i in 0..n {
-                let m = wc[i] as usize;
+            for (i, &machine_raw) in wc.iter().enumerate().take(n) {
+                let m = machine_raw as usize;
                 if m < n_wc {
                     by_machine[m].push(i);
                 }
@@ -1111,9 +1117,8 @@ impl NativeSdstBatchLookup {
         if wc_idx >= self.n_wc || from_state_idx >= self.n_states || to_state_idx >= self.n_states {
             return 0.0;
         }
-        let idx = wc_idx * self.n_states * self.n_states
-            + from_state_idx * self.n_states
-            + to_state_idx;
+        let idx =
+            wc_idx * self.n_states * self.n_states + from_state_idx * self.n_states + to_state_idx;
         self.setup_values[idx]
     }
 
@@ -1257,90 +1262,88 @@ fn compute_destroy_worst_scores<'py>(
     let out_ptr = SendPtr(unsafe { out.as_slice_mut().unwrap().as_mut_ptr() });
 
     py.allow_threads(|| {
-        (0..n_machines)
-            .into_par_iter()
-            .for_each(|m| {
-                let row_start = offsets[m] as usize;
-                let row_end = offsets[m + 1] as usize;
-                let machine_len = row_end - row_start;
+        (0..n_machines).into_par_iter().for_each(|m| {
+            let row_start = offsets[m] as usize;
+            let row_end = offsets[m + 1] as usize;
+            let machine_len = row_end - row_start;
 
-                if machine_len == 0 {
-                    return;
+            if machine_len == 0 {
+                return;
+            }
+
+            for pos in 0..machine_len {
+                let assign_idx = indices[row_start + pos] as usize;
+                if assign_idx >= n_assignments {
+                    continue;
                 }
 
-                for pos in 0..machine_len {
-                    let assign_idx = indices[row_start + pos] as usize;
-                    if assign_idx >= n_assignments {
-                        continue;
-                    }
-
-                    let wc_idx = wc[assign_idx] as usize;
-                    if wc_idx >= n_wc {
-                        // SAFETY: unique index per assignment
-                        unsafe { out_ptr.write_at(assign_idx, 0.0) };
-                        continue;
-                    }
-
-                    let wc_offset = wc_idx * n_states * n_states;
-                    let curr_state = states[assign_idx];
-
-                    if curr_state < 0 || (curr_state as usize) >= n_states {
-                        unsafe { out_ptr.write_at(assign_idx, 0.0) };
-                        continue;
-                    }
-
-                    let cs = curr_state as usize;
-                    let mut score = 0.0;
-
-                    // Setup cost from predecessor to current
-                    if pos > 0 {
-                        let prev_idx = indices[row_start + pos - 1] as usize;
-                        if prev_idx < n_assignments {
-                            let prev_state = states[prev_idx];
-                            if prev_state >= 0 && (prev_state as usize) < n_states {
-                                let ps = prev_state as usize;
-                                score += sdst[wc_offset + ps * n_states + cs];
-                            }
-                        }
-                    }
-
-                    // Setup cost from current to successor
-                    if pos < machine_len - 1 {
-                        let next_idx = indices[row_start + pos + 1] as usize;
-                        if next_idx < n_assignments {
-                            let next_state = states[next_idx];
-                            if next_state >= 0 && (next_state as usize) < n_states {
-                                let ns = next_state as usize;
-                                score += sdst[wc_offset + cs * n_states + ns];
-                            }
-                        }
-                    }
-
-                    // Subtract setup cost from predecessor directly to successor
-                    // (the cost that would remain if we remove this operation)
-                    if pos > 0 && pos < machine_len - 1 {
-                        let prev_idx = indices[row_start + pos - 1] as usize;
-                        let next_idx = indices[row_start + pos + 1] as usize;
-                        if prev_idx < n_assignments && next_idx < n_assignments {
-                            let prev_state = states[prev_idx];
-                            let next_state = states[next_idx];
-                            if prev_state >= 0
-                                && next_state >= 0
-                                && (prev_state as usize) < n_states
-                                && (next_state as usize) < n_states
-                            {
-                                let ps = prev_state as usize;
-                                let ns = next_state as usize;
-                                score -= sdst[wc_offset + ps * n_states + ns];
-                            }
-                        }
-                    }
-
-                    // SAFETY: each assignment_idx is unique across the CSR structure,
-                    // so each rayon task writes to a disjoint output index.
-                    unsafe { out_ptr.write_at(assign_idx, score) };
+                let wc_idx = wc[assign_idx] as usize;
+                if wc_idx >= n_wc {
+                    // SAFETY: unique index per assignment
+                    unsafe { out_ptr.write_at(assign_idx, 0.0) };
+                    continue;
                 }
-            });
+
+                let wc_offset = wc_idx * n_states * n_states;
+                let curr_state = states[assign_idx];
+
+                if curr_state < 0 || (curr_state as usize) >= n_states {
+                    unsafe { out_ptr.write_at(assign_idx, 0.0) };
+                    continue;
+                }
+
+                let cs = curr_state as usize;
+                let mut score = 0.0;
+
+                // Setup cost from predecessor to current
+                if pos > 0 {
+                    let prev_idx = indices[row_start + pos - 1] as usize;
+                    if prev_idx < n_assignments {
+                        let prev_state = states[prev_idx];
+                        if prev_state >= 0 && (prev_state as usize) < n_states {
+                            let ps = prev_state as usize;
+                            score += sdst[wc_offset + ps * n_states + cs];
+                        }
+                    }
+                }
+
+                // Setup cost from current to successor
+                if pos < machine_len - 1 {
+                    let next_idx = indices[row_start + pos + 1] as usize;
+                    if next_idx < n_assignments {
+                        let next_state = states[next_idx];
+                        if next_state >= 0 && (next_state as usize) < n_states {
+                            let ns = next_state as usize;
+                            score += sdst[wc_offset + cs * n_states + ns];
+                        }
+                    }
+                }
+
+                // Subtract setup cost from predecessor directly to successor
+                // (the cost that would remain if we remove this operation)
+                if pos > 0 && pos < machine_len - 1 {
+                    let prev_idx = indices[row_start + pos - 1] as usize;
+                    let next_idx = indices[row_start + pos + 1] as usize;
+                    if prev_idx < n_assignments && next_idx < n_assignments {
+                        let prev_state = states[prev_idx];
+                        let next_state = states[next_idx];
+                        if prev_state >= 0
+                            && next_state >= 0
+                            && (prev_state as usize) < n_states
+                            && (next_state as usize) < n_states
+                        {
+                            let ps = prev_state as usize;
+                            let ns = next_state as usize;
+                            score -= sdst[wc_offset + ps * n_states + ns];
+                        }
+                    }
+                }
+
+                // SAFETY: each assignment_idx is unique across the CSR structure,
+                // so each rayon task writes to a disjoint output index.
+                unsafe { out_ptr.write_at(assign_idx, score) };
+            }
+        });
     });
 
     Ok(out.into())
@@ -1373,18 +1376,18 @@ fn compute_destroy_worst_scores<'py>(
 fn greedy_repair_batch<'py>(
     py: Python<'py>,
     // Operation data (N operations, in topological order)
-    base_durations: PyReadonlyArray1<'py, f64>,      // [N] duration in minutes
-    predecessor_indices: PyReadonlyArray1<'py, i64>,  // [N] -1 = no predecessor
+    base_durations: PyReadonlyArray1<'py, f64>, // [N] duration in minutes
+    predecessor_indices: PyReadonlyArray1<'py, i64>, // [N] -1 = no predecessor
     // Eligible machines per operation (CSR format)
-    eligible_offsets: PyReadonlyArray1<'py, i64>,     // [N+1] CSR row pointers
-    eligible_indices: PyReadonlyArray1<'py, i64>,     // flat eligible machine indices
+    eligible_offsets: PyReadonlyArray1<'py, i64>, // [N+1] CSR row pointers
+    eligible_indices: PyReadonlyArray1<'py, i64>, // flat eligible machine indices
     // SDST data
-    state_ids: PyReadonlyArray1<'py, i64>,           // [N] state index per operation
-    sdst_setup_flat: PyReadonlyArray1<'py, f64>,     // [n_wc * n_states * n_states]
+    state_ids: PyReadonlyArray1<'py, i64>, // [N] state index per operation
+    sdst_setup_flat: PyReadonlyArray1<'py, f64>, // [n_wc * n_states * n_states]
     n_wc: usize,
     n_states: usize,
     // Machine speed factors
-    speed_factors: PyReadonlyArray1<'py, f64>,       // [n_wc]
+    speed_factors: PyReadonlyArray1<'py, f64>, // [n_wc]
 ) -> PyResult<(Py<PyArray1<f64>>, Py<PyArray1<f64>>, Py<PyArray1<i64>>)> {
     let durations = base_durations.as_slice()?;
     let preds = predecessor_indices.as_slice()?;
@@ -1473,7 +1476,7 @@ fn greedy_repair_batch<'py>(
             for k in row_start..row_end {
                 if k + PREFETCH_DISTANCE < row_end {
                     let m_ahead = elig_idx[k + PREFETCH_DISTANCE] as usize;
-                    prefetch_f64_at(&speeds, m_ahead);
+                    prefetch_f64_at(speeds, m_ahead);
                     prefetch_f64_at(&machine_available_at, m_ahead);
                     if m_ahead < n_wc && machine_last_state[m_ahead] >= 0 && states[i] >= 0 {
                         let prev_s = machine_last_state[m_ahead] as usize;
@@ -1560,9 +1563,18 @@ fn synaps_native(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> 
     module.add_class::<NativeSdstBatchLookup>()?;
     module.add_function(wrap_pyfunction!(compute_atcs_log_score, module)?)?;
     module.add_function(wrap_pyfunction!(compute_atcs_log_scores_batch, module)?)?;
-    module.add_function(wrap_pyfunction!(resource_capacity_window_is_feasible, module)?)?;
-    module.add_function(wrap_pyfunction!(compute_rhc_candidate_metrics_batch, module)?)?;
-    module.add_function(wrap_pyfunction!(compute_rhc_candidate_metrics_batch_np, module)?)?;
+    module.add_function(wrap_pyfunction!(
+        resource_capacity_window_is_feasible,
+        module
+    )?)?;
+    module.add_function(wrap_pyfunction!(
+        compute_rhc_candidate_metrics_batch,
+        module
+    )?)?;
+    module.add_function(wrap_pyfunction!(
+        compute_rhc_candidate_metrics_batch_np,
+        module
+    )?)?;
     module.add_function(wrap_pyfunction!(
         compute_rhc_candidate_metrics_batch_np_jagged,
         module
@@ -1571,6 +1583,9 @@ fn synaps_native(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> 
     module.add_function(wrap_pyfunction!(stabilize_temporal_batch, module)?)?;
     module.add_function(wrap_pyfunction!(compute_destroy_worst_scores, module)?)?;
     module.add_function(wrap_pyfunction!(greedy_repair_batch, module)?)?;
-    module.add_function(wrap_pyfunction!(list_schedule::list_schedule_cover, module)?)?;
+    module.add_function(wrap_pyfunction!(
+        list_schedule::list_schedule_cover,
+        module
+    )?)?;
     Ok(())
 }
