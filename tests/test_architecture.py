@@ -139,7 +139,6 @@ _LONG_FUNCTION_RATCHET: dict[str, int] = {
     "solvers/alns_solver.py::_try_native_greedy_repair": 260,
     "solvers/incremental_repair.py::_solve_core": 237,
     "solvers/cpsat_solver.py::_add_machine_order_and_adjacency": 241,
-    "solvers/lbbd_solver.py::_solve_master": 176,
     "solvers/alns_solver.py::_try_native_initial_seed": 217,
     "solvers/alns_solver.py::_destroy_critical_path": 202,
     "benchmarks/instance_generator.py::generate_large_instance": 194,

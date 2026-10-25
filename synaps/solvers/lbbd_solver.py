@@ -53,6 +53,12 @@ from synaps.solvers._lbbd_cuts import (
     cut_pool_fingerprint,
     reported_lower_bound,
 )
+from synaps.solvers._lbbd_sound import (
+    SoundMaster,
+    SoundMasterBound,
+    SoundRelaxation,
+    compute_sound_master_lower_bound,
+)
 from synaps.solvers._process_pool import SubproblemPool, solve_clusters
 from synaps.solvers.coverage_outcome import stamp_honest_coverage
 from synaps.solvers.cpsat_solver import CpSatSolver
@@ -145,6 +151,20 @@ class _LbbdRun:
         self.prev_iteration_cut_kinds: list[str] = []
         self.greedy_warm_start_used = False
         self.min_setup_by_wc: dict[UUID, float] = {}
+        # T-06 (opt-in): sound master rows, valid for every schedule, separated
+        # lazily at each master incumbent; never discounted (KI-S3).
+        # A 2 % relative MIP gap stops each master early (its dual bound stays
+        # valid) and leaves budget for separation rounds and iterations.
+        self.sound: SoundMaster | None = (
+            SoundMaster(
+                SoundRelaxation(problem),
+                mip_rel_gap=float(kwargs.get("sound_mip_rel_gap", 0.02)),
+            )
+            if kwargs.get("sound_cuts", False)
+            else None
+        )
+        self.sound_cut_rounds = int(kwargs.get("sound_cut_rounds", 8))
+        self.sound_final: SoundMasterBound | None = None
 
     def _register_cut(self, cut: _BendersCut) -> bool:
         fp = cut_pool_fingerprint(cut)
@@ -181,7 +201,28 @@ class _LbbdRun:
                     break
         finally:
             self.pool.close()
+        self._final_sound_bound()
         return self._final_result()
+
+    def _final_sound_bound(self) -> None:
+        """T-06: re-solve the sound rows WITHOUT the no-goods for the reported bound.
+
+        The rows separated in later iterations raise the relaxation, but those
+        masters also held no-goods, so their values are not lower bounds. One
+        no-good-free master over the whole row pool, within the remaining wall
+        budget, is.
+        """
+        remaining = self.deadline - time.monotonic()
+        if self.sound is None or remaining < 1.0:
+            return
+        if self.lb_evolution and self.best_ub - self.lb_evolution[0] <= 1e-6:
+            return  # the first master already closed the gap
+        self.sound_final = compute_sound_master_lower_bound(
+            self.problem,
+            time_limit_s=remaining,
+            max_rounds=self.sound_cut_rounds,
+            master=self.sound,
+        )
 
     def _greedy_warm_start(self) -> None:
         warm_ub, warm_assignments, warm_objective, warm_map = _greedy_warm_start(
@@ -212,6 +253,8 @@ class _LbbdRun:
             master_time_limit_s=max(
                 1.0, min(self.deadline - time.monotonic(), float(self.sub_time_limit_s) + 2.0)
             ),
+            sound=self.sound,
+            sound_rounds=self.sound_cut_rounds,
         )
         if master_result is None:
             failed = _master_failed_result(
@@ -355,9 +398,13 @@ class _LbbdRun:
         Cluster subproblems are re-assembled, so ``sub_makespan`` is an UPPER
         bound for its assignment: no-goods drive the search but must not
         tighten the reported bound (observed 92 vs optimum 90). The only valid
-        bound is the first, cut-free master relaxation.
+        bound is the first, cut-free master relaxation — or, with T-06
+        ``sound_cuts``, any master that holds valid rows but no no-good.
         """
         raw_relaxation = self.lb_evolution[0] if self.lb_evolution else 0.0
+        if self.sound_final is not None:
+            # T-06: a no-good-free master over valid rows only — also a bound.
+            raw_relaxation = max(raw_relaxation, self.sound_final.value)
         reported_lb, violated = reported_lower_bound(raw_relaxation, self.best_ub)
         if violated:
             warnings.warn(
@@ -376,7 +423,7 @@ class _LbbdRun:
         # N2: no cut ever generated -> the master never learned (degenerate run).
         benders_active = len(self.benders_cuts) > 0
         best_ub = self.best_ub
-        return {
+        metadata: dict[str, Any] = {
             "iterations": len(self.iteration_log),
             "lower_bound": reported_lb,
             "upper_bound": best_ub,
@@ -407,6 +454,18 @@ class _LbbdRun:
                 "skipped_unproven_subproblem": self.cuts_skipped_unproven_subproblem,
             },
         }
+        if self.sound is not None:
+            metadata["lower_bound_method"] = "sound_master_relaxation"
+            metadata["sound_cuts"] = {
+                "rows_by_kind": self.sound.rows_by_kind(),
+                "separation_rounds": self.sound.rounds,
+                "first_master_lb": self.lb_evolution[0] if self.lb_evolution else None,
+                "final_master_lb": None if self.sound_final is None else self.sound_final.value,
+                "final_master_converged": (
+                    None if self.sound_final is None else self.sound_final.converged
+                ),
+            }
+        return metadata
 
 
 class _BendersCut:
@@ -467,6 +526,8 @@ def _solve_master(
     min_setup_by_wc: dict[UUID, float] | None = None,
     prev_solution: dict[UUID, UUID] | None = None,
     master_time_limit_s: float | None = None,
+    sound: SoundMaster | None = None,
+    sound_rounds: int = 0,
 ) -> tuple[tuple[dict[UUID, UUID], float] | None, bool]:
     """Solve the assignment master problem via HiGHS MIP.
 
@@ -478,6 +539,8 @@ def _solve_master(
         ∑_k y[i,k] = 1                    ∀ i ∈ ops      (unique assignment)
         ∑_i P[i,k] · y[i,k] ≤ C_max      ∀ k ∈ machines  (relaxed capacity)
         Benders cuts from previous iterations
+        T-06 (``sound``): valid rows of ``_lbbd_sound``, separated lazily for
+        up to ``sound_rounds`` rounds at the incumbent
 
     Objective: min C_max
 
@@ -488,6 +551,39 @@ def _solve_master(
     as SolverStatus.INFEASIBLE. Only HiGHS' ``kInfeasible`` model status is a
     proof of infeasibility.
     """
+    started = time.monotonic()
+    h, var_index, cmax_idx = _build_master_model(
+        problem, eligible_by_op, wc_by_id, min_setup_by_wc, master_time_limit_s
+    )
+    # Constraint 3: Benders cuts from previous iterations
+    _add_benders_cut_rows(h, cuts, var_index, cmax_idx)
+
+    # Solve
+    h.changeObjectiveSense(highspy.ObjSense.kMinimize)
+    z_index = sound.attach(h, var_index, cmax_idx) if sound is not None else {}
+    if prev_solution is not None and hasattr(h, "setSolution"):
+        _hint_master_solution(
+            h, problem, eligible_by_op, var_index, cmax_idx, prev_solution, sound, z_index
+        )
+    best_dual = float("-inf")
+    if sound is None:
+        h.run()
+    else:
+        budget = float(master_time_limit_s) if master_time_limit_s is not None else 60.0
+        _, best_dual = sound.solve(
+            h, var_index, z_index, cmax_idx, started + max(1.0, budget), sound_rounds
+        )
+    return _extract_master_solution(h, problem, eligible_by_op, var_index, cmax_idx, best_dual)
+
+
+def _build_master_model(
+    problem: ScheduleProblem,
+    eligible_by_op: dict[UUID, list[UUID]],
+    wc_by_id: dict[UUID, WorkCenter],
+    min_setup_by_wc: dict[UUID, float] | None,
+    master_time_limit_s: float | None,
+) -> tuple[Any, dict[tuple[UUID, UUID], int], int]:
+    """HiGHS model with ``y`` / ``C_max`` columns, assignment and capacity rows."""
     h = highspy.Highs()
     h.silent()
     # D3: bound the master MILP by the remaining wall budget. An unbounded
@@ -537,7 +633,18 @@ def _solve_master(
             np.array(unique_coeffs),
         )
 
-    # Constraint 2: relaxed capacity — ∑_i P[i,k] · y[i,k] ≤ C_max for each machine
+    _add_capacity_rows(h, problem, var_index, cmax_idx, min_setup_by_wc)
+    return h, var_index, cmax_idx
+
+
+def _add_capacity_rows(
+    h: Any,
+    problem: ScheduleProblem,
+    var_index: dict[tuple[UUID, UUID], int],
+    cmax_idx: int,
+    min_setup_by_wc: dict[UUID, float] | None,
+) -> None:
+    """Constraint 2: relaxed capacity — ∑_i P[i,k] · y[i,k] ≤ C_max per machine."""
     for wc in problem.work_centers:
         capacity_indices: list[int] = []
         capacity_coeffs: list[float] = []
@@ -576,27 +683,45 @@ def _solve_master(
             np.array(capacity_coeffs),
         )
 
-    # Constraint 3: Benders cuts from previous iterations
-    _add_benders_cut_rows(h, cuts, var_index, cmax_idx)
 
-    # Solve
-    h.changeObjectiveSense(highspy.ObjSense.kMinimize)
-    if prev_solution is not None and hasattr(h, "setSolution"):
-        hint_values = [0.0] * n_vars
-        for op in problem.operations:
-            previous_wc = prev_solution.get(op.id)
-            for wc_id in eligible_by_op[op.id]:
-                key = (op.id, wc_id)
-                if key in var_index:
-                    hint_values[var_index[key]] = 1.0 if wc_id == previous_wc else 0.0
-        hint_values[cmax_idx] = float(
-            int(
-                (problem.planning_horizon_end - problem.planning_horizon_start).total_seconds() / 60
-            )
-        )
-        h.setSolution(n_vars, np.arange(n_vars, dtype=np.int32), np.array(hint_values))
-    h.run()
+def _hint_master_solution(
+    h: Any,
+    problem: ScheduleProblem,
+    eligible_by_op: dict[UUID, list[UUID]],
+    var_index: dict[tuple[UUID, UUID], int],
+    cmax_idx: int,
+    prev_solution: dict[UUID, UUID],
+    sound: SoundMaster | None,
+    z_index: dict[tuple[UUID, UUID], int],
+) -> None:
+    """Warm-start the master with the previous assignment (``z`` = states it uses)."""
+    hint_values = [0.0] * int(h.getNumCol())
+    for op in problem.operations:
+        previous_wc = prev_solution.get(op.id)
+        for wc_id in eligible_by_op[op.id]:
+            key = (op.id, wc_id)
+            if key in var_index:
+                hint_values[var_index[key]] = 1.0 if wc_id == previous_wc else 0.0
+        if sound is not None and previous_wc is not None:
+            z_col = z_index.get((previous_wc, op.state_id))
+            if z_col is not None:
+                hint_values[z_col] = 1.0
+    hint_values[cmax_idx] = float(
+        int((problem.planning_horizon_end - problem.planning_horizon_start).total_seconds() / 60)
+    )
+    n_vars = len(hint_values)
+    h.setSolution(n_vars, np.arange(n_vars, dtype=np.int32), np.array(hint_values))
 
+
+def _extract_master_solution(
+    h: Any,
+    problem: ScheduleProblem,
+    eligible_by_op: dict[UUID, list[UUID]],
+    var_index: dict[tuple[UUID, UUID], int],
+    cmax_idx: int,
+    best_dual: float = float("-inf"),
+) -> tuple[tuple[dict[UUID, UUID], float] | None, bool]:
+    """Assignment and proven master bound of a solved HiGHS master."""
     status = h.getInfoValue("primal_solution_status")[1]
     if status != 2:  # 2 = feasible
         # F12 (audit v4): only HiGHS kInfeasible is a PROOF; a time-limited
@@ -632,6 +757,9 @@ def _solve_master(
         dual_bound = float(h.getInfoValue("mip_dual_bound")[1])
     except (IndexError, TypeError, ValueError):
         dual_bound = master_bound
+    # T-06: an earlier separation round may have proven more than the last,
+    # clock-limited one; every round's model holds only valid rows.
+    dual_bound = max(dual_bound, best_dual)
     if math.isfinite(dual_bound):
         master_bound = min(master_bound, dual_bound)
     return (assignment_map, master_bound), False
