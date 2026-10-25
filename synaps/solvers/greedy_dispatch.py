@@ -30,6 +30,7 @@ from synaps.solvers._dispatch_support import (
     recompute_assignment_setups,
 )
 from synaps.solvers._time_windows import operation_earliest_offset_minutes
+from synaps.solvers._virtual_lanes import operation_on_lanes
 from synaps.solvers.coverage_outcome import stamp_honest_coverage
 from synaps.timegrain import duration_minutes_for, physical_processing_minutes_for
 
@@ -233,13 +234,9 @@ def _virtualize_parallel_lanes(
         expanded_ids[wc.id] = lane_ids
 
     default_eligible = [wc.id for wc in problem.work_centers]
-    new_operations = []
-    for op in problem.operations:
-        base_eligible = list(op.eligible_wc_ids) if op.eligible_wc_ids else list(default_eligible)
-        expanded_eligible: list[Any] = []
-        for wc_id in base_eligible:
-            expanded_eligible.extend(expanded_ids.get(wc_id, [wc_id]))
-        new_operations.append(op.model_copy(update={"eligible_wc_ids": expanded_eligible}))
+    new_operations = [
+        operation_on_lanes(op, expanded_ids, default_eligible) for op in problem.operations
+    ]
 
     new_setup_matrix = []
     for entry in problem.setup_matrix:

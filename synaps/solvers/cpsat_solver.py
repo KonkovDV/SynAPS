@@ -26,6 +26,7 @@ from synaps.solvers._time_windows import (
     operation_earliest_offset_minutes,
     operation_latest_finish_offset_minutes,
 )
+from synaps.solvers._virtual_lanes import operation_on_lanes
 from synaps.solvers.coverage_outcome import stamp_honest_coverage
 from synaps.solvers.mode_choice import build_presence_intervals, mode_assignment
 
@@ -588,19 +589,10 @@ class CpSatSolver(BaseSolver):
             expanded_ids[work_center.id] = lane_ids
 
         default_eligible = [work_center.id for work_center in problem.work_centers]
-        new_operations = []
-        for operation in problem.operations:
-            base_eligible = (
-                list(operation.eligible_wc_ids)
-                if operation.eligible_wc_ids
-                else list(default_eligible)
-            )
-            expanded_eligible: list[UUID] = []
-            for work_center_id in base_eligible:
-                expanded_eligible.extend(expanded_ids.get(work_center_id, [work_center_id]))
-            new_operations.append(
-                operation.model_copy(update={"eligible_wc_ids": expanded_eligible})
-            )
+        new_operations = [
+            operation_on_lanes(operation, expanded_ids, default_eligible)
+            for operation in problem.operations
+        ]
 
         new_setup_matrix = []
         for entry in problem.setup_matrix:
