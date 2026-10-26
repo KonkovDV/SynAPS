@@ -153,7 +153,7 @@ Line counts are a 2026-10 snapshot (`wc -l`, audit `docs/rfc/AUDIT_2026_10.md`);
 |-----------|--------|-----|-------------------|
 | CP-SAT Exact Solver | `synaps/solvers/cpsat_solver.py` | 1 623 | OR-Tools CP-SAT: optional intervals + `AddCircuit` (SDST) + NoOverlap/Cumulative (ARC), hierarchical big-M objective |
 | LBBD Decomposition | `synaps/solvers/lbbd_solver.py` | 1 431 | HiGHS MIP master (assignment + capacity relaxation) + CP-SAT subproblems + no-goods emitted only after optimal-status subproblems |
-| LBBD-HD (Parallel) | `synaps/solvers/lbbd_hd_solver.py` | 1 655 | + ProcessPool subproblems + ARC-aware partitioning + topological post-assembly |
+| LBBD-HD (Parallel) | `synaps/solvers/lbbd_hd_solver.py` | 1 655 | + ProcessPool subproblems + ARC-aware partitioning + topological post-assembly, then an open-shift snap when a machine publishes a calendar |
 | Greedy ATCS / Beam | `synaps/solvers/greedy_dispatch.py` | 1 243 | Log-space ATCS index (Lee, Bhaskaran & Pinedo 1997); serial schedule generation, $O(N^2 \cdot \bar{E})$ worst case |
 | ALNS | `synaps/solvers/alns_solver.py` + `_alns_config.py` | 4 915 | 7 destroy operators, greedy / micro-CP-SAT repair, SA acceptance, roulette or UCB1 operator selection |
 | RHC | `synaps/solvers/rhc/` (12 modules) | 7 834 | Rolling-horizon windows over an inner solver; coverage-complete list-schedule path |
