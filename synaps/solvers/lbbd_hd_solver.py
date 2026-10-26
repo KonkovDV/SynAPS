@@ -43,7 +43,11 @@ from synaps.model import (
     WorkCenter,
 )
 from synaps.solvers import BaseSolver
-from synaps.solvers._lbbd_assembly import notary_rejections, stamp_parallel_lane_ids
+from synaps.solvers._lbbd_assembly import (
+    notary_rejections,
+    seal_post_assembly_calendar,
+    stamp_parallel_lane_ids,
+)
 from synaps.solvers._lbbd_cuts import (
     compute_assignment_setup_lb_total,
     compute_machine_transition_floor,
@@ -1262,8 +1266,9 @@ def _topological_post_assembly(
         end_offset = (a.end_time - horizon_start).total_seconds() / 60.0
         timeline.insert(insert_index, (start_offset, end_offset, operation.state_id, op_id))
 
-    horizon_ok = all(a.end_time <= problem.planning_horizon_end for a in assignments)
-    return assignments, horizon_ok
+    if not seal_post_assembly_calendar(problem, assignments, ops_by_id, setup_lookup):
+        return assignments, False
+    return assignments, all(a.end_time <= problem.planning_horizon_end for a in assignments)
 
 
 def topological_post_assembly(

@@ -6,6 +6,7 @@ never serialized into a single pseudo-lane when ``lane_id`` metadata is absent.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import timedelta
 from typing import TYPE_CHECKING
 from uuid import NAMESPACE_DNS, uuid5
@@ -168,6 +169,60 @@ def snap_into_shifts(
     return changed, True
 
 
+def seal_post_assembly_calendar(
+    problem: ScheduleProblem,
+    assignments: list[Assignment],
+    ops_by_id: Mapping[UUID, Operation],
+    setup_lookup: Mapping[tuple[UUID, UUID, UUID], timedelta],
+) -> bool:
+    """Move occupancy into an open shift, then restore precedence and lane gaps.
+
+    Empty calendars return immediately and do not touch the schedule, so a
+    caller that already placed work keeps those times. Returns False when an
+    occupancy cannot sit in any later shift (the merge is unproven, not a cut).
+    """
+    wc_by_id = {work_center.id: work_center for work_center in problem.work_centers}
+    if not any(work_center.calendar for work_center in problem.work_centers):
+        return True
+    resolver = LaneGroupResolver(
+        wc_by_id=wc_by_id,
+        ops_by_id=dict(ops_by_id),
+        setup_minutes_lookup={
+            key: value.total_seconds() / 60.0 for key, value in setup_lookup.items()
+        },
+        lane_tag_prefix="lbbd-hd-lane",
+    )
+    max_passes = max(1, len(assignments) + 1)
+    for _ in range(max_passes):
+        changed = False
+        by_op = {item.operation_id: item for item in assignments}
+        for operation in problem.operations:
+            if operation.predecessor_op_id is None:
+                continue
+            predecessor = by_op.get(operation.predecessor_op_id)
+            current = by_op.get(operation.id)
+            if predecessor is None or current is None:
+                continue
+            if current.start_time < predecessor.end_time:
+                shift = predecessor.end_time - current.start_time
+                current.start_time = current.start_time + shift
+                current.end_time = current.end_time + shift
+                changed = True
+        by_machine: dict[UUID, list[Assignment]] = defaultdict(list)
+        for assignment in assignments:
+            by_machine[assignment.work_center_id].append(assignment)
+        for work_center_id, machine_assignments in by_machine.items():
+            for lane in resolver.groups(work_center_id, machine_assignments):
+                if enforce_lane_gaps(work_center_id, lane, dict(ops_by_id), dict(setup_lookup)):
+                    changed = True
+        snapped, fits = snap_into_shifts(assignments, wc_by_id, problem.planning_horizon_start)
+        if not fits:
+            return False
+        if not (changed or snapped):
+            return True
+    return True
+
+
 def notary_rejections(problem: ScheduleProblem, assignments: list[Assignment]) -> list[str]:
     """Proven hard-violation kinds of a candidate incumbent (sorted, unique).
 
@@ -186,6 +241,7 @@ __all__ = [
     "LaneGroupResolver",
     "enforce_lane_gaps",
     "notary_rejections",
+    "seal_post_assembly_calendar",
     "snap_into_shifts",
     "stamp_parallel_lane_ids",
 ]

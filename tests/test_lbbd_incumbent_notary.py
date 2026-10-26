@@ -130,3 +130,54 @@ def test_lbbd_hd_result_has_no_proven_violation() -> None:
     )
     assert result.status is SolverStatus.FEASIBLE
     assert _proven(problem, result) == []
+
+
+def test_lbbd_hd_cross_cluster_shift_lands_in_an_open_shift() -> None:
+    """Predecessor ends as M2 closes, so post-assembly must jump to the next shift."""
+    state = State(id=_uid("hd-s"), code="S")
+    early = WorkCenter(id=_uid("hd-m1"), code="M1", capability_group="g")
+    late = WorkCenter(
+        id=_uid("hd-m2"),
+        code="M2",
+        capability_group="g",
+        calendar=[
+            ShiftInterval(start=_H0, end=_H0 + timedelta(minutes=10)),
+            ShiftInterval(start=_H0 + timedelta(minutes=100), end=_H0 + timedelta(minutes=200)),
+        ],
+    )
+    order = Order(id=_uid("hd-j"), external_ref="J", due_date=_H0 + timedelta(minutes=500))
+    first = Operation(
+        id=_uid("hd-a"),
+        order_id=order.id,
+        seq_in_order=0,
+        state_id=state.id,
+        base_duration_min=10,
+        eligible_wc_ids=[early.id],
+    )
+    problem = ScheduleProblem(
+        states=[state],
+        orders=[order],
+        operations=[
+            first,
+            Operation(
+                id=_uid("hd-b"),
+                order_id=order.id,
+                seq_in_order=1,
+                state_id=state.id,
+                base_duration_min=5,
+                eligible_wc_ids=[late.id],
+                predecessor_op_id=first.id,
+            ),
+        ],
+        work_centers=[early, late],
+        setup_matrix=[],
+        planning_horizon_start=_H0,
+        planning_horizon_end=_H0 + timedelta(minutes=1000),
+    )
+    result = LbbdHdSolver().solve(
+        problem, time_limit_s=20, max_iterations=3, parallel_subproblems=False
+    )
+    assert result.status is SolverStatus.FEASIBLE
+    assert _proven(problem, result) == []
+    placed = next(item for item in result.assignments if item.operation_id == _uid("hd-b"))
+    assert (placed.start_time - _H0) >= timedelta(minutes=100)

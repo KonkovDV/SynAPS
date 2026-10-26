@@ -445,6 +445,10 @@ Review of the `audit-2026-10` branch update (2026-10-25,
 - **U-13 rate-limit bucket id:** the verified-key bucket was a SHA-256 of the
   presented secret (no work factor; CodeQL high). It is now the slot of the
   configured key (`primary` or `map:N`). The secret is not stored in the bucket.
+- **T-17 LBBD-HD calendar:** topological post-assembly placed a successor in a
+  closed shift and relied on the notary to drop it. The same open-shift snap
+  used by LBBD now runs after HD assembly. Machines without a calendar are
+  left untouched.
 
 Audit 2026-10 (`docs/rfc/AUDIT_2026_10.md`); each item has a regression
 test in `tests/test_audit_2026_10.py`.
