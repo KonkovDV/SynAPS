@@ -449,6 +449,9 @@ Review of the `audit-2026-10` branch update (2026-10-25,
   closed shift and relied on the notary to drop it. The same open-shift snap
   used by LBBD now runs after HD assembly. Machines without a calendar are
   left untouched.
+- **T-06b / T-06c:** LBBD-HD accepts the same opt-in `sound_cuts` rows as LBBD
+  (`SoundMaster` on the precedence master). The default stays off: the LBBD-5
+  A/B improved the bound and not the schedule often enough to change every run.
 
 Audit 2026-10 (`docs/rfc/AUDIT_2026_10.md`); each item has a regression
 test in `tests/test_audit_2026_10.py`.

@@ -40,6 +40,7 @@ from synaps.solvers._lbbd_sound import (
     compute_sound_master_lower_bound,
 )
 from synaps.solvers.cpsat_solver import CpSatSolver
+from synaps.solvers.lbbd_hd_solver import LbbdHdSolver
 from synaps.solvers.lbbd_solver import LbbdSolver
 from tests._fjsp_oracle import Oracle
 
@@ -371,5 +372,22 @@ def test_lbbd_sound_cuts_flag_reports_a_valid_stronger_bound() -> None:
     assert meta["lower_bound_invariant_violated"] is False
     assert meta["lower_bound"] >= legacy.metadata["lower_bound"]
     assert meta["lower_bound"] == pytest.approx(75.0)
+    assert meta["lower_bound"] <= sound.objective.makespan_minutes + 1e-6
+    assert meta["sound_cuts"]["rows_by_kind"]["energy"] >= 1
+
+
+def test_lbbd_hd_sound_cuts_flag_reports_a_valid_bound() -> None:
+    """HD uses the same rows on its precedence master. Default stays off."""
+    problem = _load_json("tiny_3x3.json")
+    legacy = LbbdHdSolver().solve(problem, time_limit_s=20, max_iterations=2, random_seed=42)
+    sound = LbbdHdSolver().solve(
+        problem, time_limit_s=20, max_iterations=2, random_seed=42, sound_cuts=True
+    )
+    assert sound.status in (SolverStatus.FEASIBLE, SolverStatus.OPTIMAL)
+    assert "sound_cuts" not in legacy.metadata
+    meta = sound.metadata
+    assert meta["lower_bound_method"] == "sound_master_relaxation_hd"
+    assert meta["lower_bound_invariant_violated"] is False
+    assert meta["lower_bound"] >= legacy.metadata["lower_bound"] - 1e-6
     assert meta["lower_bound"] <= sound.objective.makespan_minutes + 1e-6
     assert meta["sound_cuts"]["rows_by_kind"]["energy"] >= 1
