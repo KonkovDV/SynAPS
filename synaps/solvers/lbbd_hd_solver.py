@@ -63,6 +63,12 @@ from synaps.solvers._lbbd_master import (
     add_nogood_row,
     extract_master_solution,
 )
+from synaps.solvers._lbbd_sound import (
+    SoundMaster,
+    SoundMasterBound,
+    SoundRelaxation,
+    compute_sound_master_lower_bound,
+)
 from synaps.solvers._process_pool import SubproblemPool, solve_clusters
 from synaps.solvers.coverage_outcome import stamp_honest_coverage
 from synaps.solvers.cpsat_solver import CpSatSolver
@@ -185,6 +191,18 @@ class _LbbdHdRun:
         self.sub_time_limit_s = max(2, self.time_limit_s // max(self.max_iterations, 1))
         # D3: hard wall-clock deadline shared by all cluster solves.
         self.deadline = self.t0 + float(self.time_limit_s)
+        # T-06b: same opt-in rows as LBBD. Default off, so a plain HD solve
+        # still builds the historical master (no z columns, no mip_rel_gap).
+        self.sound: SoundMaster | None = (
+            SoundMaster(
+                SoundRelaxation(self.problem),
+                mip_rel_gap=float(kwargs.get("sound_mip_rel_gap", 0.02)),
+            )
+            if kwargs.get("sound_cuts", False)
+            else None
+        )
+        self.sound_cut_rounds = int(kwargs.get("sound_cut_rounds", 8))
+        self.sound_final: SoundMasterBound | None = None
 
     def _register_cut(self, cut: _BendersCut) -> bool:
         fp = cut_pool_fingerprint(cut)
@@ -221,6 +239,7 @@ class _LbbdHdRun:
                     break
         finally:
             self.pool.close()
+        self._final_sound_bound()
         return self._final_result()
 
     def _greedy_warm_start(self) -> None:
@@ -323,6 +342,9 @@ class _LbbdHdRun:
             master_time_limit_s=max(
                 1.0, min(self.deadline - time.monotonic(), float(self.sub_time_limit_s) + 2.0)
             ),
+            sound=self.sound,
+            sound_rounds=self.sound_cut_rounds,
+            sound_polish=iteration == 1,
         )
         if master_result is None:
             failed = _hd_master_failed_result(
@@ -407,6 +429,20 @@ class _LbbdHdRun:
         self.iteration_log.append(entry)
         return (self.best_ub - self.lb) / max(self.best_ub, 1e-9) < self.gap_threshold
 
+    def _final_sound_bound(self) -> None:
+        """No-good-free sound master for the reported bound (same contract as LBBD)."""
+        remaining = self.deadline - time.monotonic()
+        if self.sound is None or remaining < 1.0:
+            return
+        if self.lb_evolution and self.best_ub - self.lb_evolution[0] <= 1e-6:
+            return
+        self.sound_final = compute_sound_master_lower_bound(
+            self.problem,
+            time_limit_s=remaining,
+            max_rounds=self.sound_cut_rounds,
+            master=self.sound,
+        )
+
     def _notary_refuses(self, source: str, assignments: list[Assignment]) -> bool:
         """True (and recorded) when a candidate incumbent has proven hard violations."""
         kinds = notary_rejections(self.problem, assignments)
@@ -479,6 +515,8 @@ class _LbbdHdRun:
         reported and a violation is flagged instead.
         """
         raw_relaxation = self.lb_evolution[0] if self.lb_evolution else 0.0
+        if self.sound_final is not None:
+            raw_relaxation = max(raw_relaxation, self.sound_final.value)
         reported_lb, violated = reported_lower_bound(raw_relaxation, self.best_ub)
         if violated:
             warnings.warn(
@@ -537,6 +575,17 @@ class _LbbdHdRun:
             metadata["warm_start_error"] = self.warm_start_error
         if self.incumbent_rejections:
             metadata["incumbent_rejections"] = self.incumbent_rejections
+        if self.sound is not None:
+            metadata["lower_bound_method"] = "sound_master_relaxation_hd"
+            metadata["sound_cuts"] = {
+                "rows_by_kind": self.sound.rows_by_kind(),
+                "separation_rounds": self.sound.rounds,
+                "first_master_lb": self.lb_evolution[0] if self.lb_evolution else None,
+                "final_master_lb": None if self.sound_final is None else self.sound_final.value,
+                "final_master_converged": (
+                    None if self.sound_final is None else self.sound_final.converged
+                ),
+            }
         return metadata
 
 
@@ -620,6 +669,9 @@ def _solve_precedence_aware_master(
     min_setup_by_wc: dict[UUID, float] | None = None,
     prev_solution: dict[UUID, UUID] | None = None,
     master_time_limit_s: float | None = None,
+    sound: SoundMaster | None = None,
+    sound_rounds: int = 0,
+    sound_polish: bool = False,
 ) -> tuple[tuple[dict[UUID, UUID], float] | None, bool]:
     """Solve the precedence-aware assignment master problem via HiGHS MIP.
 
@@ -645,10 +697,27 @@ def _solve_precedence_aware_master(
     _add_makespan_rows(h, problem, layout)
     _add_hd_cut_rows(h, cuts, layout.var_index)
     h.changeObjectiveSense(highspy.ObjSense.kMinimize)
+    started = time.monotonic()
+    z_index = sound.attach(h, layout.var_index, layout.cmax_idx) if sound is not None else {}
     if prev_solution is not None and hasattr(h, "setSolution"):
-        _hint_hd_master(h, problem, eligible_by_op, layout, prev_solution)
-    h.run()
-    return extract_master_solution(h, problem, eligible_by_op, layout.var_index, layout.cmax_idx)
+        _hint_hd_master(h, problem, eligible_by_op, layout, prev_solution, extra_cols=len(z_index))
+    best_dual = float("-inf")
+    if sound is None:
+        h.run()
+    else:
+        budget = float(master_time_limit_s) if master_time_limit_s is not None else 60.0
+        _, best_dual = sound.solve(
+            h,
+            layout.var_index,
+            z_index,
+            layout.cmax_idx,
+            started + max(1.0, budget),
+            sound_rounds,
+            polish=sound_polish,
+        )
+    return extract_master_solution(
+        h, problem, eligible_by_op, layout.var_index, layout.cmax_idx, best_dual
+    )
 
 
 class _HdMasterLayout:
@@ -809,9 +878,10 @@ def _hint_hd_master(
     eligible_by_op: dict[UUID, list[UUID]],
     layout: _HdMasterLayout,
     prev_solution: dict[UUID, UUID],
+    extra_cols: int = 0,
 ) -> None:
     """Warm-start ``y`` from the previous assignment; ``C_max`` at the horizon."""
-    hint = [0.0] * layout.n_vars
+    hint = [0.0] * (layout.n_vars + extra_cols)
     for op in problem.operations:
         prev_wc = prev_solution.get(op.id)
         for wc_id in eligible_by_op[op.id]:
@@ -821,7 +891,8 @@ def _hint_hd_master(
     hint[layout.cmax_idx] = (
         problem.planning_horizon_end - problem.planning_horizon_start
     ).total_seconds() / 60
-    h.setSolution(layout.n_vars, np.arange(layout.n_vars, dtype=np.int32), np.array(hint))
+    n_hint = layout.n_vars + extra_cols
+    h.setSolution(n_hint, np.arange(n_hint, dtype=np.int32), np.array(hint))
 
 
 # ---------------------------------------------------------------------------
