@@ -34,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on the Linux wheels before upload: zero VEX/EVEX instructions in the `.so`
   (VEX-128 included) and an import plus scalar / batch kernels under
   `qemu-x86_64 -cpu Nehalem`. The `target-cpu=native` wheel fails both.
+- **T-03b Linux wheels:** the Linux release job builds inside the
+  `manylinux_2_28` image (`PyO3/maturin-action` v1.51.0, maturin v1.13.1)
+  instead of linking the `ubuntu-latest` glibc. `RUSTFLAGS=-C target-cpu=x86-64-v2`
+  is still forwarded into that image. macOS and Windows stay on the host build.
 
 - **CP-SAT `determinism="strict-parallel"` (audit 2026-10, opt-in):** the
   strict contract (deterministic-time stop, loose wall safety,

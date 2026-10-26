@@ -110,7 +110,27 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install maturin
 
+      - name: Build Linux wheel in manylinux 2.28
+        # T-03b: ubuntu-latest links the host glibc (newer than 2.28), so a
+        # wheel built there will not install on manylinux_2_28. The action
+        # builds inside the 2.28 image. RUSTFLAGS (prefix RUST) is forwarded
+        # into that container and still overrides target-cpu=native (R-10).
+        if: runner.os == 'Linux'
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        env:
+          RUSTFLAGS: -C target-cpu=x86-64-v2
+        with:
+          maturin-version: v1.13.1
+          manylinux: "2_28"
+          rust-toolchain: stable
+          args: >-
+            --release
+            --manifest-path native/synaps_native/Cargo.toml
+            --interpreter python${{ matrix.python-version }}
+            --out dist-native
+
       - name: Build native wheel
+        if: runner.os != 'Linux'
         env:
           # Audit 2026-10 (R-10): the repo's .cargo/config.toml sets
           # target-cpu=native for local builds. A published wheel built with it
