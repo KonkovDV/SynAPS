@@ -129,6 +129,21 @@ jobs:
             --interpreter python \
             --out dist-native
 
+      - name: Verify portable ISA (no AVX; imports without AVX2)
+        # T-03a: prove R-10 on the built artifact instead of trusting RUSTFLAGS.
+        # Static: no VEX/EVEX instruction (ymm, zmm or VEX-128) in the .so.
+        # Dynamic: import + scalar and batch kernels under qemu user-mode
+        # emulation of a Nehalem CPU (SSE4.2, no AVX). A target-cpu=native
+        # wheel fails both (SIGILL under emulation).
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q qemu-user
+          python -m venv .venv-isa
+          .venv-isa/bin/python -m pip install --no-deps dist-native/*.whl
+          python scripts/check_wheel_isa.py dist-native/*.whl --qemu-python .venv-isa/bin/python
+
       - name: Upload native wheels
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

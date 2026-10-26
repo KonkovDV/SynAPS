@@ -9,7 +9,8 @@ audit" into an automatic red build:
   ``BRANDIMARTE_PROVEN_OPTIMAL`` stems must equal literature BKS; all stems
   still forbid OPTIMAL above BKS;
 * every reported LBBD lower bound must be <= BKS (an S1-class invalid bound
-  otherwise);
+  otherwise), with and without the T-06 ``sound_cuts`` rows, and so must
+  ``compute_sound_master_lower_bound``;
 * the feasibility checker accepts the produced schedule (hard violations only).
 
 Fast lane (not slow): mk01/mk02 with CPSAT-30 + LBBD. Full sweep of all ten
@@ -25,6 +26,7 @@ import pytest
 from benchmark.fjs_loader import load_fjs_problem
 from benchmark.public_bks import BRANDIMARTE_BKS, BRANDIMARTE_PROVEN_OPTIMAL, BRANDIMARTE_SHAPE
 from synaps.model import ScheduleProblem, SolverStatus
+from synaps.solvers._lbbd_sound import compute_sound_master_lower_bound
 from synaps.solvers.cpsat_solver import CpSatSolver
 from synaps.solvers.feasibility_checker import FeasibilityChecker, hard_violations
 from synaps.solvers.lbbd_solver import LbbdSolver
@@ -82,6 +84,19 @@ def _assert_bks_invariants(stem: str, *, time_limit_s: int) -> None:
     lower_bound = float(lbbd.metadata.get("lower_bound", 0.0))
     assert lower_bound <= bks + 1e-6, (
         f"{stem}: LBBD lower_bound {lower_bound} > BKS {bks} (S1-class invalid bound)"
+    )
+    # T-06: the sound master relaxation (static + separated rows, no no-goods).
+    sound = LbbdSolver().solve(
+        problem, time_limit_s=time_limit_s, max_iterations=5, random_seed=42, sound_cuts=True
+    )
+    sound_lb = float(sound.metadata["lower_bound"])
+    assert not sound.metadata["lower_bound_invariant_violated"]
+    assert lower_bound - 1e-6 <= sound_lb <= bks + 1e-6, (
+        f"{stem}: sound LBBD lower_bound {sound_lb} outside [{lower_bound}, BKS {bks}]"
+    )
+    standalone = compute_sound_master_lower_bound(problem, time_limit_s=float(time_limit_s))
+    assert standalone.value <= bks + 1e-6, (
+        f"{stem}: compute_sound_master_lower_bound {standalone.value} > BKS {bks}"
     )
 
 

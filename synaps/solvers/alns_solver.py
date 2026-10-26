@@ -872,6 +872,10 @@ def _destroy_critical_path(
     The critical path is the chain from a source node to the makespan-defining
     operation. Destroying it forces ALNS repair to focus on the bottleneck.
 
+    The path weight is the sum of operation durations: setups, idle time and
+    releases are not on it, so the chain is a duration-critical chain of the
+    sequence DAG rather than the time-tight chain of the schedule (audit Q-05).
+
     Academic basis:
         - Kelley & Walker (1959): Critical Path Method (CPM)
         - Adams, Balas & Zawack (1988): shifting bottleneck + critical path
@@ -883,104 +887,15 @@ def _destroy_critical_path(
     if ops_by_id is None:
         ops_by_id = {op.id: op for op in problem.operations}
 
-    # Build assignment lookup by operation_id
-    assignment_by_op: dict[UUID, Assignment] = {a.operation_id: a for a in assignments}
-
-    # Build machine sequences sorted by start_time
-    by_machine: dict[Any, list[Assignment]] = {}
-    for a in assignments:
-        by_machine.setdefault(a.work_center_id, []).append(a)
-    for wc_id in by_machine:
-        by_machine[wc_id].sort(key=lambda a: a.start_time)
-
-    # Build the combined DAG as adjacency list: node -> list of (successor, edge_weight)
-    # Node = operation_id (UUID)
-    # Edge weight = duration of the source operation (the time it contributes)
-    # The longest path length = sum of durations along the path = makespan
-    #
-    # We use operation duration as node weight. For longest-path DP:
-    #   dist[node] = duration[node] + max(dist[successor] for each successor)
-    # The critical path ends at the node with the maximum dist value.
-
-    # Compute duration for each assigned operation (in minutes)
-    op_duration: dict[UUID, float] = {}
-    for a in assignments:
-        duration_min = (a.end_time - a.start_time).total_seconds() / 60.0
-        op_duration[a.operation_id] = duration_min
-
-    # Build adjacency list (forward edges: predecessor -> successor)
-    # Edge types:
-    #   1. Precedence edges: op.predecessor_op_id -> op.id
-    #   2. Machine-sequence edges: consecutive ops on same machine (by start_time)
-    successors: dict[UUID, list[UUID]] = {}
-    in_degree: dict[UUID, int] = {}
-
-    assigned_op_ids = set(assignment_by_op.keys())
-
-    # Initialize all assigned operations
-    for op_id in assigned_op_ids:
-        successors.setdefault(op_id, [])
-        in_degree.setdefault(op_id, 0)
-
-    # Add precedence edges
-    for op_id in assigned_op_ids:
-        op = ops_by_id.get(op_id)
-        if op is None:
-            continue
-        pred_id = op.predecessor_op_id
-        if pred_id is not None and pred_id in assigned_op_ids:
-            successors.setdefault(pred_id, []).append(op_id)
-            in_degree[op_id] = in_degree.get(op_id, 0) + 1
-
-    # Add machine-sequence edges (consecutive operations on same machine)
-    for _wc_id, machine_seq in by_machine.items():
-        for i in range(len(machine_seq) - 1):
-            from_op = machine_seq[i].operation_id
-            to_op = machine_seq[i + 1].operation_id
-            successors.setdefault(from_op, []).append(to_op)
-            in_degree[to_op] = in_degree.get(to_op, 0) + 1
-
-    # Topological sort (Kahn's algorithm)
-    from collections import deque
-
-    queue: deque[UUID] = deque()
-    for op_id in assigned_op_ids:
-        if in_degree.get(op_id, 0) == 0:
-            queue.append(op_id)
-
-    topo_order: list[UUID] = []
-    while queue:
-        node = queue.popleft()
-        topo_order.append(node)
-        for succ in successors.get(node, []):
-            in_degree[succ] -= 1
-            if in_degree[succ] == 0:
-                queue.append(succ)
-
+    dag = _ScheduleDag(assignments, ops_by_id)
+    longest = dag.longest_paths()
     # If topological sort didn't cover all nodes (cycle in graph), fall back
-    if len(topo_order) != len(assigned_op_ids):
+    if longest is None:
         return _destroy_random(assignments, problem, sdst, destroy_size, rng)
-
-    # Longest path DP (forward pass)
-    # dist[node] = longest path length ending at node (inclusive of node's duration)
-    # predecessor_on_path[node] = the node that precedes this one on the longest path
-    dist: dict[UUID, float] = {}
-    predecessor_on_path: dict[UUID, UUID | None] = {}
-
-    for node in topo_order:
-        dist[node] = op_duration.get(node, 0.0)
-        predecessor_on_path[node] = None
-
-    for node in topo_order:
-        node_dist = dist[node]
-        for succ in successors.get(node, []):
-            candidate_dist = node_dist + op_duration.get(succ, 0.0)
-            if candidate_dist > dist[succ]:
-                dist[succ] = candidate_dist
-                predecessor_on_path[succ] = node
+    dist, predecessor_on_path = longest
 
     # Find the makespan-defining operation (node with maximum dist)
-    makespan_op_id = max(assigned_op_ids, key=lambda op_id: dist.get(op_id, 0.0))
+    makespan_op_id = max(dag.assigned_op_ids, key=lambda op_id: dist.get(op_id, 0.0))
 
     # Trace back the critical path
     critical_path: list[UUID] = []
@@ -994,68 +909,138 @@ def _destroy_critical_path(
     if len(critical_path) > destroy_size:
         critical_path = critical_path[-destroy_size:]
 
-    # Extend when critical path is shorter than destroy_size:
-    # Add operations adjacent (predecessor/successor in machine sequence) to
-    # critical-path nodes on the same machines, sorted by their setup
-    # contribution (from the SDST matrix).
     if len(critical_path) < destroy_size:
-        critical_set = set(critical_path)
-
-        # Build index: operation_id -> position in its machine sequence
-        op_to_machine_pos: dict[UUID, tuple[Any, int]] = {}
-        for wc_id, machine_seq in by_machine.items():
-            for i, a in enumerate(machine_seq):
-                op_to_machine_pos[a.operation_id] = (wc_id, i)
-
-        # Collect candidate operations that are adjacent to critical-path nodes
-        # in the machine sequence (immediate predecessor or successor)
-        candidates: list[tuple[float, UUID]] = []
-        seen_candidates: set[UUID] = set()
-
-        for cp_op_id in critical_path:
-            pos_info = op_to_machine_pos.get(cp_op_id)
-            if pos_info is None:
-                continue
-            wc_id, idx = pos_info
-            machine_seq = by_machine[wc_id]
-
-            # Check immediate predecessor and successor in machine sequence
-            for neighbor_idx in (idx - 1, idx + 1):
-                if neighbor_idx < 0 or neighbor_idx >= len(machine_seq):
-                    continue
-                neighbor_a = machine_seq[neighbor_idx]
-                neighbor_op_id = neighbor_a.operation_id
-                if neighbor_op_id in critical_set or neighbor_op_id in seen_candidates:
-                    continue
-                seen_candidates.add(neighbor_op_id)
-
-                # Compute setup contribution: predecessor→self + self→successor
-                neighbor_op = ops_by_id.get(neighbor_op_id)
-                if neighbor_op is None:
-                    continue
-                cost = 0.0
-                if neighbor_idx > 0:
-                    prev_op = ops_by_id.get(machine_seq[neighbor_idx - 1].operation_id)
-                    if prev_op is not None:
-                        cost += sdst.get_setup(wc_id, prev_op.state_id, neighbor_op.state_id)
-                if neighbor_idx < len(machine_seq) - 1:
-                    next_op = ops_by_id.get(machine_seq[neighbor_idx + 1].operation_id)
-                    if next_op is not None:
-                        cost += sdst.get_setup(wc_id, neighbor_op.state_id, next_op.state_id)
-                candidates.append((cost, neighbor_op_id))
-
-        # Sort by setup contribution descending (highest cost first)
-        candidates.sort(key=lambda x: -x[0])
-
-        # Fill up to destroy_size
-        for _cost, op_id in candidates:
-            if len(critical_set) >= destroy_size:
-                break
-            critical_set.add(op_id)
-
-        return critical_set
-
+        return _extend_with_machine_neighbors(
+            critical_path, dag.by_machine, ops_by_id, sdst, destroy_size
+        )
     return set(critical_path)
+
+
+class _ScheduleDag:
+    """Precedence + machine-sequence DAG of a schedule, durations as node weights."""
+
+    def __init__(self, assignments: list[Assignment], ops_by_id: Mapping[Any, Any]) -> None:
+        assignment_by_op: dict[UUID, Assignment] = {a.operation_id: a for a in assignments}
+        # Machine sequences sorted by start_time
+        self.by_machine: dict[Any, list[Assignment]] = {}
+        for a in assignments:
+            self.by_machine.setdefault(a.work_center_id, []).append(a)
+        for wc_id in self.by_machine:
+            self.by_machine[wc_id].sort(key=lambda a: a.start_time)
+        # Node weight = the operation's duration in minutes; the longest path
+        # length is then the sum of durations along the path:
+        #   dist[node] = duration[node] + max(dist[predecessor on the path])
+        self.op_duration: dict[UUID, float] = {
+            a.operation_id: (a.end_time - a.start_time).total_seconds() / 60.0 for a in assignments
+        }
+        self.assigned_op_ids = set(assignment_by_op.keys())
+        # Forward edges: precedence (op.predecessor_op_id -> op.id), then
+        # machine sequence (consecutive operations on one machine).
+        self.successors: dict[UUID, list[UUID]] = {}
+        self.in_degree: dict[UUID, int] = {}
+        for op_id in self.assigned_op_ids:
+            self.successors.setdefault(op_id, [])
+            self.in_degree.setdefault(op_id, 0)
+        for op_id in self.assigned_op_ids:
+            op = ops_by_id.get(op_id)
+            if op is None:
+                continue
+            pred_id = op.predecessor_op_id
+            if pred_id is not None and pred_id in self.assigned_op_ids:
+                self._edge(pred_id, op_id)
+        for machine_seq in self.by_machine.values():
+            for i in range(len(machine_seq) - 1):
+                self._edge(machine_seq[i].operation_id, machine_seq[i + 1].operation_id)
+
+    def _edge(self, source: UUID, target: UUID) -> None:
+        self.successors.setdefault(source, []).append(target)
+        self.in_degree[target] = self.in_degree.get(target, 0) + 1
+
+    def longest_paths(self) -> tuple[dict[UUID, float], dict[UUID, UUID | None]] | None:
+        """Kahn order + forward DP; None when the graph has a cycle."""
+        from collections import deque
+
+        in_degree = self.in_degree
+        queue: deque[UUID] = deque(
+            op_id for op_id in self.assigned_op_ids if in_degree.get(op_id, 0) == 0
+        )
+        topo_order: list[UUID] = []
+        while queue:
+            node = queue.popleft()
+            topo_order.append(node)
+            for succ in self.successors.get(node, []):
+                in_degree[succ] -= 1
+                if in_degree[succ] == 0:
+                    queue.append(succ)
+        if len(topo_order) != len(self.assigned_op_ids):
+            return None
+        # dist[node] = longest path ending at node (inclusive of its duration)
+        dist: dict[UUID, float] = {node: self.op_duration.get(node, 0.0) for node in topo_order}
+        predecessor_on_path: dict[UUID, UUID | None] = dict.fromkeys(topo_order)
+        for node in topo_order:
+            node_dist = dist[node]
+            for succ in self.successors.get(node, []):
+                candidate_dist = node_dist + self.op_duration.get(succ, 0.0)
+                if candidate_dist > dist[succ]:
+                    dist[succ] = candidate_dist
+                    predecessor_on_path[succ] = node
+        return dist, predecessor_on_path
+
+
+def _extend_with_machine_neighbors(
+    critical_path: list[UUID],
+    by_machine: dict[Any, list[Assignment]],
+    ops_by_id: Mapping[Any, Any],
+    sdst: SdstMatrix,
+    destroy_size: int,
+) -> set[UUID]:
+    """Pad a short critical path with its machine neighbours, highest setup first.
+
+    Candidates are the immediate machine-sequence predecessor / successor of
+    each path node, scored by ``setup(prev -> self) + setup(self -> next)``.
+    """
+    critical_set = set(critical_path)
+    op_to_machine_pos: dict[UUID, tuple[Any, int]] = {}
+    for wc_id, machine_seq in by_machine.items():
+        for i, a in enumerate(machine_seq):
+            op_to_machine_pos[a.operation_id] = (wc_id, i)
+
+    candidates: list[tuple[float, UUID]] = []
+    seen_candidates: set[UUID] = set()
+    for cp_op_id in critical_path:
+        pos_info = op_to_machine_pos.get(cp_op_id)
+        if pos_info is None:
+            continue
+        wc_id, idx = pos_info
+        machine_seq = by_machine[wc_id]
+        for neighbor_idx in (idx - 1, idx + 1):
+            if neighbor_idx < 0 or neighbor_idx >= len(machine_seq):
+                continue
+            neighbor_op_id = machine_seq[neighbor_idx].operation_id
+            if neighbor_op_id in critical_set or neighbor_op_id in seen_candidates:
+                continue
+            seen_candidates.add(neighbor_op_id)
+            neighbor_op = ops_by_id.get(neighbor_op_id)
+            if neighbor_op is None:
+                continue
+            cost = 0.0
+            if neighbor_idx > 0:
+                prev_op = ops_by_id.get(machine_seq[neighbor_idx - 1].operation_id)
+                if prev_op is not None:
+                    cost += sdst.get_setup(wc_id, prev_op.state_id, neighbor_op.state_id)
+            if neighbor_idx < len(machine_seq) - 1:
+                next_op = ops_by_id.get(machine_seq[neighbor_idx + 1].operation_id)
+                if next_op is not None:
+                    cost += sdst.get_setup(wc_id, neighbor_op.state_id, next_op.state_id)
+            candidates.append((cost, neighbor_op_id))
+
+    # Sort by setup contribution descending (highest cost first), then fill.
+    candidates.sort(key=lambda x: -x[0])
+    for _cost, op_id in candidates:
+        if len(critical_set) >= destroy_size:
+            break
+        critical_set.add(op_id)
+    return critical_set
 
 
 def _destroy_due_pressure(
@@ -1735,7 +1720,7 @@ def _try_native_greedy_repair(
     Returns None if native is unavailable, input construction fails, or the result
     fails basic validation.
     """
-    from synaps.accelerators import _native_greedy_repair_batch, greedy_repair_batch_native
+    from synaps.accelerators import _native_greedy_repair_batch
 
     # Record aux/parallel skips even when the native wheel is absent (CI test-fast).
     skip = _native_repair_skip_reason(problem)
@@ -1751,7 +1736,6 @@ def _try_native_greedy_repair(
         return None
 
     try:
-        # Build index mappings
         ops_by_id = {op.id: op for op in problem.operations}
         if _ops_have_machine_duration_overrides(
             [ops_by_id[op_id] for op_id in disrupted_op_ids if op_id in ops_by_id]
@@ -1759,203 +1743,11 @@ def _try_native_greedy_repair(
             if skip_reasons is not None:
                 skip_reasons.append("machine_duration_overrides")
             return None
-        release_offsets = _release_offset_by_op(problem)
-        wc_id_to_idx = {wc.id: idx for idx, wc in enumerate(problem.work_centers)}
-        state_id_to_idx = {s.id: idx for idx, s in enumerate(problem.states)}
-        idx_to_wc_id = {idx: wc_id for wc_id, idx in wc_id_to_idx.items()}
-        n_wc = len(problem.work_centers)
-        n_states = len(problem.states)
-        horizon_start = problem.planning_horizon_start
-        all_wc_ids = [wc.id for wc in problem.work_centers]
-
-        # Build per-operation arrays for the disrupted ops only (in topological order)
-        n = len(disrupted_op_ids)
-        # Map disrupted op IDs to local indices for predecessor resolution
-        disrupted_local_idx = {op_id: i for i, op_id in enumerate(disrupted_op_ids)}
-
-        base_durations = np.empty(n, dtype=np.float64)
-        predecessor_indices = np.full(n, -1, dtype=np.int64)
-        state_ids = np.empty(n, dtype=np.int64)
-
-        # CSR for eligible machines
-        eligible_offsets = np.empty(n + 1, dtype=np.int64)
-        eligible_flat: list[int] = []
-        eligible_offsets[0] = 0
-
-        # Compute frozen machine availability from frozen_assignments
-        # machine_available_at[m] = max end offset of frozen assignments on machine m
-        machine_available_at = np.zeros(n_wc, dtype=np.float64)
-        machine_last_state = np.full(n_wc, -1, dtype=np.int64)
-
-        # Sort frozen assignments by end time per machine to get last state
-        frozen_by_machine: dict[int, list[Assignment]] = {}
-        for fa in frozen_assignments:
-            m_idx = wc_id_to_idx.get(fa.work_center_id)
-            if m_idx is not None:
-                frozen_by_machine.setdefault(m_idx, []).append(fa)
-
-        for m_idx, machine_fas in frozen_by_machine.items():
-            machine_fas.sort(key=lambda a: a.end_time)
-            last_fa = machine_fas[-1]
-            end_offset = (last_fa.end_time - horizon_start).total_seconds() / 60.0
-            machine_available_at[m_idx] = end_offset
-            # Last state on this machine
-            last_op = ops_by_id.get(last_fa.operation_id)
-            if last_op is not None:
-                si = state_id_to_idx.get(last_op.state_id, -1)
-                machine_last_state[m_idx] = si
-
-        # Predecessor end offsets from frozen assignments (for disrupted ops whose
-        # predecessor is in the frozen set)
-        frozen_end_offsets: dict[UUID, float] = {}
-        for fa in frozen_assignments:
-            end_offset = (fa.end_time - horizon_start).total_seconds() / 60.0
-            frozen_end_offsets[fa.operation_id] = end_offset
-
-        for i, op_id in enumerate(disrupted_op_ids):
-            op = ops_by_id[op_id]
-            base_durations[i] = float(op.base_duration_min)
-            state_ids[i] = state_id_to_idx.get(op.state_id, -1)
-
-            # Predecessor: either within disrupted set (local index) or frozen (handled
-            # by adjusting machine availability). For the native function, we only track
-            # predecessors within the disrupted set.
-            if op.predecessor_op_id is not None:
-                local_pred = disrupted_local_idx.get(op.predecessor_op_id)
-                if local_pred is not None:
-                    predecessor_indices[i] = local_pred
-                else:
-                    # Predecessor is in frozen set — its end time becomes a constraint.
-                    # We encode this by setting predecessor_indices[i] = -1 (no local pred)
-                    # but we need to ensure the operation starts after the frozen predecessor.
-                    # The native function only respects local predecessors, so we handle
-                    # frozen predecessors by adjusting the eligible machine availability.
-                    # This is a simplification — we'll validate the result afterward.
-                    pass
-
-            eligible_wc_indices = _native_eligible_machine_indices(op, wc_id_to_idx, all_wc_ids)
-            if not eligible_wc_indices:
-                if skip_reasons is not None:
-                    skip_reasons.append("empty_eligible_machines")
-                return None
-            eligible_flat.extend(eligible_wc_indices)
-            eligible_offsets[i + 1] = len(eligible_flat)
-
-        eligible_indices = np.array(eligible_flat, dtype=np.int64)
-
-        # Build SDST flat matrix and speed factors
-        sdst_setup_flat = np.zeros(n_wc * n_states * n_states, dtype=np.float64)
-        for entry in problem.setup_matrix:
-            wi = wc_id_to_idx.get(entry.work_center_id)
-            fi = state_id_to_idx.get(entry.from_state_id)
-            ti = state_id_to_idx.get(entry.to_state_id)
-            if wi is not None and fi is not None and ti is not None:
-                sdst_setup_flat[wi * n_states * n_states + fi * n_states + ti] = float(
-                    entry.setup_minutes
-                )
-
-        speed_factors = np.array([wc.speed_factor for wc in problem.work_centers], dtype=np.float64)
-
-        # Native dispatches from t=0; post-process for frozen machine/pred floors.
-        native_result = greedy_repair_batch_native(
-            base_durations=base_durations,
-            predecessor_indices=predecessor_indices,
-            eligible_offsets=eligible_offsets,
-            eligible_indices=eligible_indices,
-            state_ids=state_ids,
-            sdst_setup_flat=sdst_setup_flat,
-            n_wc=n_wc,
-            n_states=n_states,
-            speed_factors=speed_factors,
+        repaired_assignments = _native_greedy_dispatch(
+            problem, disrupted_op_ids, ops_by_id, frozen_assignments, skip_reasons=skip_reasons
         )
-
-        if native_result is None:
+        if repaired_assignments is None:
             return None
-
-        start_offsets, end_offsets, assigned_machine_indices = native_result
-
-        # Post-process: shift operations to respect frozen machine availability
-        # and frozen predecessor constraints.
-        # We do a single forward pass in topological order (disrupted_op_ids is
-        # already sorted topologically).
-        op_end_offset = np.copy(end_offsets)
-
-        for i, op_id in enumerate(disrupted_op_ids):
-            op = ops_by_id[op_id]
-            m = int(assigned_machine_indices[i])
-            if m < 0 or m >= n_wc:
-                return None  # Invalid machine assignment
-
-            # Minimum start from frozen predecessor
-            min_start = machine_available_at[m]
-
-            # M1: cannot start before the order release_date.
-            release_offset = release_offsets.get(op_id)
-            if release_offset is not None:
-                min_start = max(min_start, release_offset)
-
-            # Check frozen predecessor constraint
-            if op.predecessor_op_id is not None and op.predecessor_op_id not in disrupted_local_idx:
-                if op.predecessor_op_id not in frozen_end_offsets:
-                    return None  # Wave 13 / C13-3: never default missing pred to 0.0
-                pred_end = frozen_end_offsets[op.predecessor_op_id]
-                min_start = max(min_start, pred_end)
-
-            # Check local predecessor constraint (already handled by native, but
-            # we need to account for our shifts)
-            if predecessor_indices[i] >= 0:
-                local_pred_idx = int(predecessor_indices[i])
-                min_start = max(min_start, op_end_offset[local_pred_idx])
-
-            # Setup time from machine's last state
-            setup = 0.0
-            curr_state = int(state_ids[i])
-            prev_state = int(machine_last_state[m])
-            if (
-                prev_state >= 0
-                and curr_state >= 0
-                and prev_state < n_states
-                and curr_state < n_states
-            ):
-                setup = sdst_setup_flat[
-                    m * n_states * n_states + prev_state * n_states + curr_state
-                ]
-
-            actual_start = max(float(start_offsets[i]), min_start + setup)
-            # F2 (audit v4): the native kernel returns raw ``base/speed`` float
-            # spans; snap to the canonical integer ceil grain (P0-4) so ALNS
-            # reserves the same duration as every other solver. The old 1-min
-            # checker tolerance existed only to absorb this divergence.
-            duration = float(duration_minutes_for(op, problem.work_centers[m]))
-            actual_end = actual_start + duration
-
-            start_offsets[i] = actual_start
-            end_offsets[i] = actual_end
-            op_end_offset[i] = actual_end
-
-            # Update machine state for next operation on this machine
-            machine_available_at[m] = actual_end
-            machine_last_state[m] = curr_state
-
-        # Convert to Assignment objects
-        repaired_assignments: list[Assignment] = []
-        for i, op_id in enumerate(disrupted_op_ids):
-            m = int(assigned_machine_indices[i])
-            mapped_wc_id = idx_to_wc_id.get(m)
-            if mapped_wc_id is None:
-                return None  # Can't map machine index back
-
-            start_dt = horizon_start + timedelta(minutes=float(start_offsets[i]))
-            end_dt = horizon_start + timedelta(minutes=float(end_offsets[i]))
-
-            repaired_assignments.append(
-                Assignment(
-                    operation_id=op_id,
-                    work_center_id=mapped_wc_id,
-                    start_time=start_dt,
-                    end_time=end_dt,
-                )
-            )
 
         # Quick feasibility validation: ignore UNKNOWN_OPERATION on frozen
         # ops that live outside the window sub-problem (W16 / RT coverage #6).
@@ -1992,7 +1784,7 @@ def _try_native_initial_seed(
     Reuses greedy_repair_batch with disrupted_op_ids = all problem operations.
     Returns a list of Assignments or None if native is unavailable/fails.
     """
-    from synaps.accelerators import _native_greedy_repair_batch, greedy_repair_batch_native
+    from synaps.accelerators import _native_greedy_repair_batch
 
     if _native_repair_skip_reason(problem) is not None:
         return None
@@ -2004,203 +1796,275 @@ def _try_native_initial_seed(
         return None
 
     try:
-        # Build index mappings
-        wc_id_to_idx = {wc.id: idx for idx, wc in enumerate(problem.work_centers)}
-        state_id_to_idx = {s.id: idx for idx, s in enumerate(problem.states)}
-        idx_to_wc_id = {idx: wc_id for wc_id, idx in wc_id_to_idx.items()}
-        n_wc = len(problem.work_centers)
-        n_states = len(problem.states)
-        horizon_start = problem.planning_horizon_start
-        release_offsets = _release_offset_by_op(problem)
-        all_wc_ids = [wc.id for wc in problem.work_centers]
-
-        # Build topological order of ALL operations in the problem.
         # Operations are already in topological order in problem.operations
         # (predecessor always appears before dependent).
         all_op_ids = [op.id for op in problem.operations]
-        n = len(all_op_ids)
-        if n == 0:
+        if not all_op_ids:
             return None
+        return _native_greedy_dispatch(problem, all_op_ids, ops_by_id, frozen_assignments)
 
-        # Map op IDs to local indices for predecessor resolution
-        local_idx = {op_id: i for i, op_id in enumerate(all_op_ids)}
+    except Exception:
+        # Any error in native path — silently fall through to Python
+        return None
 
-        base_durations = np.empty(n, dtype=np.float64)
-        predecessor_indices = np.full(n, -1, dtype=np.int64)
-        state_ids = np.empty(n, dtype=np.int64)
 
+class _NativeDispatchInputs:
+    """Structure-of-arrays input of the Rust ``greedy_repair_batch`` kernel."""
+
+    __slots__ = (
+        "base_durations",
+        "eligible_indices",
+        "eligible_offsets",
+        "local_idx",
+        "n_states",
+        "n_wc",
+        "predecessor_indices",
+        "sdst_setup_flat",
+        "speed_factors",
+        "state_ids",
+    )
+
+    def __init__(
+        self,
+        problem: ScheduleProblem,
+        op_ids: list[Any],
+        ops_by_id: Mapping[Any, Any],
+        wc_id_to_idx: dict[Any, int],
+        state_id_to_idx: dict[Any, int],
+    ) -> None:
+        self.n_wc = len(problem.work_centers)
+        self.n_states = len(problem.states)
+        n = len(op_ids)
+        # Map the dispatched op IDs to local indices for predecessor resolution
+        self.local_idx = {op_id: i for i, op_id in enumerate(op_ids)}
+        self.base_durations = np.empty(n, dtype=np.float64)
+        self.predecessor_indices = np.full(n, -1, dtype=np.int64)
+        self.state_ids = np.empty(n, dtype=np.int64)
         # CSR for eligible machines
-        eligible_offsets = np.empty(n + 1, dtype=np.int64)
-        eligible_flat: list[int] = []
-        eligible_offsets[0] = 0
-
-        # Compute frozen machine availability from frozen_assignments
-        # machine_available_at[m] = max end offset of frozen assignments on machine m
-        machine_available_at = np.zeros(n_wc, dtype=np.float64)
-        machine_last_state = np.full(n_wc, -1, dtype=np.int64)
-
-        # Sort frozen assignments by end time per machine to get last state
-        frozen_by_machine: dict[int, list[Assignment]] = {}
-        for fa in frozen_assignments:
-            m_idx = wc_id_to_idx.get(fa.work_center_id)
-            if m_idx is not None:
-                frozen_by_machine.setdefault(m_idx, []).append(fa)
-
-        for m_idx, machine_fas in frozen_by_machine.items():
-            machine_fas.sort(key=lambda a: a.end_time)
-            last_fa = machine_fas[-1]
-            end_offset = (last_fa.end_time - horizon_start).total_seconds() / 60.0
-            machine_available_at[m_idx] = end_offset
-            # Last state on this machine
-            last_op = ops_by_id.get(last_fa.operation_id)
-            if last_op is not None:
-                si = state_id_to_idx.get(last_op.state_id, -1)
-                machine_last_state[m_idx] = si
-
-        # Predecessor end offsets from frozen assignments (for ops whose
-        # predecessor is in the frozen set)
-        frozen_end_offsets: dict[Any, float] = {}
-        for fa in frozen_assignments:
-            end_offset = (fa.end_time - horizon_start).total_seconds() / 60.0
-            frozen_end_offsets[fa.operation_id] = end_offset
-
-        for i, op_id in enumerate(all_op_ids):
-            op = ops_by_id[op_id]
-            base_durations[i] = float(op.base_duration_min)
-            state_ids[i] = state_id_to_idx.get(op.state_id, -1)
-
-            # Predecessor: within the problem set (local index)
-            if op.predecessor_op_id is not None:
-                local_pred = local_idx.get(op.predecessor_op_id)
-                if local_pred is not None:
-                    predecessor_indices[i] = local_pred
-                # else: predecessor is in frozen set — handled in post-processing
-
-            eligible_wc_indices = _native_eligible_machine_indices(op, wc_id_to_idx, all_wc_ids)
-            if not eligible_wc_indices:
-                return None
-            eligible_flat.extend(eligible_wc_indices)
-            eligible_offsets[i + 1] = len(eligible_flat)
-
-        eligible_indices_arr = np.array(eligible_flat, dtype=np.int64)
-
-        # Build SDST flat matrix and speed factors
-        sdst_setup_flat = np.zeros(n_wc * n_states * n_states, dtype=np.float64)
+        self.eligible_offsets = np.empty(n + 1, dtype=np.int64)
+        self.eligible_offsets[0] = 0
+        self.eligible_indices = np.empty(0, dtype=np.int64)
+        self.sdst_setup_flat = np.zeros(self.n_wc * self.n_states * self.n_states, dtype=np.float64)
         for entry in problem.setup_matrix:
             wi = wc_id_to_idx.get(entry.work_center_id)
             fi = state_id_to_idx.get(entry.from_state_id)
             ti = state_id_to_idx.get(entry.to_state_id)
             if wi is not None and fi is not None and ti is not None:
-                sdst_setup_flat[wi * n_states * n_states + fi * n_states + ti] = float(
-                    entry.setup_minutes
-                )
-
-        speed_factors = np.array([wc.speed_factor for wc in problem.work_centers], dtype=np.float64)
-
-        # Call native — dispatches from time 0 with no initial machine state.
-        # Post-process to account for frozen state.
-        native_result = greedy_repair_batch_native(
-            base_durations=base_durations,
-            predecessor_indices=predecessor_indices,
-            eligible_offsets=eligible_offsets,
-            eligible_indices=eligible_indices_arr,
-            state_ids=state_ids,
-            sdst_setup_flat=sdst_setup_flat,
-            n_wc=n_wc,
-            n_states=n_states,
-            speed_factors=speed_factors,
+                self.sdst_setup_flat[
+                    wi * self.n_states * self.n_states + fi * self.n_states + ti
+                ] = float(entry.setup_minutes)
+        self.speed_factors = np.array(
+            [wc.speed_factor for wc in problem.work_centers], dtype=np.float64
         )
 
-        if native_result is None:
-            return None
-
-        start_offsets, end_offsets, assigned_machine_indices = native_result
-
-        # Post-process: shift operations to respect frozen machine availability
-        # and frozen predecessor constraints.
-        # Single forward pass in topological order (all_op_ids is already topological).
-        op_end_offset = np.copy(end_offsets)
-
-        for i, op_id in enumerate(all_op_ids):
+    def fill_operations(
+        self,
+        op_ids: list[Any],
+        ops_by_id: Mapping[Any, Any],
+        wc_id_to_idx: dict[Any, int],
+        state_id_to_idx: dict[Any, int],
+        all_wc_ids: list[Any],
+    ) -> bool:
+        """Per-operation rows; False when an operation has no eligible machine."""
+        eligible_flat: list[int] = []
+        for i, op_id in enumerate(op_ids):
             op = ops_by_id[op_id]
-            m = int(assigned_machine_indices[i])
-            if m < 0 or m >= n_wc:
-                return None  # Invalid machine assignment
+            self.base_durations[i] = float(op.base_duration_min)
+            self.state_ids[i] = state_id_to_idx.get(op.state_id, -1)
+            # The kernel only tracks predecessors inside the dispatched set; a
+            # predecessor outside it (frozen) becomes a start floor afterwards.
+            if op.predecessor_op_id is not None:
+                local_pred = self.local_idx.get(op.predecessor_op_id)
+                if local_pred is not None:
+                    self.predecessor_indices[i] = local_pred
+            eligible_wc_indices = _native_eligible_machine_indices(op, wc_id_to_idx, all_wc_ids)
+            if not eligible_wc_indices:
+                return False
+            eligible_flat.extend(eligible_wc_indices)
+            self.eligible_offsets[i + 1] = len(eligible_flat)
+        self.eligible_indices = np.array(eligible_flat, dtype=np.int64)
+        return True
 
-            # Minimum start from frozen predecessor
-            min_start = machine_available_at[m]
-
-            # M1: cannot start before the order release_date.
-            release_offset = release_offsets.get(op_id)
-            if release_offset is not None:
-                min_start = max(min_start, release_offset)
-
-            # Check frozen predecessor constraint
-            if op.predecessor_op_id is not None and op.predecessor_op_id not in local_idx:
-                if op.predecessor_op_id not in frozen_end_offsets:
-                    return None  # Wave 13 / C13-3: never default missing pred to 0.0
-                pred_end = frozen_end_offsets[op.predecessor_op_id]
-                min_start = max(min_start, pred_end)
-
-            # Check local predecessor constraint (already handled by native, but
-            # we need to account for our shifts)
-            if predecessor_indices[i] >= 0:
-                local_pred_idx = int(predecessor_indices[i])
-                min_start = max(min_start, op_end_offset[local_pred_idx])
-
-            # Setup time from machine's last state
-            setup = 0.0
-            curr_state = int(state_ids[i])
-            prev_state = int(machine_last_state[m])
-            if (
-                prev_state >= 0
-                and curr_state >= 0
-                and prev_state < n_states
-                and curr_state < n_states
-            ):
-                setup = sdst_setup_flat[
-                    m * n_states * n_states + prev_state * n_states + curr_state
+    def setup_after(self, machine: int, prev_state: int, curr_state: int) -> float:
+        """Changeover from the machine's last state, 0 when either state is unknown."""
+        n_states = self.n_states
+        if 0 <= prev_state < n_states and 0 <= curr_state < n_states:
+            return float(
+                self.sdst_setup_flat[
+                    machine * n_states * n_states + prev_state * n_states + curr_state
                 ]
-
-            actual_start = max(float(start_offsets[i]), min_start + setup)
-            # F2 (audit v4): snap the native raw ``base/speed`` span to the
-            # canonical integer ceil grain (P0-4 / T-30) — same as repair.
-            duration = float(duration_minutes_for(op, problem.work_centers[m]))
-            actual_end = actual_start + duration
-
-            start_offsets[i] = actual_start
-            end_offsets[i] = actual_end
-            op_end_offset[i] = actual_end
-
-            # Update machine state for next operation on this machine
-            machine_available_at[m] = actual_end
-            machine_last_state[m] = curr_state
-
-        # Convert to Assignment objects
-        seed_assignments: list[Assignment] = []
-        for i, op_id in enumerate(all_op_ids):
-            m = int(assigned_machine_indices[i])
-            wc_id = idx_to_wc_id.get(m)
-            if wc_id is None:
-                return None  # Can't map machine index back
-
-            start_dt = horizon_start + timedelta(minutes=float(start_offsets[i]))
-            end_dt = horizon_start + timedelta(minutes=float(end_offsets[i]))
-
-            seed_assignments.append(
-                Assignment(
-                    operation_id=op_id,
-                    work_center_id=wc_id,
-                    start_time=start_dt,
-                    end_time=end_dt,
-                )
             )
+        return 0.0
 
-        return seed_assignments
 
-    except Exception:
-        # Any error in native path — silently fall through to Python
+def _native_greedy_dispatch(
+    problem: ScheduleProblem,
+    op_ids: list[Any],
+    ops_by_id: Mapping[Any, Any],
+    frozen_assignments: list[Assignment],
+    *,
+    skip_reasons: list[str] | None = None,
+) -> list[Assignment] | None:
+    """Dispatch ``op_ids`` (topological order) with the Rust kernel after the frozen set.
+
+    The kernel dispatches from ``t = 0`` with no initial machine state; a
+    single forward pass then shifts every operation past the frozen machine
+    availability, its release, a frozen or shifted predecessor and the setup
+    from the machine's last state, and snaps the span to the integer grain.
+    Returns None when the kernel is unavailable or the input is unusable.
+    """
+    from synaps.accelerators import greedy_repair_batch_native
+
+    wc_id_to_idx = {wc.id: idx for idx, wc in enumerate(problem.work_centers)}
+    state_id_to_idx = {s.id: idx for idx, s in enumerate(problem.states)}
+    inputs = _NativeDispatchInputs(problem, op_ids, ops_by_id, wc_id_to_idx, state_id_to_idx)
+    machine_available_at, machine_last_state, frozen_end_offsets = _frozen_machine_floors(
+        problem, frozen_assignments, ops_by_id, wc_id_to_idx, state_id_to_idx
+    )
+    all_wc_ids = [wc.id for wc in problem.work_centers]
+    if not inputs.fill_operations(op_ids, ops_by_id, wc_id_to_idx, state_id_to_idx, all_wc_ids):
+        if skip_reasons is not None:
+            skip_reasons.append("empty_eligible_machines")
         return None
+
+    native_result = greedy_repair_batch_native(
+        base_durations=inputs.base_durations,
+        predecessor_indices=inputs.predecessor_indices,
+        eligible_offsets=inputs.eligible_offsets,
+        eligible_indices=inputs.eligible_indices,
+        state_ids=inputs.state_ids,
+        sdst_setup_flat=inputs.sdst_setup_flat,
+        n_wc=inputs.n_wc,
+        n_states=inputs.n_states,
+        speed_factors=inputs.speed_factors,
+    )
+    if native_result is None:
+        return None
+    start_offsets, end_offsets, assigned_machine_indices = native_result
+    if not _shift_past_frozen(
+        problem,
+        op_ids,
+        ops_by_id,
+        inputs,
+        (start_offsets, end_offsets, assigned_machine_indices),
+        (machine_available_at, machine_last_state, frozen_end_offsets),
+    ):
+        return None
+    return _native_offsets_to_assignments(
+        problem, op_ids, start_offsets, end_offsets, assigned_machine_indices
+    )
+
+
+def _shift_past_frozen(
+    problem: ScheduleProblem,
+    op_ids: list[Any],
+    ops_by_id: Mapping[Any, Any],
+    inputs: _NativeDispatchInputs,
+    native: tuple[Any, Any, Any],
+    floors: tuple[Any, Any, dict[Any, float]],
+) -> bool:
+    """Forward pass in topological order, in place; False on an invalid machine
+    index or a predecessor that is neither dispatched nor frozen."""
+    start_offsets, end_offsets, assigned_machine_indices = native
+    machine_available_at, machine_last_state, frozen_end_offsets = floors
+    release_offsets = _release_offset_by_op(problem)
+    op_end_offset = np.copy(end_offsets)
+    for i, op_id in enumerate(op_ids):
+        op = ops_by_id[op_id]
+        m = int(assigned_machine_indices[i])
+        if m < 0 or m >= inputs.n_wc:
+            return False  # Invalid machine assignment
+
+        # Minimum start from the frozen machine availability
+        min_start = machine_available_at[m]
+
+        # M1: cannot start before the order release_date.
+        release_offset = release_offsets.get(op_id)
+        if release_offset is not None:
+            min_start = max(min_start, release_offset)
+
+        # Frozen predecessor constraint
+        if op.predecessor_op_id is not None and op.predecessor_op_id not in inputs.local_idx:
+            if op.predecessor_op_id not in frozen_end_offsets:
+                return False  # Wave 13 / C13-3: never default missing pred to 0.0
+            min_start = max(min_start, frozen_end_offsets[op.predecessor_op_id])
+
+        # Local predecessor (handled by native, but our shifts move it)
+        if inputs.predecessor_indices[i] >= 0:
+            min_start = max(min_start, op_end_offset[int(inputs.predecessor_indices[i])])
+
+        curr_state = int(inputs.state_ids[i])
+        setup = inputs.setup_after(m, int(machine_last_state[m]), curr_state)
+        actual_start = max(float(start_offsets[i]), min_start + setup)
+        # F2 (audit v4): the native kernel returns raw ``base/speed`` float
+        # spans; snap to the canonical integer ceil grain (P0-4) so ALNS
+        # reserves the same duration as every other solver. The old 1-min
+        # checker tolerance existed only to absorb this divergence.
+        actual_end = actual_start + float(duration_minutes_for(op, problem.work_centers[m]))
+
+        start_offsets[i] = actual_start
+        end_offsets[i] = actual_end
+        op_end_offset[i] = actual_end
+        machine_available_at[m] = actual_end
+        machine_last_state[m] = curr_state
+    return True
+
+
+def _frozen_machine_floors(
+    problem: ScheduleProblem,
+    frozen_assignments: list[Assignment],
+    ops_by_id: Mapping[Any, Any],
+    wc_id_to_idx: dict[Any, int],
+    state_id_to_idx: dict[Any, int],
+) -> tuple[Any, Any, dict[Any, float]]:
+    """Per machine: frozen availability and last state; per frozen op: its end offset."""
+    horizon_start = problem.planning_horizon_start
+    # machine_available_at[m] = end offset of the last frozen assignment on m
+    machine_available_at = np.zeros(len(problem.work_centers), dtype=np.float64)
+    machine_last_state = np.full(len(problem.work_centers), -1, dtype=np.int64)
+    frozen_by_machine: dict[int, list[Assignment]] = {}
+    for fa in frozen_assignments:
+        m_idx = wc_id_to_idx.get(fa.work_center_id)
+        if m_idx is not None:
+            frozen_by_machine.setdefault(m_idx, []).append(fa)
+    for m_idx, machine_fas in frozen_by_machine.items():
+        machine_fas.sort(key=lambda a: a.end_time)
+        last_fa = machine_fas[-1]
+        machine_available_at[m_idx] = (last_fa.end_time - horizon_start).total_seconds() / 60.0
+        last_op = ops_by_id.get(last_fa.operation_id)
+        if last_op is not None:
+            machine_last_state[m_idx] = state_id_to_idx.get(last_op.state_id, -1)
+    frozen_end_offsets = {
+        fa.operation_id: (fa.end_time - horizon_start).total_seconds() / 60.0
+        for fa in frozen_assignments
+    }
+    return machine_available_at, machine_last_state, frozen_end_offsets
+
+
+def _native_offsets_to_assignments(
+    problem: ScheduleProblem,
+    op_ids: list[Any],
+    start_offsets: Any,
+    end_offsets: Any,
+    assigned_machine_indices: Any,
+) -> list[Assignment] | None:
+    """Minute offsets → ``Assignment`` objects; None on an unmappable machine index."""
+    idx_to_wc_id = {idx: wc.id for idx, wc in enumerate(problem.work_centers)}
+    horizon_start = problem.planning_horizon_start
+    assignments: list[Assignment] = []
+    for i, op_id in enumerate(op_ids):
+        wc_id = idx_to_wc_id.get(int(assigned_machine_indices[i]))
+        if wc_id is None:
+            return None  # Can't map machine index back
+        assignments.append(
+            Assignment(
+                operation_id=op_id,
+                work_center_id=wc_id,
+                start_time=horizon_start + timedelta(minutes=float(start_offsets[i])),
+                end_time=horizon_start + timedelta(minutes=float(end_offsets[i])),
+            )
+        )
+    return assignments
 
 
 def _repair_greedy(

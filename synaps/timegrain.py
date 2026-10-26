@@ -86,6 +86,21 @@ def duration_minutes_for(operation: Any, work_center: Any) -> int:
     )
 
 
+def min_duration_minutes_for(operation: Any, work_center: Any) -> int:
+    """Shortest reservation an operation can take on ``work_center`` (lower bounds).
+
+    An operation with execution ``modes`` runs for the selected mode's
+    ``duration_min`` on any eligible machine (CP-SAT, ``mode_choice``), which
+    may be shorter than :func:`duration_minutes_for`; the shortest mode is then
+    the floor. Without modes this is :func:`duration_minutes_for`. A bound
+    built on anything longer over-claims on moded instances.
+    """
+    modes = getattr(operation, "modes", None)
+    if modes:
+        return min(int(mode.duration_min) for mode in modes)
+    return duration_minutes_for(operation, work_center)
+
+
 def physical_processing_minutes_for(operation: Any, work_center: Any) -> float:
     """Physical processing floor for ``(operation, work_center)`` (T-30 / F2).
 

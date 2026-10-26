@@ -267,6 +267,29 @@ class IncrementalRepair(BaseSolver):
         result.metadata["parallel_virtualization"] = True
         return stamp_honest_coverage(problem, result)
 
+    def _finish_with_cpsat(
+        self,
+        problem: ScheduleProblem,
+        frozen: list[Assignment],
+        loop: _GreedyRepairLoop,
+        remaining_repair: list[Operation],
+        num_workers: int,
+    ) -> bool:
+        """A ready operation fit nowhere: let CP-SAT place every remaining one."""
+        cpsat_result = self._cpsat_fallback(
+            problem,
+            frozen + loop.repaired,
+            {operation.id for operation in remaining_repair},
+            loop.scheduled_ids,
+            num_workers=num_workers,
+        )
+        if cpsat_result is None:
+            return False
+        loop.repaired.extend(cpsat_result)
+        loop.scheduled_ids.update(assignment.operation_id for assignment in cpsat_result)
+        remaining_repair.clear()
+        return True
+
     def _solve_core(self, problem: ScheduleProblem, **kwargs: Any) -> ScheduleResult:
         t0 = time.monotonic()
 
@@ -286,21 +309,12 @@ class IncrementalRepair(BaseSolver):
                 metadata={"error": "base_assignments required"},
             )
 
-        orders_by_id = {o.id: o for o in problem.orders}
         ops_by_id = {op.id: op for op in problem.operations}
         op_positions = {op.id: index for index, op in enumerate(problem.operations)}
         dispatch_context = build_dispatch_context(problem)
 
-        # Identify neighbourhood: disrupted ops + `radius` downstream successors
-        neighbourhood: set[Any] = set(disrupted_op_ids)
-        for _ in range(radius):
-            new_layer: set[Any] = set()
-            for op in problem.operations:
-                if op.predecessor_op_id in neighbourhood and op.id not in neighbourhood:
-                    new_layer.add(op.id)
-            if not new_layer:
-                break
-            neighbourhood.update(new_layer)
+        # Neighbourhood: disrupted ops + `radius` downstream successors, minus frozen.
+        neighbourhood = _repair_neighbourhood(problem, disrupted_op_ids, radius)
         neighbourhood -= frozen_ids_for_repair(base_assignments, kwargs)
 
         # Separate frozen vs. repaired assignments
@@ -310,149 +324,12 @@ class IncrementalRepair(BaseSolver):
             for operation_id in sorted(neighbourhood, key=op_positions.__getitem__)
             if operation_id in ops_by_id
         ]
-        horizon_start = problem.planning_horizon_start
-        used_cpsat_fallback = False
-
-        repaired: list[Assignment] = []
-        scheduled_ids: set[Any] = {a.operation_id for a in frozen}
-        scheduled_by_op: dict[Any, Assignment] = {
-            assignment.operation_id: assignment for assignment in frozen
-        }
-        machine_idx = MachineIndex(dispatch_context)
-        machine_idx.extend(frozen)
-        # Sort by descending priority first (higher priority = more urgent),
-        # then by sequence within order for stable tie-breaking.
-        remaining_repair = sorted(
-            to_repair,
-            key=lambda operation: (
-                -orders_by_id[operation.order_id].priority,
-                operation.seq_in_order,
-                op_positions[operation.id],
-            ),
+        loop = _GreedyRepairLoop(problem, dispatch_context, frozen, op_positions)
+        remaining_repair, slot_missing = loop.run(to_repair)
+        repaired = loop.repaired
+        used_cpsat_fallback = slot_missing and self._finish_with_cpsat(
+            problem, frozen, loop, remaining_repair, cpsat_fallback_num_workers
         )
-        n_scan = len(problem.operations)
-
-        while remaining_repair:
-            ready = [
-                operation
-                for operation in remaining_repair
-                if operation.predecessor_op_id is None
-                or operation.predecessor_op_id in scheduled_ids
-            ]
-            if not ready:
-                break
-
-            best_candidate: (
-                tuple[
-                    int,
-                    float,
-                    float,
-                    float,
-                    int,
-                    int,
-                    str,
-                    Operation,
-                    UUID,
-                    Any,
-                ]
-                | None
-            ) = None
-            scheduled_assignments = machine_idx.all_assignments
-
-            for operation in ready:
-                predecessor_end = 0.0
-                if operation.predecessor_op_id is not None:
-                    predecessor_assignment = scheduled_by_op.get(operation.predecessor_op_id)
-                    if predecessor_assignment is not None:
-                        predecessor_end = (
-                            predecessor_assignment.end_time - horizon_start
-                        ).total_seconds() / 60.0
-
-                earliest_start = max(
-                    predecessor_end,
-                    operation_earliest_offset_minutes(
-                        operation,
-                        orders_by_id[operation.order_id],
-                        horizon_start,
-                    ),
-                )
-
-                eligible = (
-                    operation.eligible_wc_ids
-                    if operation.eligible_wc_ids
-                    else [work_center.id for work_center in problem.work_centers]
-                )
-                for work_center_id in eligible:
-                    slot = find_earliest_feasible_slot(
-                        dispatch_context,
-                        scheduled_assignments,
-                        operation,
-                        work_center_id,
-                        earliest_start,
-                        machine_index=machine_idx,
-                        gap_scan=gap_scan_for(n_scan, operation),
-                    )
-                    if slot is None:
-                        continue
-                    # Priority-aware candidate key: high-priority operations (higher number)
-                    # are preferred even if they start later.  Negative priority ensures
-                    # descending sort.  Within the same priority class, prefer earlier
-                    # end_offset to minimise makespan impact, then lower material loss.
-                    op_priority = orders_by_id[operation.order_id].priority
-                    candidate_key = (
-                        -op_priority,
-                        slot.end_offset,
-                        slot.material_loss,
-                        slot.start_offset,
-                        operation.seq_in_order,
-                        op_positions[operation.id],
-                        str(work_center_id),
-                    )
-                    if best_candidate is None or candidate_key < best_candidate[:7]:
-                        best_candidate = (
-                            -op_priority,
-                            slot.end_offset,
-                            slot.material_loss,
-                            slot.start_offset,
-                            operation.seq_in_order,
-                            op_positions[operation.id],
-                            str(work_center_id),
-                            operation,
-                            work_center_id,
-                            slot,
-                        )
-
-            if best_candidate is None:
-                remaining_ids = {operation.id for operation in remaining_repair}
-                cpsat_result = self._cpsat_fallback(
-                    problem,
-                    frozen + repaired,
-                    remaining_ids,
-                    scheduled_ids,
-                    num_workers=cpsat_fallback_num_workers,
-                )
-                if cpsat_result is not None:
-                    repaired.extend(cpsat_result)
-                    scheduled_ids.update(assignment.operation_id for assignment in cpsat_result)
-                    remaining_repair.clear()
-                    used_cpsat_fallback = True
-                break
-
-            _, _, _, _, _, _, _, operation, work_center_id, slot = best_candidate
-            repaired.append(
-                Assignment(
-                    operation_id=operation.id,
-                    work_center_id=work_center_id,
-                    start_time=horizon_start + timedelta(minutes=slot.start_offset),
-                    end_time=horizon_start + timedelta(minutes=slot.end_offset),
-                    setup_minutes=slot.setup_minutes,
-                    aux_resource_ids=slot.aux_resource_ids,
-                )
-            )
-            scheduled_by_op[operation.id] = repaired[-1]
-            machine_idx.add(repaired[-1])
-            scheduled_ids.add(operation.id)
-            remaining_repair.remove(operation)
 
         all_assignments = frozen + repaired
 
@@ -460,25 +337,7 @@ class IncrementalRepair(BaseSolver):
         # sequence — prevents ghost setups when a repaired op is inserted
         # between two frozen ops.
         total_setup = recompute_assignment_setups(all_assignments, dispatch_context)
-
-        total_material_loss = 0.0
-        by_machine: dict[Any, list[Assignment]] = {}
-        for assignment in all_assignments:
-            by_machine.setdefault(assignment.work_center_id, []).append(assignment)
-        for work_center_id, machine_assignments in by_machine.items():
-            machine_assignments.sort(key=lambda assignment: assignment.start_time)
-            for index in range(1, len(machine_assignments)):
-                previous_operation = ops_by_id.get(machine_assignments[index - 1].operation_id)
-                current_operation = ops_by_id.get(machine_assignments[index].operation_id)
-                if previous_operation is None or current_operation is None:
-                    continue
-                previous_state = previous_operation.state_id
-                current_state = current_operation.state_id
-                total_material_loss += dispatch_context.material_loss.get(
-                    (work_center_id, previous_state, current_state),
-                    0.0,
-                )
-
+        horizon_start = problem.planning_horizon_start
         makespan = (
             max((a.end_time - horizon_start).total_seconds() / 60.0 for a in all_assignments)
             if all_assignments
@@ -502,7 +361,167 @@ class IncrementalRepair(BaseSolver):
             notary_mode=str(kwargs.get("notary", "exhaustive")),
             freeze_horizon_end=kwargs.get("freeze_horizon_end"),
             total_setup=total_setup,
-            total_material_loss=total_material_loss,
+            total_material_loss=_total_material_loss(all_assignments, ops_by_id, dispatch_context),
             makespan=makespan,
             total_tardiness=total_tardiness,
         )
+
+
+def _repair_neighbourhood(
+    problem: ScheduleProblem, disrupted_op_ids: set[Any], radius: int
+) -> set[Any]:
+    """Disrupted operations plus up to ``radius`` layers of chain successors."""
+    neighbourhood: set[Any] = set(disrupted_op_ids)
+    for _ in range(radius):
+        new_layer: set[Any] = set()
+        for op in problem.operations:
+            if op.predecessor_op_id in neighbourhood and op.id not in neighbourhood:
+                new_layer.add(op.id)
+        if not new_layer:
+            break
+        neighbourhood.update(new_layer)
+    return neighbourhood
+
+
+_RepairCandidate = tuple[int, float, float, float, int, int, str, "Operation", "UUID", Any]
+
+
+class _GreedyRepairLoop:
+    """Priority-aware greedy re-insertion of the neighbourhood after the frozen set."""
+
+    def __init__(
+        self,
+        problem: ScheduleProblem,
+        dispatch_context: Any,
+        frozen: list[Assignment],
+        op_positions: dict[Any, int],
+    ) -> None:
+        self.dispatch_context = dispatch_context
+        self.op_positions = op_positions
+        self.orders_by_id = {o.id: o for o in problem.orders}
+        self.horizon_start = problem.planning_horizon_start
+        self.all_wc_ids = [work_center.id for work_center in problem.work_centers]
+        self.repaired: list[Assignment] = []
+        self.scheduled_ids: set[Any] = {a.operation_id for a in frozen}
+        self.scheduled_by_op: dict[Any, Assignment] = {
+            assignment.operation_id: assignment for assignment in frozen
+        }
+        self.machine_idx = MachineIndex(dispatch_context)
+        self.machine_idx.extend(frozen)
+        self.n_scan = len(problem.operations)
+
+    def run(self, to_repair: list[Operation]) -> tuple[list[Operation], bool]:
+        """Insert until done or stuck: ``(remaining, a ready op had no slot)``."""
+        # Sort by descending priority first (higher priority = more urgent),
+        # then by sequence within order for stable tie-breaking.
+        remaining_repair = sorted(
+            to_repair,
+            key=lambda operation: (
+                -self.orders_by_id[operation.order_id].priority,
+                operation.seq_in_order,
+                self.op_positions[operation.id],
+            ),
+        )
+        while remaining_repair:
+            ready = [
+                operation
+                for operation in remaining_repair
+                if operation.predecessor_op_id is None
+                or operation.predecessor_op_id in self.scheduled_ids
+            ]
+            if not ready:
+                return remaining_repair, False
+            best_candidate = self._best_candidate(ready)
+            if best_candidate is None:
+                return remaining_repair, True
+            _, _, _, _, _, _, _, operation, work_center_id, slot = best_candidate
+            self.repaired.append(
+                Assignment(
+                    operation_id=operation.id,
+                    work_center_id=work_center_id,
+                    start_time=self.horizon_start + timedelta(minutes=slot.start_offset),
+                    end_time=self.horizon_start + timedelta(minutes=slot.end_offset),
+                    setup_minutes=slot.setup_minutes,
+                    aux_resource_ids=slot.aux_resource_ids,
+                )
+            )
+            self.scheduled_by_op[operation.id] = self.repaired[-1]
+            self.machine_idx.add(self.repaired[-1])
+            self.scheduled_ids.add(operation.id)
+            remaining_repair.remove(operation)
+        return remaining_repair, False
+
+    def _best_candidate(self, ready: list[Operation]) -> _RepairCandidate | None:
+        best_candidate: _RepairCandidate | None = None
+        scheduled_assignments = self.machine_idx.all_assignments
+        for operation in ready:
+            predecessor_end = 0.0
+            if operation.predecessor_op_id is not None:
+                predecessor_assignment = self.scheduled_by_op.get(operation.predecessor_op_id)
+                if predecessor_assignment is not None:
+                    predecessor_end = (
+                        predecessor_assignment.end_time - self.horizon_start
+                    ).total_seconds() / 60.0
+            earliest_start = max(
+                predecessor_end,
+                operation_earliest_offset_minutes(
+                    operation,
+                    self.orders_by_id[operation.order_id],
+                    self.horizon_start,
+                ),
+            )
+            eligible = operation.eligible_wc_ids if operation.eligible_wc_ids else self.all_wc_ids
+            for work_center_id in eligible:
+                slot = find_earliest_feasible_slot(
+                    self.dispatch_context,
+                    scheduled_assignments,
+                    operation,
+                    work_center_id,
+                    earliest_start,
+                    machine_index=self.machine_idx,
+                    gap_scan=gap_scan_for(self.n_scan, operation),
+                )
+                if slot is None:
+                    continue
+                # Priority-aware candidate key: high-priority operations (higher
+                # number) are preferred even if they start later. Negative
+                # priority ensures descending sort. Within the same priority
+                # class, prefer earlier end_offset to minimise makespan impact,
+                # then lower material loss.
+                candidate: _RepairCandidate = (
+                    -self.orders_by_id[operation.order_id].priority,
+                    slot.end_offset,
+                    slot.material_loss,
+                    slot.start_offset,
+                    operation.seq_in_order,
+                    self.op_positions[operation.id],
+                    str(work_center_id),
+                    operation,
+                    work_center_id,
+                    slot,
+                )
+                if best_candidate is None or candidate[:7] < best_candidate[:7]:
+                    best_candidate = candidate
+        return best_candidate
+
+
+def _total_material_loss(
+    all_assignments: list[Assignment], ops_by_id: dict[Any, Operation], dispatch_context: Any
+) -> float:
+    """Material loss of the consecutive transitions on every machine sequence."""
+    total_material_loss = 0.0
+    by_machine: dict[Any, list[Assignment]] = {}
+    for assignment in all_assignments:
+        by_machine.setdefault(assignment.work_center_id, []).append(assignment)
+    for work_center_id, machine_assignments in by_machine.items():
+        machine_assignments.sort(key=lambda assignment: assignment.start_time)
+        for index in range(1, len(machine_assignments)):
+            previous_operation = ops_by_id.get(machine_assignments[index - 1].operation_id)
+            current_operation = ops_by_id.get(machine_assignments[index].operation_id)
+            if previous_operation is None or current_operation is None:
+                continue
+            total_material_loss += dispatch_context.material_loss.get(
+                (work_center_id, previous_operation.state_id, current_operation.state_id),
+                0.0,
+            )
+    return total_material_loss

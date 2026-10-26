@@ -57,24 +57,24 @@ The **Solver Router** selects one standalone solver configuration based on opera
 
 ### 2.1. Implementation Evidence — Code Line Counts
 
-Measured line counts, 2026-10 audit snapshot (`wc -l`; regenerate rather than hand-edit).
+Measured line counts, 2026-10-25 snapshot after T-05 / T-06 (`wc -l`; regenerate rather than hand-edit).
 
 | Component | Source File | LOC | Primary Algorithm |
 |-----------|------------|-----|-------------------|
-| **CP-SAT Exact Solver** | `synaps/solvers/cpsat_solver.py` | 1 751 | Optional intervals + `AddCircuit` (SDST) + NoOverlap/Cumulative (ARC); modes; calendars |
-| **LBBD Decomposition** | `synaps/solvers/lbbd_solver.py` | 1 361 | HiGHS MIP master (unique assignment + capacity relaxation with a safe transition floor) + CP-SAT subproblems + full-assignment no-goods (only when every cluster subproblem reached optimality status). The setup-cost / machine-TSP / load-balance / critical-path cuts were REMOVED in 2026-07 (S1/S3 invalid-bound findings); `_LbbdRun` engine |
-| **LBBD-HD (Parallel)** | `synaps/solvers/lbbd_hd_solver.py` | 1 643 | Hierarchical LBBD + process-pool subproblems + topological post-assembly; `_LbbdHdRun` engine |
-| **Greedy ATCS / Beam** | `synaps/solvers/greedy_dispatch.py` | 1 090 | Log-space ATCS priority index; serial schedule generation. Each step rebuilds the ready set and scores every (ready op × eligible machine) pair, so the worst case is $O(N^2 \bar{E})$ slot searches, not $O(N \log N)$ |
+| **CP-SAT Exact Solver** | `synaps/solvers/cpsat_solver.py` | 1 889 | Optional intervals + `AddCircuit` (SDST) + NoOverlap/Cumulative (ARC); modes; calendars |
+| **LBBD Decomposition** | `synaps/solvers/lbbd_solver.py` | 1 392 | HiGHS MIP master (unique assignment + capacity relaxation with a safe transition floor) + CP-SAT subproblems + full-assignment no-goods (only when every cluster subproblem reached optimality status). The setup-cost / machine-TSP / load-balance / critical-path cuts were REMOVED in 2026-07 (S1/S3 invalid-bound findings); `_LbbdRun` engine. Opt-in `sound_cuts` (T-06, `_lbbd_sound.py`): valid master rows — chains, anchored head/tail energy, state entry/exit setups, metric-closure state paths — so the no-good-free master bound is a valid lower bound. Master pieces shared with LBBD-HD in `_lbbd_master.py`; a merged schedule becomes the incumbent only when the notary reports `proven_hard_violations = ∅` |
+| **LBBD-HD (Parallel)** | `synaps/solvers/lbbd_hd_solver.py` | 1 602 | Hierarchical LBBD + process-pool subproblems + topological post-assembly; `_LbbdHdRun` engine |
+| **Greedy ATCS / Beam** | `synaps/solvers/greedy_dispatch.py` | 1 087 | Log-space ATCS priority index; serial schedule generation. Each step rebuilds the ready set and scores every (ready op × eligible machine) pair, so the worst case is $O(N^2 \bar{E})$ slot searches, not $O(N \log N)$ |
 | **Pareto Slice** | `synaps/solvers/pareto_slice_solver.py` | 294 | Two-stage $\varepsilon$-constraint (makespan-then-secondary) |
-| **Incremental Repair** | `synaps/solvers/incremental_repair.py` | 508 | Neighbourhood radius + greedy fallback + micro-CP-SAT |
-| **Portfolio Router** | `synaps/solvers/router.py` | 499 | Deterministic regime×size→config decision tree |
+| **Incremental Repair** | `synaps/solvers/incremental_repair.py` | 527 | Neighbourhood radius + greedy fallback + micro-CP-SAT |
+| **Portfolio Router** | `synaps/solvers/router.py` | 517 | Deterministic regime×size→config decision tree |
 | **FeasibilityChecker** | `synaps/solvers/feasibility_checker.py` | 1 423 | Independent notary (10 constraint classes); since 2026-10 the calendar checks derive setup windows and held aux resources instead of trusting solver stamps |
 | **RHC Solver** | `synaps/solvers/rhc/` package | 7 834 | Rolling-horizon decomposition; `_RhcRun` engine + typed `RhcRunConfig` |
-| **ALNS Solver** | `synaps/solvers/alns_solver.py` (+ `_alns_config.py`) | 4 915 | 7 destroy operators (random / worst / related / machine_segment / precedence_chain / critical_path / due_pressure) + greedy or micro-CP-SAT repair + SA + roulette or UCB1 selection; `_AlnsRun` engine |
+| **ALNS Solver** | `synaps/solvers/alns_solver.py` (+ `_alns_config.py`) | 4 779 | 7 destroy operators (random / worst / related / machine_segment / precedence_chain / critical_path / due_pressure) + greedy or micro-CP-SAT repair + SA + roulette or UCB1 selection; `_AlnsRun` engine |
 | **Graph Partitioning** | `synaps/solvers/partitioning.py` | 268 | Coarsening (BFS ARC-affinity) + FFD bin packing + refinement |
 | **Solver Registry** | `synaps/solvers/registry.py` | 456 | 25 named solver configs |
-| **Data Model** | `synaps/model.py` | 625 | Pydantic v2 schema + cross-reference validator |
-| **Control-Plane BFF** | `control-plane/src/*.ts` | 3 964 | Fastify + OpenAPI/AJV + Python bridge (TypeScript) |
+| **Data Model** | `synaps/model.py` | 655 | Pydantic v2 schema + cross-reference validator |
+| **Control-Plane BFF** | `control-plane/src/*.ts` | 4 015 | Fastify + OpenAPI/AJV + Python bridge (TypeScript) |
 
 ### 2.2. Solver Registry — 25 named solver configs (registry.py)
 
