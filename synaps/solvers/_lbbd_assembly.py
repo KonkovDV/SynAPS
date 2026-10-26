@@ -220,7 +220,8 @@ def seal_post_assembly_calendar(
             return False
         if not (changed or snapped):
             return True
-    return True
+    # Still moving after the pass cap: do not treat the merge as finished.
+    return False
 
 
 def notary_rejections(problem: ScheduleProblem, assignments: list[Assignment]) -> list[str]:
