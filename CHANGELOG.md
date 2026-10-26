@@ -38,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `manylinux_2_28` image (`PyO3/maturin-action` v1.51.0, maturin v1.13.1)
   instead of linking the `ubuntu-latest` glibc. `RUSTFLAGS=-C target-cpu=x86-64-v2`
   is still forwarded into that image. macOS and Windows stay on the host build.
+  `workflow_dispatch` `build-only` run `40355045146` uploaded
+  `synaps_native-0.3.0-cp312-cp312-manylinux_2_28_x86_64` and the cp313 twin
+  (maturin 1.13.1). ELF `verneed` on both `.so` files stops at `GLIBC_2.28`.
+  The previous host build, run `40348268121`, was tagged `manylinux_2_34`
+  and its `verneed` reached `GLIBC_2.34`.
 
 - **CP-SAT `determinism="strict-parallel"` (audit 2026-10, opt-in):** the
   strict contract (deterministic-time stop, loose wall safety,
