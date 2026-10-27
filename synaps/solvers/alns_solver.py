@@ -19,7 +19,7 @@ import random
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
@@ -542,7 +542,7 @@ def _evaluate_objective_incremental(
 #                to break high-cost setup chains (domain heuristic)
 #   precedence_chain — R8 order-based ejection chain removal
 #                (Voudouris & Tsang 1999; Ropke & Pisinger 2006 §3.3)
-#   critical_path — longest-path bottleneck-chain removal via topological DP
+#   critical_path — zero-slack chain into the makespan operation
 #                (Kelley & Walker 1959; Adams, Balas & Zawack 1988)
 # ---------------------------------------------------------------------------
 
@@ -853,6 +853,110 @@ def _destroy_precedence_chain(
     return set(rng.sample(op_ids, min(destroy_size, len(op_ids))))
 
 
+#: A scheduled gap within this slack is a binding CPM edge (Q-05 / T-16).
+_TIGHT_SLACK = timedelta(milliseconds=1)
+
+
+def _tight_predecessors(
+    assignments: list[Assignment],
+    sdst: SdstMatrix,
+    ops_by_id: Mapping[Any, Any],
+) -> dict[UUID, list[UUID]]:
+    """Tight predecessors of each operation, latest finish first.
+
+    A precedence edge is tight when the successor starts at the predecessor's
+    end. A machine edge, per lane, is tight when the gap equals the setup
+    (idle beyond that setup is not on the chain). A release date is a source:
+    the walk stops there, it is not an edge.
+    """
+    by_op = {item.operation_id: item for item in assignments}
+    by_lane: dict[tuple[Any, Any], list[Assignment]] = {}
+    for item in assignments:
+        by_lane.setdefault((item.work_center_id, item.lane_id), []).append(item)
+    machine_prev: dict[UUID, tuple[Assignment, timedelta]] = {}
+    for (wc_id, _lane), seq in by_lane.items():
+        seq.sort(key=lambda item: (item.start_time, str(item.operation_id)))
+        for index in range(len(seq) - 1):
+            prev, curr = seq[index], seq[index + 1]
+            prev_op = ops_by_id.get(prev.operation_id)
+            curr_op = ops_by_id.get(curr.operation_id)
+            lag_min = 0.0
+            if prev_op is not None and curr_op is not None:
+                lag_min = sdst.get_setup(wc_id, prev_op.state_id, curr_op.state_id)
+            machine_prev[curr.operation_id] = (prev, timedelta(minutes=lag_min))
+
+    preds: dict[UUID, list[UUID]] = {}
+    for op_id, assignment in by_op.items():
+        found: list[tuple[datetime, str, UUID]] = []
+        op = ops_by_id.get(op_id)
+        if op is not None and op.predecessor_op_id in by_op:
+            pred = by_op[op.predecessor_op_id]
+            if assignment.start_time - pred.end_time <= _TIGHT_SLACK:
+                found.append((pred.end_time, str(pred.operation_id), pred.operation_id))
+        machine = machine_prev.get(op_id)
+        if machine is not None:
+            pred, lag = machine
+            if assignment.start_time - (pred.end_time + lag) <= _TIGHT_SLACK:
+                found.append((pred.end_time, str(pred.operation_id), pred.operation_id))
+        found.sort(key=lambda item: item[1])
+        found.sort(key=lambda item: item[0], reverse=True)
+        preds[op_id] = [item[2] for item in found]
+    return preds
+
+
+def schedule_critical_chain(
+    assignments: list[Assignment],
+    sdst: SdstMatrix,
+    ops_by_id: Mapping[Any, Any],
+) -> list[UUID]:
+    """One zero-slack chain ending at the makespan operation."""
+    if not assignments:
+        return []
+    preds = _tight_predecessors(assignments, sdst, ops_by_id)
+    sink = max(assignments, key=lambda item: (item.end_time, str(item.operation_id)))
+    chain: list[UUID] = []
+    current: UUID | None = sink.operation_id
+    seen: set[UUID] = set()
+    while current is not None and current not in seen:
+        seen.add(current)
+        chain.append(current)
+        nxt = preds.get(current) or []
+        current = nxt[0] if nxt else None
+    chain.reverse()
+    return chain
+
+
+def _ops_on_tight_critical_paths(
+    assignments: list[Assignment],
+    sdst: SdstMatrix,
+    ops_by_id: Mapping[Any, Any],
+) -> set[UUID]:
+    """Every operation that can reach a makespan operation on tight edges."""
+    if not assignments:
+        return set()
+    preds = _tight_predecessors(assignments, sdst, ops_by_id)
+    max_end = max(item.end_time for item in assignments)
+    stack = [item.operation_id for item in assignments if item.end_time == max_end]
+    seen: set[UUID] = set()
+    while stack:
+        current = stack.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        stack.extend(preds.get(current, []))
+    return seen
+
+
+def _machine_sequences(assignments: list[Assignment]) -> dict[Any, list[Assignment]]:
+    """Assignments grouped by work center and ordered by start time."""
+    by_machine: dict[Any, list[Assignment]] = {}
+    for item in assignments:
+        by_machine.setdefault(item.work_center_id, []).append(item)
+    for seq in by_machine.values():
+        seq.sort(key=lambda item: (item.start_time, str(item.operation_id)))
+    return by_machine
+
+
 def _destroy_critical_path(
     assignments: list[Assignment],
     problem: ScheduleProblem,
@@ -863,128 +967,31 @@ def _destroy_critical_path(
     ops_by_id: dict[Any, Any] | None = None,
     **_kwargs: Any,
 ) -> set[UUID]:
-    """Remove operations on the critical path of the current schedule.
+    """Remove the time-tight chain that ends at the makespan operation.
 
-    Builds a combined DAG of precedence edges and machine-sequence edges
-    (sorted by start_time), then computes the longest path via topological
-    sort + dynamic programming in O(N + E) time.
-
-    The critical path is the chain from a source node to the makespan-defining
-    operation. Destroying it forces ALNS repair to focus on the bottleneck.
-
-    The path weight is the sum of operation durations: setups, idle time and
-    releases are not on it, so the chain is a duration-critical chain of the
-    sequence DAG rather than the time-tight chain of the schedule (audit Q-05).
+    Precedence edges and same-lane machine edges count only when the
+    successor starts at the predecessor's end plus the required setup.
+    Idle, a release date, and a setup gap larger than the setup itself
+    are slack: they are not part of the chain (T-16).
 
     Academic basis:
         - Kelley & Walker (1959): Critical Path Method (CPM)
         - Adams, Balas & Zawack (1988): shifting bottleneck + critical path
           for job-shop scheduling
     """
+    del rng
     if not assignments:
         return set()
-
     if ops_by_id is None:
         ops_by_id = {op.id: op for op in problem.operations}
-
-    dag = _ScheduleDag(assignments, ops_by_id)
-    longest = dag.longest_paths()
-    # If topological sort didn't cover all nodes (cycle in graph), fall back
-    if longest is None:
-        return _destroy_random(assignments, problem, sdst, destroy_size, rng)
-    dist, predecessor_on_path = longest
-
-    # Find the makespan-defining operation (node with maximum dist)
-    makespan_op_id = max(dag.assigned_op_ids, key=lambda op_id: dist.get(op_id, 0.0))
-
-    # Trace back the critical path
-    critical_path: list[UUID] = []
-    current: UUID | None = makespan_op_id
-    while current is not None:
-        critical_path.append(current)
-        current = predecessor_on_path.get(current)
-    critical_path.reverse()
-
-    # Cap to destroy_size (take from the end — closer to makespan bottleneck)
+    critical_path = schedule_critical_chain(assignments, sdst, ops_by_id)
     if len(critical_path) > destroy_size:
         critical_path = critical_path[-destroy_size:]
-
     if len(critical_path) < destroy_size:
         return _extend_with_machine_neighbors(
-            critical_path, dag.by_machine, ops_by_id, sdst, destroy_size
+            critical_path, _machine_sequences(assignments), ops_by_id, sdst, destroy_size
         )
     return set(critical_path)
-
-
-class _ScheduleDag:
-    """Precedence + machine-sequence DAG of a schedule, durations as node weights."""
-
-    def __init__(self, assignments: list[Assignment], ops_by_id: Mapping[Any, Any]) -> None:
-        assignment_by_op: dict[UUID, Assignment] = {a.operation_id: a for a in assignments}
-        # Machine sequences sorted by start_time
-        self.by_machine: dict[Any, list[Assignment]] = {}
-        for a in assignments:
-            self.by_machine.setdefault(a.work_center_id, []).append(a)
-        for wc_id in self.by_machine:
-            self.by_machine[wc_id].sort(key=lambda a: a.start_time)
-        # Node weight = the operation's duration in minutes; the longest path
-        # length is then the sum of durations along the path:
-        #   dist[node] = duration[node] + max(dist[predecessor on the path])
-        self.op_duration: dict[UUID, float] = {
-            a.operation_id: (a.end_time - a.start_time).total_seconds() / 60.0 for a in assignments
-        }
-        self.assigned_op_ids = set(assignment_by_op.keys())
-        # Forward edges: precedence (op.predecessor_op_id -> op.id), then
-        # machine sequence (consecutive operations on one machine).
-        self.successors: dict[UUID, list[UUID]] = {}
-        self.in_degree: dict[UUID, int] = {}
-        for op_id in self.assigned_op_ids:
-            self.successors.setdefault(op_id, [])
-            self.in_degree.setdefault(op_id, 0)
-        for op_id in self.assigned_op_ids:
-            op = ops_by_id.get(op_id)
-            if op is None:
-                continue
-            pred_id = op.predecessor_op_id
-            if pred_id is not None and pred_id in self.assigned_op_ids:
-                self._edge(pred_id, op_id)
-        for machine_seq in self.by_machine.values():
-            for i in range(len(machine_seq) - 1):
-                self._edge(machine_seq[i].operation_id, machine_seq[i + 1].operation_id)
-
-    def _edge(self, source: UUID, target: UUID) -> None:
-        self.successors.setdefault(source, []).append(target)
-        self.in_degree[target] = self.in_degree.get(target, 0) + 1
-
-    def longest_paths(self) -> tuple[dict[UUID, float], dict[UUID, UUID | None]] | None:
-        """Kahn order + forward DP; None when the graph has a cycle."""
-        from collections import deque
-
-        in_degree = self.in_degree
-        queue: deque[UUID] = deque(
-            op_id for op_id in self.assigned_op_ids if in_degree.get(op_id, 0) == 0
-        )
-        topo_order: list[UUID] = []
-        while queue:
-            node = queue.popleft()
-            topo_order.append(node)
-            for succ in self.successors.get(node, []):
-                in_degree[succ] -= 1
-                if in_degree[succ] == 0:
-                    queue.append(succ)
-        if len(topo_order) != len(self.assigned_op_ids):
-            return None
-        # dist[node] = longest path ending at node (inclusive of its duration)
-        dist: dict[UUID, float] = {node: self.op_duration.get(node, 0.0) for node in topo_order}
-        predecessor_on_path: dict[UUID, UUID | None] = dict.fromkeys(topo_order)
-        for node in topo_order:
-            node_dist = dist[node]
-            for succ in self.successors.get(node, []):
-                candidate_dist = node_dist + self.op_duration.get(succ, 0.0)
-                if candidate_dist > dist[succ]:
-                    dist[succ] = candidate_dist
-                    predecessor_on_path[succ] = node
-        return dist, predecessor_on_path
 
 
 def _extend_with_machine_neighbors(
@@ -1184,7 +1191,7 @@ def _destroy_due_pressure(
 # All destroy operators (random, worst, related: Shaw/Ropke-Pisinger;
 #  machine_segment: domain heuristic for setup-chain disruption;
 #  precedence_chain: R8 order-based ejection for work-order level re-sequencing;
-#  critical_path: Kelley/Walker & Adams-Balas-Zawack bottleneck-chain removal;
+#  critical_path: zero-slack chain into the latest finish (Kelley/Walker, Adams-Balas-Zawack);
 #  due_pressure: Pinedo weighted-tardiness order-tail removal with slack fallback)
 DESTROY_OPERATORS: list[tuple[str, Callable[..., Any]]] = [
     ("random", _destroy_random),

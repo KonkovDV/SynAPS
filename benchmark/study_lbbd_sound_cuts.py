@@ -50,9 +50,19 @@ GEN_120 = {
 }
 GEN_SEEDS = (7, 8, 9)
 LOCAL_INSTANCES = ("tiny_3x3", "medium_stress_20x4", "medium_4state_tsp_dominance_16x4")
+#: Same shape as ``scripts/golden_snapshot.py`` ``gen_600``.
+GEN_600 = {
+    "n_operations": 600,
+    "n_machines": 12,
+    "n_states": 6,
+    "horizon_hours": 240,
+    "n_aux_resources": 3,
+    "aux_requirement_prob": 0.1,
+    "seed": 11,
+}
 
 
-def _instances(quick: bool) -> list[tuple[str, Callable[[], ScheduleProblem]]]:
+def _instances(quick: bool, only: set[str]) -> list[tuple[str, Callable[[], ScheduleProblem]]]:
     brandimarte = REPO_ROOT / "benchmark" / "instances" / "public" / "brandimarte"
     local = REPO_ROOT / "benchmark" / "instances"
     cases: list[tuple[str, Callable[[], ScheduleProblem]]] = [
@@ -75,6 +85,12 @@ def _instances(quick: bool) -> list[tuple[str, Callable[[], ScheduleProblem]]]:
     if quick:
         keep = {"gen_120_s7", "tiny_3x3", "mk01"}
         cases = [case for case in cases if case[0] in keep]
+    if "gen_600" in only:
+        cases.append(
+            ("gen_600", lambda: generate_large_instance(**GEN_600)),
+        )
+    if only:
+        cases = [case for case in cases if case[0] in only]
     return cases
 
 
@@ -109,10 +125,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--quick", action="store_true")
     parser.add_argument("--repeats", type=int, default=1)
+    parser.add_argument(
+        "--only",
+        default="",
+        help="comma-separated instance names; include gen_600 to add that instance",
+    )
     args = parser.parse_args(argv)
     args.out_dir.mkdir(parents=True, exist_ok=True)
+    only = {name.strip() for name in args.only.split(",") if name.strip()}
     rows: list[dict[str, Any]] = []
-    for name, load in _instances(args.quick):
+    for name, load in _instances(args.quick, only):
         problem = load()
         for repeat, sound in itertools.product(range(args.repeats), (False, True)):
             if repeat % 2:

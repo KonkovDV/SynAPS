@@ -91,6 +91,27 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.12", "3.13"]
+        include:
+          # ABI tag for /opt/python inside manylinux. Workflow expressions have
+          # no replace(), so the compact tag is listed beside the dotted version.
+          - os: ubuntu-latest
+            python-version: "3.12"
+            py_abi: "312"
+          - os: ubuntu-latest
+            python-version: "3.13"
+            py_abi: "313"
+          - os: macos-latest
+            python-version: "3.12"
+            py_abi: "312"
+          - os: macos-latest
+            python-version: "3.13"
+            py_abi: "313"
+          - os: windows-latest
+            python-version: "3.12"
+            py_abi: "312"
+          - os: windows-latest
+            python-version: "3.13"
+            py_abi: "313"
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -103,14 +124,45 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Set up Rust
+        # Linux compiles inside the manylinux image, which installs its own
+        # toolchain. The host rustc is unused there.
+        if: runner.os != 'Linux'
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
       - name: Install maturin
+        # Linux uses the pinned maturin inside maturin-action. An unpinned
+        # `pip install maturin` on that job never builds the wheel.
+        if: runner.os != 'Linux'
         run: |
           python -m pip install --upgrade pip
-          python -m pip install maturin
+          python -m pip install "maturin==1.13.1"
+
+      - name: Build Linux wheel in manylinux 2.28
+        # T-03b: ubuntu-latest links the host glibc (newer than 2.28), so a
+        # wheel built there will not install on manylinux_2_28. The action
+        # builds inside the 2.28 image. RUSTFLAGS (prefix RUST) is forwarded
+        # into that container and still overrides target-cpu=native (R-10).
+        # The image digest and rustc 1.99.1 are the ones from run 40355045146.
+        # `:latest` and `rust-toolchain: stable` both move. The action's PATH
+        # export stops at cp312; the interpreter path is the binary maturin
+        # resolved for 3.13 (`/opt/python/cp313-cp313/bin/python`).
+        if: runner.os == 'Linux'
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        env:
+          RUSTFLAGS: -C target-cpu=x86-64-v2
+        with:
+          maturin-version: v1.13.1
+          manylinux: "2_28"
+          container: quay.io/pypa/manylinux_2_28_x86_64@sha256:e0adf18521ad35192df733a6c62d35df7801957d24e0470238aacecfab2188a3
+          rust-toolchain: 1.99.1
+          args: >-
+            --release
+            --manifest-path native/synaps_native/Cargo.toml
+            --interpreter /opt/python/cp${{ matrix.py_abi }}-cp${{ matrix.py_abi }}/bin/python
+            --out dist-native
 
       - name: Build native wheel
+        if: runner.os != 'Linux'
         env:
           # Audit 2026-10 (R-10): the repo's .cargo/config.toml sets
           # target-cpu=native for local builds. A published wheel built with it
@@ -159,7 +211,7 @@ jobs:
 
   publish-testpypi:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.publish_target == 'testpypi'
-    needs: build
+    needs: [build, build-native-wheels]
     runs-on: ubuntu-latest
     environment:
       name: testpypi
@@ -174,15 +226,30 @@ jobs:
           name: python-package-distributions
           path: dist/
 
+      - name: Download native wheels
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: native-wheel-*
+          merge-multiple: true
+          path: dist-native/
+
       - name: Publish to TestPyPI
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           repository-url: https://test.pypi.org/legacy/
           print-hash: true
 
+      - name: Publish native wheels to TestPyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist-native/
+          skip-existing: true
+          print-hash: true
+
   publish-pypi:
     if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_target == 'pypi')
-    needs: build
+    needs: [build, build-native-wheels]
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -197,7 +264,21 @@ jobs:
           name: python-package-distributions
           path: dist/
 
+      - name: Download native wheels
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: native-wheel-*
+          merge-multiple: true
+          path: dist-native/
+
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
+          print-hash: true
+
+      - name: Publish native wheels to PyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: dist-native/
+          skip-existing: true
           print-hash: true
