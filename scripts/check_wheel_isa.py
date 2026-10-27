@@ -21,7 +21,7 @@ Usage::
     python scripts/check_wheel_isa.py dist-native/*.whl
     python scripts/check_wheel_isa.py dist-native/*.whl --qemu-python venv/bin/python
 
-Exit status 0 = portable; 1 = AVX found or the emulated import failed.
+Exit status 0 = portable; 1 = AVX found, an x86-64 wheel has no ELF, or the emulated import failed.
 """
 
 from __future__ import annotations
@@ -104,6 +104,12 @@ def _is_x86_64_elf(path: Path) -> bool:
     return header[:4] == b"\x7fELF" and header[18:20] == b"\x3e\x00"
 
 
+def _expects_x86_64_elf(wheel: Path) -> bool:
+    """True when the wheel tag says this archive should contain an x86-64 ``.so``."""
+    name = wheel.name
+    return "x86_64" in name and ("manylinux" in name or "linux" in name)
+
+
 def check_wheel(wheel: Path) -> bool:
     ok = True
     with tempfile.TemporaryDirectory() as tmp:
@@ -111,6 +117,9 @@ def check_wheel(wheel: Path) -> bool:
             archive.extractall(tmp)
         objects = [p for p in Path(tmp).rglob("*.so") if _is_x86_64_elf(p)]
         if not objects:
+            if _expects_x86_64_elf(wheel):
+                print(f"{wheel.name}: x86-64 wheel has no ELF shared object")
+                return False
             print(f"{wheel.name}: no x86-64 ELF shared object (nothing to check)")
             return True
         for shared_object in objects:

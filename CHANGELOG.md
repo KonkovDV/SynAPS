@@ -42,7 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `synaps_native-0.3.0-cp312-cp312-manylinux_2_28_x86_64` and the cp313 twin
   (maturin 1.13.1). ELF `verneed` on both `.so` files stops at `GLIBC_2.28`.
   The previous host build, run `40348268121`, was tagged `manylinux_2_34`
-  and its `verneed` reached `GLIBC_2.34`.
+  and its `verneed` reached `GLIBC_2.34`. The Linux job now pins that run's
+  image (`quay.io/pypa/manylinux_2_28_x86_64@sha256:e0adf18521ad35192df733a6c62d35df7801957d24e0470238aacecfab2188a3`)
+  and rustc 1.99.1, and calls the `/opt/python/cp3xx` interpreter directly.
+  An x86-64 wheel with no ELF shared object fails `check_wheel_isa.py`.
 
 - **CP-SAT `determinism="strict-parallel"` (audit 2026-10, opt-in):** the
   strict contract (deterministic-time stop, loose wall safety,

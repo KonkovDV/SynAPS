@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -40,6 +41,20 @@ def test_vex_128_counts_as_avx_and_verw_does_not() -> None:
     counts = _load().count_avx(_LISTING)
     # vmovdqu xmm (VEX-128) + vaddpd ymm + vfmadd zmm + vzeroupper; not verw.
     assert counts == {"vex_or_evex": 4, "ymm": 1, "zmm": 1, "instructions": 8}
+
+
+def test_x86_64_wheel_without_an_elf_fails(tmp_path: Path) -> None:
+    wheel = tmp_path / "synaps_native-0.3.0-cp313-cp313-manylinux_2_28_x86_64.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("synaps_native-0.3.0.dist-info/WHEEL", "Tag: cp313\n")
+    assert _load().check_wheel(wheel) is False
+
+
+def test_windows_wheel_without_an_elf_is_out_of_scope(tmp_path: Path) -> None:
+    wheel = tmp_path / "synaps_native-0.3.0-cp313-cp313-win_amd64.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("synaps_native-0.3.0.dist-info/WHEEL", "Tag: cp313\n")
+    assert _load().check_wheel(wheel) is True
 
 
 def test_sse_only_listing_is_clean() -> None:
