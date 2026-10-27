@@ -1,0 +1,64 @@
+{
+ "runs": [
+  {
+   "instance": "gen_600",
+   "ops": 600,
+   "config": "LBBD-5-HD",
+   "repeat": 0,
+   "mode": "default",
+   "status": "feasible",
+   "makespan": 5062.0,
+   "lower_bound": 3901.0,
+   "gap": 0.22935598577637298,
+   "wall_s": 133.297,
+   "iterations": 3,
+   "lower_bound_method": "master_relaxation_benders_hd",
+   "lower_bound_invariant_violated": false,
+   "sound_cuts": null,
+   "hard_violations": 0,
+   "bks": null
+  },
+  {
+   "instance": "gen_600",
+   "ops": 600,
+   "config": "LBBD-5-HD",
+   "repeat": 0,
+   "mode": "sound",
+   "status": "feasible",
+   "makespan": 5062.0,
+   "lower_bound": 3901.0,
+   "gap": 0.22935598577637298,
+   "wall_s": 122.528,
+   "iterations": 4,
+   "lower_bound_method": "sound_master_relaxation_hd",
+   "lower_bound_invariant_violated": false,
+   "sound_cuts": {
+    "rows_by_kind": {
+     "chain": 124,
+     "setup_in": 8,
+     "setup_out": 9
+    },
+    "separation_rounds": 0,
+    "first_master_lb": 3901.0,
+    "final_master_lb": null,
+    "final_master_converged": null
+   },
+   "hard_violations": 0,
+   "bks": null
+  }
+ ],
+ "summary": {
+  "paired_instances": 1,
+  "statistic": "per-instance median over repeats, then mean over instances",
+  "mean_gap_default": 0.22935598577637298,
+  "mean_gap_sound": 0.22935598577637298,
+  "instances_gap_lower": 0,
+  "instances_gap_higher": 0,
+  "instances_lb_raised": 0,
+  "instances_lb_lowered": 0,
+  "instances_ub_better": 0,
+  "instances_ub_worse": 0,
+  "any_lb_invariant_violated": false,
+  "any_hard_violations": false
+ }
+}
