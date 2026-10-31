@@ -42,7 +42,7 @@ dependencies = [
     # Cap below 1.15: some 1.15.x Linux wheels have ABI mismatches
     # (undefined symbol Highs::releaseMemory) that break import on CI.
     "highspy>=1.11,<1.15",
-    "pydantic>=2.9",
+    "pydantic>=2.14.1",
     "numpy>=2.5.3",
 ]
 
