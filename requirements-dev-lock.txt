@@ -4,7 +4,7 @@ absl-py==2.4.0
 annotated-types==0.7.0
 ast-serialize==0.13.1
 build==1.5.0
-certifi==2026.4.22
+certifi==2026.10.23
 cffi==2.1.1 ; platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_python_implementation != 'PyPy' and sys_platform == 'linux'
 cfgv==3.5.0
 charset-normalizer==3.4.7
