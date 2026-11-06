@@ -914,9 +914,7 @@ def run_weighted_residual_pair(
         and float(pvc["coverage"]) == 1.0
     )
     return {
-        "claim": (
-            "synthetic C6c cover-then-ALNS residual; not a live plant MES; not OPTIMAL"
-        ),
+        "claim": ("synthetic C6c cover-then-ALNS residual; not a live plant MES; not OPTIMAL"),
         "seed": seed,
         "residual_time_limit_s": residual_time_limit_s,
         "residual_max_iterations": residual_max_iterations,
