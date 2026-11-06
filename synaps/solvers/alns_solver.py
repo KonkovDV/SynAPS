@@ -865,6 +865,24 @@ def _gap_is_tight(start: datetime, pred_end: datetime, lag: timedelta) -> bool:
     return abs(start - (pred_end + lag)) <= _TIGHT_SLACK
 
 
+def _machine_gap_is_tight(
+    start: datetime,
+    pred_end: datetime,
+    stamp_minutes: float,
+    sdst_minutes: float,
+) -> bool:
+    """True when the Gantt gap equals the inserted setup or the SDST lookup.
+
+    The two lags are alternatives, not a maximum. A pair that touches
+    (inserted setup 0) stays critical even if the matrix lists a larger
+    setup that this schedule did not insert. A pair whose gap equals the
+    matrix setup stays critical when the stamp was left at 0.
+    """
+    return _gap_is_tight(start, pred_end, timedelta(minutes=stamp_minutes)) or _gap_is_tight(
+        start, pred_end, timedelta(minutes=sdst_minutes)
+    )
+
+
 def _tight_predecessors(
     assignments: list[Assignment],
     sdst: SdstMatrix,
@@ -873,26 +891,26 @@ def _tight_predecessors(
     """Tight predecessors of each operation, latest finish first.
 
     A precedence edge is tight when the successor starts at the predecessor's
-    end. A machine edge, per lane, is tight when the gap equals the larger of
-    the SDST lookup and the successor's ``setup_minutes``. Idle beyond that
-    lag, and a large overlap, are not on the chain. A release date is a
-    source: the walk stops there, it is not an edge.
+    end. A machine edge, per lane, is tight when the gap equals either the
+    inserted ``setup_minutes`` or the SDST lookup. Idle beyond both, and a
+    large overlap, are not on the chain. A release date is a source: the
+    walk stops there, it is not an edge.
     """
     by_op = {item.operation_id: item for item in assignments}
     by_lane: dict[tuple[Any, Any], list[Assignment]] = {}
     for item in assignments:
         by_lane.setdefault((item.work_center_id, item.lane_id), []).append(item)
-    machine_prev: dict[UUID, tuple[Assignment, timedelta]] = {}
+    machine_prev: dict[UUID, tuple[Assignment, float, float]] = {}
     for (wc_id, _lane), seq in by_lane.items():
         seq.sort(key=lambda item: (item.start_time, str(item.operation_id)))
         for index in range(len(seq) - 1):
             prev, curr = seq[index], seq[index + 1]
             prev_op = ops_by_id.get(prev.operation_id)
             curr_op = ops_by_id.get(curr.operation_id)
-            lag_min = float(curr.setup_minutes)
+            sdst_minutes = 0.0
             if prev_op is not None and curr_op is not None:
-                lag_min = max(lag_min, sdst.get_setup(wc_id, prev_op.state_id, curr_op.state_id))
-            machine_prev[curr.operation_id] = (prev, timedelta(minutes=lag_min))
+                sdst_minutes = sdst.get_setup(wc_id, prev_op.state_id, curr_op.state_id)
+            machine_prev[curr.operation_id] = (prev, float(curr.setup_minutes), sdst_minutes)
 
     preds: dict[UUID, list[UUID]] = {}
     for op_id, assignment in by_op.items():
@@ -904,8 +922,10 @@ def _tight_predecessors(
                 found.append((pred.end_time, str(pred.operation_id), pred.operation_id))
         machine = machine_prev.get(op_id)
         if machine is not None:
-            pred, lag = machine
-            if _gap_is_tight(assignment.start_time, pred.end_time, lag):
+            pred, stamp_minutes, sdst_minutes = machine
+            if _machine_gap_is_tight(
+                assignment.start_time, pred.end_time, stamp_minutes, sdst_minutes
+            ):
                 found.append((pred.end_time, str(pred.operation_id), pred.operation_id))
         found.sort(key=lambda item: item[1])
         found.sort(key=lambda item: item[0], reverse=True)
@@ -976,17 +996,18 @@ def _destroy_critical_path(
     ops_by_id: dict[Any, Any] | None = None,
     **_kwargs: Any,
 ) -> set[UUID]:
-    """Remove the time-tight chain that ends at the makespan operation.
+    """Remove critical operations, then high-setup machine neighbours.
 
-    Precedence edges and same-lane machine edges count only when the
-    successor starts at the predecessor's end plus the required setup.
-    Idle, a release date, and a setup gap larger than the setup itself
-    are slack: they are not part of the chain (T-16).
+    The seed is one zero-slack chain into the latest finish (Kelley & Walker).
+    If that chain is shorter than ``destroy_size``, other operations that
+    also lie on a zero-slack path to a makespan finish are taken next
+    (critical activities). Positive-slack machine neighbours are only the
+    remainder (Nowicki & Smutnicki: slack work is not a critical block).
 
     Academic basis:
-        - Kelley & Walker (1959): Critical Path Method (CPM)
-        - Adams, Balas & Zawack (1988): shifting bottleneck + critical path
-          for job-shop scheduling
+        - Kelley & Walker (1959): Critical Path Method
+        - Adams, Balas & Zawack (1988): disjunctive graph, shifting bottleneck
+        - Nowicki & Smutnicki (1996): critical blocks
     """
     del rng
     if not assignments:
@@ -996,11 +1017,34 @@ def _destroy_critical_path(
     critical_path = schedule_critical_chain(assignments, sdst, ops_by_id)
     if len(critical_path) > destroy_size:
         critical_path = critical_path[-destroy_size:]
-    if len(critical_path) < destroy_size:
-        return _extend_with_machine_neighbors(
-            critical_path, _machine_sequences(assignments), ops_by_id, sdst, destroy_size
-        )
-    return set(critical_path)
+    if len(critical_path) >= destroy_size:
+        return set(critical_path)
+    chosen = _fill_other_critical_ops(critical_path, assignments, sdst, ops_by_id, destroy_size)
+    if len(chosen) >= destroy_size:
+        return set(chosen)
+    return _extend_with_machine_neighbors(
+        chosen, _machine_sequences(assignments), ops_by_id, sdst, destroy_size
+    )
+
+
+def _fill_other_critical_ops(
+    chosen: list[UUID],
+    assignments: list[Assignment],
+    sdst: SdstMatrix,
+    ops_by_id: Mapping[Any, Any],
+    destroy_size: int,
+) -> list[UUID]:
+    """Append other zero-slack operations, latest finish first."""
+    already = set(chosen)
+    critical = _ops_on_tight_critical_paths(assignments, sdst, ops_by_id)
+    extras = [item for item in assignments if item.operation_id in critical - already]
+    extras.sort(key=lambda item: (item.end_time, str(item.operation_id)), reverse=True)
+    filled = list(chosen)
+    for item in extras:
+        if len(filled) >= destroy_size:
+            break
+        filled.append(item.operation_id)
+    return filled
 
 
 def _extend_with_machine_neighbors(

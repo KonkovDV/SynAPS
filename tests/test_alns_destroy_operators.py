@@ -649,6 +649,134 @@ class TestCriticalPathIdentification:
             assignments, problem, sdst, destroy_size=1, rng=random.Random(1)
         ) == {op_b.id}
 
+    def test_touching_pair_stays_critical_when_matrix_setup_was_not_inserted(self):
+        """A larger unused SDST lookup does not invent slack between touching ops."""
+        wc = WorkCenter(id=uuid4(), code="M", capability_group="grp1")
+        state_a = State(id=uuid4(), code="A")
+        state_b = State(id=uuid4(), code="B")
+        order_a = Order(id=uuid4(), external_ref="A", due_date=datetime(2025, 1, 2))
+        order_b = Order(id=uuid4(), external_ref="B", due_date=datetime(2025, 1, 2))
+        op_a = Operation(
+            id=uuid4(),
+            order_id=order_a.id,
+            seq_in_order=0,
+            state_id=state_a.id,
+            base_duration_min=10,
+            eligible_wc_ids=[wc.id],
+        )
+        op_b = Operation(
+            id=uuid4(),
+            order_id=order_b.id,
+            seq_in_order=0,
+            state_id=state_b.id,
+            base_duration_min=10,
+            eligible_wc_ids=[wc.id],
+        )
+        base = datetime(2025, 1, 1)
+        problem = ScheduleProblem(
+            operations=[op_a, op_b],
+            work_centers=[wc],
+            states=[state_a, state_b],
+            setup_matrix=[
+                SetupEntry(
+                    work_center_id=wc.id,
+                    from_state_id=state_a.id,
+                    to_state_id=state_b.id,
+                    setup_minutes=40,
+                )
+            ],
+            orders=[order_a, order_b],
+            planning_horizon_start=base,
+            planning_horizon_end=datetime(2025, 1, 2),
+        )
+        assignments = [
+            Assignment(
+                operation_id=op_a.id,
+                work_center_id=wc.id,
+                start_time=base,
+                end_time=base + timedelta(minutes=10),
+            ),
+            Assignment(
+                operation_id=op_b.id,
+                work_center_id=wc.id,
+                start_time=base + timedelta(minutes=10),
+                end_time=base + timedelta(minutes=20),
+            ),
+        ]
+        sdst = SdstMatrix.from_problem(problem)
+        ops = {op.id: op for op in problem.operations}
+        assert schedule_critical_chain(assignments, sdst, ops) == [op_a.id, op_b.id]
+
+    def test_other_critical_activity_is_removed_before_a_slack_neighbor(self):
+        """A second zero-slack finish is removed before a neighbour that has idle."""
+        wc_chain = WorkCenter(id=uuid4(), code="CHAIN", capability_group="grp1")
+        wc_other = WorkCenter(id=uuid4(), code="OTHER", capability_group="grp1")
+        state = State(id=uuid4(), code="S")
+        orders = [
+            Order(id=uuid4(), external_ref=code, due_date=datetime(2025, 1, 2))
+            for code in ("A", "B", "C", "D")
+        ]
+        ops = [
+            Operation(
+                id=uuid4(),
+                order_id=order.id,
+                seq_in_order=0,
+                state_id=state.id,
+                base_duration_min=duration,
+                eligible_wc_ids=[wc],
+            )
+            for order, duration, wc in (
+                (orders[0], 30, wc_chain.id),
+                (orders[1], 30, wc_chain.id),
+                (orders[2], 100, wc_other.id),
+                (orders[3], 10, wc_chain.id),
+            )
+        ]
+        op_a, op_b, op_c, op_d = ops
+        base = datetime(2025, 1, 1)
+        problem = ScheduleProblem(
+            operations=ops,
+            work_centers=[wc_chain, wc_other],
+            states=[state],
+            setup_matrix=[],
+            orders=orders,
+            planning_horizon_start=base,
+            planning_horizon_end=datetime(2025, 1, 2),
+        )
+        # D sits before A with idle. A touches B. C finishes with B.
+        assignments = [
+            Assignment(
+                operation_id=op_d.id,
+                work_center_id=wc_chain.id,
+                start_time=base,
+                end_time=base + timedelta(minutes=10),
+            ),
+            Assignment(
+                operation_id=op_a.id,
+                work_center_id=wc_chain.id,
+                start_time=base + timedelta(minutes=40),
+                end_time=base + timedelta(minutes=70),
+            ),
+            Assignment(
+                operation_id=op_b.id,
+                work_center_id=wc_chain.id,
+                start_time=base + timedelta(minutes=70),
+                end_time=base + timedelta(minutes=100),
+            ),
+            Assignment(
+                operation_id=op_c.id,
+                work_center_id=wc_other.id,
+                start_time=base,
+                end_time=base + timedelta(minutes=100),
+            ),
+        ]
+        sdst = SdstMatrix.from_problem(problem)
+        result = _destroy_critical_path(
+            assignments, problem, sdst, destroy_size=3, rng=random.Random(1)
+        )
+        assert result == {op_a.id, op_b.id, op_c.id}
+        assert op_d.id not in result
+
     def test_diamond_dag_selects_longer_middle_branch(self):
         """Diamond fork-and-join: critical path takes the longer of two middle branches."""
         wc_m1 = WorkCenter(id=uuid4(), code="M1", capability_group="grp1")
