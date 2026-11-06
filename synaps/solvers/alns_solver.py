@@ -857,6 +857,14 @@ def _destroy_precedence_chain(
 _TIGHT_SLACK = timedelta(milliseconds=1)
 
 
+def _gap_is_tight(start: datetime, pred_end: datetime, lag: timedelta) -> bool:
+    """True when the successor starts at ``pred_end + lag``, within 1 ms.
+
+    A large overlap is a broken schedule, not a zero-slack edge.
+    """
+    return abs(start - (pred_end + lag)) <= _TIGHT_SLACK
+
+
 def _tight_predecessors(
     assignments: list[Assignment],
     sdst: SdstMatrix,
@@ -865,9 +873,10 @@ def _tight_predecessors(
     """Tight predecessors of each operation, latest finish first.
 
     A precedence edge is tight when the successor starts at the predecessor's
-    end. A machine edge, per lane, is tight when the gap equals the setup
-    (idle beyond that setup is not on the chain). A release date is a source:
-    the walk stops there, it is not an edge.
+    end. A machine edge, per lane, is tight when the gap equals the larger of
+    the SDST lookup and the successor's ``setup_minutes``. Idle beyond that
+    lag, and a large overlap, are not on the chain. A release date is a
+    source: the walk stops there, it is not an edge.
     """
     by_op = {item.operation_id: item for item in assignments}
     by_lane: dict[tuple[Any, Any], list[Assignment]] = {}
@@ -880,9 +889,9 @@ def _tight_predecessors(
             prev, curr = seq[index], seq[index + 1]
             prev_op = ops_by_id.get(prev.operation_id)
             curr_op = ops_by_id.get(curr.operation_id)
-            lag_min = 0.0
+            lag_min = float(curr.setup_minutes)
             if prev_op is not None and curr_op is not None:
-                lag_min = sdst.get_setup(wc_id, prev_op.state_id, curr_op.state_id)
+                lag_min = max(lag_min, sdst.get_setup(wc_id, prev_op.state_id, curr_op.state_id))
             machine_prev[curr.operation_id] = (prev, timedelta(minutes=lag_min))
 
     preds: dict[UUID, list[UUID]] = {}
@@ -891,12 +900,12 @@ def _tight_predecessors(
         op = ops_by_id.get(op_id)
         if op is not None and op.predecessor_op_id in by_op:
             pred = by_op[op.predecessor_op_id]
-            if assignment.start_time - pred.end_time <= _TIGHT_SLACK:
+            if _gap_is_tight(assignment.start_time, pred.end_time, timedelta(0)):
                 found.append((pred.end_time, str(pred.operation_id), pred.operation_id))
         machine = machine_prev.get(op_id)
         if machine is not None:
             pred, lag = machine
-            if assignment.start_time - (pred.end_time + lag) <= _TIGHT_SLACK:
+            if _gap_is_tight(assignment.start_time, pred.end_time, lag):
                 found.append((pred.end_time, str(pred.operation_id), pred.operation_id))
         found.sort(key=lambda item: item[1])
         found.sort(key=lambda item: item[0], reverse=True)

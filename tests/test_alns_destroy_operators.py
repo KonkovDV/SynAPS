@@ -547,6 +547,108 @@ class TestCriticalPathIdentification:
             idle, problem, sdst, destroy_size=1, rng=random.Random(1)
         ) == {op_b.id}
 
+    def test_stamped_setup_is_tight_without_a_matrix_hit(self):
+        """The successor's setup stamp is the realized lag when SDST misses."""
+        wc = WorkCenter(id=uuid4(), code="M", capability_group="grp1")
+        state = State(id=uuid4(), code="S")
+        order_a = Order(id=uuid4(), external_ref="A", due_date=datetime(2025, 1, 2))
+        order_b = Order(id=uuid4(), external_ref="B", due_date=datetime(2025, 1, 2))
+        op_a = Operation(
+            id=uuid4(),
+            order_id=order_a.id,
+            seq_in_order=0,
+            state_id=state.id,
+            base_duration_min=10,
+            eligible_wc_ids=[wc.id],
+        )
+        op_b = Operation(
+            id=uuid4(),
+            order_id=order_b.id,
+            seq_in_order=0,
+            state_id=state.id,
+            base_duration_min=10,
+            eligible_wc_ids=[wc.id],
+        )
+        base = datetime(2025, 1, 1)
+        problem = ScheduleProblem(
+            operations=[op_a, op_b],
+            work_centers=[wc],
+            states=[state],
+            setup_matrix=[],
+            orders=[order_a, order_b],
+            planning_horizon_start=base,
+            planning_horizon_end=datetime(2025, 1, 2),
+        )
+        assignments = [
+            Assignment(
+                operation_id=op_a.id,
+                work_center_id=wc.id,
+                start_time=base,
+                end_time=base + timedelta(minutes=10),
+            ),
+            Assignment(
+                operation_id=op_b.id,
+                work_center_id=wc.id,
+                start_time=base + timedelta(minutes=15),
+                end_time=base + timedelta(minutes=25),
+                setup_minutes=5,
+            ),
+        ]
+        sdst = SdstMatrix.from_problem(problem)
+        assert _destroy_critical_path(
+            assignments, problem, sdst, destroy_size=2, rng=random.Random(1)
+        ) == {op_a.id, op_b.id}
+
+    def test_overlap_is_not_a_zero_slack_edge(self):
+        wc = WorkCenter(id=uuid4(), code="M", capability_group="grp1")
+        state = State(id=uuid4(), code="S")
+        order_a = Order(id=uuid4(), external_ref="A", due_date=datetime(2025, 1, 2))
+        order_b = Order(id=uuid4(), external_ref="B", due_date=datetime(2025, 1, 2))
+        op_a = Operation(
+            id=uuid4(),
+            order_id=order_a.id,
+            seq_in_order=0,
+            state_id=state.id,
+            base_duration_min=40,
+            eligible_wc_ids=[wc.id],
+        )
+        op_b = Operation(
+            id=uuid4(),
+            order_id=order_b.id,
+            seq_in_order=0,
+            state_id=state.id,
+            base_duration_min=10,
+            eligible_wc_ids=[wc.id],
+        )
+        base = datetime(2025, 1, 1)
+        problem = ScheduleProblem(
+            operations=[op_a, op_b],
+            work_centers=[wc],
+            states=[state],
+            setup_matrix=[],
+            orders=[order_a, order_b],
+            planning_horizon_start=base,
+            planning_horizon_end=datetime(2025, 1, 2),
+        )
+        assignments = [
+            Assignment(
+                operation_id=op_a.id,
+                work_center_id=wc.id,
+                start_time=base,
+                end_time=base + timedelta(minutes=40),
+            ),
+            Assignment(
+                operation_id=op_b.id,
+                work_center_id=wc.id,
+                start_time=base + timedelta(minutes=10),
+                end_time=base + timedelta(minutes=50),
+            ),
+        ]
+        sdst = SdstMatrix.from_problem(problem)
+        assert _destroy_critical_path(
+            assignments, problem, sdst, destroy_size=1, rng=random.Random(1)
+        ) == {op_b.id}
+
     def test_diamond_dag_selects_longer_middle_branch(self):
         """Diamond fork-and-join: critical path takes the longer of two middle branches."""
         wc_m1 = WorkCenter(id=uuid4(), code="M1", capability_group="grp1")
