@@ -12,6 +12,8 @@ from datetime import UTC, datetime, timedelta
 from uuid import NAMESPACE_DNS, uuid5
 
 from synaps.model import (
+    AuxiliaryResource,
+    ModeRequirement,
     Operation,
     OperationMode,
     Order,
@@ -69,3 +71,32 @@ def test_bounds_do_not_exceed_the_cpsat_optimum_with_modes() -> None:
     assert optimum == 20  # two chained FAST runs
     assert compute_relaxed_makespan_lower_bound(problem).value <= optimum
     assert compute_sound_master_lower_bound(problem).value <= optimum
+
+
+def test_mode_resource_floor_is_the_minimum_over_modes() -> None:
+    """Every mode holds the tool: the floor is the fast mode, not zero."""
+    problem = _moded_problem()
+    tool = AuxiliaryResource(
+        id=uuid5(NAMESPACE_DNS, "mlb-tool"), code="T", resource_type="fixture", pool_size=1
+    )
+    operation = problem.operations[0]
+    operation.modes[0].requirements.append(
+        ModeRequirement(aux_resource_id=tool.id, quantity_needed=1)
+    )
+    operation.modes[1].requirements.append(
+        ModeRequirement(aux_resource_id=tool.id, quantity_needed=1)
+    )
+    problem = problem.model_copy(update={"auxiliary_resources": [tool]})
+    assert compute_relaxed_makespan_lower_bound(problem).auxiliary_resource_lb == 10
+
+
+def test_mode_resource_floor_is_zero_when_one_mode_skips_it() -> None:
+    problem = _moded_problem()
+    tool = AuxiliaryResource(
+        id=uuid5(NAMESPACE_DNS, "mlb-tool"), code="T", resource_type="fixture", pool_size=1
+    )
+    problem.operations[1].modes[1].requirements.append(
+        ModeRequirement(aux_resource_id=tool.id, quantity_needed=1)
+    )
+    problem = problem.model_copy(update={"auxiliary_resources": [tool]})
+    assert compute_relaxed_makespan_lower_bound(problem).auxiliary_resource_lb == 0
