@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 import highspy
 import numpy as np
 
-from synaps.timegrain import duration_minutes_for
+from synaps.timegrain import min_duration_minutes_for
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -55,15 +55,16 @@ def add_capacity_rows(
         for op in problem.operations:
             key = (op.id, wc.id)
             if key in var_index:
-                # CP-SAT duration semantics, divided by the number of parallel
-                # lanes: a machine with max_parallel lanes finishes load L in
-                # L / max_parallel, so `Sum p_i y_i / lanes <= C_max` stays a
-                # valid lower bound (matching average_capacity_lb in
-                # lower_bounds.py). Without the division the bound over-claims
-                # on max_parallel > 1 machines.
+                # Shortest reservation (grain, machine override, or shortest
+                # mode), divided by the number of parallel lanes. A machine
+                # with max_parallel lanes finishes load L in L / max_parallel,
+                # so `Sum p_i y_i / lanes <= C_max` stays a lower bound and
+                # matches average_capacity_lb in lower_bounds.py. The base
+                # duration over-claims when a mode is shorter. Without the
+                # division the bound over-claims on max_parallel > 1 machines.
                 lanes = float(max(1, wc.max_parallel))
                 indices.append(var_index[key])
-                coeffs.append(float(duration_minutes_for(op, wc)) / lanes)
+                coeffs.append(float(min_duration_minutes_for(op, wc)) / lanes)
         if not indices:
             continue
         # The min-setup transition floor assumes n_k - 1 sequential transitions
