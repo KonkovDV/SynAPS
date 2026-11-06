@@ -600,6 +600,19 @@ class TestCriticalPathIdentification:
         assert _destroy_critical_path(
             assignments, problem, sdst, destroy_size=2, rng=random.Random(1)
         ) == {op_a.id, op_b.id}
+        # A zero SDST lookup must not explain a touch when the stamp requires setup.
+        touching = [
+            assignments[0],
+            Assignment(
+                operation_id=op_b.id,
+                work_center_id=wc.id,
+                start_time=base + timedelta(minutes=10),
+                end_time=base + timedelta(minutes=20),
+                setup_minutes=5,
+            ),
+        ]
+        ops = {op_a.id: op_a, op_b.id: op_b}
+        assert schedule_critical_chain(touching, sdst, ops) == [op_b.id]
 
     def test_overlap_is_not_a_zero_slack_edge(self):
         wc = WorkCenter(id=uuid4(), code="M", capability_group="grp1")
@@ -708,6 +721,17 @@ class TestCriticalPathIdentification:
         sdst = SdstMatrix.from_problem(problem)
         ops = {op.id: op for op in problem.operations}
         assert schedule_critical_chain(assignments, sdst, ops) == [op_a.id, op_b.id]
+        overlapped = [
+            assignments[0],
+            Assignment(
+                operation_id=op_b.id,
+                work_center_id=wc.id,
+                start_time=base + timedelta(minutes=10),
+                end_time=base + timedelta(minutes=20),
+                setup_minutes=5,
+            ),
+        ]
+        assert schedule_critical_chain(overlapped, sdst, ops) == [op_b.id]
 
     def test_unary_auxiliary_handoff_is_on_the_critical_chain(self):
         """A pool of one is a disjunctive resource: a tight handoff is critical."""
@@ -782,6 +806,68 @@ class TestCriticalPathIdentification:
         ]
         assert schedule_critical_chain(pooled, sdst, ops, problem) == [op_b.id]
 
+    def test_unstamped_gap_does_not_extend_resource_occupancy(self):
+        """A setup stamp that does not fit the machine gap is not resource time."""
+        wc = WorkCenter(id=uuid4(), code="M", capability_group="grp1")
+        other = WorkCenter(id=uuid4(), code="N", capability_group="grp1")
+        state = State(id=uuid4(), code="S")
+        tool = AuxiliaryResource(id=uuid4(), code="DRUM", resource_type="fixture", pool_size=1)
+        orders = [
+            Order(id=uuid4(), external_ref=code, due_date=datetime(2025, 1, 2))
+            for code in ("A", "B", "R")
+        ]
+        ops = [
+            Operation(
+                id=uuid4(),
+                order_id=order.id,
+                seq_in_order=0,
+                state_id=state.id,
+                base_duration_min=10,
+                eligible_wc_ids=[wc.id if code != "R" else other.id],
+            )
+            for order, code in zip(orders, ("A", "B", "R"), strict=True)
+        ]
+        op_a, op_b, op_r = ops
+        base = datetime(2025, 1, 1)
+        problem = ScheduleProblem(
+            operations=ops,
+            work_centers=[wc, other],
+            states=[state],
+            setup_matrix=[],
+            orders=orders,
+            auxiliary_resources=[tool],
+            planning_horizon_start=base,
+            planning_horizon_end=datetime(2025, 1, 2),
+        )
+        sdst = SdstMatrix.from_problem(problem)
+        ops_by_id = {op.id: op for op in ops}
+        # A and B touch. B's stamp claims 5 minutes of setup, which cannot fit.
+        # R released the tool at minute 5. That is not a handoff into B.
+        assignments = [
+            Assignment(
+                operation_id=op_a.id,
+                work_center_id=wc.id,
+                start_time=base,
+                end_time=base + timedelta(minutes=10),
+            ),
+            Assignment(
+                operation_id=op_r.id,
+                work_center_id=other.id,
+                start_time=base,
+                end_time=base + timedelta(minutes=5),
+                aux_resource_ids=[tool.id],
+            ),
+            Assignment(
+                operation_id=op_b.id,
+                work_center_id=wc.id,
+                start_time=base + timedelta(minutes=10),
+                end_time=base + timedelta(minutes=20),
+                setup_minutes=5,
+                aux_resource_ids=[tool.id],
+            ),
+        ]
+        assert schedule_critical_chain(assignments, sdst, ops_by_id, problem) == [op_b.id]
+
     def test_full_pool_demand_is_disjunctive_even_without_a_stamp(self):
         """Two holders that each need the whole pool cannot overlap."""
         wc_a = WorkCenter(id=uuid4(), code="A", capability_group="grp1")
@@ -842,6 +928,48 @@ class TestCriticalPathIdentification:
             ),
         ]
         assert schedule_critical_chain(touching, sdst, ops, problem) == [op_a.id, op_b.id]
+        light = AuxiliaryResource(id=uuid4(), code="WIDE", resource_type="fixture", pool_size=5)
+        wide = problem.model_copy(
+            update={
+                "auxiliary_resources": [light],
+                "aux_requirements": [
+                    OperationAuxRequirement(
+                        operation_id=op_a.id, aux_resource_id=light.id, quantity_needed=4
+                    ),
+                    OperationAuxRequirement(
+                        operation_id=op_b.id, aux_resource_id=light.id, quantity_needed=2
+                    ),
+                ],
+            }
+        )
+        mixed = [
+            Assignment(
+                operation_id=op_a.id,
+                work_center_id=wc_a.id,
+                start_time=base,
+                end_time=base + timedelta(minutes=10),
+            ),
+            Assignment(
+                operation_id=op_b.id,
+                work_center_id=wc_b.id,
+                start_time=base + timedelta(minutes=10),
+                end_time=base + timedelta(minutes=20),
+            ),
+        ]
+        assert schedule_critical_chain(mixed, sdst, ops, wide) == [op_a.id, op_b.id]
+        fitting = wide.model_copy(
+            update={
+                "aux_requirements": [
+                    OperationAuxRequirement(
+                        operation_id=op_a.id, aux_resource_id=light.id, quantity_needed=2
+                    ),
+                    OperationAuxRequirement(
+                        operation_id=op_b.id, aux_resource_id=light.id, quantity_needed=2
+                    ),
+                ]
+            }
+        )
+        assert schedule_critical_chain(mixed, sdst, ops, fitting) == [op_b.id]
 
     def test_parallel_lane_neighbor_is_not_on_the_machine_sequence(self):
         wc = WorkCenter(id=uuid4(), code="M", capability_group="grp1")

@@ -13,6 +13,7 @@ Academic basis:
 
 from __future__ import annotations
 
+import bisect
 import logging
 import math
 import random
@@ -865,35 +866,62 @@ def _gap_is_tight(start: datetime, pred_end: datetime, lag: timedelta) -> bool:
     return abs(start - (pred_end + lag)) <= _TIGHT_SLACK
 
 
+def _lag_matches(gap: timedelta, minutes: float) -> bool:
+    """True when ``gap`` equals ``minutes``, within 1 ms."""
+    return abs(gap - timedelta(minutes=minutes)) <= _TIGHT_SLACK
+
+
 def _machine_gap_is_tight(
     start: datetime,
     pred_end: datetime,
     stamp_minutes: float,
     sdst_minutes: float,
 ) -> bool:
-    """True when the Gantt gap equals the inserted setup or the SDST lookup.
+    """True when the gap equals the inserted setup, or a positive SDST lookup.
 
-    The two lags are alternatives, not a maximum. A pair that touches
-    (inserted setup 0) stays critical even if the matrix lists a larger
-    setup that this schedule did not insert. A pair whose gap equals the
-    matrix setup stays critical when the stamp was left at 0.
+    A zero lookup is not an explanation. Otherwise every touching pair would
+    be critical even when the stamp says a setup was required and is missing.
+    A touching pair whose stamp is 0 stays critical: the inserted lag is 0,
+    even if the matrix lists a setup this schedule did not insert.
     """
-    return _gap_is_tight(start, pred_end, timedelta(minutes=stamp_minutes)) or _gap_is_tight(
-        start, pred_end, timedelta(minutes=sdst_minutes)
-    )
+    gap = start - pred_end
+    if _lag_matches(gap, stamp_minutes):
+        return True
+    return sdst_minutes > 0 and _lag_matches(gap, sdst_minutes)
+
+
+def _explained_setup_minutes(
+    gap: timedelta | None, stamp_minutes: float, sdst_minutes: float
+) -> float:
+    """Setup that actually sits in front of processing on this lane.
+
+    No previous occupant: the stamp is the claim. A gap that equals the stamp
+    or a positive SDST lookup uses that lag. A longer idle gap still holds the
+    stamped setup immediately before processing. A stamp that does not fit in
+    the gap was not inserted.
+    """
+    if gap is None:
+        return stamp_minutes
+    if _lag_matches(gap, stamp_minutes):
+        return stamp_minutes
+    if sdst_minutes > 0 and _lag_matches(gap, sdst_minutes):
+        return sdst_minutes
+    if gap >= timedelta(0) and gap + _TIGHT_SLACK >= timedelta(minutes=stamp_minutes):
+        return stamp_minutes
+    return 0.0
 
 
 def _blocking_aux_predecessors(
     assignments: list[Assignment],
     problem: ScheduleProblem | None,
+    explained_setup: Mapping[Any, float] | None = None,
 ) -> dict[UUID, list[Assignment]]:
-    """Previous blocker on each auxiliary, when the handoff has no idle.
+    """Previous incompatible holder, when the handoff has no idle.
 
-    An operation blocks the pool when twice its demand exceeds the pool: any
-    two such holders are incompatible (RCPSP disjunctive clique). A pool of
-    one is that case for demand 1. Holders are the solver stamp union the
-    problem requirements. Occupancy is ``[start - setup, end]``. A demand
-    that fits beside another copy of itself is cumulative, not a precedence.
+    Holders i and j cannot share the pool when ``q_i + q_j`` exceeds it
+    (Artigues resource arc). Identical demand ``q`` is the special case
+    ``2q`` above the pool; a pool of one is demand 1. Holders are the solver
+    stamp union the problem requirements. Occupancy is ``[start - setup, end]``.
     """
     if problem is None:
         return {}
@@ -905,27 +933,28 @@ def _blocking_aux_predecessors(
             per_op.get(requirement.aux_resource_id, 0),
             requirement.quantity_needed,
         )
-    holders: dict[Any, list[Assignment]] = {}
+    holders: dict[Any, list[tuple[Assignment, int]]] = {}
     for item in assignments:
         quantities = dict(required.get(item.operation_id, {}))
         for aux_id in item.aux_resource_ids:
             quantities.setdefault(aux_id, 1)
         for aux_id, qty in quantities.items():
-            pool = pools.get(aux_id)
-            if pool is not None and 2 * qty > pool:
-                holders.setdefault(aux_id, []).append(item)
+            if aux_id in pools and qty > 0:
+                holders.setdefault(aux_id, []).append((item, qty))
     preds: dict[UUID, list[Assignment]] = {}
-    for seq in holders.values():
-        seq.sort(
-            key=lambda item: (
-                item.start_time - timedelta(minutes=item.setup_minutes),
-                str(item.operation_id),
-            )
-        )
-        for index in range(len(seq) - 1):
-            prev, curr = seq[index], seq[index + 1]
-            acquire = curr.start_time - timedelta(minutes=curr.setup_minutes)
-            if _gap_is_tight(acquire, prev.end_time, timedelta(0)):
+    for aux_id, seq in holders.items():
+        pool = pools[aux_id]
+        seq.sort(key=lambda pair: (pair[0].end_time, str(pair[0].operation_id)))
+        releases = [pair[0].end_time for pair in seq]
+        for curr, qty_j in seq:
+            setup = (explained_setup or {}).get(curr.operation_id, float(curr.setup_minutes))
+            acquire = curr.start_time - timedelta(minutes=setup)
+            lo = bisect.bisect_left(releases, acquire - _TIGHT_SLACK)
+            hi = bisect.bisect_right(releases, acquire + _TIGHT_SLACK)
+            for index in range(lo, hi):
+                prev, qty_i = seq[index]
+                if prev.operation_id == curr.operation_id or qty_i + qty_j <= pool:
+                    continue
                 preds.setdefault(curr.operation_id, []).append(prev)
     return preds
 
@@ -939,17 +968,19 @@ def _tight_predecessors(
     """Tight predecessors of each operation, latest finish first.
 
     A precedence edge is tight when the successor starts at the predecessor's
-    end. A machine edge, per lane, is tight when the gap equals either the
-    inserted ``setup_minutes`` or the SDST lookup. Idle beyond both, and a
-    large overlap, are not on the chain. A release date is a source: the
-    walk stops there, it is not an edge.
+    end. A machine edge, per lane, is tight when the gap equals the inserted
+    setup, or a positive SDST lookup. A zero lookup is not an explanation.
+    Idle beyond those lags, and a large overlap, are not on the chain. A
+    release date is a source: the walk stops there, it is not an edge.
     """
     by_op = {item.operation_id: item for item in assignments}
     by_lane: dict[tuple[Any, Any], list[Assignment]] = {}
     for item in assignments:
         by_lane.setdefault((item.work_center_id, item.lane_id), []).append(item)
-    aux_preds = _blocking_aux_predecessors(assignments, problem)
     machine_prev: dict[UUID, tuple[Assignment, float, float]] = {}
+    explained_setup: dict[UUID, float] = {
+        item.operation_id: float(item.setup_minutes) for item in assignments
+    }
     for (wc_id, _lane), seq in by_lane.items():
         seq.sort(key=lambda item: (item.start_time, str(item.operation_id)))
         for index in range(len(seq) - 1):
@@ -959,7 +990,11 @@ def _tight_predecessors(
             sdst_minutes = 0.0
             if prev_op is not None and curr_op is not None:
                 sdst_minutes = sdst.get_setup(wc_id, prev_op.state_id, curr_op.state_id)
-            machine_prev[curr.operation_id] = (prev, float(curr.setup_minutes), sdst_minutes)
+            stamp = float(curr.setup_minutes)
+            machine_prev[curr.operation_id] = (prev, stamp, sdst_minutes)
+            gap = curr.start_time - prev.end_time
+            explained_setup[curr.operation_id] = _explained_setup_minutes(gap, stamp, sdst_minutes)
+    aux_preds = _blocking_aux_predecessors(assignments, problem, explained_setup)
 
     preds: dict[UUID, list[UUID]] = {}
     for op_id, assignment in by_op.items():
