@@ -34,6 +34,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on the Linux wheels before upload: zero VEX/EVEX instructions in the `.so`
   (VEX-128 included) and an import plus scalar / batch kernels under
   `qemu-x86_64 -cpu Nehalem`. The `target-cpu=native` wheel fails both.
+- **Native wheels on publish:** `publish-pypi` and `publish-testpypi` fold
+  each `synaps_native` wheel into a platform wheel of project `synaps`
+  (`scripts/merge_synaps_native_wheel.py`). `import synaps_native` still
+  works. There is no PyPI project `synaps_native`; uploading that name
+  would be rejected by the `synaps` trusted publisher.
+- **macOS and Windows maturin** in `release.yml` is pinned to `1.13.1`, the
+  same version the Linux image installs.
+- **T-16 critical path:** ALNS `critical_path` follows zero-slack edges into
+  the operation that finishes last. A machine gap is zero-slack when it
+  equals the inserted setup or the SDST lookup, separately. Other operations
+  on a zero-slack path are removed before a neighbour that has idle. A unary
+  auxiliary handoff is on the chain when the sum of the two demands exceeds
+  the pool. A zero SDST lookup does not make a touching pair critical when
+  the stamp requires a setup that is missing. Parallel lanes stay separate
+  sequences. Formal statement:
+  `docs/architecture/02_CANONICAL_FORM.md` (realized disjunctive graph).
+  That graph is not the processing-time chain inside the makespan lower
+  bound, and the operator is not a block reversal. No ALNS quality A/B
+  is claimed.
+- **T-06c gen_600 HD:** one `LBBD-5-HD` pair,
+  `benchmark/evidence/lbbd-hd-sound-cuts-2026-10-27/`. UB 5062 and LB 3901 in
+  both modes, no hard violations. `sound_cuts` stays off.
+- **T-03b Linux wheels:** the Linux release job builds inside the
+  `manylinux_2_28` image (`PyO3/maturin-action` v1.51.0, maturin v1.13.1)
+  instead of linking the `ubuntu-latest` glibc. `RUSTFLAGS=-C target-cpu=x86-64-v2`
+  is still forwarded into that image. macOS and Windows stay on the host build.
+  `workflow_dispatch` `build-only` run `40355045146` uploaded
+  `synaps_native-0.3.0-cp312-cp312-manylinux_2_28_x86_64` and the cp313 twin
+  (maturin 1.13.1). ELF `verneed` on both `.so` files stops at `GLIBC_2.28`.
+  The previous host build, run `40348268121`, was tagged `manylinux_2_34`
+  and its `verneed` reached `GLIBC_2.34`. The Linux job now pins that run's
+  image (`quay.io/pypa/manylinux_2_28_x86_64@sha256:e0adf18521ad35192df733a6c62d35df7801957d24e0470238aacecfab2188a3`)
+  and rustc 1.99.1, and calls the `/opt/python/cp3xx` interpreter directly.
+  An x86-64 wheel with no ELF shared object fails `check_wheel_isa.py`.
+  Build-only run `40456896271` on that pin produced the same
+  `manylinux_2_28_x86_64` tags, rustc 1.99.1, and a clean ISA listing.
 
 - **CP-SAT `determinism="strict-parallel"` (audit 2026-10, opt-in):** the
   strict contract (deterministic-time stop, loose wall safety,
