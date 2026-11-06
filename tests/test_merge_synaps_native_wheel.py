@@ -51,8 +51,7 @@ def test_merge_keeps_synaps_name_and_native_extension(tmp_path: Path) -> None:
             "synaps_native/synaps_native.pyd": b"native-bytes",
             "synaps_native-0.3.0.dist-info/METADATA": b"Name: synaps_native\nVersion: 0.3.0\n",
             "synaps_native-0.3.0.dist-info/WHEEL": (
-                b"Wheel-Version: 1.0\nRoot-Is-Purelib: false\n"
-                b"Tag: cp313-cp313-win_amd64\n"
+                b"Wheel-Version: 1.0\nRoot-Is-Purelib: false\nTag: cp313-cp313-win_amd64\n"
             ),
         },
     )
