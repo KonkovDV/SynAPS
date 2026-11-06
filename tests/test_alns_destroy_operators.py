@@ -36,6 +36,7 @@ from synaps.model import (
     Assignment,
     AuxiliaryResource,
     Operation,
+    OperationAuxRequirement,
     Order,
     ScheduleProblem,
     SetupEntry,
@@ -780,6 +781,67 @@ class TestCriticalPathIdentification:
             ),
         ]
         assert schedule_critical_chain(pooled, sdst, ops, problem) == [op_b.id]
+
+    def test_full_pool_demand_is_disjunctive_even_without_a_stamp(self):
+        """Two holders that each need the whole pool cannot overlap."""
+        wc_a = WorkCenter(id=uuid4(), code="A", capability_group="grp1")
+        wc_b = WorkCenter(id=uuid4(), code="B", capability_group="grp1")
+        state = State(id=uuid4(), code="S")
+        tool = AuxiliaryResource(id=uuid4(), code="PAIR", resource_type="fixture", pool_size=2)
+        order_a = Order(id=uuid4(), external_ref="A", due_date=datetime(2025, 1, 2))
+        order_b = Order(id=uuid4(), external_ref="B", due_date=datetime(2025, 1, 2))
+        op_a = Operation(
+            id=uuid4(),
+            order_id=order_a.id,
+            seq_in_order=0,
+            state_id=state.id,
+            base_duration_min=10,
+            eligible_wc_ids=[wc_a.id],
+        )
+        op_b = Operation(
+            id=uuid4(),
+            order_id=order_b.id,
+            seq_in_order=0,
+            state_id=state.id,
+            base_duration_min=10,
+            eligible_wc_ids=[wc_b.id],
+        )
+        base = datetime(2025, 1, 1)
+        problem = ScheduleProblem(
+            operations=[op_a, op_b],
+            work_centers=[wc_a, wc_b],
+            states=[state],
+            setup_matrix=[],
+            orders=[order_a, order_b],
+            auxiliary_resources=[tool],
+            aux_requirements=[
+                OperationAuxRequirement(
+                    operation_id=op_a.id, aux_resource_id=tool.id, quantity_needed=2
+                ),
+                OperationAuxRequirement(
+                    operation_id=op_b.id, aux_resource_id=tool.id, quantity_needed=2
+                ),
+            ],
+            planning_horizon_start=base,
+            planning_horizon_end=datetime(2025, 1, 2),
+        )
+        sdst = SdstMatrix.from_problem(problem)
+        ops = {op.id: op for op in problem.operations}
+        touching = [
+            Assignment(
+                operation_id=op_a.id,
+                work_center_id=wc_a.id,
+                start_time=base,
+                end_time=base + timedelta(minutes=10),
+            ),
+            Assignment(
+                operation_id=op_b.id,
+                work_center_id=wc_b.id,
+                start_time=base + timedelta(minutes=10),
+                end_time=base + timedelta(minutes=20),
+            ),
+        ]
+        assert schedule_critical_chain(touching, sdst, ops, problem) == [op_a.id, op_b.id]
 
     def test_parallel_lane_neighbor_is_not_on_the_machine_sequence(self):
         wc = WorkCenter(id=uuid4(), code="M", capability_group="grp1")

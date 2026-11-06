@@ -45,8 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the operation that finishes last. A machine gap is zero-slack when it
   equals the inserted setup or the SDST lookup, separately. Other operations
   on a zero-slack path are removed before a neighbour that has idle. A unary
-  auxiliary (pool size 1) adds the same kind of handoff; a larger pool does
-  not. Parallel lanes stay separate sequences. No ALNS quality A/B is claimed.
+  auxiliary handoff is on the chain when twice the demand exceeds the pool
+  (a pool of one is the usual case). The holders are the solver stamp union
+  the problem requirements. A demand that fits beside another copy of itself
+  does not create a precedence. Parallel lanes stay separate sequences.
+  No ALNS quality A/B is claimed.
 - **T-06c gen_600 HD:** one `LBBD-5-HD` pair,
   `benchmark/evidence/lbbd-hd-sound-cuts-2026-10-27/`. UB 5062 and LB 3901 in
   both modes, no hard violations. `sound_cuts` stays off.

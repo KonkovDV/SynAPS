@@ -155,7 +155,7 @@ Line counts are a 2026-10 snapshot (`wc -l`, audit `docs/rfc/AUDIT_2026_10.md`);
 | LBBD Decomposition | `synaps/solvers/lbbd_solver.py` | 1 431 | HiGHS MIP master (assignment + capacity relaxation) + CP-SAT subproblems + no-goods emitted only after optimal-status subproblems |
 | LBBD-HD (Parallel) | `synaps/solvers/lbbd_hd_solver.py` | 1 655 | + ProcessPool subproblems + ARC-aware partitioning + topological post-assembly, then an open-shift snap when a machine publishes a calendar |
 | Greedy ATCS / Beam | `synaps/solvers/greedy_dispatch.py` | 1 243 | Log-space ATCS index (Lee, Bhaskaran & Pinedo 1997); serial schedule generation, $O(N^2 \cdot \bar{E})$ worst case |
-| ALNS | `synaps/solvers/alns_solver.py` + `_alns_config.py` | 4 915 | 7 destroy operators, greedy / micro-CP-SAT repair, SA acceptance, roulette or UCB1 operator selection |
+| ALNS | `synaps/solvers/alns_solver.py` + `_alns_config.py` | 4 915 | 7 destroy operators, greedy / micro-CP-SAT repair, SA acceptance, roulette or UCB1 operator selection. `critical_path` is the zero-slack chain into the latest finish, including a unary or full-pool auxiliary handoff |
 | RHC | `synaps/solvers/rhc/` (12 modules) | 7 834 | Rolling-horizon windows over an inner solver; coverage-complete list-schedule path |
 | Pareto Slice | `synaps/solvers/pareto_slice_solver.py` | 294 | Two-stage $\varepsilon$-constraint |
 | Incremental Repair | `synaps/solvers/incremental_repair.py` | 508 | Neighbourhood radius + greedy fallback + micro-CP-SAT |

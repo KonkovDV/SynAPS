@@ -883,25 +883,36 @@ def _machine_gap_is_tight(
     )
 
 
-def _unary_aux_predecessors(
+def _blocking_aux_predecessors(
     assignments: list[Assignment],
     problem: ScheduleProblem | None,
 ) -> dict[UUID, list[Assignment]]:
-    """Previous holder of each unary auxiliary, when the handoff has no idle.
+    """Previous blocker on each auxiliary, when the handoff has no idle.
 
-    A pool of size 1 is a disjunctive resource (RCPSP): holders are totally
-    ordered by occupancy ``[start - setup, end]``. A larger pool is cumulative,
-    so consecutive start times are not a precedence.
+    An operation blocks the pool when twice its demand exceeds the pool: any
+    two such holders are incompatible (RCPSP disjunctive clique). A pool of
+    one is that case for demand 1. Holders are the solver stamp union the
+    problem requirements. Occupancy is ``[start - setup, end]``. A demand
+    that fits beside another copy of itself is cumulative, not a precedence.
     """
     if problem is None:
         return {}
-    unary = {resource.id for resource in problem.auxiliary_resources if resource.pool_size == 1}
-    if not unary:
-        return {}
+    pools = {resource.id: resource.pool_size for resource in problem.auxiliary_resources}
+    required: dict[Any, dict[Any, int]] = {}
+    for requirement in problem.aux_requirements:
+        per_op = required.setdefault(requirement.operation_id, {})
+        per_op[requirement.aux_resource_id] = max(
+            per_op.get(requirement.aux_resource_id, 0),
+            requirement.quantity_needed,
+        )
     holders: dict[Any, list[Assignment]] = {}
     for item in assignments:
+        quantities = dict(required.get(item.operation_id, {}))
         for aux_id in item.aux_resource_ids:
-            if aux_id in unary:
+            quantities.setdefault(aux_id, 1)
+        for aux_id, qty in quantities.items():
+            pool = pools.get(aux_id)
+            if pool is not None and 2 * qty > pool:
                 holders.setdefault(aux_id, []).append(item)
     preds: dict[UUID, list[Assignment]] = {}
     for seq in holders.values():
@@ -937,6 +948,7 @@ def _tight_predecessors(
     by_lane: dict[tuple[Any, Any], list[Assignment]] = {}
     for item in assignments:
         by_lane.setdefault((item.work_center_id, item.lane_id), []).append(item)
+    aux_preds = _blocking_aux_predecessors(assignments, problem)
     machine_prev: dict[UUID, tuple[Assignment, float, float]] = {}
     for (wc_id, _lane), seq in by_lane.items():
         seq.sort(key=lambda item: (item.start_time, str(item.operation_id)))
@@ -964,7 +976,7 @@ def _tight_predecessors(
                 assignment.start_time, pred.end_time, stamp_minutes, sdst_minutes
             ):
                 found.append((pred.end_time, str(pred.operation_id), pred.operation_id))
-        for pred in _unary_aux_predecessors(assignments, problem).get(op_id, []):
+        for pred in aux_preds.get(op_id, []):
             found.append((pred.end_time, str(pred.operation_id), pred.operation_id))
         found.sort(key=lambda item: item[1])
         found.sort(key=lambda item: item[0], reverse=True)
