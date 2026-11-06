@@ -1,6 +1,6 @@
 """Campaign windows: approximate lot combining without cross-order predecessors.
 
-INFIMUM 2.0 and ADVARIS both cluster similar SKUs into one launch. SynAPS
+Commercial cable APS products cluster similar SKUs into one launch. SynAPS
 rejects cross-order ``predecessor_op_id``, so this preprocessor only aligns
 ``earliest_start`` of first-stage ops.
 

@@ -673,7 +673,7 @@ Historical Unreleased dump below this marker. Non-canonical 499770 / ~145 s /
   `docs/rfc/CABLE_CR2_DRUM_METRICS_REDTEAM_2026_08_15.md`.
 
 - **Native wheel interpreter (OPS-WHEEL):** maturin must target the probe
-  CPython (`--interpreter C:\py313\python.exe` / `py -3.13`). Default
+  CPython (`--interpreter python` / `py -3.13`). Default
   3.12 on this machine does not load under 3.13. `docs/gridplan/`
   gitignored. Evidence: `docs/rfc/OPS_WHEEL_REDTEAM_2026_08_15.md`.
 

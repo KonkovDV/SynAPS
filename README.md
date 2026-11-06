@@ -28,7 +28,7 @@ cd SynAPS
 python -m pip install -e ".[dev]"
 ```
 
-Requires **Python ≥ 3.12**. Optional Rust acceleration: see [`native/`](native/). HTTP BFF: see [`control-plane/`](control-plane/).
+Requires **Python ≥ 3.12**. Optional Rust acceleration lives in [`native/synaps_native`](native/synaps_native/) and imports as `synaps_native`. The release workflow folds that extension into a platform wheel of project `synaps`; there is no separate PyPI project. Linux wheels are built in the manylinux 2.28 image at `x86-64-v2` (`scripts/check_wheel_isa.py` rejects VEX/EVEX). A local build follows `.cargo/config.toml` (`target-cpu=native`). HTTP BFF: see [`control-plane/`](control-plane/).
 
 ## Quick start
 
@@ -59,11 +59,13 @@ JSON contracts live under [`schema/contracts/`](schema/contracts/). Examples: [`
 
 For **full coverage** on large instances, prefer `RHC-GREEDY-COVER` (reserved residual fill). `RHC-ALNS` is a refine/quality lane, not a completeness guarantee under short timeboxes. `RHC-ALNS-SEARCH-COVER` combines the search-active DOE geometry with a deterministic coverage-pace guard for 50K+ instances.
 
+ALNS `critical_path` removes a tight set on the realized disjunctive graph ([canonical form](docs/architecture/02_CANONICAL_FORM.md)): a zero-slack chain, then other critical activities, then a same-lane neighbour. That graph is not the processing-time chain inside the makespan lower bound, and selecting it is not a measured improvement of the search. LBBD `sound_cuts` adds valid master rows and stays off unless the flag is set. `FEASIBLE` means `proven_hard_violations = ∅`.
+
 ## What is (and is not) claimed
 
-**Shipped:** deterministic-first portfolio, stable solve/repair contracts, feasibility checker, CI (Python / TypeScript / Rust), lockfiles + SBOM, Scorecard workflows.
+**Shipped:** deterministic-first portfolio, stable solve/repair contracts, feasibility checker, CI (Python / TypeScript / Rust), lockfiles + SBOM, Scorecard workflows, an optional native extension inside the `synaps` wheel.
 
-**Not claimed:** live-factory validation; SOTA quality; N-1 / SAIDI. `RHC-ALNS` is not a completeness guarantee under short timeboxes. Large-instance **coverage** is the `RHC-GREEDY-COVER` list-schedule path (enough machines vs horizon), not ALNS. Do not quote 50K–500K wall times or `FEASIBLE` from README: cite the hashed ladder [`benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md`](benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md). **60k/200k/500k are three-seed; hashed 100k@200 is two of three** (seed 42 STALL). Seed 42 Python recapture (ratio 1.0, 40.137 s) is [`benchmark/BENCHMARK_EVIDENCE_COVER_100K_SEED42_2026_08_27.md`](benchmark/BENCHMARK_EVIDENCE_COVER_100K_SEED42_2026_08_27.md), not that hashed row. That ladder is wide-horizon without a machine calendar; the night-window analog is a different geometry ([`benchmark/BENCHMARK_EVIDENCE_DEADZONE_5K_2026_08_26.md`](benchmark/BENCHMARK_EVIDENCE_DEADZONE_5K_2026_08_26.md)). The May 2026 protocol is historical: [`benchmark/BENCHMARK_EVIDENCE_50K_2026_05_18.md`](benchmark/BENCHMARK_EVIDENCE_50K_2026_05_18.md) (`SUPERSEDED`).
+**Not claimed:** live-factory validation; SOTA quality; N-1 / SAIDI; a separate `synaps_native` package; `sound_cuts` as the default; a shorter makespan from `critical_path`. `RHC-ALNS` is not a completeness guarantee under short timeboxes. Large-instance **coverage** is the `RHC-GREEDY-COVER` list-schedule path (enough machines vs horizon), not ALNS. Do not quote 50K–500K wall times or `FEASIBLE` from README: cite the hashed ladder [`benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md`](benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md). **60k/200k/500k are three-seed; hashed 100k@200 is two of three** (seed 42 STALL). Seed 42 Python recapture (ratio 1.0, 40.137 s) is [`benchmark/BENCHMARK_EVIDENCE_COVER_100K_SEED42_2026_08_27.md`](benchmark/BENCHMARK_EVIDENCE_COVER_100K_SEED42_2026_08_27.md), not that hashed row. That ladder is wide-horizon without a machine calendar; the night-window analog is a different geometry ([`benchmark/BENCHMARK_EVIDENCE_DEADZONE_5K_2026_08_26.md`](benchmark/BENCHMARK_EVIDENCE_DEADZONE_5K_2026_08_26.md)). The May 2026 protocol is historical: [`benchmark/BENCHMARK_EVIDENCE_50K_2026_05_18.md`](benchmark/BENCHMARK_EVIDENCE_50K_2026_05_18.md) (`SUPERSEDED`).
 
 Scale evidence protocol: [`benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md`](benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md). History: [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -71,6 +73,7 @@ Scale evidence protocol: [`benchmark/BENCHMARK_EVIDENCE_COVER_2026_08_26.md`](be
 
 ```bash
 ruff check synaps tests benchmark
+ruff format --check synaps tests benchmark
 python -m mypy synaps --strict --no-error-summary
 pytest tests/ -q -m "not slow"
 

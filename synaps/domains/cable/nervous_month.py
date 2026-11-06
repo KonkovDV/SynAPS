@@ -1,6 +1,6 @@
 """Nervous-month cable benchmark: high-mix, rushes, freeze/repair waves.
 
-Synthetic. Not a live Moskabelmet month. INFIMUM 39k/40 min is not a target.
+Synthetic. Not a live plant month. A vendor brochure is not a target.
 """
 
 from __future__ import annotations
@@ -726,7 +726,7 @@ def run_freeze_insert_pair(
         and steal["freeze"]["notary_hard_violations"] == 0
     )
     return {
-        "claim": "synthetic C6b freeze vs insert; not Moskabelmet MES; not -24% drums",
+        "claim": "synthetic C6b freeze vs insert; not a live plant MES",
         "seed": seed,
         "n_rush_parents": n_rush,
         "n_new_ops": rush["n_new_ops"],
@@ -915,7 +915,7 @@ def run_weighted_residual_pair(
     )
     return {
         "claim": (
-            "synthetic C6c cover-then-ALNS residual; not Moskabelmet MES; not OPTIMAL; not INFIMUM"
+            "synthetic C6c cover-then-ALNS residual; not a live plant MES; not OPTIMAL"
         ),
         "seed": seed,
         "residual_time_limit_s": residual_time_limit_s,
@@ -1001,7 +1001,7 @@ def run_nervous_month_multiseed(seeds: tuple[int, ...], **kwargs: Any) -> dict[s
     )
     tardiness = [int(row["total_tardiness_minutes"]) for row in kpis]
     return {
-        "claim": "synthetic nervous-month multiseed; not Moskabelmet MES; not INFIMUM",
+        "claim": "synthetic nervous-month multiseed; not a live plant MES",
         "seeds": list(seeds),
         "n_runs": len(runs),
         "all_feasible": feasible,
@@ -1036,7 +1036,7 @@ def _month_report(
     new_rush: dict[str, Any] | None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
-        "claim": "synthetic nervous month; not Moskabelmet MES; not INFIMUM",
+        "claim": "synthetic nervous month; not a live plant MES",
         "n_parent_orders": n_orders,
         "n_reel_orders": len(problem.orders),
         "n_operations": len(problem.operations),

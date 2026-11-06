@@ -1,7 +1,7 @@
 """Inter-solve planning policy helpers (freeze horizon, rush admission).
 
 RHC ``sealed_window_op_ids`` freezes commits *inside one solve*. A plant freeze
-(Moskabelmet 3-day plan lock, ADVARIS WIP-limit planning) is a constraint on
+(a plant plan lock, or a WIP-limit policy) is a constraint on
 the *next* repair: assignments that already start before ``freeze_horizon_end``
 must not move unless ``allow_freeze_break`` is set (breakdown of that op).
 """

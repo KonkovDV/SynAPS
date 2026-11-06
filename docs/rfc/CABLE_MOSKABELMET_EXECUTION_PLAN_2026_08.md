@@ -2,7 +2,7 @@
 
 - **Status:** C0–C4 encode-first implemented 2026-08-14. C5 still gated. Not a kernel-change RFC.
 - **Date:** 2026-08-14
-- **Repo:** SynAPS standalone (`C:\plans\SynAPS`). GridPlan is out of scope.
+- **Repo:** SynAPS standalone. GridPlan is out of scope.
 - **Claim boundary:** public plant narrative + SynAPS algebra/code. Not live-factory validation. Not INFIMUM replacement. Not SOTA / N-1 / SAIDI.
 
 ## North star
@@ -25,7 +25,7 @@ Success is a **named policy profile** (`cable_pvc`) plus a **synthetic cable gen
 | Replace 1С:КоМод / MES | APS is blind without PDM and shop-floor facts |
 | GridPlan / ROSSETI / N-1 | Different product |
 | Vendor dmorill FJSSP-SDST (GPL-3) | Wave 10 permanent forbid |
-| AVX-512, rayon on the main cover loop | Raptor Lake hybrid CPU contract |
+| AVX-512, rayon on the main cover loop | Release wheels are `x86-64-v2` / `apple-m1` |
 | DRL as the factory engine | 2026 literature still fails SDST+aux at 10⁴–10⁵ |
 | Cross-order `predecessor_op_id` in C0–C4 | Validator rejects it; campaign combining is a preprocessor until C5d |
 

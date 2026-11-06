@@ -26,12 +26,14 @@ Four rules dominate:
 
 ### Current proof surface
 
-The repository currently proves:
+The repository currently contains:
 
 1. a Python scheduling kernel;
 2. baseline solvers and bounded repair;
 3. benchmark harness and feasibility checking;
-4. research and architecture documentation.
+4. a minimal TypeScript BFF in `control-plane/`;
+5. an optional Rust extension, `synaps_native`, whose kernels are listed in §5;
+6. research and architecture documentation.
 
 ### Target runtime split
 
@@ -43,7 +45,7 @@ The target SynAPS platform is intentionally polyglot:
 
 Important boundary:
 
-This is a **target architecture document**, not a claim that all three runtime layers are already implemented in the current repository.
+The three layers above are the target split. What ships today is the Python kernel, the BFF, and the optional extension in §5. Operator UI, ML advisory as an authority, and a Rust feasibility kernel are not that surface.
 
 ---
 
@@ -102,13 +104,9 @@ The `synaps_native` PyO3 extension implements:
 2. **RHC candidate metrics**: Vec, zero-copy NumPy+CSR, and CSR-in-Rust (jagged) paths;
 3. **Resource capacity feasibility**: sweep-line algorithm.
 
-Silicon-level optimizations verified on Intel i5-13600KF (Raptor Lake):
-- Branchless overdue boost (eliminates branch misprediction on P/E hybrid);
-- Rayon work-stealing tuned for P/E core asymmetry (`with_min_len(256)`);
-- `target-cpu=native` enables AVX2/FMA3 auto-vectorization;
-- **No AVX-512**: hardware-disabled on 12th–14th Gen hybrid architectures.
+Local x86-64 builds follow `.cargo/config.toml` (`target-cpu=native`). A release wheel does not. `release.yml` sets `RUSTFLAGS` to `x86-64-v2`, or `apple-m1` on arm64. The Linux job builds inside the manylinux 2.28 image, and `scripts/check_wheel_isa.py` rejects VEX/EVEX before upload. The published file is a platform wheel of project `synaps`; there is no PyPI project `synaps_native`.
 
-See: [08_HPC_SILICON_OPTIMIZATION_ROADMAP.md](08_HPC_SILICON_OPTIMIZATION_ROADMAP.md) for the full hardware-aware optimization roadmap.
+Branchless overdue boost and Rayon chunking are in the sources. The workstation notes that motivated them, including the absence of AVX-512 on that hybrid CPU, are in [08_HPC_SILICON_OPTIMIZATION_ROADMAP.md](08_HPC_SILICON_OPTIMIZATION_ROADMAP.md). They are not the ISA of the release wheel.
 
 ### Target candidates
 

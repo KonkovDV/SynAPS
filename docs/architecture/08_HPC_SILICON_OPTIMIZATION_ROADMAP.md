@@ -1,30 +1,17 @@
 # 08 — HPC Silicon-Level Optimization Roadmap
 
-> **Scope**: Extreme hardware-aware optimizations for `synaps_native` kernel, profiled against a concrete development machine.
+> **Scope**: Extreme hardware-aware optimizations for `synaps_native` kernel, profiled against a concrete development machine. That profile is not the release wheel. `release.yml` sets `x86-64-v2` on x86-64 and `apple-m1` on arm64, the Linux job runs in the manylinux 2.28 image, and `scripts/check_wheel_isa.py` rejects VEX/EVEX. Local builds keep `target-cpu=native` in `.cargo/config.toml`.
 
 <details><summary>🇷🇺 Краткое описание</summary>
 
-Дорожная карта оптимизаций вычислительного ядра SynAPS на уровне кремния: branchless-программирование, настройка Rayon под гибридные P/E-ядра Raptor Lake, анализ кэш-иерархии DDR5, план добавления явных AVX2+FMA3 интринсиков и будущий GPU-оффлоадинг.
+Дорожная карта оптимизаций вычислительного ядра: branchless-программирование, мелкие чанки Rayon на несимметричных ядрах, доступ к памяти и то, что релизное колесо не наследует ISA рабочей станции.
 </details>
 
 ---
 
 ## 1. Target Hardware Profile
 
-Profiled on a development workstation (CPU-Z verified, April 2026):
-
-| Component | Specification | Scheduling Implication |
-|-----------|--------------|----------------------|
-| **CPU** | Intel Core i5-13600KF (Raptor Lake) | Hybrid P/E architecture — asymmetric core speeds |
-| **Cores** | 6P (5.1 GHz) + 8E (~3.9 GHz) = 20 threads | Work-stealing chunk size must be small (256) |
-| **ISA** | MMX, SSE 1-4.2, SSSE3, EM64T, AES, AVX, AVX2, AVX-VNNI, FMA3, SHA | **No AVX-512** — hardware disabled on hybrid |
-| **Cache L1** | 6×48 KB + 8×32 KB (data) | 288 + 256 = 544 KB total L1D |
-| **Cache L2** | 6×2 MB + 2×4 MB | **20 MB total** — fits 50k SoA working set |
-| **Cache L3** | 24 MB shared | Full 4.4 MB working set is L3-resident |
-| **Memory** | 2×16 GB DDR5-6000 (Patriot 6000 Series, SK Hynix) | Dual-channel (4×32-bit subchannels), 32 GB total |
-| **RAM Timings** | **CL30**-40-40-76 (EXPO-6000 active, 1.350V) | Activated via BIOS EXPO profile |
-| **Motherboard** | Gigabyte B760 GAMING X (PCIe 4.0 x16, BIOS F13) | Intel B760 chipset |
-| **RAM Latency** | **~10.0 ns** at CL30 (EXPO-6000 active) | ~50 empty CPU cycles at 5 GHz |
+The notes below were taken on a development workstation with a hybrid performance/efficiency CPU and no AVX-512. The SKU, board, BIOS, and memory kit are not part of the kernel. Release wheels do not use that host ISA (`x86-64-v2` / `apple-m1` in `release.yml`). A small work-stealing chunk (256) is the useful consequence of asymmetric cores.
 
 ---
 
@@ -61,11 +48,9 @@ let pressure = pressure * (1.0 + overdue * (due_pressure_overdue_boost - 1.0));
 
 **Impact**: Expected **10–25% wall-time reduction** at 50k+ scale on hybrid architectures.
 
-### 2.3 target-cpu=native (AVX2/FMA3 Auto-Vectorization)
+### 2.3 Local `target-cpu=native` (AVX2/FMA3 auto-vectorization)
 
-`.cargo/config.toml` enables LLVM to use AVX2/FMA3 instructions during auto-vectorization. The `fast_exp` computation and min-scan loop are primary beneficiaries.
-
-**Critical**: The config explicitly targets `native` (which resolves to AVX2 on the profiled Raptor Lake workstation), NOT AVX-512 which would cause `Illegal Instruction` on this hardware. This is a deployment-specific constraint, not a universal claim about every future SynAPS build.
+`.cargo/config.toml` enables LLVM to use AVX2/FMA3 instructions during auto-vectorization on the host. The `fast_exp` computation and min-scan loop are primary beneficiaries. This is the local build only. On the profiled workstation `native` resolves to AVX2, not AVX-512. The release wheel is the `x86-64-v2` / `apple-m1` override named in the scope above, so it does not carry that AVX2.
 
 ---
 
@@ -169,23 +154,13 @@ Python (NumPy/CuPy) → synaps_cuda (PTX kernel) → GPU
 
 **Break-even point**: GPU offload becomes advantageous when N > ~500k due to PCIe transfer overhead (~5 μs baseline + 8 GB/s bandwidth). At N = 5M, GPU expected to be 50–100× faster than CPU.
 
-### 4.2 BIOS-Level Optimization (DDR5 EXPO/XMP) — APPLIED ✓
+### 4.2 Host memory profile
 
-**Current state**: DDR5-6000 running at **EXPO-6000 CL30** (activated April 2026, BIOS F13).
-**Previous**: JEDEC CL40 (conservative defaults).
-
-**Measured impact** (CPU-Z verified):
-- CL40 → CL30: latency reduction from ~13.3 ns to **~10.0 ns** (25% improvement)
-- Timings: CL30-40-40-76-116 at 1.350V (EXPO profile, Patriot 6000 Series / SK Hynix)
-- Mem Controller Freq: 1496.3 MHz, Uncore: 1396.6 MHz, Command Rate: 2T
-- For memory-bound workloads: **15–20% free speedup** realized without any code changes
-- Particularly impactful for "ragged" CSR access patterns in `machine_available_offsets`
-
-**Status**: ✅ Applied. Stable. No code changes required.
+Host DRAM timings are not a release setting and are not recorded here. Ragged CSR access in `machine_available_offsets` stays a software concern.
 
 ---
 
-## 5. Memory Bandwidth Analysis (i5-13600KF + DDR5-6000)
+## 5. Memory Bandwidth Analysis
 
 ### Working Set at N = 50,000
 
@@ -196,9 +171,9 @@ Python (NumPy/CuPy) → synaps_cuda (PTX kernel) → GPU
 | `emi_indices` | ~150k × 8 = 1.2 MB | Sequential/CSR | L2 ✓ |
 | SoA arrays (5×) | 5 × 400 KB = 2 MB | Sequential | L2/L3 ✓ |
 | Output arrays (2×) | 2 × 400 KB = 800 KB | Sequential write | L2/L3 ✓ |
-| **Total** | **~4.4 MB** | | **L3-resident** (24 MB) |
+| **Total** | **~4.4 MB** | | last-level cache on a workstation |
 
-On this hardware, the 50k working set fits entirely in L2+L3. The 20 MB of L2 cache (2 MB per P-core) means each P-core can hold its entire chunk locally. This is why the current implementation is already fast — and why further gains require silicon-level tricks rather than algorithmic changes.
+A few megabytes of working set fit in a typical last-level cache. Further gains are about the access pattern, not about a particular CPU SKU.
 
 ### Theoretical Throughput
 
@@ -207,7 +182,7 @@ $$T(N) \approx T_{\text{overhead}} + \frac{N \cdot B_{\text{elem}}}{BW_{\text{ef
 Where:
 - $T_{\text{overhead}}$ = GIL release + rayon wakeup + numpy alloc ≈ 0.1–0.5 ms
 - $B_{\text{elem}}$ ≈ 80 bytes/element
-- $BW_{\text{eff}}$ ≈ 45 GB/s (DDR5-6000 dual-channel, practical)
+- $BW_{\text{eff}}$ is the host's sustained memory bandwidth, not a release constant
 - $P$ ≈ 0.75–0.90 (parallel efficiency with chunk=256 and work-stealing)
 
 | N | Before v0.3.0 | After v0.3.0 | With AVX2 SIMD | Memory BW limit |

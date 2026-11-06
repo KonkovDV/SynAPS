@@ -3,7 +3,7 @@
 Duration is metres / line speed written into ``base_duration_min``; the kernel
 still does not read ``Order.quantity``. Reel-splitting is a preprocessor
 (Zhu et al., Processes 14(5):769, 2026), not a search decision. Setup minutes
-are parametric family deltas, not Moskabelmet SMED stopwatch claims.
+are parametric family deltas, not a plant SMED stopwatch.
 """
 
 from __future__ import annotations

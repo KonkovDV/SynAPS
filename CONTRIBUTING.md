@@ -36,18 +36,15 @@ Before opening an issue or pull request, read:
 ## Native COVER wheel (optional)
 
 COVER switches to the Rust Kolisch SGS at ≥10 000 operations. `maturin`
-binds to the interpreter that invoked it. On the Windows probe machine
-maturin defaulted to CPython 3.12 while nervous-month runs used
-`py -3.13` (`C:\py313` junction). A 3.12 wheel is invisible to 3.13, so
-the probe silently stays on the Python cover loop.
-
-Build into the **same** interpreter that will run the probe:
+binds to the interpreter that invoked it. A wheel built for another
+interpreter does not load. Build into the same interpreter that will run
+the probe:
 
 ```bash
-maturin develop --release --interpreter C:\py313\python.exe
-# or
 py -3.13 -m maturin develop --release
 ```
+
+That local build follows `.cargo/config.toml` (`target-cpu=native`). The release workflow pins maturin 1.13.1 and `x86-64-v2` / `apple-m1`, then folds the extension into the `synaps` wheel. There is no PyPI project `synaps_native`.
 
 Do not quote 1600@8 / 50k times as native unless `import synaps_native`
 succeeds in that interpreter. See `docs/domains/cable.md`.

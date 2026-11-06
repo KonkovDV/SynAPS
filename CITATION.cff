@@ -4,8 +4,7 @@ title: SynAPS
 message: If you use this kernel, cite the hashed evidence files, not README wall times.
 type: software
 authors:
-  - family-names: Konkov
-    given-names: DV
+  - name: SynAPS Contributors
 repository-code: https://github.com/KonkovDV/SynAPS
 license: MIT
 version: 0.1.0
