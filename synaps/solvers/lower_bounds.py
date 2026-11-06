@@ -273,11 +273,13 @@ def compute_relaxed_makespan_lower_bound(problem: ScheduleProblem) -> MakespanLo
         # bound.  This signals upstream data corruption that should be fixed.
         logger.warning(
             "precedence_cycle_detected: topological sort covered %d of %d "
-            "operations — lower bound will be weaker than expected",
+            "operations — lower bound keeps the acyclic prefix",
             len(topo_order),
             len(problem.operations),
         )
-        topo_order = [operation.id for operation in problem.operations]
+        # An arbitrary order along the cycle counts an operation twice. The
+        # acyclic prefix stays a valid relaxation; omitted operations still
+        # contribute their own duration through max_operation_lb.
 
     longest_path_to: dict[UUID, float] = {}
     for op_id in topo_order:
