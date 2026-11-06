@@ -204,7 +204,8 @@ def compute_relaxed_makespan_lower_bound(problem: ScheduleProblem) -> MakespanLo
 
     Components are chosen to remain valid under flexible routing:
 
-    - precedence critical path using each operation's fastest eligible duration
+    - precedence critical path using each operation's shortest reservation
+      (grain-rounded base or machine override, or the shortest execution mode)
     - average load over total parallel machine capacity
     - exclusive-machine load for operations pinned to one work center
     - the longest single-operation processing time
