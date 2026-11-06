@@ -46,7 +46,7 @@ protobuf==6.33.6
 py-cpuinfo2==10.1.1
 pycparser==3.12 ; implementation_name != 'PyPy' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_python_implementation != 'PyPy' and sys_platform == 'linux'
 pydantic==2.14.1
-pydantic-core==2.46.4
+pydantic-core==2.50.1
 pygments==2.20.0
 pyproject-hooks==1.2.0
 pytest==9.1.1
@@ -66,8 +66,8 @@ secretstorage==3.5.0 ; platform_machine != 'ppc64le' and platform_machine != 's3
 six==1.17.0
 sortedcontainers==2.4.0
 twine==7.0.0
-typing-extensions==4.15.0
-typing-inspection==0.4.2
+typing-extensions==4.16.0
+typing-inspection==0.4.5
 tzdata==2026.2 ; sys_platform == 'emscripten' or sys_platform == 'win32'
 urllib3==2.7.0
 virtualenv==21.3.3
