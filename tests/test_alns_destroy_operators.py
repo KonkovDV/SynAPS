@@ -1031,6 +1031,168 @@ class TestCriticalPathIdentification:
         assert op_a.id in result and op_b.id in result
         assert op_c.id not in result
 
+    def test_tight_machine_chain_span_telescopes(self):
+        """Processing plus the explained setup on the chain equals the span."""
+        wc = WorkCenter(id=uuid4(), code="M", capability_group="grp1")
+        state_a = State(id=uuid4(), code="A")
+        state_b = State(id=uuid4(), code="B")
+        order_a = Order(id=uuid4(), external_ref="A", due_date=datetime(2025, 1, 2))
+        order_b = Order(id=uuid4(), external_ref="B", due_date=datetime(2025, 1, 2))
+        op_a = Operation(
+            id=uuid4(),
+            order_id=order_a.id,
+            seq_in_order=0,
+            state_id=state_a.id,
+            base_duration_min=10,
+            eligible_wc_ids=[wc.id],
+        )
+        op_b = Operation(
+            id=uuid4(),
+            order_id=order_b.id,
+            seq_in_order=0,
+            state_id=state_b.id,
+            base_duration_min=10,
+            eligible_wc_ids=[wc.id],
+        )
+        base = datetime(2025, 1, 1)
+        problem = ScheduleProblem(
+            operations=[op_a, op_b],
+            work_centers=[wc],
+            states=[state_a, state_b],
+            setup_matrix=[],
+            orders=[order_a, order_b],
+            planning_horizon_start=base,
+            planning_horizon_end=datetime(2025, 1, 2),
+        )
+        assignments = [
+            Assignment(
+                operation_id=op_a.id,
+                work_center_id=wc.id,
+                start_time=base,
+                end_time=base + timedelta(minutes=10),
+            ),
+            Assignment(
+                operation_id=op_b.id,
+                work_center_id=wc.id,
+                start_time=base + timedelta(minutes=15),
+                end_time=base + timedelta(minutes=25),
+                setup_minutes=5,
+            ),
+        ]
+        sdst = SdstMatrix.from_problem(problem)
+        chain = schedule_critical_chain(assignments, sdst, {op_a.id: op_a, op_b.id: op_b}, problem)
+        assert chain == [op_a.id, op_b.id]
+        span = (assignments[1].end_time - assignments[0].start_time).total_seconds() / 60.0
+        assert span == 10 + 5 + 10
+
+    def test_tight_resource_chain_span_telescopes(self):
+        """A resource arc contributes the successor's explained setup."""
+        wc_a = WorkCenter(id=uuid4(), code="A", capability_group="grp1")
+        wc_b = WorkCenter(id=uuid4(), code="B", capability_group="grp1")
+        state = State(id=uuid4(), code="S")
+        tool = AuxiliaryResource(id=uuid4(), code="DRUM", resource_type="fixture", pool_size=1)
+        order_a = Order(id=uuid4(), external_ref="A", due_date=datetime(2025, 1, 2))
+        order_b = Order(id=uuid4(), external_ref="B", due_date=datetime(2025, 1, 2))
+        op_a = Operation(
+            id=uuid4(),
+            order_id=order_a.id,
+            seq_in_order=0,
+            state_id=state.id,
+            base_duration_min=10,
+            eligible_wc_ids=[wc_a.id],
+        )
+        op_b = Operation(
+            id=uuid4(),
+            order_id=order_b.id,
+            seq_in_order=0,
+            state_id=state.id,
+            base_duration_min=10,
+            eligible_wc_ids=[wc_b.id],
+        )
+        base = datetime(2025, 1, 1)
+        problem = ScheduleProblem(
+            operations=[op_a, op_b],
+            work_centers=[wc_a, wc_b],
+            states=[state],
+            setup_matrix=[],
+            orders=[order_a, order_b],
+            auxiliary_resources=[tool],
+            planning_horizon_start=base,
+            planning_horizon_end=datetime(2025, 1, 2),
+        )
+        assignments = [
+            Assignment(
+                operation_id=op_a.id,
+                work_center_id=wc_a.id,
+                start_time=base,
+                end_time=base + timedelta(minutes=10),
+                aux_resource_ids=[tool.id],
+            ),
+            Assignment(
+                operation_id=op_b.id,
+                work_center_id=wc_b.id,
+                start_time=base + timedelta(minutes=15),
+                end_time=base + timedelta(minutes=25),
+                setup_minutes=5,
+                aux_resource_ids=[tool.id],
+            ),
+        ]
+        sdst = SdstMatrix.from_problem(problem)
+        chain = schedule_critical_chain(assignments, sdst, {op_a.id: op_a, op_b.id: op_b}, problem)
+        assert chain == [op_a.id, op_b.id]
+        lag = (assignments[1].start_time - assignments[0].end_time).total_seconds() / 60.0
+        assert lag == 5
+        span = (assignments[1].end_time - assignments[0].start_time).total_seconds() / 60.0
+        assert span == 10 + lag + 10
+
+    def test_makespan_tie_starts_the_chain_at_the_smaller_operation_id(self):
+        """Equal finish times use the smallest operation-id string, not the largest."""
+        wc_a = WorkCenter(id=uuid4(), code="A", capability_group="grp1")
+        wc_b = WorkCenter(id=uuid4(), code="B", capability_group="grp1")
+        state = State(id=uuid4(), code="S")
+        orders = [
+            Order(id=uuid4(), external_ref=code, due_date=datetime(2025, 1, 2))
+            for code in ("A", "B")
+        ]
+        ops = [
+            Operation(
+                id=uuid4(),
+                order_id=order.id,
+                seq_in_order=0,
+                state_id=state.id,
+                base_duration_min=10,
+                eligible_wc_ids=[wc.id],
+            )
+            for order, wc in zip(orders, (wc_a, wc_b), strict=True)
+        ]
+        base = datetime(2025, 1, 1)
+        problem = ScheduleProblem(
+            operations=ops,
+            work_centers=[wc_a, wc_b],
+            states=[state],
+            setup_matrix=[],
+            orders=orders,
+            planning_horizon_start=base,
+            planning_horizon_end=datetime(2025, 1, 2),
+        )
+        assignments = [
+            Assignment(
+                operation_id=op.id,
+                work_center_id=wc.id,
+                start_time=base,
+                end_time=base + timedelta(minutes=10),
+            )
+            for op, wc in zip(ops, (wc_a, wc_b), strict=True)
+        ]
+        sdst = SdstMatrix.from_problem(problem)
+        smaller = min(ops, key=lambda op: str(op.id))
+        assert schedule_critical_chain(assignments, sdst, {op.id: op for op in ops}, problem) == [
+            smaller.id
+        ]
+        assert _destroy_critical_path(
+            assignments, problem, sdst, destroy_size=1, rng=random.Random(1)
+        ) == {smaller.id}
+
     def test_other_critical_activity_is_removed_before_a_slack_neighbor(self):
         """A second zero-slack finish is removed before a neighbour that has idle."""
         wc_chain = WorkCenter(id=uuid4(), code="CHAIN", capability_group="grp1")

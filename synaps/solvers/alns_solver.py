@@ -543,8 +543,9 @@ def _evaluate_objective_incremental(
 #                to break high-cost setup chains (domain heuristic)
 #   precedence_chain — R8 order-based ejection chain removal
 #                (Voudouris & Tsang 1999; Ropke & Pisinger 2006 §3.3)
-#   critical_path — zero-slack chain into the makespan operation
-#                (Kelley & Walker 1959; Adams, Balas & Zawack 1988)
+#   critical_path — LNS destroy set on the realized disjunctive graph
+#                (docs/architecture/02_CANONICAL_FORM.md). Not a lower bound
+#                and not a critical-block reversal.
 # ---------------------------------------------------------------------------
 
 
@@ -1013,6 +1014,7 @@ def _tight_predecessors(
                 found.append((pred.end_time, str(pred.operation_id), pred.operation_id))
         for pred in aux_preds.get(op_id, []):
             found.append((pred.end_time, str(pred.operation_id), pred.operation_id))
+        # Latest finish, then the smallest operation-id string (stable sort).
         found.sort(key=lambda item: item[1])
         found.sort(key=lambda item: item[0], reverse=True)
         seen_ids: set[UUID] = set()
@@ -1032,11 +1034,21 @@ def schedule_critical_chain(
     ops_by_id: Mapping[Any, Any],
     problem: ScheduleProblem | None = None,
 ) -> list[UUID]:
-    """One zero-slack chain ending at the makespan operation."""
+    """One zero-slack chain ending at one makespan operation.
+
+    The sink is the makespan finish with the smallest operation-id string.
+    Each step takes the tight predecessor with the latest finish, then the
+    smallest id. See the realized disjunctive graph in
+    ``docs/architecture/02_CANONICAL_FORM.md``.
+    """
     if not assignments:
         return []
     preds = _tight_predecessors(assignments, sdst, ops_by_id, problem)
-    sink = max(assignments, key=lambda item: (item.end_time, str(item.operation_id)))
+    makespan_end = max(item.end_time for item in assignments)
+    sink = min(
+        (item for item in assignments if item.end_time == makespan_end),
+        key=lambda item: str(item.operation_id),
+    )
     chain: list[UUID] = []
     current: UUID | None = sink.operation_id
     seen: set[UUID] = set()
@@ -1091,18 +1103,14 @@ def _destroy_critical_path(
     ops_by_id: dict[Any, Any] | None = None,
     **_kwargs: Any,
 ) -> set[UUID]:
-    """Remove critical operations, then high-setup machine neighbours.
+    """Remove critical activities, then same-lane neighbours if the set is short.
 
-    The seed is one zero-slack chain into the latest finish (Kelley & Walker).
-    If that chain is shorter than ``destroy_size``, other operations that
-    also lie on a zero-slack path to a makespan finish are taken next
-    (critical activities). Positive-slack machine neighbours are only the
-    remainder (Nowicki & Smutnicki: slack work is not a critical block).
-
-    Academic basis:
-        - Kelley & Walker (1959): Critical Path Method
-        - Adams, Balas & Zawack (1988): disjunctive graph, shifting bottleneck
-        - Nowicki & Smutnicki (1996): critical blocks
+    The graph is the realized disjunctive graph in
+    ``docs/architecture/02_CANONICAL_FORM.md`` (not the processing-time
+    relaxation inside the makespan lower bound). Fill order: a suffix of one
+    zero-slack chain into a latest finish; then the other critical activities;
+    then immediate same-lane neighbours. The last step is padding. Block
+    reversal is a different neighbourhood and is not what this operator does.
     """
     del rng
     if not assignments:
@@ -1136,7 +1144,8 @@ def _fill_other_critical_ops(
     already = set(chosen)
     critical = _ops_on_tight_critical_paths(assignments, sdst, ops_by_id, problem)
     extras = [item for item in assignments if item.operation_id in critical - already]
-    extras.sort(key=lambda item: (item.end_time, str(item.operation_id)), reverse=True)
+    extras.sort(key=lambda item: str(item.operation_id))
+    extras.sort(key=lambda item: item.end_time, reverse=True)
     filled = list(chosen)
     for item in extras:
         if len(filled) >= destroy_size:
@@ -1193,8 +1202,9 @@ def _extend_with_machine_neighbors(
                     cost += sdst.get_setup(wc_id, neighbor_op.state_id, next_op.state_id)
             candidates.append((cost, neighbor_op_id))
 
-    # Sort by setup contribution descending (highest cost first), then fill.
-    candidates.sort(key=lambda x: -x[0])
+    # Highest incident setup, then the smallest operation-id string.
+    candidates.sort(key=lambda item: str(item[1]))
+    candidates.sort(key=lambda item: item[0], reverse=True)
     for _cost, op_id in candidates:
         if len(critical_set) >= destroy_size:
             break

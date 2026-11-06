@@ -48,7 +48,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   auxiliary handoff is on the chain when the sum of the two demands exceeds
   the pool. A zero SDST lookup does not make a touching pair critical when
   the stamp requires a setup that is missing. Parallel lanes stay separate
-  sequences. No ALNS quality A/B is claimed.
+  sequences. Formal statement:
+  `docs/architecture/02_CANONICAL_FORM.md` (realized disjunctive graph).
+  That graph is not the processing-time chain inside the makespan lower
+  bound, and the operator is not a block reversal. No ALNS quality A/B
+  is claimed.
 - **T-06c gen_600 HD:** one `LBBD-5-HD` pair,
   `benchmark/evidence/lbbd-hd-sound-cuts-2026-10-27/`. UB 5062 and LB 3901 in
   both modes, no hard violations. `sound_cuts` stays off.
