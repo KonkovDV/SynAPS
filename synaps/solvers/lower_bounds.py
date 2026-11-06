@@ -197,6 +197,11 @@ def _compute_head_tail_lb(
 def compute_relaxed_makespan_lower_bound(problem: ScheduleProblem) -> MakespanLowerBound:
     """Return a deterministic makespan lower bound from relaxed structure.
 
+    The precedence term is a longest chain of minimum processing times. It is
+    not the realized disjunctive graph used by ALNS ``critical_path``
+    (``docs/architecture/02_CANONICAL_FORM.md``): that graph is built from a
+    schedule and is not a lower bound.
+
     Components are chosen to remain valid under flexible routing:
 
     - precedence critical path using each operation's fastest eligible duration

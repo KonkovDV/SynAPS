@@ -24,7 +24,7 @@ cores): `GREED`, `BEAM-3`, `CPSAT-10`, `LBBD-5`, `ALNS-300`.
 | `material_loss` | ✅ | ✅ | ✅ | ✅ | ✅ | secondary objective term (not in the fast matrix) |
 | `energy_kwh` | ✅ | ✅ | ✅ | ✅ | ✅ | evaluate + CP-SAT search term (Wave 10; default weight 0) |
 | `planning_horizon_*` | ✅ | ✅ | ✅ | ✅ | ✅ | `HORIZON_BOUND_VIOLATION` in checker |
-| `pool_size` / `quantity_needed` | ✅ | ✅ | ✅ | ✅ | ✅ | auxiliary-resource capacity (aux cumulative) |
+| `pool_size` / `quantity_needed` | ✅ | ✅ | ✅ | ✅ | ✅ | auxiliary-resource capacity (aux cumulative). ALNS `critical_path` also links a tight handoff when the two demands sum to more than the pool |
 
 The fast matrix in the test asserts release/parallel/speed/predecessor/setup/
 aux/horizon/material_loss/`machine_duration_overrides`/`earliest_start` across all five
