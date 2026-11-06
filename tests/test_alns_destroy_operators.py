@@ -34,6 +34,7 @@ from hypothesis import HealthCheck, event, given, settings
 
 from synaps.model import (
     Assignment,
+    AuxiliaryResource,
     Operation,
     Order,
     ScheduleProblem,
@@ -706,6 +707,139 @@ class TestCriticalPathIdentification:
         sdst = SdstMatrix.from_problem(problem)
         ops = {op.id: op for op in problem.operations}
         assert schedule_critical_chain(assignments, sdst, ops) == [op_a.id, op_b.id]
+
+    def test_unary_auxiliary_handoff_is_on_the_critical_chain(self):
+        """A pool of one is a disjunctive resource: a tight handoff is critical."""
+        wc_a = WorkCenter(id=uuid4(), code="A", capability_group="grp1")
+        wc_b = WorkCenter(id=uuid4(), code="B", capability_group="grp1")
+        state = State(id=uuid4(), code="S")
+        tool = AuxiliaryResource(id=uuid4(), code="DRUM", resource_type="fixture", pool_size=1)
+        pool = AuxiliaryResource(id=uuid4(), code="POOL", resource_type="fixture", pool_size=2)
+        order_a = Order(id=uuid4(), external_ref="A", due_date=datetime(2025, 1, 2))
+        order_b = Order(id=uuid4(), external_ref="B", due_date=datetime(2025, 1, 2))
+        op_a = Operation(
+            id=uuid4(),
+            order_id=order_a.id,
+            seq_in_order=0,
+            state_id=state.id,
+            base_duration_min=10,
+            eligible_wc_ids=[wc_a.id],
+        )
+        op_b = Operation(
+            id=uuid4(),
+            order_id=order_b.id,
+            seq_in_order=0,
+            state_id=state.id,
+            base_duration_min=10,
+            eligible_wc_ids=[wc_b.id],
+        )
+        base = datetime(2025, 1, 1)
+        problem = ScheduleProblem(
+            operations=[op_a, op_b],
+            work_centers=[wc_a, wc_b],
+            states=[state],
+            setup_matrix=[],
+            orders=[order_a, order_b],
+            auxiliary_resources=[tool, pool],
+            planning_horizon_start=base,
+            planning_horizon_end=datetime(2025, 1, 2),
+        )
+        sdst = SdstMatrix.from_problem(problem)
+        ops = {op.id: op for op in problem.operations}
+        touching = [
+            Assignment(
+                operation_id=op_a.id,
+                work_center_id=wc_a.id,
+                start_time=base,
+                end_time=base + timedelta(minutes=10),
+                aux_resource_ids=[tool.id],
+            ),
+            Assignment(
+                operation_id=op_b.id,
+                work_center_id=wc_b.id,
+                start_time=base + timedelta(minutes=10),
+                end_time=base + timedelta(minutes=20),
+                aux_resource_ids=[tool.id],
+            ),
+        ]
+        assert schedule_critical_chain(touching, sdst, ops, problem) == [op_a.id, op_b.id]
+        pooled = [
+            Assignment(
+                operation_id=op_a.id,
+                work_center_id=wc_a.id,
+                start_time=base,
+                end_time=base + timedelta(minutes=10),
+                aux_resource_ids=[pool.id],
+            ),
+            Assignment(
+                operation_id=op_b.id,
+                work_center_id=wc_b.id,
+                start_time=base + timedelta(minutes=10),
+                end_time=base + timedelta(minutes=20),
+                aux_resource_ids=[pool.id],
+            ),
+        ]
+        assert schedule_critical_chain(pooled, sdst, ops, problem) == [op_b.id]
+
+    def test_parallel_lane_neighbor_is_not_on_the_machine_sequence(self):
+        wc = WorkCenter(id=uuid4(), code="M", capability_group="grp1")
+        state = State(id=uuid4(), code="S")
+        orders = [
+            Order(id=uuid4(), external_ref=code, due_date=datetime(2025, 1, 2))
+            for code in ("A", "B", "C")
+        ]
+        ops = [
+            Operation(
+                id=uuid4(),
+                order_id=order.id,
+                seq_in_order=0,
+                state_id=state.id,
+                base_duration_min=10,
+                eligible_wc_ids=[wc.id],
+            )
+            for order in orders
+        ]
+        op_a, op_b, op_c = ops
+        lane_a, lane_b = uuid4(), uuid4()
+        base = datetime(2025, 1, 1)
+        problem = ScheduleProblem(
+            operations=ops,
+            work_centers=[wc],
+            states=[state],
+            setup_matrix=[],
+            orders=orders,
+            planning_horizon_start=base,
+            planning_horizon_end=datetime(2025, 1, 2),
+        )
+        assignments = [
+            Assignment(
+                operation_id=op_a.id,
+                work_center_id=wc.id,
+                lane_id=lane_a,
+                start_time=base,
+                end_time=base + timedelta(minutes=10),
+            ),
+            Assignment(
+                operation_id=op_c.id,
+                work_center_id=wc.id,
+                lane_id=lane_b,
+                start_time=base + timedelta(minutes=5),
+                end_time=base + timedelta(minutes=15),
+            ),
+            Assignment(
+                operation_id=op_b.id,
+                work_center_id=wc.id,
+                lane_id=lane_a,
+                start_time=base + timedelta(minutes=10),
+                end_time=base + timedelta(minutes=20),
+            ),
+        ]
+        sdst = SdstMatrix.from_problem(problem)
+        result = _destroy_critical_path(
+            assignments, problem, sdst, destroy_size=3, rng=random.Random(1)
+        )
+        assert op_a.id in result and op_b.id in result
+        assert op_c.id not in result
 
     def test_other_critical_activity_is_removed_before_a_slack_neighbor(self):
         """A second zero-slack finish is removed before a neighbour that has idle."""
@@ -2750,7 +2884,7 @@ def _count_critical_path_length(assignments: list[Assignment], problem: Schedule
         return 0
     ops_by_id = {op.id: op for op in problem.operations}
     sdst = SdstMatrix.from_problem(problem)
-    return max(len(schedule_critical_chain(assignments, sdst, ops_by_id)), 1)
+    return max(len(schedule_critical_chain(assignments, sdst, ops_by_id, problem)), 1)
 
 
 # --- Hypothesis generator: small feasible FJSP-SDST problems ---------------
@@ -2975,7 +3109,7 @@ class TestCriticalPathProperty:
         # The chain is a zero-slack path into a makespan operation, which is
         # not the same set as the duration-sum longest path (T-16).
         tight = _ops_on_tight_critical_paths(
-            assignments, sdst, {op.id: op for op in problem.operations}
+            assignments, sdst, {op.id: op for op in problem.operations}, problem
         )
         leaked = destroyed - tight
         assert not leaked, (

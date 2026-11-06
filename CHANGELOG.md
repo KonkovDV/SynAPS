@@ -44,8 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **T-16 critical path:** ALNS `critical_path` follows zero-slack edges into
   the operation that finishes last. A machine gap is zero-slack when it
   equals the inserted setup or the SDST lookup, separately. Other operations
-  on a zero-slack path are removed before a neighbour that has idle. No ALNS
-  quality A/B is claimed.
+  on a zero-slack path are removed before a neighbour that has idle. A unary
+  auxiliary (pool size 1) adds the same kind of handoff; a larger pool does
+  not. Parallel lanes stay separate sequences. No ALNS quality A/B is claimed.
 - **T-06c gen_600 HD:** one `LBBD-5-HD` pair,
   `benchmark/evidence/lbbd-hd-sound-cuts-2026-10-27/`. UB 5062 and LB 3901 in
   both modes, no hard violations. `sound_cuts` stays off.

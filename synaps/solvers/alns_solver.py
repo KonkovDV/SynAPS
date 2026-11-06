@@ -883,10 +883,47 @@ def _machine_gap_is_tight(
     )
 
 
+def _unary_aux_predecessors(
+    assignments: list[Assignment],
+    problem: ScheduleProblem | None,
+) -> dict[UUID, list[Assignment]]:
+    """Previous holder of each unary auxiliary, when the handoff has no idle.
+
+    A pool of size 1 is a disjunctive resource (RCPSP): holders are totally
+    ordered by occupancy ``[start - setup, end]``. A larger pool is cumulative,
+    so consecutive start times are not a precedence.
+    """
+    if problem is None:
+        return {}
+    unary = {resource.id for resource in problem.auxiliary_resources if resource.pool_size == 1}
+    if not unary:
+        return {}
+    holders: dict[Any, list[Assignment]] = {}
+    for item in assignments:
+        for aux_id in item.aux_resource_ids:
+            if aux_id in unary:
+                holders.setdefault(aux_id, []).append(item)
+    preds: dict[UUID, list[Assignment]] = {}
+    for seq in holders.values():
+        seq.sort(
+            key=lambda item: (
+                item.start_time - timedelta(minutes=item.setup_minutes),
+                str(item.operation_id),
+            )
+        )
+        for index in range(len(seq) - 1):
+            prev, curr = seq[index], seq[index + 1]
+            acquire = curr.start_time - timedelta(minutes=curr.setup_minutes)
+            if _gap_is_tight(acquire, prev.end_time, timedelta(0)):
+                preds.setdefault(curr.operation_id, []).append(prev)
+    return preds
+
+
 def _tight_predecessors(
     assignments: list[Assignment],
     sdst: SdstMatrix,
     ops_by_id: Mapping[Any, Any],
+    problem: ScheduleProblem | None = None,
 ) -> dict[UUID, list[UUID]]:
     """Tight predecessors of each operation, latest finish first.
 
@@ -927,9 +964,18 @@ def _tight_predecessors(
                 assignment.start_time, pred.end_time, stamp_minutes, sdst_minutes
             ):
                 found.append((pred.end_time, str(pred.operation_id), pred.operation_id))
+        for pred in _unary_aux_predecessors(assignments, problem).get(op_id, []):
+            found.append((pred.end_time, str(pred.operation_id), pred.operation_id))
         found.sort(key=lambda item: item[1])
         found.sort(key=lambda item: item[0], reverse=True)
-        preds[op_id] = [item[2] for item in found]
+        seen_ids: set[UUID] = set()
+        ordered: list[UUID] = []
+        for _end, _label, pred_id in found:
+            if pred_id in seen_ids:
+                continue
+            seen_ids.add(pred_id)
+            ordered.append(pred_id)
+        preds[op_id] = ordered
     return preds
 
 
@@ -937,11 +983,12 @@ def schedule_critical_chain(
     assignments: list[Assignment],
     sdst: SdstMatrix,
     ops_by_id: Mapping[Any, Any],
+    problem: ScheduleProblem | None = None,
 ) -> list[UUID]:
     """One zero-slack chain ending at the makespan operation."""
     if not assignments:
         return []
-    preds = _tight_predecessors(assignments, sdst, ops_by_id)
+    preds = _tight_predecessors(assignments, sdst, ops_by_id, problem)
     sink = max(assignments, key=lambda item: (item.end_time, str(item.operation_id)))
     chain: list[UUID] = []
     current: UUID | None = sink.operation_id
@@ -959,11 +1006,12 @@ def _ops_on_tight_critical_paths(
     assignments: list[Assignment],
     sdst: SdstMatrix,
     ops_by_id: Mapping[Any, Any],
+    problem: ScheduleProblem | None = None,
 ) -> set[UUID]:
     """Every operation that can reach a makespan operation on tight edges."""
     if not assignments:
         return set()
-    preds = _tight_predecessors(assignments, sdst, ops_by_id)
+    preds = _tight_predecessors(assignments, sdst, ops_by_id, problem)
     max_end = max(item.end_time for item in assignments)
     stack = [item.operation_id for item in assignments if item.end_time == max_end]
     seen: set[UUID] = set()
@@ -976,14 +1024,14 @@ def _ops_on_tight_critical_paths(
     return seen
 
 
-def _machine_sequences(assignments: list[Assignment]) -> dict[Any, list[Assignment]]:
-    """Assignments grouped by work center and ordered by start time."""
-    by_machine: dict[Any, list[Assignment]] = {}
+def _machine_sequences(assignments: list[Assignment]) -> dict[tuple[Any, Any], list[Assignment]]:
+    """Assignments grouped by work center and lane, ordered by start time."""
+    by_lane: dict[tuple[Any, Any], list[Assignment]] = {}
     for item in assignments:
-        by_machine.setdefault(item.work_center_id, []).append(item)
-    for seq in by_machine.values():
+        by_lane.setdefault((item.work_center_id, item.lane_id), []).append(item)
+    for seq in by_lane.values():
         seq.sort(key=lambda item: (item.start_time, str(item.operation_id)))
-    return by_machine
+    return by_lane
 
 
 def _destroy_critical_path(
@@ -1014,12 +1062,14 @@ def _destroy_critical_path(
         return set()
     if ops_by_id is None:
         ops_by_id = {op.id: op for op in problem.operations}
-    critical_path = schedule_critical_chain(assignments, sdst, ops_by_id)
+    critical_path = schedule_critical_chain(assignments, sdst, ops_by_id, problem)
     if len(critical_path) > destroy_size:
         critical_path = critical_path[-destroy_size:]
     if len(critical_path) >= destroy_size:
         return set(critical_path)
-    chosen = _fill_other_critical_ops(critical_path, assignments, sdst, ops_by_id, destroy_size)
+    chosen = _fill_other_critical_ops(
+        critical_path, assignments, sdst, ops_by_id, destroy_size, problem
+    )
     if len(chosen) >= destroy_size:
         return set(chosen)
     return _extend_with_machine_neighbors(
@@ -1033,10 +1083,11 @@ def _fill_other_critical_ops(
     sdst: SdstMatrix,
     ops_by_id: Mapping[Any, Any],
     destroy_size: int,
+    problem: ScheduleProblem | None = None,
 ) -> list[UUID]:
     """Append other zero-slack operations, latest finish first."""
     already = set(chosen)
-    critical = _ops_on_tight_critical_paths(assignments, sdst, ops_by_id)
+    critical = _ops_on_tight_critical_paths(assignments, sdst, ops_by_id, problem)
     extras = [item for item in assignments if item.operation_id in critical - already]
     extras.sort(key=lambda item: (item.end_time, str(item.operation_id)), reverse=True)
     filled = list(chosen)
@@ -1060,10 +1111,10 @@ def _extend_with_machine_neighbors(
     each path node, scored by ``setup(prev -> self) + setup(self -> next)``.
     """
     critical_set = set(critical_path)
-    op_to_machine_pos: dict[UUID, tuple[Any, int]] = {}
-    for wc_id, machine_seq in by_machine.items():
+    op_to_machine_pos: dict[UUID, tuple[tuple[Any, Any], int]] = {}
+    for lane_key, machine_seq in by_machine.items():
         for i, a in enumerate(machine_seq):
-            op_to_machine_pos[a.operation_id] = (wc_id, i)
+            op_to_machine_pos[a.operation_id] = (lane_key, i)
 
     candidates: list[tuple[float, UUID]] = []
     seen_candidates: set[UUID] = set()
@@ -1071,8 +1122,9 @@ def _extend_with_machine_neighbors(
         pos_info = op_to_machine_pos.get(cp_op_id)
         if pos_info is None:
             continue
-        wc_id, idx = pos_info
-        machine_seq = by_machine[wc_id]
+        lane_key, idx = pos_info
+        wc_id = lane_key[0]
+        machine_seq = by_machine[lane_key]
         for neighbor_idx in (idx - 1, idx + 1):
             if neighbor_idx < 0 or neighbor_idx >= len(machine_seq):
                 continue
