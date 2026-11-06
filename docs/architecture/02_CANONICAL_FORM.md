@@ -104,7 +104,49 @@ Current shipped Pareto profiles use $\varepsilon = 0.10$ (10% relaxation).
 
 $\text{LB} = \max(\text{critical path},\ \text{head-tail},\ \sum_o \min_m p_{om} / \sum_m L_m,\ \text{pinned-machine load}/L_m,\ \max_o \min_m p_{om},\ \max_r \sum_o q_{o,r} \min_m p_{om} / \text{pool}(r))$.
 
-Each component is a relaxation (setups, calendars and generalized edges are dropped), hence valid. Caveat: it uses the base / override durations and ignores execution modes; it is currently consumed only by ALNS and RHC, which refuse mode instances.
+Each component is a relaxation (setups, calendars and generalized edges are dropped), hence valid. Caveat: it uses the base / override durations and ignores execution modes; it is currently consumed only by ALNS and RHC, which refuse mode instances. The words "critical path" in that maximum are this processing-time chain, not the realized disjunctive graph below.
+
+## Realized disjunctive graph (ALNS `critical_path`)
+
+The destroy operator builds a graph of one realized schedule. It does not compute a lower bound.
+
+Notation for a scheduled operation \(o\): lane \((m_o, \ell_o)\), processing interval \([s_o, e_o]\), stamped setup \(\sigma_o^{\mathrm{stamp}}\), and, when \(o\) has an immediate predecessor on that lane, the gap \(\gamma_o = s_o - e_{\mathrm{prev}}\) and the matrix lookup \(\sigma_o^{\mathrm{SDST}}\) (absent pair \(\mapsto 0\)). Equality of two times is the operator tolerance (sub-minute; see `_TIGHT_SLACK`).
+
+**Explained setup** \(\hat\sigma_o\), the setup that sits immediately before processing:
+
+- no previous occupant on the lane: \(\hat\sigma_o = \sigma_o^{\mathrm{stamp}}\)
+- \(\gamma_o = \sigma_o^{\mathrm{stamp}}\): \(\hat\sigma_o = \sigma_o^{\mathrm{stamp}}\)
+- \(\sigma_o^{\mathrm{SDST}} > 0\) and \(\gamma_o = \sigma_o^{\mathrm{SDST}}\): \(\hat\sigma_o = \sigma_o^{\mathrm{SDST}}\)
+- \(\gamma_o \ge \sigma_o^{\mathrm{stamp}} \ge 0\): \(\hat\sigma_o = \sigma_o^{\mathrm{stamp}}\) (the stamp fits at the end of a longer idle gap)
+- otherwise the stamp does not fit: \(\hat\sigma_o = 0\)
+
+Occupancy is \([s_o - \hat\sigma_o,\ e_o]\).
+
+**Tight arcs** (zero slack). The head is the predecessor:
+
+1. **Chain.** \(p \to o\) when `predecessor_op_id` of \(o\) is \(p\) and \(s_o = e_p\). This is finish-to-start with lag 0. Generalized `PrecedenceEdge` relations (SS / FF / SF, nonzero lags) are not arcs here: ALNS rejects an instance that carries them.
+2. **Lane.** From the immediate previous occupant on \((m_o, \ell_o)\) when \(\gamma_o = \sigma_o^{\mathrm{stamp}}\), or when \(\sigma_o^{\mathrm{SDST}} > 0\) and \(\gamma_o = \sigma_o^{\mathrm{SDST}}\). A lookup of 0 is not a second explanation: it would mark every touch critical, including a touch that violates a positive stamp.
+3. **Resource.** \(i \to j\) on resource \(r\) when \(q_{i,r} + q_{j,r} > \mathrm{pool}(r)\) and \(j\) acquires the resource at the release of \(i\). Demand is the problem requirement, or 1 when only the assignment stamp lists \(r\). Holders are the union of the stamp and the requirements. A pool of one and unit demand is the special case \(1+1 > 1\). Two demands that sum to at most the pool are cumulative: a touch is a choice, not a precedence.
+
+**Not arcs.** Idle, overlap, a release date, a shift boundary, another lane of the same machine, and a cumulative pair.
+
+**Critical activities** are the operations that reach a makespan operation (\(e_o = \max e\)) along tight arcs, walked backwards. One chain starts at the makespan operation with the smallest operation-id string and, at each step, takes the tight predecessor with the latest finish; a tie on that finish uses the smallest operation-id string. The same order fills the other critical activities. Neighbour padding uses the highest incident SDST, then the smallest operation-id string. The chain is not claimed to be unique.
+
+**Destroy set**, filled in this order up to `destroy_size`:
+
+1. the suffix of that chain nearest the makespan
+2. the other critical activities, latest finish first
+3. the immediate same-lane neighbours of the operations already chosen, highest incident SDST first
+
+Step 3 pads the set. It is not a critical activity. The operator is an LNS destroy set on the realized graph (the disjunctive graph of Adams, Balas and Zawack; zero total slack as in Kelley and Walker). It is not the block-reversal neighbourhood of Nowicki and Smutnicki, and selecting it is not a claim that the search makespan improves.
+
+**Telescoping.** For the selected chain \(c_0,\ldots,c_k\),
+
+\[
+e(c_k)-s(c_0)=\sum_{i=0}^{k}(e(c_i)-s(c_i))+\sum_{i=1}^{k}\lambda_i,
+\]
+
+where \(\lambda_i=s(c_i)-e(c_{i-1})\) is the lag of the tight arc that was chosen: \(0\) on a chain arc, the matched machine setup on a lane arc, and \(\hat\sigma(c_i)\) on a resource arc. Idle that is not that lag is not on the chain. A release date or a shift boundary may explain why \(c_0\) starts where it does; neither is a term in the sum. The identity is the definition of a tight arc, not an optimality result.
 
 ## Robust Extension (roadmap, not implemented)
 
