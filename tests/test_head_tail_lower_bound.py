@@ -59,6 +59,18 @@ def test_head_tail_reflects_release_date() -> None:
     assert lb.value >= 560.0 - 1e-6, f"release-aware bound too weak: {lb.value}"
 
 
+def test_head_tail_reflects_operation_earliest_start() -> None:
+    """An op that cannot start before minute 500 cannot finish a 60-min job before 560."""
+    problem = _release_chain_problem()
+    operation = problem.operations[0].model_copy(
+        update={"earliest_start": _H0 + timedelta(minutes=500)}
+    )
+    order = problem.orders[0].model_copy(update={"release_date": None})
+    problem = problem.model_copy(update={"operations": [operation], "orders": [order]})
+    lb = compute_relaxed_makespan_lower_bound(problem)
+    assert lb.value >= 560.0 - 1e-6, f"earliest-start bound too weak: {lb.value}"
+
+
 def test_head_tail_dominates_plain_critical_path() -> None:
     """Head-tail component must be >= the release-free critical path."""
     lb = compute_relaxed_makespan_lower_bound(_release_chain_problem())

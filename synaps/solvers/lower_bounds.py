@@ -7,6 +7,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from synaps.solvers._time_windows import operation_earliest_offset_minutes
 from synaps.timegrain import min_duration_minutes_for
 
 if TYPE_CHECKING:
@@ -166,20 +167,20 @@ def _compute_head_tail_lb(
     """Release-aware head-tail (Jackson) makespan bound (P1-3).
 
     ``Cmax >= max_op (est(op) + p(op) + tail(op))``: est(op) folds in the order
-    release_date and the predecessor chain; tail(op) is the longest successor
-    chain of min-durations. Valid because every feasible schedule starts op no
-    earlier than est(op) and completes op's successor chain after op.
+    release, the operation earliest_start, and the predecessor chain; tail(op)
+    is the longest successor chain of min-durations. The release and the
+    earliest start use the same integer-minute offset as CP-SAT. Valid because
+    every feasible schedule starts op no earlier than est(op) and completes
+    op's successor chain after op.
     Operations carry at most one predecessor, so the precedence graph is a
     forest of chains.
     """
     horizon_start = problem.planning_horizon_start
-    order_release_offset: dict[UUID, float] = {}
-    for order in problem.orders:
-        if order.release_date is not None:
-            offset = (order.release_date - horizon_start).total_seconds() / 60.0
-            order_release_offset[order.id] = max(0.0, offset)
+    orders_by_id = {order.id: order for order in problem.orders}
     op_release_offset: dict[UUID, float] = {
-        operation.id: order_release_offset.get(operation.order_id, 0.0)
+        operation.id: operation_earliest_offset_minutes(
+            operation, orders_by_id.get(operation.order_id), horizon_start
+        )
         for operation in problem.operations
     }
     predecessor_of: dict[UUID, UUID] = {
