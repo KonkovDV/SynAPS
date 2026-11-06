@@ -123,7 +123,7 @@ copy no longer lists overwritten `environment.json` / live `summary.json` /
 `run_3000ops_4m_GREED_seed1.json`.
 
 Recapture (not P2.3): `sessions/recapture-2026-08-26/environment.json`
-SHA-256 `c8bc8363a3b0849fd33639b589283f7dda326712bbe1ea3b590af9a18834e1bc`.
+SHA-256 `ad4e459a81906cfc7e2797c7ead616ead3fa52084050631c716273c0b2166c80`.
 
 B1 recapture 8k@4 RHC-GREEDY seed 1 (hashed remainder JSON **not** rewritten).
 Epoch file stays `worker_error` at 210 s. This tree: isolate finished inside
@@ -136,14 +136,14 @@ is unknown (old isolate may have dropped stderr).
 
 | File | SHA-256 |
 | --- | --- |
-| `environment.json` | `ef3d4ae969749474d324c29c41897382611bddad0d436f39efc331977832b1cf` |
-| `sessions/recapture-2026-08-26/environment.json` | `c8bc8363a3b0849fd33639b589283f7dda326712bbe1ea3b590af9a18834e1bc` |
+| `environment.json` | `d36fe09c37f8502ad4d830bdbf95e1b87d744be29c846c32d2317c589a860f4b` |
+| `sessions/recapture-2026-08-26/environment.json` | `dda630fa3f6f4ae2acd15bf5d9d2cf72cb0009de5ae42b58e1b37c3b5829434f` |
 | `sessions/worker-error-2026-08-26/run_8000ops_4m_RHC_GREEDY_seed1.json` | `b09fc80fe11dfeea44174c63aa849e3b5120da0c2aeacdd746ec74f5b7f62a5c` |
-| `sessions/worker-error-2026-08-26/SHA256SUMS.txt` | `e1cc6e2566cb3b811cb698fafb3b8d7751049800c6e3c76bcec115e9926cf29d` |
+| `sessions/worker-error-2026-08-26/SHA256SUMS.txt` | `ddb551f0922be20254418967edab4c2abef77f7de745346d82683e2fe4a36fea` |
 | `sessions/worker-error-2026-08-26-py313/run_8000ops_4m_RHC_GREEDY_seed1.json` | `d51f8ea42e5cc911c6851916f4dcd783d25e9542ed8d0760525d63f11f35178f` |
-| `sessions/worker-error-2026-08-26-py313/SHA256SUMS.txt` | `33ca8da76c2bed1ab8c5f2a8c81846ea32383b7f6a38aa510af7559b24511ed9` |
+| `sessions/worker-error-2026-08-26-py313/SHA256SUMS.txt` | `7e2aedcb6f647c7d4e56e6e7d6d76e3b70ef5aa49d640bbe69d5a7c801023f8f` |
 | `summary.json` | `29ab576d0023c9aff16f674c6f94d257c4d4b94a9c15a3086249a890643b45c4` |
-| `SHA256SUMS.txt` | `f3d1615d2e524bdae7f6bce6f13f1dc60c454c0c60695f920f3934ed49bd0c20` |
+| `SHA256SUMS.txt` | `2645a53943ef8433ea3ae87080b7e0cdc8fd96e97e060eb898982ddde884a1d1` |
 | `run_5000ops_8m_GREED_seed1.json` | `358062e9b2d3c0a1848d3eedbca1deb8aee6819cac82baf68facf2bb431df2a6` |
 | `run_5000ops_8m_GREED_seed42.json` | `f254f11e1bb7f9dea5a5d58cf94a18f569bfceac9b634b6fea7e4b8266ab0508` |
 | `run_5000ops_8m_GREED_seed999.json` | `d05ce024f7d5adab25e9c32c8ba06355c456d0231c331a5a7a34f4516fabfddc` |

@@ -1,6 +1,6 @@
 # Consolidated AI-executor work plan — 2026-08-15 (post-chat synthesis)
 
-- **Repo:** SynAPS standalone (`C:\plans\SynAPS`). GridPlan / MobiRoute out of scope.
+- **Repo:** SynAPS standalone. GridPlan / MobiRoute out of scope.
 - **Claim boundary:** synthetic + public OSINT. Not Moskabelmet MES, not INFIMUM, not SOTA, not N-1/SAIDI.
 - **Authority order:** this plan sequences the *open* findings mined from the full session
   (hyper-algebra audit 11.08 → Waves 11–15 → P0–P4 → cable C0–C6b). It does not re-open
@@ -141,7 +141,7 @@ From the 11.08 algebra ledger, not a cable feature. RT:
 4. 20k-op tables are local evidence, not CI. Tiny GREED tests prove plumbing.
 5. Function-length ratchet ≤80 lines for new helpers; `_run_python_cover_loop`
    stays exactly 80.
-6. On Windows use `py -3.13`; native wheel via `--interpreter C:\py313\python.exe`.
+6. On Windows use `py -3.13`; native wheel via `--interpreter python`.
 
 ## 5. Wave acceptance checklist (each wave)
 

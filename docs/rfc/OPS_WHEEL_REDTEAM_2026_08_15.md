@@ -7,10 +7,10 @@ Claim level: **interpreter hygiene**. Not a kernel change. Not SOTA.
 
 **ship the note.** `maturin` binds to the interpreter that invoked it.
 On this Windows workstation the default was CPython 3.12 while
-nervous-month probes use `py -3.13` (`C:\py313` junction). A 3.12 wheel
+nervous-month probes use `py -3.13` (`the probe interpreter` junction). A 3.12 wheel
 does not import under 3.13, so COVER stays on the Python loop without
 an error. `CONTRIBUTING.md` and `docs/domains/cable.md` now say: build
-with `--interpreter C:\py313\python.exe` (or `py -3.13 -m maturin`).
+with `--interpreter python` (or `py -3.13 -m maturin`).
 `.cursor-*` was already gitignored. `docs/gridplan/` is gitignored
 (local GridPlan notes, not this kernel).
 

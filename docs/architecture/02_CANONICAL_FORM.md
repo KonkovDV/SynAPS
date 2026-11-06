@@ -104,7 +104,7 @@ Current shipped Pareto profiles use $\varepsilon = 0.10$ (10% relaxation).
 
 $\text{LB} = \max(\text{critical path},\ \text{head-tail},\ \sum_o \min_m p_{om} / \sum_m L_m,\ \text{pinned-machine load}/L_m,\ \max_o \min_m p_{om},\ \max_r \sum_o q_{o,r} \min_m p_{om} / \text{pool}(r))$.
 
-Each component is a relaxation (setups, calendars and generalized edges are dropped), hence valid. Caveat: it uses the base / override durations and ignores execution modes; it is currently consumed only by ALNS and RHC, which refuse mode instances. The words "critical path" in that maximum are this processing-time chain, not the realized disjunctive graph below.
+Each component drops setups, calendars and generalized edges. The processing time \(p_{om}\) is the grain-rounded base or machine override, or, when the operation has execution modes, the shortest mode duration. A longer duration would sit above a schedule that picks the shorter mode. Mode demand is not in `aux_requirements`; the auxiliary term uses, for each resource, the minimum over modes of duration times quantity, which is 0 when some mode does not use that resource. ALNS and RHC call this bound and refuse mode instances, so on the instances they accept that branch is idle. The words "critical path" in that maximum are this processing-time chain, not the realized disjunctive graph below.
 
 ## Realized disjunctive graph (ALNS `critical_path`)
 

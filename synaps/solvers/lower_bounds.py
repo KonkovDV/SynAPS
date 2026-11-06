@@ -102,7 +102,9 @@ def _compute_auxiliary_resource_lb(
 
     The problem-level ARC bound is the maximum of `LB_arc(r)` over all
     auxiliary resources that actually have requirements pointing at them.
-    Safe fallback (0.0) when no auxiliary resources or requirements exist.
+    A mode list is separate from `aux_requirements`: each resource contributes
+    the minimum over modes of duration times quantity (0 if some mode skips it).
+    Safe fallback (0.0) when no auxiliary resources exist.
 
     TODO(R4-tech-debt): min_duration_by_op must be precomputed as
     min(duration over eligible machines) by the caller. Moving this
@@ -110,7 +112,7 @@ def _compute_auxiliary_resource_lb(
     and add coupling; document this contract clearly for future solver authors.
     """
 
-    if not problem.auxiliary_resources or not problem.aux_requirements:
+    if not problem.auxiliary_resources:
         return 0.0
 
     pool_by_resource: dict[UUID, int] = {
@@ -126,6 +128,28 @@ def _compute_auxiliary_resource_lb(
         load_by_resource[requirement.aux_resource_id] += op_duration * float(
             requirement.quantity_needed
         )
+    # A mode list replaces aux_requirements. The schedule may pick the mode
+    # with the smallest resource-time, so the floor is that minimum.
+    for operation in problem.operations:
+        if not operation.modes:
+            continue
+        resource_ids = {
+            item.aux_resource_id for mode in operation.modes for item in mode.requirements
+        }
+        for resource_id in resource_ids:
+            if resource_id not in pool_by_resource:
+                continue
+            floor = min(
+                float(mode.duration_min)
+                * sum(
+                    item.quantity_needed
+                    for item in mode.requirements
+                    if item.aux_resource_id == resource_id
+                )
+                for mode in operation.modes
+            )
+            if floor > 0.0:
+                load_by_resource[resource_id] += floor
 
     return max(
         (load / pool_by_resource[resource_id] for resource_id, load in load_by_resource.items()),
@@ -204,7 +228,8 @@ def compute_relaxed_makespan_lower_bound(problem: ScheduleProblem) -> MakespanLo
 
     Components are chosen to remain valid under flexible routing:
 
-    - precedence critical path using each operation's fastest eligible duration
+    - precedence critical path using each operation's shortest reservation
+      (grain-rounded base or machine override, or the shortest execution mode)
     - average load over total parallel machine capacity
     - exclusive-machine load for operations pinned to one work center
     - the longest single-operation processing time
@@ -272,11 +297,13 @@ def compute_relaxed_makespan_lower_bound(problem: ScheduleProblem) -> MakespanLo
         # bound.  This signals upstream data corruption that should be fixed.
         logger.warning(
             "precedence_cycle_detected: topological sort covered %d of %d "
-            "operations — lower bound will be weaker than expected",
+            "operations — lower bound keeps the acyclic prefix",
             len(topo_order),
             len(problem.operations),
         )
-        topo_order = [operation.id for operation in problem.operations]
+        # An arbitrary order along the cycle counts an operation twice. The
+        # acyclic prefix stays a valid relaxation; omitted operations still
+        # contribute their own duration through max_operation_lb.
 
     longest_path_to: dict[UUID, float] = {}
     for op_id in topo_order:

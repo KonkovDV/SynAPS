@@ -13,6 +13,7 @@ Public technical docs for the scheduling core.
 ## Architecture
 
 - [01_OVERVIEW.md](architecture/01_OVERVIEW.md)
+- ALNS `critical_path` is the realized disjunctive graph in [02_CANONICAL_FORM.md](architecture/02_CANONICAL_FORM.md), not the processing-time chain inside the makespan lower bound.
 - [02_CANONICAL_FORM.md](architecture/02_CANONICAL_FORM.md)
 - [03_SOLVER_PORTFOLIO.md](architecture/03_SOLVER_PORTFOLIO.md)
 - [04_DATA_MODEL.md](architecture/04_DATA_MODEL.md)

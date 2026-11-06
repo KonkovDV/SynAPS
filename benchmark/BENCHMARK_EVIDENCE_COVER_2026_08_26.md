@@ -18,9 +18,9 @@ Recorded in `benchmark/evidence/cover-ladder-2026-08-25/environment.json`.
 
 | Item | This run |
 | --- | --- |
-| OS | Windows 11 (10.0.26200) |
-| CPU | Intel Family 6 Model 183, 20 logical processors |
-| Interpreter | CPython 3.13.7 (`C:\Users\Пользователь\AppData\Local\Programs\Python\Python313\python.exe`) |
+| OS | Windows |
+| CPU | x86-64 |
+| Interpreter | CPython 3.13.7 (`python`) |
 | Kernel tree | `bd09d13561b3bd690845d07546def59b4521b16c` |
 | `synaps_native` wheel | present (`list_schedule_cover` kernel loaded) |
 | RSS probe | **failed** in the ladder process (`peak_rss_mb=null`). Do not cite CHANGELOG 2.3 GB RSS as this run's measurement. |
@@ -178,7 +178,7 @@ git show HEAD:benchmark/evidence/cover-ladder-2026-08-25/run_100k_at_200_seed42.
 
 | File | SHA-256 |
 |------|---------|
-| `environment.json` | `977126179a8a31c25067c57ce43eca31153f890c01d432135ac354967b3db3c7` |
+| `environment.json` | `ca9e304bae4c5e2fb9fa0b449e83b0d74ef09fd6f557741100d381178e334926` |
 | `run_60k_at_100_seed1.json` | `e39aa48c9a38d236aa3c1b4104ac5396ddf262cefb5cdb5b435e4411700326e1` |
 | `run_60k_at_100_seed42.json` | `1636be3360840ef813d0877a46ee4146a2a3112ddb65d5e6cf4b4636d5adbc3f` |
 | `run_60k_at_100_seed999.json` | `3f49e808e2fd61359fbecf973a6ac59018043ee7f2c940d71f9c2eaedd73a43c` |
@@ -192,4 +192,4 @@ git show HEAD:benchmark/evidence/cover-ladder-2026-08-25/run_100k_at_200_seed42.
 | `run_500k_at_1000_seed42.json` | `e5c65810eae5c95da0d2ccef7bd51caf7bf60446e2aacc7f419b69549061cc69` |
 | `run_500k_at_1000_seed999.json` | `a535085983a715e9cbafb0eaaa6ae1e092fc145f92d1fdad82a632b3d06e612b` |
 | `summary.json` | `51b7144d906c14331a001dbbc6b165bb61b9c4483e9161d4a80c5b4d80b2d5b6` |
-| `SHA256SUMS.txt` | `79082fc9f5a3160ff71c119eac8d1bf8d69e2a359d6efea5598ac3a1fae45ee2` |
+| `SHA256SUMS.txt` | `b04358c3023e249dc244008bf0b323e0cf3b6699bb398e7c6c86685b65f043e4` |

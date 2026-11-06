@@ -60,7 +60,7 @@ git-blob LF digest is the citable one after commit.
 
 | File | SHA-256 |
 |------|---------|
-| `environment.json` | `ad66604e32b75bb9245b657742862c79b973d65f58d044b10d56fa7d4758035e` |
+| `environment.json` | `4569fb9f721486b1d1b2d3e78ce26e10c7b2ab1e4a86d8918bd47be8b3343e5a` |
 | `run_3000ops_8m_RHC_GREEDY_calendar_seed1.json` | `606a5b0c9872f89f99740a5df21f1b9812b6e9637f42efa5ffb358a610a4db30` |
 | `run_3000ops_8m_RHC_GREEDY_calendar_seed42.json` | `7739faa9198aca0c7585e0ddfb03d38b1f15ae041dcc9a18bba0bbf711f1cb1d` |
 | `run_3000ops_8m_RHC_GREEDY_calendar_seed999.json` | `c897b168d2cc9963b4288149428a146991df1fea82b450b8a0706fb7e4822cd6` |

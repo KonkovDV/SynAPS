@@ -32,14 +32,14 @@
   },
   "captured_at_utc": "2026-08-26T07:25:39.818105+00:00",
   "cpu_count": 20,
-  "executable": "C:\\Users\\\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044c\\AppData\\Local\\Programs\\Python\\Python313\\python.exe",
+  "executable": "python",
   "git_head": "bd09d13561b3bd690845d07546def59b4521b16c",
   "list_schedule_cover_backend": "native",
   "machine": "AMD64",
-  "platform": "Windows-11-10.0.26200-SP0",
-  "processor": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+  "platform": "Windows",
+  "processor": "x86-64",
   "python": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
   "synaps_native": "present",
-  "synaps_native_file": "C:\\Users\\\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044c\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\synaps_native\\__init__.py",
+  "synaps_native_file": "synaps_native",
   "wheel_present": true
 }

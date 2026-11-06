@@ -12,9 +12,7 @@ Language: [EN](README.md) | **RU**
 
 ## Архитектура
 
-См. каталог [`architecture/`](architecture/).
-
-## Домены
+См. каталог [`architecture/`](architecture/). `critical_path` в ALNS — реализованный дизъюнктивный граф в [02_CANONICAL_FORM.md](architecture/02_CANONICAL_FORM.md), не цепь минимальных длительностей внутри нижней оценки makespan.
 
 ## Домены
 

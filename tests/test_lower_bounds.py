@@ -131,6 +131,45 @@ class TestComputeRelaxedMakespanLowerBound:
         assert result.max_operation_lb == 0.0
         assert result.auxiliary_resource_lb == 0.0
 
+    def test_precedence_cycle_does_not_count_an_operation_twice(self) -> None:
+        """A flat walk around A → B → A sums a duration twice and beats every load."""
+        state = State(id=uuid4(), code="S0", label="State 0")
+        machine = WorkCenter(id=uuid4(), code="WC0", capability_group="machining")
+        order = Order(id=uuid4(), external_ref="ORD-CYCLE", due_date=_HORIZON_END)
+        op_a = Operation(
+            id=uuid4(),
+            order_id=order.id,
+            seq_in_order=0,
+            state_id=state.id,
+            base_duration_min=10,
+            eligible_wc_ids=[machine.id],
+        )
+        op_b = Operation(
+            id=uuid4(),
+            order_id=order.id,
+            seq_in_order=1,
+            state_id=state.id,
+            base_duration_min=10,
+            eligible_wc_ids=[machine.id],
+        )
+        op_a = op_a.model_copy(update={"predecessor_op_id": op_b.id})
+        op_b = op_b.model_copy(update={"predecessor_op_id": op_a.id})
+        problem = ScheduleProblem.model_construct(
+            states=[state],
+            orders=[order],
+            operations=[op_a, op_b],
+            work_centers=[machine],
+            setup_matrix=[],
+            auxiliary_resources=[],
+            aux_requirements=[],
+            precedence_edges=[],
+            planning_horizon_start=_HORIZON_START,
+            planning_horizon_end=_HORIZON_END,
+        )
+        result = compute_relaxed_makespan_lower_bound(problem)
+        assert result.precedence_critical_path_lb <= 20
+        assert result.value <= 20
+
     def test_single_op_single_machine_equals_duration(self) -> None:
         problem = _make_problem(n_ops=1, n_machines=1, base_duration_min=45)
         result = compute_relaxed_makespan_lower_bound(problem)

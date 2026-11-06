@@ -276,7 +276,7 @@ def _run_cable_demo(args: argparse.Namespace) -> int:
         "scalar_default": scalarize(objective),
         "scalar_cable_pvc": scalarize(objective, CABLE_PVC_WEIGHTS),
         "cpsat_weight_vector": CABLE_PVC_CPSAT_WEIGHTS,
-        "claim": "synthetic encode-first cable demo; not Moskabelmet MES data",
+        "claim": "synthetic encode-first cable demo; not a live plant MES",
     }
     _write_json_output(payload, args.output_file)
     return 0 if result.status.value == "feasible" and not hard else 1
