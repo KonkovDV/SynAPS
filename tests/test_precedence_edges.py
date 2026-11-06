@@ -14,6 +14,7 @@ from synaps.model import (
     AuxiliaryResource,
     Operation,
     OperationAuxRequirement,
+    OperationMode,
     Order,
     ScheduleProblem,
     SolverStatus,
@@ -295,3 +296,36 @@ def test_property_checker_accepts_solver_and_rejects_mutation(
             mutated.append(row)
         kinds = {v.kind for v in checker.check(problem, mutated)}
         assert "PRECEDENCE_EDGE_VIOLATION" in kinds
+
+
+def test_finish_anchor_uses_the_shortest_mode() -> None:
+    """A fast mode must not inherit the base duration's earlier start."""
+    from synaps.precedence import DispatchPrecedence
+    from synaps.solvers.greedy_dispatch import _edge_bound
+
+    src_id, dst_id = uuid4(), uuid4()
+    machine = WorkCenter(code="M", capability_group="g")
+    destination = Operation(
+        id=dst_id,
+        order_id=uuid4(),
+        seq_in_order=0,
+        state_id=uuid4(),
+        base_duration_min=100,
+        eligible_wc_ids=[machine.id],
+        modes=[
+            OperationMode(code="FAST", duration_min=10),
+            OperationMode(code="SLOW", duration_min=20),
+        ],
+    )
+    edges = DispatchPrecedence.build(
+        [
+            PrecedenceEdge(
+                src_op_id=src_id,
+                dst_op_id=dst_id,
+                type=PrecedenceType.FF,
+                min_lag=0,
+            )
+        ]
+    )
+    edges.record(src_id, 0.0, 100.0)
+    assert _edge_bound(edges, destination, [machine.id], {machine.id: machine}) == 90

@@ -32,7 +32,7 @@ from synaps.solvers._dispatch_support import (
 from synaps.solvers._time_windows import operation_earliest_offset_minutes
 from synaps.solvers._virtual_lanes import operation_on_lanes
 from synaps.solvers.coverage_outcome import stamp_honest_coverage
-from synaps.timegrain import duration_minutes_for, physical_processing_minutes_for
+from synaps.timegrain import min_duration_minutes_for, physical_processing_minutes_for
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -44,8 +44,12 @@ def _edge_bound(
     """Earliest start implied by generalized precedence edges (0 when none)."""
     if operation.id not in edges.incoming:
         return 0.0
+    # Shortest reservation: a shorter mode or a faster machine must not be
+    # allowed to start earlier than its own finish-anchor permits.
     durations = [
-        duration_minutes_for(operation, wc_by_id[wc_id]) for wc_id in eligible if wc_id in wc_by_id
+        min_duration_minutes_for(operation, wc_by_id[wc_id])
+        for wc_id in eligible
+        if wc_id in wc_by_id
     ]
     return edges.earliest_start(operation.id, float(min(durations, default=0)))
 
