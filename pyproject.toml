@@ -55,7 +55,7 @@ llm = [
     "sglang>=0.4",
 ]
 rl = [
-    "torchrl>=0.6",
+    "torchrl>=0.14.1",
 ]
 dev = [
     "build>=1.2",
